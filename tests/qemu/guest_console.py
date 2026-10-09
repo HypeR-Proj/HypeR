@@ -4,6 +4,7 @@
 
 """Reassemble guest console bytes without hiding host or guest failures."""
 
+import argparse
 import re
 import sys
 
@@ -40,6 +41,11 @@ def append_console_output(pending, data, *, preserve_cr=False, filter_guest_logs
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--filter-guest-logs', action='store_true',
+                        help='remove Linux printk records when matching shell responses')
+    args = parser.parse_args()
     output = bytearray()
-    append_console_output(output, sys.stdin.buffer.read(), preserve_cr=True)
+    append_console_output(output, sys.stdin.buffer.read(), preserve_cr=True,
+                          filter_guest_logs=args.filter_guest_logs)
     sys.stdout.buffer.write(output)

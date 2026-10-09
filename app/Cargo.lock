@@ -583,6 +583,7 @@ version = "0.0.0"
 dependencies = [
  "hyper-os",
  "hyper-rt",
+ "hyper-vm-support",
 ]
 
 [[package]]

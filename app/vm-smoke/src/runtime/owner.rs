@@ -9,7 +9,9 @@ use core::mem::MaybeUninit;
 use hyper_os::capability_channel::{
     CapabilityChannel, CapabilityDisposition, CapabilityReceiveSlot,
 };
-use hyper_os::handle::{CapabilityChannelObject, RightsOffer, VirtualMachineCreationLeaseObject};
+use hyper_os::handle::{
+    CapabilityChannelObject, Rights, RightsOffer, VirtualMachineCreationLeaseObject,
+};
 use hyper_os::startup::StartupPurpose;
 use hyper_os::task::ProcessBuilder;
 
@@ -125,14 +127,7 @@ pub(super) fn child(startup: &mut Startup<'_>) -> Result<()> {
     );
     let mut guest = Guest::create(startup, lease, 0)?;
     guest.marker(b'B')?;
-    let Guest {
-        machine: _machine,
-        vcpu,
-        serial: _serial,
-        output: _output,
-        buffered: _buffered,
-    } = guest;
-    let mut observer = Some(vcpu);
+    let mut observer = Some(vm::open_vcpu(guest.machine.as_handle_ref(), 0).map_err(show)?);
     let until = deadline()?;
     loop {
         let mut dispositions = [CapabilityDisposition::move_handle(
@@ -163,7 +158,7 @@ pub(super) fn child(startup: &mut Startup<'_>) -> Result<()> {
         }
     }
     // Parent cancels this process. Rust destructors must not be the mechanism
-    // that requests VM stop or unregisters these shared output pages.
+    // that requests VM stop or joins the userspace device worker.
     std::thread::sleep(Duration::from_secs(20));
     Err("owner child was not cancelled".into())
 }

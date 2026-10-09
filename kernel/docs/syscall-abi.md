@@ -918,7 +918,7 @@ contracts. These are representative implemented families; consult the
 | IPC | ByteChannel queues, CapabilityChannel rendezvous, Event create/signal |
 | Wait | Object wait-one/wait-many; WaitSet create/add/rearm/remove/wait; atomic wait/wake |
 | Filesystem | Capability-relative Directory operations, File data/metadata/sync, content protection and advisory locks; authorized ramfs mount and atomic root switching |
-| Virtualization | Creation leases, PendingVirtualMachine construction/install/abort, VM stop and power completion, vCPU start/affinity/MMIO completion, VirtualSerial |
+| Virtualization | Creation leases, PendingVirtualMachine construction/install/abort, VM stop and power completion, vCPU start/affinity/device completion, userspace MMIO routes and device IRQ levels |
 | Physical devices and I/O | DeviceAssignmentAuthority, PhysicalDevice claims/MMIO/IRQ, GuestMemory, GuestMapping, GuestMailbox, GuestNotification and NativeBlock |
 
 Device claims require explicit assignment authority and validate the selected

@@ -22,9 +22,7 @@ use hyper::abi::native;
 /// A `NativeBlock` may move into an isolated filesystem worker. It retains its
 /// own backing and in-flight request leases; staging grants no VM control and
 /// retiring the last active owner disconnects the volume before DMA retirement.
-/// `VirtualSerial` is created by
-/// its owning runtime and is not a startup transport object. Nested
-/// `ProcessBuilder` authority is always forbidden.
+/// Nested `ProcessBuilder` authority is always forbidden.
 pub(crate) struct BuilderStorable;
 
 impl BuilderStorable {

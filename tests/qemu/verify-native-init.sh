@@ -116,11 +116,12 @@ while :; do
             ;;
     esac
     # Guest UART output is a byte stream, unlike Native Console TX frames.
-    # Retain its CR/LF bytes while removing complete multiplexed host records;
-    # the helper checks fatal diagnostics before and after reassembly.
+    # Retain its CR/LF bytes while removing complete host and Linux printk
+    # records that can split tty echo. The raw log still retains diagnostics;
+    # the helper checks fatal failures before and after reassembly.
     case "$command_phase" in
         guest_console | guest_echo | guest_enter)
-            python3 -B "$script_dir/guest_console.py" <"$log" >"$guest_output"
+            python3 -B "$script_dir/guest_console.py" --filter-guest-logs <"$log" >"$guest_output"
             ;;
     esac
     if "$prompt_ready"; then
