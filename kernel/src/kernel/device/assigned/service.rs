@@ -53,7 +53,7 @@ pub(crate) fn claim_matching(
         return Err(Error::InvalidArgument.into());
     }
     process
-        .resolve_handle::<DeviceAssignmentAuthority>(authority, Rights::INSPECT)
+        .resolve_handle::<DeviceAssignmentAuthority>(authority, Rights::ASSIGN_DEVICE)
         .map_err(Error::from)?;
     if !super::model::transport_profile(profile) {
         return Err(Error::NotSupported.into());
@@ -78,7 +78,7 @@ pub(crate) fn claim_matching(
                 Rights::TRANSFER
                     .union(Rights::DUPLICATE)
                     .union(Rights::INSPECT)
-                    .union(Rights::WRITE),
+                    .union(Rights::ASSIGN_DEVICE),
                 HandleFlags::NONE,
             )
             .map_err(|_| Error::NoMemory)?;
@@ -108,7 +108,7 @@ pub(crate) fn claim(
     index: u32,
 ) -> Result<HandleValue, Error> {
     let _authority =
-        process.resolve_handle::<DeviceAssignmentAuthority>(authority, Rights::INSPECT)?;
+        process.resolve_handle::<DeviceAssignmentAuthority>(authority, Rights::ASSIGN_DEVICE)?;
     let reservation = process.reserve_handles::<1>()?;
     let (reservation, prepared) = super::transaction::prepare(
         reservation,
@@ -122,7 +122,7 @@ pub(crate) fn claim(
                 Rights::TRANSFER
                     .union(Rights::DUPLICATE)
                     .union(Rights::INSPECT)
-                    .union(Rights::WRITE),
+                    .union(Rights::ASSIGN_DEVICE),
                 HandleFlags::NONE,
             )
             .map_err(|_| Error::NoMemory)?;
@@ -162,7 +162,7 @@ pub(crate) fn dma_extent(
     length: u64,
 ) -> Result<DmaExtent, Error> {
     let _authority =
-        process.resolve_handle::<DeviceAssignmentAuthority>(authority, Rights::INSPECT)?;
+        process.resolve_handle::<DeviceAssignmentAuthority>(authority, Rights::MAP_DMA)?;
     let vmo = process.resolve_handle::<VmoObject>(vmo, Rights::READ.union(Rights::MAP))?;
     let storage = vmo.object().writable().ok_or(Error::InvalidArgument)?;
     let first = super::model::contiguous_extent(
@@ -200,7 +200,7 @@ pub(crate) fn assign(
         pending,
         Rights::WRITE,
     )?;
-    let device = process.resolve_handle::<PhysicalDevice>(device, Rights::WRITE)?;
+    let device = process.resolve_handle::<PhysicalDevice>(device, Rights::ASSIGN_DEVICE)?;
     let assignment = Assignment::new(
         device.into_operation_pin().into_vm_device_binding(),
         base,
@@ -245,7 +245,7 @@ pub(crate) fn claim_bundle(
     entries: &[(u32, u32, u64)],
     irq_node: u32,
 ) -> Result<HandleValue, Error> {
-    process.resolve_handle::<DeviceAssignmentAuthority>(authority, Rights::INSPECT)?;
+    process.resolve_handle::<DeviceAssignmentAuthority>(authority, Rights::ASSIGN_DEVICE)?;
     let reservation = process.reserve_handles::<1>()?;
     let (reservation, prepared) = super::transaction::prepare(
         reservation,
@@ -278,7 +278,7 @@ pub(crate) fn mmio(
     value: u64,
 ) -> Result<u64, Error> {
     process
-        .resolve_handle::<PhysicalDevice>(device, Rights::WRITE)?
+        .resolve_handle::<PhysicalDevice>(device, if write { Rights::WRITE } else { Rights::READ })?
         .object()
         .mmio(offset, width, write, value)
         .map_err(classify)
@@ -297,7 +297,7 @@ pub(crate) fn irq_complete(
     asserted: bool,
 ) -> Result<(), Error> {
     process
-        .resolve_handle::<PhysicalDevice>(device, Rights::WRITE)?
+        .resolve_handle::<PhysicalDevice>(device, Rights::ACK_INTERRUPT)?
         .object()
         .irq_complete(sequence, asserted)
         .map_err(classify)
