@@ -1165,6 +1165,24 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             self.calls.set(self.calls.get().saturating_add(1));
             Err(crate::kernel::vm::service::Error::NotSupported)
         }
+        fn read_guest_memory(
+            &self,
+            _: HandleValue,
+            _: u64,
+            _: Option<crate::kernel::mm::user_space::UserSlice>,
+        ) -> Result<(), crate::kernel::vm::service::Error> {
+            self.calls.set(self.calls.get().saturating_add(1));
+            Err(crate::kernel::vm::service::Error::NotSupported)
+        }
+        fn write_guest_memory(
+            &self,
+            _: HandleValue,
+            _: u64,
+            _: Option<crate::kernel::mm::user_space::UserSlice>,
+        ) -> Result<(), crate::kernel::vm::service::Error> {
+            self.calls.set(self.calls.get().saturating_add(1));
+            Err(crate::kernel::vm::service::Error::NotSupported)
+        }
         fn map_guest_memory(
             &self,
             _: HandleValue,

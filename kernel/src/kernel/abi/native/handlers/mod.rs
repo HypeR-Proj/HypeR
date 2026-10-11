@@ -9,6 +9,7 @@
 mod console;
 mod device;
 mod guest_io;
+mod guest_memory;
 mod handles;
 mod inspect;
 mod ipc;
@@ -33,6 +34,7 @@ pub(super) use guest_io::{
     sys_guest_mapping_release, sys_guest_notification_control, sys_guest_notification_create,
     sys_native_block_activate, sys_native_block_create, sys_native_block_transfer,
 };
+pub(super) use guest_memory::{sys_guest_memory_read, sys_guest_memory_write};
 pub(super) use handles::{
     sys_handle_close, sys_handle_duplicate, sys_handle_get_info, sys_handle_replace,
     sys_object_get_basic_info,

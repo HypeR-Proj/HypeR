@@ -669,7 +669,8 @@ pub const DIRECTORY_STREAM_RIGHTS: u64 =
 
 pub const FILE_PROTECTION_RIGHTS: u64 = RIGHT_MAP | RIGHT_INSPECT;
 
-pub const GUEST_MEMORY_RIGHTS: u64 = RIGHT_TRANSFER | RIGHT_DUPLICATE | RIGHT_MAP | RIGHT_INSPECT;
+pub const GUEST_MEMORY_RIGHTS: u64 =
+    RIGHT_TRANSFER | RIGHT_DUPLICATE | RIGHT_READ | RIGHT_WRITE | RIGHT_MAP | RIGHT_INSPECT;
 
 pub const RIGHTS: &[Right] = &[
     Right {
@@ -1490,6 +1491,14 @@ pub const CONSTANTS: &[AbiConstant] = &[
         value: 268435456,
     },
     AbiConstant {
+        name: "virtual_platform_riscv64_reference_user_mmio_base",
+        value: 0x1000_1000,
+    },
+    AbiConstant {
+        name: "virtual_platform_riscv64_reference_user_mmio_size",
+        value: 0x1000,
+    },
+    AbiConstant {
         name: "virtual_platform_riscv64_reference_uart_size",
         value: 4096,
     },
@@ -1652,6 +1661,10 @@ pub const CONSTANTS: &[AbiConstant] = &[
     AbiConstant {
         name: "vmo_max_size_bytes",
         value: 4 * 1024 * 1024 * 1024,
+    },
+    AbiConstant {
+        name: "guest_memory_max_transfer_bytes",
+        value: 64 * 1024,
     },
     AbiConstant {
         name: "vmo_max_transfer_bytes",
@@ -9453,6 +9466,90 @@ pub const SYSCALLS: &[Syscall] = &[
         failure_results: &[],
     },
     Syscall {
+        number: 158,
+        name: "guest_memory_read",
+        feature: FeatureGate::Core,
+        arguments: &[
+            Argument {
+                name: "memory",
+                kind: ValueKind::Handle,
+                handle: Some(HandleArgument {
+                    object: ObjectConstraint::Kind("guest_memory"),
+                    required_rights: RIGHT_READ,
+                    disposition: HandleDisposition::Borrow,
+                }),
+                memory: None,
+            },
+            scalar_argument("offset", ValueKind::U64),
+            Argument {
+                name: "bytes",
+                kind: ValueKind::UserAddress,
+                handle: None,
+                memory: Some(UserMemory {
+                    direction: MemoryDirection::Write,
+                    length: MemoryLength::Bytes {
+                        argument: "byte_count",
+                        maximum_bytes: 64 * 1024,
+                    },
+                    record: None,
+                    handles: None,
+                    validation_order: 0,
+                }),
+            },
+            scalar_argument("byte_count", ValueKind::ByteCount),
+        ],
+        results: &[],
+        blocking: BlockingClass::MayBlock,
+        cancellation: CancellationClass::None,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
+        number: 159,
+        name: "guest_memory_write",
+        feature: FeatureGate::Core,
+        arguments: &[
+            Argument {
+                name: "memory",
+                kind: ValueKind::Handle,
+                handle: Some(HandleArgument {
+                    object: ObjectConstraint::Kind("guest_memory"),
+                    required_rights: RIGHT_WRITE,
+                    disposition: HandleDisposition::Borrow,
+                }),
+                memory: None,
+            },
+            scalar_argument("offset", ValueKind::U64),
+            Argument {
+                name: "bytes",
+                kind: ValueKind::UserAddress,
+                handle: None,
+                memory: Some(UserMemory {
+                    direction: MemoryDirection::Read,
+                    length: MemoryLength::Bytes {
+                        argument: "byte_count",
+                        maximum_bytes: 64 * 1024,
+                    },
+                    record: None,
+                    handles: None,
+                    validation_order: 0,
+                }),
+            },
+            scalar_argument("byte_count", ValueKind::ByteCount),
+        ],
+        results: &[],
+        blocking: BlockingClass::MayBlock,
+        cancellation: CancellationClass::None,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
         number: 480,
         name: "virtual_machine_register_mmio_event",
         feature: FeatureGate::Core,
@@ -9659,6 +9756,7 @@ pub const SEMANTIC_RULES: &[&str] = &[
     "A VirtualMachineCreationAuthority may derive one resource-domain-bound VirtualMachineCreationLease. The lease is single-use and is consumed only when VirtualMachine creation publishes a PendingVirtualMachine handle successfully.",
     "Virtual-machine info appends resident_memory_bytes after the original 32-byte prefix. UINT64_MAX means unavailable during retirement. It counts currently allocated primary VMO backing, including RAM, explicitly admitted shared pools, and uploaded pages not yet mapped by stage-2; overlapping ranges of the same VMO count once. Dynamic backend alias windows, translation tables, and Native runtime memory are excluded. Shared pages are attributed independently in each guest and are not additive across guests. Inspection samples bounded page chunks and is not a globally atomic memory snapshot.",
     "A PendingVirtualMachine is mutable until seal. It must own at least one explicitly backed, non-overlapping writable region inside the configured IPA envelope and one bootstrap record for boot vCPU 0. Bootstrap entry and stack must lie in admitted backing; sparse envelope gaps remain unbacked and never become anonymous RAM. The configured vcpu_count fixes immutable topology; architecture power-on protocols supply secondary-vCPU runtime entry state, and virtual_machine_open_vcpu exposes their control handles. Guest device models run in userspace and register immutable MMIO routes before first start. Seal is irreversible; install consumes the pending handle only on ok and publishes the installed VirtualMachine and dormant boot VirtualCpu handles together. VirtualCpu start is a separate operation after handle publication. The started VirtualCpu phase means that start committed successfully; it is not an observation that the scheduler currently considers the vCPU runnable or executing. AArch64 reference guests accept 1..8 vCPUs; RISC-V reference guests currently accept one.",
+    "GuestMemory READ and WRITE grant bounded Native backend copying, up to guest_memory_max_transfer_bytes per call, independently of MAP. Handle rights and grant-relative ranges are checked even for an empty transfer. Backing and copy admission remain retained across user faults and handle closure. The kernel commits missing pages under the original VMO resource accounting before copying; allocation failure may leave those pages resident. Naturally aligned 1/2/4/8-byte transfers are single-copy atomic on the guest side irrespective of Native buffer alignment. Other transfers are not atomic snapshots. Reads have acquire ordering; writes have release ordering and a full completion fence before later index loads or notifications. The caller remains responsible for the shared-memory protocol. A fault during read copyout may partially modify the Native output; a write copies the entire Native input before modifying guest bytes. A region permanently dedicated to the kernel NativeBlock initiator rejects Native copies, and dedication fails while a copy is active.",
     "The creating process retains its guest VMO handle, but attaching it to a PendingVirtualMachine acquires exclusive hardware-write ownership and rejects any active Native writable mapping or direct VMO operation. Direct VMO access, snapshots, and writable Native mappings remain closed until VM retirement removes and invalidates every stage-2 mapping and releases the independent backing reference; read-only Native mappings may coexist.",
 ];
 

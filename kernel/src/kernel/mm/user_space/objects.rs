@@ -102,6 +102,78 @@ impl GuestMemoryBacking {
             .map_err(MemoryObjectError::Vmo)
     }
 
+    /// Native backend reads have an aligned scalar fast path so shared ring
+    /// indices cannot tear. Other ranges retain the external byte-copy contract.
+    pub(crate) fn read_native(
+        &self,
+        offset: u64,
+        destination: &mut [u8],
+    ) -> Result<(), MemoryObjectError> {
+        if let Some(address) = self.scalar_address(offset, destination.len())? {
+            // SAFETY: scalar_address validates natural alignment and extent.
+            // This backing retains the hardware lease and physical page; the
+            // HAL accesses external Normal memory without a Rust byte borrow.
+            let value = unsafe {
+                crate::hal::user::load_exposed_scalar(address.cast_const(), destination.len())
+            }
+            .map_err(|_| MemoryObjectError::Vmo(VmoError::Backend(KernelPageError::Unsupported)))?;
+            destination.copy_from_slice(&value.to_le_bytes()[..destination.len()]);
+        } else {
+            self.read_exposed(offset, destination)?;
+        }
+        core::sync::atomic::fence(core::sync::atomic::Ordering::Acquire);
+        Ok(())
+    }
+
+    /// Publishes Native backend writes before later queue indices/notifications.
+    /// Naturally aligned 1/2/4/8-byte writes use one scalar machine access.
+    pub(crate) fn write_native(&self, offset: u64, source: &[u8]) -> Result<(), MemoryObjectError> {
+        core::sync::atomic::fence(core::sync::atomic::Ordering::Release);
+        if let Some(address) = self.scalar_address(offset, source.len())? {
+            let mut bytes = [0; 8];
+            bytes[..source.len()].copy_from_slice(source);
+            // SAFETY: The retained hardware lease keeps the validated aligned
+            // Normal-memory range writable and resident throughout this call.
+            unsafe {
+                crate::hal::user::store_exposed_scalar(
+                    address,
+                    source.len(),
+                    u64::from_le_bytes(bytes),
+                )
+            }
+            .map_err(|_| MemoryObjectError::Vmo(VmoError::Backend(KernelPageError::Unsupported)))?;
+        } else {
+            self.write_exposed(offset, source)?;
+        }
+        // In particular, the used index must become visible before a later
+        // guest interrupt or a load checking notification suppression.
+        core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn scalar_address(
+        &self,
+        offset: u64,
+        width: usize,
+    ) -> Result<Option<*mut u8>, MemoryObjectError> {
+        if !matches!(width, 1 | 2 | 4 | 8) || !offset.is_multiple_of(width as u64) {
+            return Ok(None);
+        }
+        if offset
+            .checked_add(width as u64)
+            .is_none_or(|end| end > self.size())
+        {
+            return Err(MemoryObjectError::Vmo(VmoError::InvalidRange));
+        }
+        let physical = self.physical_page(offset & !(hyper::mm::PAGE_SIZE - 1))?;
+        let address = crate::kernel::mm::memory::linear_address(physical.get())
+            .and_then(|base| base.checked_add((offset % hyper::mm::PAGE_SIZE) as usize))
+            .ok_or(MemoryObjectError::Vmo(VmoError::Backend(
+                KernelPageError::MissingLinearMap,
+            )))?;
+        Ok(Some(core::ptr::with_exposed_provenance_mut(address)))
+    }
+
     pub(crate) fn page_is_resident(&self, offset: u64) -> Result<bool, MemoryObjectError> {
         self.storage
             .page_is_resident(offset)

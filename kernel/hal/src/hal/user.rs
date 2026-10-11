@@ -807,3 +807,54 @@ pub unsafe fn copy_to_exposed(
         Err(ExposedCopyError)
     }
 }
+
+/// Loads one naturally aligned scalar from externally mutable Normal memory.
+/// The access is single-copy atomic; protocol barriers remain with the caller.
+///
+/// # Safety
+/// `source` must designate retained, resident, initialized Normal memory for
+/// `width` bytes. It may be concurrently accessed by a guest, never as MMIO.
+pub unsafe fn load_exposed_scalar(
+    source: *const u8,
+    width: usize,
+) -> Result<u64, ExposedCopyError> {
+    if !matches!(width, 1 | 2 | 4 | 8) || !source.addr().is_multiple_of(width) {
+        return Err(ExposedCopyError);
+    }
+    #[cfg(any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64))]
+    {
+        // SAFETY: Alignment and supported width are checked above; the caller
+        // retains the resident Normal-memory range for this single access.
+        Ok(unsafe { crate::arch::user::load_exposed_scalar(source, width) })
+    }
+    #[cfg(not(any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64)))]
+    Err(ExposedCopyError)
+}
+
+/// Stores one naturally aligned scalar into externally mutable Normal memory.
+/// The access is single-copy atomic; protocol barriers remain with the caller.
+///
+/// # Safety
+/// `destination` must designate retained, resident, writable Normal memory for
+/// `width` bytes. It may be concurrently accessed by a guest, never as MMIO.
+pub unsafe fn store_exposed_scalar(
+    destination: *mut u8,
+    width: usize,
+    value: u64,
+) -> Result<(), ExposedCopyError> {
+    if !matches!(width, 1 | 2 | 4 | 8) || !destination.addr().is_multiple_of(width) {
+        return Err(ExposedCopyError);
+    }
+    #[cfg(any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64))]
+    {
+        // SAFETY: Alignment and width are validated above, and the retained
+        // writable Normal-memory range comes from the caller's ownership.
+        unsafe { crate::arch::user::store_exposed_scalar(destination, width, value) };
+        Ok(())
+    }
+    #[cfg(not(any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64)))]
+    {
+        let _ = value;
+        Err(ExposedCopyError)
+    }
+}

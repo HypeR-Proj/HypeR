@@ -39,7 +39,8 @@ pub(crate) use super::imp::{
 };
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 pub(crate) use super::imp::{
-    application_address_limit, copy_from_exposed, copy_to_exposed, user_address_limit,
+    application_address_limit, copy_from_exposed, copy_to_exposed, load_exposed_scalar,
+    store_exposed_scalar, user_address_limit,
 };
 
 #[cfg(target_arch = "riscv64")]

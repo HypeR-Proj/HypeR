@@ -111,3 +111,59 @@ pub fn user_translation_identifier_bits() -> Result<u8, UserMachineContractError
     execution_capabilities()?;
     Ok(super::address::capabilities().asid_bits)
 }
+
+/// Performs one naturally aligned, single-copy atomic external-memory load.
+///
+/// # Safety
+/// The caller retains `width` resident Normal-memory bytes, aligned to a
+/// supported width (1, 2, 4, or 8). No Rust reference to the bytes is formed.
+pub(crate) unsafe fn load_exposed_scalar(source: *const u8, width: usize) -> u64 {
+    let value: u64;
+    // SAFETY: The HAL validates width/alignment, the owner pins the range, and
+    // each branch issues one scalar machine access with a memory clobber.
+    unsafe {
+        match width {
+            1 => {
+                asm!("ldrb {value:w}, [{source}]", source = in(reg) source, value = out(reg) value, options(nostack))
+            }
+            2 => {
+                asm!("ldrh {value:w}, [{source}]", source = in(reg) source, value = out(reg) value, options(nostack))
+            }
+            4 => {
+                asm!("ldr {value:w}, [{source}]", source = in(reg) source, value = out(reg) value, options(nostack))
+            }
+            8 => {
+                asm!("ldr {value}, [{source}]", source = in(reg) source, value = out(reg) value, options(nostack))
+            }
+            _ => return 0,
+        }
+    }
+    value
+}
+
+/// Performs one naturally aligned, single-copy atomic external-memory store.
+///
+/// # Safety
+/// The caller retains `width` writable, resident Normal-memory bytes aligned to
+/// a supported width (1, 2, 4, or 8). No Rust reference to the bytes is formed.
+pub(crate) unsafe fn store_exposed_scalar(destination: *mut u8, width: usize, value: u64) {
+    // SAFETY: The HAL checks width/alignment, the owner pins the writable range,
+    // and each branch performs one machine access with a memory clobber.
+    unsafe {
+        match width {
+            1 => {
+                asm!("strb {value:w}, [{destination}]", destination = in(reg) destination, value = in(reg) value, options(nostack))
+            }
+            2 => {
+                asm!("strh {value:w}, [{destination}]", destination = in(reg) destination, value = in(reg) value, options(nostack))
+            }
+            4 => {
+                asm!("str {value:w}, [{destination}]", destination = in(reg) destination, value = in(reg) value, options(nostack))
+            }
+            8 => {
+                asm!("str {value}, [{destination}]", destination = in(reg) destination, value = in(reg) value, options(nostack))
+            }
+            _ => {}
+        }
+    }
+}

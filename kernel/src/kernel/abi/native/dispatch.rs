@@ -312,6 +312,12 @@ pub(in crate::kernel) fn dispatch_deferred(
         abi::HYPER_NATIVE_SYS_GUEST_MEMORY_CREATE => {
             handlers::sys_guest_memory_create(services, invocation.arguments())
         }
+        abi::HYPER_NATIVE_SYS_GUEST_MEMORY_READ => {
+            handlers::sys_guest_memory_read(services, invocation.arguments())
+        }
+        abi::HYPER_NATIVE_SYS_GUEST_MEMORY_WRITE => {
+            handlers::sys_guest_memory_write(services, invocation.arguments())
+        }
         abi::HYPER_NATIVE_SYS_PENDING_VIRTUAL_MACHINE_MAP_MEMORY => {
             handlers::sys_pending_virtual_machine_map_memory(services, invocation.arguments())
         }

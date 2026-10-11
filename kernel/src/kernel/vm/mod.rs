@@ -18,6 +18,7 @@ mod installed;
 pub(crate) mod io;
 #[cfg(feature = "kernel-self-test")]
 pub(crate) use endpoint::{WaitSelfTestError, run_wait_self_test};
+pub(crate) mod guest_memory;
 pub(crate) mod lifecycle;
 pub mod memory;
 pub(crate) mod objects;

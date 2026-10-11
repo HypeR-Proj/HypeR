@@ -421,3 +421,59 @@ pub(crate) unsafe fn copy_to_exposed(source: *const u8, destination: *mut u8, le
     // SAFETY: The byte-loop mechanism has the same requirements in either direction.
     unsafe { copy_from_exposed(source, destination, length) };
 }
+
+/// Performs one naturally aligned, single-copy atomic external-memory load.
+///
+/// # Safety
+/// The caller retains `width` resident Normal-memory bytes, aligned to a
+/// supported width (1, 2, 4, or 8). No Rust reference to the bytes is formed.
+pub(crate) unsafe fn load_exposed_scalar(source: *const u8, width: usize) -> u64 {
+    let value: u64;
+    // SAFETY: The HAL validates width/alignment, the owner pins the range, and
+    // each branch issues one scalar machine access with a memory clobber.
+    unsafe {
+        match width {
+            1 => {
+                asm!("lbu {value}, 0({source})", source = in(reg) source, value = out(reg) value, options(nostack))
+            }
+            2 => {
+                asm!("lhu {value}, 0({source})", source = in(reg) source, value = out(reg) value, options(nostack))
+            }
+            4 => {
+                asm!("lwu {value}, 0({source})", source = in(reg) source, value = out(reg) value, options(nostack))
+            }
+            8 => {
+                asm!("ld {value}, 0({source})", source = in(reg) source, value = out(reg) value, options(nostack))
+            }
+            _ => return 0,
+        }
+    }
+    value
+}
+
+/// Performs one naturally aligned, single-copy atomic external-memory store.
+///
+/// # Safety
+/// The caller retains `width` writable, resident Normal-memory bytes aligned to
+/// a supported width (1, 2, 4, or 8). No Rust reference to the bytes is formed.
+pub(crate) unsafe fn store_exposed_scalar(destination: *mut u8, width: usize, value: u64) {
+    // SAFETY: The HAL checks width/alignment, the owner pins the writable range,
+    // and each branch performs one machine access with a memory clobber.
+    unsafe {
+        match width {
+            1 => {
+                asm!("sb {value}, 0({destination})", destination = in(reg) destination, value = in(reg) value, options(nostack))
+            }
+            2 => {
+                asm!("sh {value}, 0({destination})", destination = in(reg) destination, value = in(reg) value, options(nostack))
+            }
+            4 => {
+                asm!("sw {value}, 0({destination})", destination = in(reg) destination, value = in(reg) value, options(nostack))
+            }
+            8 => {
+                asm!("sd {value}, 0({destination})", destination = in(reg) destination, value = in(reg) value, options(nostack))
+            }
+            _ => {}
+        }
+    }
+}

@@ -930,9 +930,10 @@ pub fn complete_mmio(
     .into_result()
 }
 
-/// Freezes the VMO against Native writes and snapshots while any guest-memory
+/// Freezes the VMO against ordinary Native access and snapshots while any guest-memory
 /// capability or installed guest mapping retains it. Physical backing remains
-/// stable across sharing and source-handle closure.
+/// stable across sharing and source-handle closure. The returned capability
+/// separately authorizes bounded backend copies through READ and WRITE rights.
 pub fn create_guest_memory(
     vmo: HandleRef<'_, VmoObject>,
 ) -> Result<OwnedHandle<crate::handle::GuestMemoryObject>> {
@@ -946,10 +947,60 @@ pub fn create_guest_memory(
         result.value0,
         Rights::TRANSFER
             .union(Rights::DUPLICATE)
+            .union(Rights::READ)
+            .union(Rights::WRITE)
             .union(Rights::MAP)
             .union(Rights::INSPECT),
         &[vmo.raw()],
     )
+}
+
+/// Maximum guest-memory payload in one backend copy operation.
+pub const GUEST_MEMORY_MAX_TRANSFER_BYTES: usize =
+    hyper_abi::HYPER_NATIVE_GUEST_MEMORY_MAX_TRANSFER_BYTES as usize;
+
+/// Reads guest RAM through READ authority, with acquire ordering on completion.
+/// Aligned 1/2/4/8-byte guest ranges use a single-copy atomic access, independent
+/// of the output buffer's alignment. Larger copies are not atomic snapshots;
+/// validate guest-owned descriptors after copying them into private storage.
+pub fn read_guest_memory(
+    memory: HandleRef<'_, crate::handle::GuestMemoryObject>,
+    offset: u64,
+    output: &mut [u8],
+) -> Result<()> {
+    if output.len() > GUEST_MEMORY_MAX_TRANSFER_BYTES {
+        return Err(Error::Status(Status::INVALID_ARGUMENT));
+    }
+    // SAFETY: The typed capability and mutable output stay borrowed through
+    // the call; the kernel copies into this disjoint Native-owned slice.
+    Status::from_raw(unsafe {
+        hyper_sys::guest_memory_read(
+            memory.raw().get(),
+            offset,
+            output.as_mut_ptr(),
+            output.len(),
+        )
+    })
+    .into_result()
+}
+
+/// Writes guest RAM through WRITE authority, ordered before later notifications.
+/// Aligned 1/2/4/8-byte ranges use a single-copy atomic store. Other transfers can
+/// be observed partially: publish a separate queue index only after success.
+/// Memory dedicated to a kernel `NativeBlock` initiator rejects these copies.
+pub fn write_guest_memory(
+    memory: HandleRef<'_, crate::handle::GuestMemoryObject>,
+    offset: u64,
+    input: &[u8],
+) -> Result<()> {
+    if input.len() > GUEST_MEMORY_MAX_TRANSFER_BYTES {
+        return Err(Error::Status(Status::INVALID_ARGUMENT));
+    }
+    // SAFETY: Input and the typed capability remain borrowed for the call.
+    Status::from_raw(unsafe {
+        hyper_sys::guest_memory_write(memory.raw().get(), offset, input.as_ptr(), input.len())
+    })
+    .into_result()
 }
 
 /// Adds non-overlapping RAM coverage before seal. Offsets and length must be
@@ -1101,6 +1152,14 @@ impl DeviceDoorbell {
     }
     pub fn wait_item(&self) -> crate::wait::WaitItem<'_> {
         crate::wait::WaitItem::new(
+            self.event.as_handle_ref(),
+            crate::wait::ObjectSignals::<crate::handle::EventObject>::SIGNALED,
+        )
+    }
+    /// Subscribes to the private route prompt without exposing its signal authority.
+    /// Clear before scanning and rearm a consumed notification before waiting.
+    pub fn subscribe(&self, waits: &crate::wait::WaitSet) -> Result<crate::wait::RegistrationId> {
+        waits.add(
             self.event.as_handle_ref(),
             crate::wait::ObjectSignals::<crate::handle::EventObject>::SIGNALED,
         )

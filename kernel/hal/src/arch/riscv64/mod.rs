@@ -108,10 +108,10 @@ pub(crate) use user_machine::{
 pub(crate) use user_machine::{
     activate_local as activate_user_local, application_address_limit, assert_kernel_access,
     copy_from_exposed, copy_to_exposed, deactivate_local as deactivate_user_local,
-    identifier_bits as user_translation_identifier_bits,
+    identifier_bits as user_translation_identifier_bits, load_exposed_scalar,
     local_identity_is_active as user_local_identity_is_active,
     prepare_host as prepare_host_user_address_space,
-    service_local_request as service_user_local_request, user_address_limit,
+    service_local_request as service_user_local_request, store_exposed_scalar, user_address_limit,
 };
 pub use vm_interrupt::{Error as VmInterruptError, VmInterruptController};
 pub use vm_vcpu::Error as VcpuInterruptError;

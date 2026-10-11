@@ -491,6 +491,60 @@ pub unsafe fn guest_memory_create(vmo: abi::HyperNativeHandle) -> CallResult {
     }
 }
 
+/// Reads a bounded guest-memory range through explicit READ authority.
+///
+/// # Safety
+/// The handle must remain live and `bytes` writable for `length` bytes for the
+/// complete call. A failed copyout may partially modify the output buffer.
+#[inline]
+pub unsafe fn guest_memory_read(
+    memory: abi::HyperNativeHandle,
+    offset: u64,
+    bytes: *mut u8,
+    length: usize,
+) -> abi::HyperNativeStatus {
+    // SAFETY: Caller establishes output extent and borrowed handle lifetime.
+    unsafe {
+        ffi_native_call6(
+            abi::HYPER_NATIVE_SYS_GUEST_MEMORY_READ,
+            memory,
+            offset,
+            bytes.addr() as u64,
+            length as u64,
+            0,
+            0,
+        )
+        .status
+    }
+}
+
+/// Writes a bounded guest-memory range through explicit WRITE authority.
+///
+/// # Safety
+/// The handle must remain live and `bytes` readable for `length` bytes for the
+/// complete call. The caller owns synchronization of the guest-memory protocol.
+#[inline]
+pub unsafe fn guest_memory_write(
+    memory: abi::HyperNativeHandle,
+    offset: u64,
+    bytes: *const u8,
+    length: usize,
+) -> abi::HyperNativeStatus {
+    // SAFETY: Caller establishes input extent and borrowed handle lifetime.
+    unsafe {
+        ffi_native_call6(
+            abi::HYPER_NATIVE_SYS_GUEST_MEMORY_WRITE,
+            memory,
+            offset,
+            bytes.addr() as u64,
+            length as u64,
+            0,
+            0,
+        )
+        .status
+    }
+}
+
 /// Adds a page-aligned region to a pending VM's immutable RAM layout.
 ///
 /// # Safety

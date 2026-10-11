@@ -190,7 +190,7 @@ const fn classify_thread_error(error: crate::kernel::task::thread::Error) -> Err
     }
 }
 
-const fn classify_memory_object_error(
+pub(super) const fn classify_memory_object_error(
     error: crate::kernel::mm::user_space::MemoryObjectError,
 ) -> Error {
     use crate::kernel::mm::user_space::MemoryObjectError;

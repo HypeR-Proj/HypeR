@@ -143,6 +143,22 @@ impl VmServices for DeferredProcessServices<'_> {
     ) -> Result<HandleValue, crate::kernel::vm::service::Error> {
         crate::kernel::vm::service::create_guest_memory(self.process, vmo)
     }
+    fn read_guest_memory(
+        &self,
+        memory: HandleValue,
+        offset: u64,
+        destination: Option<UserSlice>,
+    ) -> Result<(), crate::kernel::vm::service::Error> {
+        crate::kernel::vm::guest_memory::read(self.process, memory, offset, destination)
+    }
+    fn write_guest_memory(
+        &self,
+        memory: HandleValue,
+        offset: u64,
+        source: Option<UserSlice>,
+    ) -> Result<(), crate::kernel::vm::service::Error> {
+        crate::kernel::vm::guest_memory::write(self.process, memory, offset, source)
+    }
     fn map_guest_memory(
         &self,
         pending: HandleValue,

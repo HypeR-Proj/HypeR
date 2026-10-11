@@ -118,7 +118,9 @@ pub(crate) use user::assert_kernel_pan;
 pub(crate) use user::{
     application_address_limit, user_address_limit, user_translation_identifier_bits,
 };
-pub(crate) use user::{copy_from_exposed, copy_to_exposed};
+pub(crate) use user::{
+    copy_from_exposed, copy_to_exposed, load_exposed_scalar, store_exposed_scalar,
+};
 pub use user_entry::Error as UserEntryError;
 #[cfg(feature = "kernel-self-test")]
 pub(crate) use user_entry::direct_native_call_count_for_test;

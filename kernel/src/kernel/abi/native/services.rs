@@ -461,6 +461,18 @@ pub(in crate::kernel) trait VmServices: UserMemoryServices {
         &self,
         vmo: HandleValue,
     ) -> Result<HandleValue, crate::kernel::vm::service::Error>;
+    fn read_guest_memory(
+        &self,
+        memory: HandleValue,
+        offset: u64,
+        destination: Option<UserSlice>,
+    ) -> Result<(), crate::kernel::vm::service::Error>;
+    fn write_guest_memory(
+        &self,
+        memory: HandleValue,
+        offset: u64,
+        source: Option<UserSlice>,
+    ) -> Result<(), crate::kernel::vm::service::Error>;
     fn map_guest_memory(
         &self,
         pending: HandleValue,

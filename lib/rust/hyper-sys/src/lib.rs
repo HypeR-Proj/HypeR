@@ -77,10 +77,11 @@ pub use task::{
     thread_create, thread_exit, thread_request_stop, thread_sleep, thread_start, thread_yield,
 };
 pub use vm::{
-    guest_memory_create, pending_virtual_machine_abort, pending_virtual_machine_assign_device,
-    pending_virtual_machine_install, pending_virtual_machine_map_memory,
-    pending_virtual_machine_seal, pending_virtual_machine_set_bootstrap,
-    pending_virtual_machine_set_memory, virtual_cpu_complete_mmio, virtual_cpu_get_device_request,
+    guest_memory_create, guest_memory_read, guest_memory_write, pending_virtual_machine_abort,
+    pending_virtual_machine_assign_device, pending_virtual_machine_install,
+    pending_virtual_machine_map_memory, pending_virtual_machine_seal,
+    pending_virtual_machine_set_bootstrap, pending_virtual_machine_set_memory,
+    virtual_cpu_complete_mmio, virtual_cpu_get_device_request,
     virtual_cpu_get_device_request_for_device, virtual_cpu_get_info, virtual_cpu_set_affinity,
     virtual_cpu_start, virtual_machine_bind_firmware_console,
     virtual_machine_complete_power_request, virtual_machine_create,
