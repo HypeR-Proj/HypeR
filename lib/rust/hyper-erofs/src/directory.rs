@@ -10,11 +10,109 @@ use crate::{
 
 const DIRENT_BYTES: usize = 12;
 const MAX_DIRECTORY_BYTES: u64 = 16 * 1024 * 1024;
+pub(crate) const CURSOR_TAG: u64 = 0x4552_4f46_5344_0001;
+
+/// Reads at most one wire batch without rescanning preceding directory blocks.
+/// A resumed block is validated in full and against its predecessor, retaining
+/// the same sorted-name checks as a cold scan without storing a whole index.
+pub(crate) fn read_batch<D: Device>(
+    reader: &mut Reader<D>,
+    sb: &Superblock,
+    inode: Inode,
+    mut offset: u64,
+    mut index: usize,
+    path_key: u64,
+    batch: &mut hyper_filesystem::protocol::DirectoryBatchBuilder<'_>,
+) -> Result<bool, Error> {
+    use hyper_filesystem::{
+        Timestamp,
+        protocol::{self, DirectoryCursor, Entry},
+    };
+    if inode.kind != Kind::Directory
+        || offset > inode.size
+        || !offset.is_multiple_of(sb.block_size as u64)
+    {
+        return Err(Error::InvalidInput);
+    }
+    if inode.size == 0 {
+        return Err(Error::Corrupt);
+    }
+    if inode.size > MAX_DIRECTORY_BYTES {
+        return Err(Error::ResourceLimit);
+    }
+    let mut buffer = [0; MAX_BLOCK];
+    let mut previous = [0; 255];
+    let mut previous_len = 0;
+    if offset != 0 {
+        let length = inode.read(
+            reader,
+            sb,
+            offset - sb.block_size as u64,
+            &mut buffer[..sb.block_size],
+        )?;
+        let block = &buffer[..length];
+        let count = validate(block)?;
+        let name = child(block, count - 1, count)?.0;
+        previous[..name.len()].copy_from_slice(name);
+        previous_len = name.len();
+    }
+    let mut entry = Entry::empty();
+    while offset < inode.size {
+        let length = inode.read(reader, sb, offset, &mut buffer[..sb.block_size])?;
+        let block = &buffer[..length];
+        let count = validate(block)?;
+        if index > count {
+            return Err(Error::InvalidInput);
+        }
+        if previous_len != 0 && child(block, 0, count)?.0 <= &previous[..previous_len] {
+            return Err(Error::Corrupt);
+        }
+        while index < count {
+            let (name, nid, kind) = child(block, index, count)?;
+            index += 1;
+            if matches!(name, b"." | b"..") {
+                continue;
+            }
+            let metadata = Inode::load(reader, sb, nid)?;
+            if kind.is_some_and(|kind| kind != metadata.kind) {
+                return Err(Error::Corrupt);
+            }
+            core::str::from_utf8(name).map_err(|_| Error::Unsupported)?;
+            entry.name[..name.len()].copy_from_slice(name);
+            entry.name_len = name.len();
+            entry.kind = match metadata.kind {
+                Kind::File => protocol::FILE,
+                Kind::Directory => protocol::DIRECTORY,
+                Kind::Symlink => protocol::SYMLINK,
+            };
+            entry.mode = metadata.mode & !0o222;
+            entry.size = metadata.size;
+            entry.modified = Timestamp::new(metadata.modified.0, metadata.modified.1);
+            // Keep the final block's end as an index within that block. Its
+            // inline tail need not end on a filesystem-block boundary.
+            let next = DirectoryCursor {
+                words: [
+                    CURSOR_TAG,
+                    inode.nid,
+                    offset | ((index as u64) << 32),
+                    path_key,
+                ],
+            };
+            if !batch.push(&entry, next).ok_or(Error::Corrupt)? {
+                return Ok(false);
+            }
+        }
+        let last = child(block, count - 1, count)?.0;
+        previous[..last.len()].copy_from_slice(last);
+        previous_len = last.len();
+        offset += length as u64;
+        index = 0;
+    }
+    Ok(true)
+}
 
 pub(crate) struct Child {
     pub nid: u64,
-    pub name: [u8; 255],
-    pub length: usize,
     pub kind: Option<Kind>,
 }
 
@@ -25,7 +123,6 @@ pub(crate) fn find<D: Device>(
     sb: &Superblock,
     inode: Inode,
     name: Option<&[u8]>,
-    mut index: usize,
 ) -> Result<Option<Child>, Error> {
     if inode.kind != Kind::Directory {
         return Err(Error::InvalidInput);
@@ -56,23 +153,8 @@ pub(crate) fn find<D: Device>(
             if matches!(entry_name, b"." | b"..") {
                 continue;
             }
-            let selected = if let Some(name) = name {
-                name == entry_name
-            } else {
-                index == 0
-            };
-            if selected {
-                let mut child = Child {
-                    nid,
-                    name: [0; 255],
-                    length: entry_name.len(),
-                    kind,
-                };
-                child.name[..entry_name.len()].copy_from_slice(entry_name);
-                return Ok(Some(child));
-            }
-            if name.is_none() {
-                index -= 1;
+            if name.is_none_or(|name| name == entry_name) {
+                return Ok(Some(Child { nid, kind }));
             }
         }
         offset += length as u64;

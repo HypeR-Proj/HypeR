@@ -60,12 +60,22 @@ editor, disk reference, or unbounded allocation is retained by the cache.
 `File::size` exposes the already recorded directory-entry size, letting the
 adapter construct an allocation map without a preliminary full-chain EOF seek.
 
+`DirIter::position` and `FileSystem::resume_directory` export and restore small
+directory checkpoints containing the first/current cluster and record offset.
+They avoid repeated parent lookup and cluster-prefix traversal across bounded
+userspace directory batches. Geometry validation does not establish authority:
+HypeR retains checkpoints inside kernel directory-stream objects, and its FAT
+worker rejects checkpoints for a different path. The kernel invalidates active
+streams before mutating their directories, including on failed mutations.
+Applications never supply physical checkpoint fields. No borrowed iterator or
+file editor is retained between requests.
+
 This is not a journaled transaction. A device I/O failure after destination
 publication can leave an incomplete rename; HypeR latches the error and stops
 further access rather than claiming rollback. On a completely full volume,
 rename can report no space when it cannot publish a second directory entry;
 the original entry remains intact.
 
-Regression coverage lives in `kernel/tests/host/src/cases/fat_volume.rs`.
+Regression coverage lives in `lib/rust/hyper-fatfs/tests/volume.rs`.
 Keep this patch small, review it when updating the pinned upstream source,
 and remove it when an upstream version supplies equivalent guarantees.

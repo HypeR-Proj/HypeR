@@ -122,6 +122,7 @@ unsafe extern "C" {
         options: u32,
         info: *mut FileInfo,
     ) -> i64;
+    pub fn __hyper_std_fs_begin_readdir(directory: u64, stream: *mut u64) -> i64;
     pub fn __hyper_std_fs_readdir(
         handle: u64,
         cookie: u64,

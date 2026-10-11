@@ -6,7 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 # Virtual filesystem architecture
 
 HypeR keeps filesystem namespace, path-resolution authority, open filesystem
-objects, and the file-data cache in the kernel. A filesystem implementation is
+objects, and the shared data/metadata cache in the kernel. A filesystem implementation is
 an adapter below that policy boundary: it may execute directly in the kernel
 or proxy an external service without changing the Native capability model.
 Block devices form a separate backend boundary. A filesystem is not required
@@ -31,7 +31,7 @@ resource accounting, and the process-facing service boundary. Syscall parsing
 and user-memory validation stay in the Native ABI entry layer or its service
 adapter; backend code never observes a Process.
 
-`src/kernel/io_cache` owns bounded file-data residency. It does not resolve
+`src/kernel/io_cache` owns reclaimable file-data and namespace-metadata residency. It does not resolve
 paths or grant authority, and a cache miss never calls back into VFS policy.
 CPU cache maintenance remains architecture/HAL work and is unrelated to the
 filesystem data cache.
@@ -106,8 +106,7 @@ The common VFS layer owns file-content coherence. Ramfs nodes embed one
 opens and aliases therefore use the same content gate and identity. Its
 sleeping gate protects a non-repeating content revision and optional known
 length. Cache entries are keyed by filesystem identity, node incarnation,
-content revision and page index. A path or raw reusable inode number is never
-a cache key. A clean page also retains an opaque content-owner pin; the portable
+content revision and page index. File-data keys never use a path or raw reusable inode number. A clean page also retains an opaque content-owner pin; the portable
 cache has no dependency on VFS types. This preserves remote file identity across the
 last close and a later open while pages remain, including opens by another
 process. Page reclamation releases these pins outside the cache lock. The record
@@ -154,6 +153,18 @@ Hash chains contain at most 64 entries, bounding index work while interrupts
 are masked. A colliding miss bypasses retention once that limit is reached.
 Shrinking metadata may discard entries that would exceed a merged bucket's
 limit; growth preserves resident entries.
+
+The same cache also owns immutable directory batches and exact-name attribute
+records for remote filesystems. Key kinds distinguish file data, directory
+positions and namespace lookups. Full names and private checkpoints validate
+hashed placement. Each metadata payload still occupies exactly one physical
+page and retains only a plain content/accounting record, never a namespace
+Location or backend. Directory streams retain their own small continuation;
+cache eviction does not force a prefix rescan or pin a whole directory. The
+same page permits, index accounting, pressure admission and reclaim paths apply
+to all three kinds. Remote identity bindings use individually charged balanced
+indices by ID and canonical path, with bounded successor-based cleanup rather
+than a full registry scan on each open.
 
 Cache capacity grows on demand rather than imposing a fixed byte budget. The
 `kio-reclaim` kernel thread grows metadata geometrically and reclaims cold clean
@@ -255,14 +266,52 @@ worker and returns the block capability. There is no forced or lazy unmount.
 Final destruction releases only already-quiescent memory; waiting and fallible
 storage work belong to the explicit retirement path.
 
+## Directory streams
+
+`directory_begin_read` derives an independent DirectoryStream from Directory
+READ authority. Its grant inherits only the source rights supported by the
+stream: READ, DUPLICATE, TRANSFER and INSPECT. Derivation cannot restore
+attenuated propagation or inspection rights. The stream pins the opened
+namespace location and retains only its backend position and the previous
+position needed to retry failed copyout.
+It never pins complete directory contents or cache pages. Closing the stream
+releases its namespace reference; duplicate and transferred handles share one
+scan. Separate calls to begin_read have independent progress.
+
+`directory_read` consumes a stream-issued continuation cookie and returns up to
+four owned entry records. Cookie zero begins that stream, and a returned zero
+means EOF. A short nonempty page may still carry a continuation. Cookies are
+monotonic, globally non-reused and bound to one stream; only the most recent
+input may be retried, including an EOF page. Forged, foreign-stream and older
+cookies fail. Copyout failure leaves the previous position available for retry
+without retaining cache bytes. Remote mutations of the scanned directory, or
+renames of that directory or an ancestor, invalidate its scan. Mutations of
+unrelated directories and content/attribute changes preserve traversal.
+Applications can start a fresh stream after namespace changes. No stream provides
+a directory snapshot.
+
+The Rust Native SDK owns a stream per `DirectoryReader`; Rust std uses the same
+contract for `ReadDir`. `DirEntry::metadata()` remains a fresh, non-following
+lookup relative to its directory, allowing the kernel to reuse current cached
+attributes without returning permanently saved application-side metadata.
+
+Directory enumeration resumes from bounded checkpoints even when retention is
+unavailable, so its backend scan remains linear in directory size. Canonical
+name and attribute reuse depends on cache admission: under pressure, a fresh
+per-entry metadata lookup can still rescan a FAT directory. Therefore tools such
+as `ls` can incur repeated lookup work even though enumeration itself no longer
+restarts at the beginning. Metadata invalidation is currently volume-wide;
+unrelated writes can discard attribute and directory-batch reuse, but do not
+invalidate a stream's physical continuation.
+
 ## Writable ramfs
 
 Each open node lease pins the node independently of its directory entry.
 Unlink removes namespace reachability; existing File handles continue to read
 and write that same node. Recreating the name produces a distinct, non-reused
 node identity. Removed directories reject creation through old handles.
-Directory enumeration returns owned entry snapshots with monotonically
-allocated cookies, so deletion cannot turn a cursor into a reused entry index.
+Ramfs stream positions use monotonically allocated backend cookies, so deletion
+cannot turn a position into a reused entry index.
 Enumeration is not a snapshot of the whole directory during concurrent mutation.
 
 File bytes borrow the boot archive until mutation requires owned storage.

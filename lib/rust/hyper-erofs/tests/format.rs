@@ -128,10 +128,20 @@ fn compact_extended_inline_plain_and_nested_paths() -> Result<(), Error> {
             .all(|(i, v)| *v == ((4093 + i) % 251) as u8)
     );
     assert_eq!(volume.read("big", u64::MAX, &mut output)?, 0);
-    assert_eq!(volume.entry("", 0)?.ok_or(Error::Missing)?.name, "big");
-    assert_eq!(volume.entry("", 3)?.ok_or(Error::Missing)?.name, "small");
-    assert!(volume.entry("", 4)?.is_none());
-    assert!(volume.entry("", usize::MAX)?.is_none());
+    assert_eq!(
+        directory_entry(&mut volume, "", 0)?
+            .ok_or(Error::Missing)?
+            .name,
+        "big"
+    );
+    assert_eq!(
+        directory_entry(&mut volume, "", 3)?
+            .ok_or(Error::Missing)?
+            .name,
+        "small"
+    );
+    assert!(directory_entry(&mut volume, "", 4)?.is_none());
+    assert!(directory_entry(&mut volume, "", usize::MAX)?.is_none());
     Ok(())
 }
 
@@ -283,7 +293,7 @@ fn deterministic_metadata_mutations_remain_bounded() {
             let _ = volume.stat("big");
             let _ = volume.read("small", 0, &mut buffer);
             let _ = volume.readlink("link", &mut buffer);
-            let _ = volume.entry("", 7);
+            let _ = directory_entry(&mut volume, "", 7);
         }
     }
 }
@@ -304,4 +314,202 @@ fn official_mkfs_checksum_and_core_fixture() -> Result<(), Error> {
         Err(Error::Corrupt)
     ));
     Ok(())
+}
+
+fn large_directory_fixture(count: usize) -> Vec<u8> {
+    let directory_blocks = count.div_ceil(64);
+    let blocks = 8 + directory_blocks;
+    let mut bytes = vec![0; blocks * 4096];
+    dword(&mut bytes, 1024, 0xe0f5_e1e2);
+    bytes[1036] = 12;
+    word(&mut bytes, 1038, 40);
+    qword(&mut bytes, 1040, 2);
+    dword(&mut bytes, 1060, blocks as u32);
+    inode(
+        &mut bytes,
+        40,
+        0o40755,
+        (directory_blocks * 4096) as u64,
+        false,
+        false,
+        8,
+    );
+    inode(&mut bytes, 64, 0o100644, 0, false, false, 0);
+    for block in 0..directory_blocks {
+        let names: Vec<String> = (block * 64..count.min((block + 1) * 64))
+            .map(|index| format!("F{index:07}"))
+            .collect();
+        let entries: Vec<_> = names.iter().map(|name| (64, 1, name.as_str())).collect();
+        directory(&mut bytes[(8 + block) * 4096..(9 + block) * 4096], &entries);
+    }
+    bytes
+}
+
+struct CountedMemory {
+    memory: Memory,
+    reads: std::rc::Rc<std::cell::Cell<usize>>,
+}
+impl Device for CountedMemory {
+    fn len(&self) -> u64 {
+        self.memory.len()
+    }
+    fn read_exact_at(&mut self, offset: u64, output: &mut [u8]) -> Result<(), Error> {
+        self.reads.set(self.reads.get() + 1);
+        self.memory.read_exact_at(offset, output)
+    }
+}
+
+fn scan_large_erofs_directory(count: usize) -> Result<usize, Error> {
+    use hyper_filesystem::protocol::{DIRECTORY_BATCH_BYTES, DirectoryBatch, DirectoryCursor};
+    let reads = std::rc::Rc::new(std::cell::Cell::new(0));
+    let mut volume = Volume::mount(CountedMemory {
+        memory: Memory(large_directory_fixture(count)),
+        reads: reads.clone(),
+    })?;
+    let mut buffers = [[0; DIRECTORY_BATCH_BYTES]; 2];
+    let mut cursors = [Some(DirectoryCursor::START); 2];
+    let mut seen = [0; 2];
+    let before = reads.get();
+    while cursors.iter().any(Option::is_some) {
+        for reader in 0..2 {
+            let Some(cursor) = cursors[reader] else {
+                continue;
+            };
+            let length = volume.read_directory("", cursor, &mut buffers[reader])?;
+            let batch = DirectoryBatch::decode(&buffers[reader][..length]).ok_or(Error::Corrupt)?;
+            assert_eq!(batch.start_cursor(), cursor);
+            for record in batch.records() {
+                assert_eq!(record.name(), format!("F{:07}", seen[reader]));
+                seen[reader] += 1;
+                cursors[reader] = Some(record.next_cursor());
+            }
+            if batch.eof() {
+                cursors[reader] = None;
+            }
+        }
+    }
+    assert_eq!(seen, [count; 2]);
+    Ok(reads.get() - before)
+}
+
+#[test]
+fn directory_batches_resume_independent_readers_with_linear_io() -> Result<(), Error> {
+    let small = scan_large_erofs_directory(1024)?;
+    let large = scan_large_erofs_directory(4096)?;
+    assert!(
+        large <= small * 5,
+        "directory I/O grew superlinearly: {small} -> {large}"
+    );
+    assert!(large < 1600, "too many EROFS directory reads: {large}");
+    Ok(())
+}
+
+#[test]
+fn directory_checkpoint_replay_and_cross_directory_rejection() -> Result<(), Error> {
+    use hyper_filesystem::protocol::{DIRECTORY_MIN_BYTES, DirectoryBatch, DirectoryCursor};
+    let mut volume = Volume::mount(Memory(large_directory_fixture(64)))?;
+    let mut bytes = [0; DIRECTORY_MIN_BYTES];
+    let length = volume.read_directory("", DirectoryCursor::START, &mut bytes)?;
+    let batch = DirectoryBatch::decode(&bytes[..length]).ok_or(Error::Corrupt)?;
+    assert!(!batch.eof());
+    let cursor = batch.records().last().ok_or(Error::Corrupt)?.next_cursor();
+    assert_eq!(
+        volume.read_directory("other", cursor, &mut bytes),
+        Err(Error::InvalidInput)
+    );
+    let length = volume.read_directory("", cursor, &mut bytes)?;
+    let copy = bytes[..length].to_vec();
+    assert_eq!(volume.read_directory("", cursor, &mut bytes)?, length);
+    assert_eq!(&bytes[..length], copy);
+    Ok(())
+}
+
+#[test]
+fn directory_batches_resume_inside_inline_tail_and_finish_at_exact_eof() -> Result<(), Error> {
+    use hyper_filesystem::protocol::{DIRECTORY_MIN_BYTES, DirectoryBatch, DirectoryCursor};
+    let mut bytes = large_directory_fixture(96);
+    // Keep 64 names in the external block, then put the final 32 names after
+    // the compact root inode. This tail ends between filesystem blocks.
+    let tail_length = 32 * (12 + 8);
+    let inline = inode(
+        &mut bytes,
+        40,
+        0o40755,
+        (4096 + tail_length) as u64,
+        false,
+        true,
+        8,
+    );
+    bytes.copy_within(9 * 4096..9 * 4096 + tail_length, inline);
+    let mut volume = Volume::mount(Memory(bytes))?;
+    let mut output = [0; DIRECTORY_MIN_BYTES];
+    let mut cursor = DirectoryCursor::START;
+    let mut seen = 0;
+    let mut tail_batches = 0;
+    loop {
+        let length = volume.read_directory("", cursor, &mut output)?;
+        let batch = DirectoryBatch::decode(&output[..length]).ok_or(Error::Corrupt)?;
+        assert_eq!(batch.start_cursor(), cursor);
+        for record in batch.records() {
+            assert_eq!(record.name(), format!("F{seen:07}"));
+            seen += 1;
+            cursor = record.next_cursor();
+        }
+        if cursor.words[2] as u32 == 4096 {
+            tail_batches += 1;
+        }
+        if batch.eof() {
+            break;
+        }
+    }
+    assert_eq!(seen, 96);
+    assert!(tail_batches > 1, "inline tail did not require continuation");
+    // The last entry leaves a valid position within the inline block. Resuming
+    // that exact position returns empty EOF rather than seeking past its tail.
+    let length = volume.read_directory("", cursor, &mut output)?;
+    let batch = DirectoryBatch::decode(&output[..length]).ok_or(Error::Corrupt)?;
+    assert!(batch.is_empty() && batch.eof());
+    assert_eq!(batch.start_cursor(), cursor);
+    Ok(())
+}
+
+fn directory_entry(
+    volume: &mut Volume<Memory>,
+    path: &str,
+    mut index: usize,
+) -> Result<Option<hyper_erofs::Entry>, Error> {
+    use hyper_filesystem::protocol::{
+        self, DIRECTORY_BATCH_BYTES, DirectoryBatch, DirectoryCursor, Entry,
+    };
+    let mut bytes = [0; DIRECTORY_BATCH_BYTES];
+    let mut cursor = DirectoryCursor::START;
+    loop {
+        let length = volume.read_directory(path, cursor, &mut bytes)?;
+        let batch = DirectoryBatch::decode(&bytes[..length]).ok_or(Error::Corrupt)?;
+        for record in batch.records() {
+            if index == 0 {
+                let mut entry = Entry::empty();
+                record.entry_into(&mut entry);
+                return Ok(Some(hyper_erofs::Entry {
+                    name: entry.name().to_owned(),
+                    kind: match entry.kind {
+                        protocol::FILE => Kind::File,
+                        protocol::DIRECTORY => Kind::Directory,
+                        _ => Kind::Symlink,
+                    },
+                    mode: entry.mode,
+                    size: entry.size,
+                    modified: entry
+                        .modified
+                        .map(|time| (time.seconds(), time.nanoseconds()))
+                        .ok_or(Error::Corrupt)?,
+                }));
+            }
+            index -= 1;
+            cursor = record.next_cursor();
+        }
+        if batch.eof() {
+            return Ok(None);
+        }
+    }
 }

@@ -224,8 +224,6 @@ pub(super) struct EntrySnapshot {
     pub(super) next_cookie: u64,
 }
 
-pub(super) type DirectoryEntry = EntrySnapshot;
-
 impl FilesystemInstance {
     pub(crate) fn try_from_ramfs(ramfs: RamFs<'static>) -> Result<FallibleArc<Self>, Error> {
         FallibleArc::try_new(Self {
@@ -260,12 +258,18 @@ impl FilesystemInstance {
     pub(super) fn try_from_remote(
         device: super::remote::Transport,
         sponsor: &ResourceDomain,
+        cache: FallibleArc<FileDataCache<CachePage>>,
     ) -> Result<FallibleArc<Self>, Error> {
         let charge = allocation_charge::<Self>(sponsor)?;
-        let filesystem = super::remote::RemoteFs::mount(device, sponsor.clone())?;
+        let id = FilesystemId(allocate_identifier(&NEXT_FILESYSTEM_ID)?);
+        let generation = io_cache::FilesystemGeneration::new(
+            NonZeroU64::new(id.get()).ok_or(Error::IdentifierExhausted)?,
+        );
+        let filesystem =
+            super::remote::RemoteFs::mount(device, sponsor.clone(), generation, cache)?;
         FallibleArc::try_new(Self {
             _charge: Some(charge),
-            id: FilesystemId(allocate_identifier(&NEXT_FILESYSTEM_ID)?),
+            id,
             backend: Backend::Remote(FallibleArc::try_new(filesystem)?),
         })
         .map_err(Error::from)
@@ -512,14 +516,42 @@ impl FilesystemInstance {
         }
     }
 
-    pub(super) fn read_directory_entry(
+    pub(super) fn read_directory_page(
         &self,
         node: &NodeLease,
-        cookie: u64,
-    ) -> Result<Option<DirectoryEntry>, Error> {
+        position: &super::directory::DirectoryPosition,
+        page: &mut super::DirectoryPage,
+    ) -> Result<super::directory::DirectoryPosition, Error> {
         match &self.backend {
-            Backend::RamFs(fs) => fs.entry(node.ramfs()?, cookie),
-            Backend::Remote(fs) => fs.entry(node.remote()?, cookie),
+            Backend::RamFs(fs) => {
+                let mut next = *position;
+                page.len = 0;
+                page.next_cookie = 0;
+                while page.len < super::objects::DIRECTORY_PAGE_CAPACITY {
+                    let Some(entry) = fs.entry(node.ramfs()?, next.ramfs_cookie)? else {
+                        return Ok(next);
+                    };
+                    if entry.next_cookie <= next.ramfs_cookie {
+                        return Err(Error::InvalidBackendResult);
+                    }
+                    page.entries[page.len] = Some(super::DirectoryEntrySnapshot {
+                        name: entry.name,
+                        name_length: entry.length as u32,
+                        attributes: entry.attributes,
+                    });
+                    page.len += 1;
+                    next.ramfs_cookie = entry.next_cookie;
+                }
+                // A full page may end exactly at EOF. Discover that with the
+                // next ordinary read, never an extra backend probe per page.
+                page.next_cookie = 1;
+                Ok(next)
+            }
+            Backend::Remote(fs) => {
+                let mut next = *position;
+                next.remote = fs.read_directory(node.remote()?, &position.remote, page)?;
+                Ok(next)
+            }
         }
     }
 
@@ -940,15 +972,16 @@ impl MountNamespace {
         self.mounts.reclaim_idle_records(domain);
     }
 
-    pub(super) fn read_directory_entry(
+    pub(super) fn read_directory_page(
         &self,
         directory: &Location,
-        cookie: u64,
-    ) -> Result<Option<DirectoryEntry>, Error> {
+        position: &super::directory::DirectoryPosition,
+        page: &mut super::DirectoryPage,
+    ) -> Result<super::directory::DirectoryPosition, Error> {
         directory
             .mount()
             .filesystem()
-            .read_directory_entry(directory.node(), cookie)
+            .read_directory_page(directory.node(), position, page)
     }
 }
 

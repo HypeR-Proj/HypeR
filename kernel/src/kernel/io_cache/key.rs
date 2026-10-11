@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Filesystem, node-incarnation, and content identities for clean pages.
+//! Filesystem, node-incarnation, and content identities for clean I/O pages.
 
 use core::num::NonZeroU64;
 
@@ -72,12 +72,43 @@ impl FilePageIndex {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct CacheKey {
     file: FileIdentity,
-    page: FilePageIndex,
+    kind: CacheKind,
+    index: u64,
+}
+
+/// Different views can share numeric offsets without sharing payloads.
+/// Directory and lookup indices are placement hashes; their callers must
+/// compare the complete cursor or name stored inside the immutable payload.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum CacheKind {
+    FileData,
+    Directory,
+    Lookup,
 }
 
 impl CacheKey {
     pub(crate) const fn new(file: FileIdentity, page: FilePageIndex) -> Self {
-        Self { file, page }
+        Self {
+            file,
+            kind: CacheKind::FileData,
+            index: page.0,
+        }
+    }
+
+    pub(crate) const fn directory(file: FileIdentity, cursor_hash: u64) -> Self {
+        Self {
+            file,
+            kind: CacheKind::Directory,
+            index: cursor_hash,
+        }
+    }
+
+    pub(crate) const fn lookup(file: FileIdentity, name_hash: u64) -> Self {
+        Self {
+            file,
+            kind: CacheKind::Lookup,
+            index: name_hash,
+        }
     }
 
     /// Noncryptographic placement only. The index separately caps collision
@@ -89,7 +120,8 @@ impl CacheKey {
             self.file.filesystem.0.get(),
             self.file.node.0.get(),
             self.file.revision.0.get(),
-            self.page.0,
+            self.kind as u64,
+            self.index,
         ] {
             hash = (hash ^ value).wrapping_mul(0x0000_0100_0000_01b3);
         }

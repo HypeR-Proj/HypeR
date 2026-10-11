@@ -23,9 +23,13 @@ pub(super) struct PageBytes {
 
 impl PageBytes {
     pub(super) fn try_copy(bytes: &[u8]) -> Result<Self, CacheError> {
-        if bytes.len() > PAGE_BYTES {
-            return Err(CacheError::InvalidCapacity);
-        }
+        Self::try_copy_parts(&[bytes])
+    }
+
+    /// Assemble a bounded payload without a page-sized temporary on the
+    /// caller's stack. All component lengths are validated before allocation.
+    pub(super) fn try_copy_parts(parts: &[&[u8]]) -> Result<Self, CacheError> {
+        parts_length(parts).ok_or(CacheError::InvalidCapacity)?;
         #[cfg(not(test))]
         {
             let page = crate::kernel::mm::cache_memory::allocate_page()
@@ -37,7 +41,7 @@ impl PageBytes {
                 address,
                 length: 0,
             };
-            storage.replace(bytes);
+            storage.replace_parts(parts);
             Ok(storage)
         }
         #[cfg(test)]
@@ -46,30 +50,45 @@ impl PageBytes {
             owned
                 .try_reserve_exact(PAGE_BYTES)
                 .map_err(|_| CacheError::Allocation)?;
-            owned.extend_from_slice(bytes);
+            for part in parts {
+                owned.extend_from_slice(part);
+            }
             Ok(Self { bytes: owned })
         }
     }
 
     pub(super) fn replace(&mut self, bytes: &[u8]) {
-        if bytes.len() > PAGE_BYTES {
+        self.replace_parts(&[bytes]);
+    }
+
+    pub(super) fn replace_parts(&mut self, parts: &[&[u8]]) {
+        let Some(length) = parts_length(parts) else {
             super::cache_invariant_violation();
-        }
+        };
         #[cfg(not(test))]
         {
-            // SAFETY: This owner retains one order-0 block in the permanent
-            // writable RAM map. Exclusive access prevents a reader observing
-            // replacement; only the initialized prefix becomes visible.
-            unsafe {
-                core::ptr::with_exposed_provenance_mut::<u8>(self.address)
-                    .copy_from_nonoverlapping(bytes.as_ptr(), bytes.len());
+            let mut offset = 0;
+            for part in parts {
+                // SAFETY: This owner retains one order-0 block in the permanent
+                // writable RAM map. Validated lengths keep every destination
+                // inside it. Exclusive access prevents readers and aliases of
+                // this page; only the fully initialized prefix is published.
+                unsafe {
+                    core::ptr::with_exposed_provenance_mut::<u8>(self.address)
+                        .add(offset)
+                        .copy_from_nonoverlapping(part.as_ptr(), part.len());
+                }
+                offset += part.len();
             }
-            self.length = bytes.len();
+            self.length = length;
         }
         #[cfg(test)]
         {
             self.bytes.clear();
-            self.bytes.extend_from_slice(bytes);
+            for part in parts {
+                self.bytes.extend_from_slice(part);
+            }
+            debug_assert_eq!(self.bytes.len(), length);
         }
     }
 
@@ -88,4 +107,12 @@ impl PageBytes {
         #[cfg(test)]
         &self.bytes
     }
+}
+
+fn parts_length(parts: &[&[u8]]) -> Option<usize> {
+    parts.iter().try_fold(0_usize, |length, part| {
+        length
+            .checked_add(part.len())
+            .filter(|length| *length <= PAGE_BYTES)
+    })
 }

@@ -448,6 +448,9 @@ pub(super) fn parse_object_kind(
         HYPER_NATIVE_OBJECT_VMO => Ok(ObjectKind::VMO),
         HYPER_NATIVE_OBJECT_VMAR => Ok(ObjectKind::VMAR),
         HYPER_NATIVE_OBJECT_CONSOLE => Ok(ObjectKind::CONSOLE),
+        hyper::abi::native::HYPER_NATIVE_OBJECT_DIRECTORY_STREAM => {
+            Ok(ObjectKind::DIRECTORY_STREAM)
+        }
         HYPER_NATIVE_OBJECT_DIRECTORY => Ok(ObjectKind::DIRECTORY),
         HYPER_NATIVE_OBJECT_FILE => Ok(ObjectKind::FILE),
         HYPER_NATIVE_OBJECT_PROCESS_BUILDER => Ok(ObjectKind::PROCESS_BUILDER),

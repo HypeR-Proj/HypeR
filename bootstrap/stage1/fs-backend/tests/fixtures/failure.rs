@@ -23,6 +23,8 @@ use std::{
     time::Duration,
 };
 
+mod directory;
+mod directory_volume;
 mod volume;
 
 type Result<T> = std::result::Result<T, String>;
@@ -288,6 +290,7 @@ fn suite(startup: &mut Startup<'_>) -> Result<()> {
     write_overflow(startup, &root)?;
     protected_file_cache(startup, &root)?;
     protection_exit(startup, &root)?;
+    directory::run(startup, &root)?;
     Ok(())
 }
 
@@ -807,6 +810,7 @@ fn run() -> Result<bool> {
         let mut volume = volume::FixtureVolume {
             notice,
             snapshot: Some(vec![0x5a; 8192]),
+            directories: directory_volume::DirectoryVolume::default(),
         };
         let _completion = hyper_fs_service::serve(&mut startup, &mut volume)?;
         Ok(false)

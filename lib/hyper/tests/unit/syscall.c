@@ -39,6 +39,8 @@ static void transport(hyper_native_status_t status)
 	hyper_native_filesystem_root_switch_t root_switch = {0};
 	EXPECT(FILESYSTEM_MOUNT_RAMFS, handle, (uintptr_t)bytes, sizeof(bytes));
 	RESULT(hyper_filesystem_mount_ramfs(handle, bytes, sizeof(bytes)));
+	EXPECT(DIRECTORY_BEGIN_READ, handle);
+	RESULT(hyper_directory_begin_read(handle));
 	EXPECT(FILE_PROTECT, handle);
 	RESULT(hyper_file_protect(handle));
 	hyper_native_private_mapping_t mapping = {0};

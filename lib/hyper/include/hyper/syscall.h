@@ -62,7 +62,9 @@ hyper_call_result_t hyper_directory_open_file(hyper_native_handle_t directory, c
 hyper_call_result_t hyper_directory_open_directory(hyper_native_handle_t directory,
 						   const void *path, size_t path_size,
 						   uint64_t requested_rights);
-hyper_call_result_t hyper_directory_read(hyper_native_handle_t directory, uint64_t cookie,
+hyper_call_result_t hyper_directory_begin_read(hyper_native_handle_t directory);
+/* Reads a DirectoryStream; zero starts, subsequent cookies are stream-issued. */
+hyper_call_result_t hyper_directory_read(hyper_native_handle_t stream, uint64_t cookie,
 					 hyper_native_directory_entry_t *records, size_t capacity);
 hyper_call_result_t hyper_directory_get_info(hyper_native_handle_t directory,
 					     hyper_native_directory_info_t *info);

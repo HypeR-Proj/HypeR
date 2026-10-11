@@ -245,6 +245,10 @@ impl VfsServices for DeferredProcessServices<'_> {
         crate::kernel::vfs::open_directory(self.process, root, path, rights)
     }
 
+    fn begin_directory_read(&self, directory: HandleValue) -> Result<HandleValue, VfsServiceError> {
+        crate::kernel::vfs::begin_directory_read(self.process, directory)
+    }
+
     fn read_directory(
         &self,
         directory: HandleValue,

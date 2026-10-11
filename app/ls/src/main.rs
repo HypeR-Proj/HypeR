@@ -35,7 +35,7 @@ fn list(path: &Path, args: &Ls, output: &mut impl Write) -> io::Result<()> {
             entries.push(Entry {
                 name,
                 path: entry.path(),
-                metadata: fs::symlink_metadata(entry.path())?,
+                metadata: entry.metadata()?,
             });
         }
     } else {

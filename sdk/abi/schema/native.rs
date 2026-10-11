@@ -233,6 +233,11 @@ pub enum ProducedObject {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProducedRights {
     RequestedSubsetOf(&'static str),
+    /// Source-handle rights intersected with a fixed destination ceiling.
+    InheritedSubset {
+        authority_source: &'static str,
+        allowed_rights: u64,
+    },
     ExactRequested {
         argument: &'static str,
         allowed_rights: u64,
@@ -657,7 +662,15 @@ pub const OBJECT_KINDS: &[ObjectKind] = &[
         name: "file_protection",
         transfer: TransferClass::Forbidden,
     },
+    ObjectKind {
+        value: 35,
+        name: "directory_stream",
+        transfer: TransferClass::General,
+    },
 ];
+
+pub const DIRECTORY_STREAM_RIGHTS: u64 =
+    RIGHT_READ | RIGHT_DUPLICATE | RIGHT_TRANSFER | RIGHT_INSPECT;
 
 pub const FILE_PROTECTION_RIGHTS: u64 = RIGHT_MAP | RIGHT_INSPECT;
 
@@ -4217,10 +4230,10 @@ const DIRECTORY_OPEN_DIRECTORY_RESULTS: &[ResultValue] = &[ResultValue {
 
 const DIRECTORY_READ_ARGUMENTS: &[Argument] = &[
     Argument {
-        name: "directory",
+        name: "stream",
         kind: ValueKind::Handle,
         handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("directory"),
+            object: ObjectConstraint::Kind("directory_stream"),
             required_rights: RIGHT_READ,
             disposition: HandleDisposition::Borrow,
         }),
@@ -4577,6 +4590,19 @@ const fn wait_set_argument(rights: u64) -> Argument {
         kind: ValueKind::Handle,
         handle: Some(HandleArgument {
             object: ObjectConstraint::Kind("wait_set"),
+            required_rights: rights,
+            disposition: HandleDisposition::Borrow,
+        }),
+        memory: None,
+    }
+}
+
+const fn directory_argument(rights: u64) -> Argument {
+    Argument {
+        name: "directory",
+        kind: ValueKind::Handle,
+        handle: Some(HandleArgument {
+            object: ObjectConstraint::Kind("directory"),
             required_rights: rights,
             disposition: HandleDisposition::Borrow,
         }),
@@ -9623,6 +9649,30 @@ pub const SYSCALLS: &[Syscall] = &[
         failure_results: &[],
     },
     Syscall {
+        number: 157,
+        name: "directory_begin_read",
+        feature: FeatureGate::Core,
+        arguments: &[directory_argument(RIGHT_READ)],
+        results: &[ResultValue {
+            name: "stream",
+            kind: ValueKind::Handle,
+            handle: Some(ProducedHandle {
+                object: ProducedObject::Kind("directory_stream"),
+                rights: ProducedRights::InheritedSubset {
+                    authority_source: "directory",
+                    allowed_rights: DIRECTORY_STREAM_RIGHTS,
+                },
+            }),
+        }],
+        blocking: BlockingClass::MayBlock,
+        cancellation: CancellationClass::None,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
         number: 496,
         name: "native_block_transfer",
         feature: FeatureGate::Core,
@@ -9704,14 +9754,14 @@ pub const SEMANTIC_RULES: &[&str] = &[
     "ByteChannel duplicate authority permits shared endpoint ownership; peer_closed is published only when the last active endpoint handle closes. Internal operation pins, including WaitSet subscriptions, do not retain active endpoint authority.",
     "process_get_current_id returns the calling Process KOID for observation only. It creates no handle or operational authority and is not a PID-to-handle lookup.",
     "KOIDs encode a nonzero 32-bit slot in bits 0..31 and a 32-bit generation in bits 32..63. Full KOIDs never repeat within a boot. A slot remains unique until final payload destruction, after which reuse advances its generation; generation exhaustion permanently retires the slot. Full KOIDs are required for durable correlation. A language runtime with a 32-bit process ID surface may expose the KOID slot, accepting reuse after object destruction. Neither form grants authority or permits identifier-to-handle conversion; KOIDs do not encode creation order.",
-    "Ramfs storage and all current VFS operations remain kernel-owned. Open File and Directory objects pin their nodes after unlink. Directory WRITE permits namespace mutation; File WRITE permits content mutation. directory_create_file exclusively creates a regular file and publishes its requested handle atomically with the new name. Mode accepts permission bits 0777. directory_remove options 0 removes a non-directory entry without following the final symlink; 1 removes an empty directory. file_write_at options 0 uses offset, 1 atomically appends (offset must be zero); returns actual bytes and end offset. Transfers may complete short. file_resize zero-fills extension. Directory cookies are monotonic, never reused, and enumeration is weakly consistent across mutations. Active file protections reject content changes through every File alias.",
+    "Ramfs storage and namespace policy remain kernel-owned; disk filesystem parsing runs in userspace. Open File and Directory objects pin their nodes after unlink. Directory WRITE permits namespace mutation; File WRITE permits content mutation. directory_create_file exclusively creates a regular file and publishes its requested handle atomically with the new name. Mode accepts permission bits 0777. directory_remove options 0 removes a non-directory entry without following the final symlink; 1 removes an empty directory. file_write_at options 0 uses offset, 1 atomically appends (offset must be zero); returns actual bytes and end offset. Transfers may complete short. file_resize zero-fills extension. Active file protections reject content changes through every File alias.",
     "Thread creation prepares a dormant thread in the calling Process and returns duplicate, wait, inspect, start and request_stop authority. Entry, 16-byte-aligned stack, TLS and an opaque first argument define its initial context. Affinity pointer/count zero together inherit the calling Thread current allowed CPU set; otherwise they name one to four little-endian u64 bitmap words. An explicit mask must be nonempty, fit supported CPU indices and include at least one schedulable CPU. The child remains dormant until start, with affinity already applied. The caller retains stack/TLS ownership through the thread terminated signal. Start publishes runnable execution; request_stop abandons execution without language destructors. Closing the last handle to a dormant thread cancels it; running threads continue independently of handle ownership. Existing thread_exit terminates only the caller, while process_exit stops every thread.",
     "Atomic wait/wake currently operate on aligned writable u32 words in the calling Process. Wait checks the value and publishes its generation atomically with respect to wake; mismatch returns ok, and spurious wakes are allowed. Wait uses an absolute monotonic nanosecond deadline, with UINT64_MAX meaning infinite; timeout returns timed_out and cancellation returns cancelled. Wake returns the number of registrations actually notified, bounded by count. Wake does not replace the caller's release operation or the waiter's acquire predicate check. Keys include the non-reused mapping identity and virtual address; aliases and other Processes have separate wait domains. Keep the mapping live while waiting: unmap/protect does not move an existing wait to a replacement mapping. Pinned backing survives concurrent unmap until admitted accesses finish; process stop cancels outstanding waits.",
     "Thread sleep accepts an absolute monotonic nanosecond deadline and returns ok when it expires, including an already elapsed deadline. UINT64_MAX sleeps until cancellation. It parks the current thread through scheduler timeout arbitration rather than polling or yielding.",
     "The monotonic clock syscall returns absolute nanoseconds from the kernel's monotonic clock domain. Ambient monotonic observation is intentionally not a capability because reading it conveys no mutable authority; future virtual or adjustable clocks may be represented by handle objects without changing this clock domain.",
     "Extensible input records carry their caller size in the syscall's explicit byte-count argument. The size must be at least the record's published minimum prefix and no greater than extensible_record_max_bytes; missing bytes through the kernel's current record size default to zero, while bytes beyond that size must be zero. Extensible information outputs accept any capacity from the record's minimum prefix through extensible_record_max_bytes, write only the intersection of caller capacity and kernel-supported size, and return the kernel-supported size in value0 on ok. Bytes beyond that intersection remain untouched.",
     "Directory lookup is capability-relative. A leading slash restarts at that Directory's traversal root, and parent components cannot escape it. Every open requires read traversal authority, and every requested File right must already be present on the source Directory before the result is further bounded by the File object's node-specific ceiling.",
-    "Directory reads require the exact published page capacity. Cookie zero starts a scan and a returned next_cookie of zero ends it. Every name is one valid path component encoded as name_length UTF-8 bytes followed by zero-filled capacity. Pages are weakly consistent with concurrent filesystem mutation; callers must neither interpret nor synthesize cookies.",
+    "directory_begin_read requires only Directory READ and creates an independent DirectoryStream. Its grant is the source Directory grant intersected with READ|DUPLICATE|TRANSFER|INSPECT, so attenuated propagation or inspection authority is never restored. Each stream retains its opened namespace location and small trusted backend position, never directory cache pages. Duplicated or transferred stream handles share progress. directory_read now requires DirectoryStream READ and the exact published page capacity. Cookie zero reads the first page; subsequent cookies must have been returned by that stream. Nonzero cookies are globally monotonic and never reused. Only the most recent input cookie can be replayed for copyout retry; older, forged or foreign-stream cookies are invalid. A zero next_cookie marks EOF; short nonempty pages may still have a continuation. Every name is one valid path component encoded as name_length UTF-8 bytes followed by zero-filled capacity. Remote mutations of the scanned directory, or renames of that directory or an ancestor, invalidate its ongoing scans and require a new stream; mutations of unrelated directories and file-content changes preserve traversal. Ramfs enumeration remains weakly consistent across mutations. No scan is an immutable directory snapshot. Callers must not interpret or synthesize cookies. Closing the final stream handle releases the position and namespace pin.",
     "Native task and object inspectors are immutable capability-scoped views. Process, thread, and object KOIDs plus scan cursors are observation-only values and can never be exchanged for operational authority. Out-of-scope targeted lookup returns not_found.",
     "Task inspector records carry a bounded UTF-8 name as name_length bytes followed by zero-filled capacity. Process names are the immutable labels committed by ProcessBuilder publication; Thread names are immutable scheduler identity labels retained through the retiring registry phase.",
     "Inspector derivation is monotonic: a derived Process, TaskGroup, or ResourceDomain view cannot widen its parent's task scope, object scope, visibility, or rights. Derivation requires DUPLICATE | TRANSFER | INSPECT | DERIVE and returns exactly that base set; INSPECT_DETAILS is never added or preserved by the existing derivation calls. Callers attenuate the returned handle before delegation. Native task operations remain handle-based; numeric PID and TID namespaces belong exclusively to compatibility personalities.",

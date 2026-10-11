@@ -744,6 +744,7 @@ pub(in crate::kernel) trait VfsServices: UserMemoryServices {
         path: UserSlice,
         rights: Rights,
     ) -> Result<HandleValue, VfsServiceError>;
+    fn begin_directory_read(&self, directory: HandleValue) -> Result<HandleValue, VfsServiceError>;
     fn read_directory(
         &self,
         directory: HandleValue,

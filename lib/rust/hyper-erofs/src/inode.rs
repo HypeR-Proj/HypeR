@@ -9,6 +9,7 @@ use crate::{
 
 #[derive(Clone, Copy)]
 pub(crate) struct Inode {
+    pub nid: u64,
     pub kind: Kind,
     pub mode: u32,
     pub size: u64,
@@ -85,6 +86,7 @@ impl Inode {
             reader.check(data, usize::try_from(external).map_err(|_| Error::Corrupt)?)?;
         }
         Ok(Self {
+            nid,
             kind,
             mode: u32::from(mode & 0o777),
             size,

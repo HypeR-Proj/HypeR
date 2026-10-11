@@ -12,10 +12,14 @@ use hyper_os::handle::{ByteChannelObject, OwnedHandle};
 pub(super) struct FixtureVolume {
     pub(super) notice: OwnedHandle<ByteChannelObject>,
     pub(super) snapshot: Option<Vec<u8>>,
+    pub(super) directories: super::directory_volume::DirectoryVolume,
 }
 
 impl hyper_fs_service::Volume for FixtureVolume {
     fn stat(&mut self, path: &str) -> Result<Entry, Error> {
+        if super::directory_volume::DirectoryVolume::owns(path) {
+            return self.directories.stat(path);
+        }
         let mut entry = Entry::empty();
         match path {
             "" => {}
@@ -68,11 +72,19 @@ impl hyper_fs_service::Volume for FixtureVolume {
         Ok(length)
     }
 
-    fn entry(&mut self, _: &str, _: usize) -> Result<Option<Entry>, Error> {
-        Err(Error::Unsupported)
+    fn read_directory(
+        &mut self,
+        path: &str,
+        cursor: protocol::DirectoryCursor,
+        output: &mut [u8],
+    ) -> Result<usize, Error> {
+        self.directories.read_directory(path, cursor, output)
     }
 
     fn write(&mut self, path: &str, offset: u64, input: &[u8]) -> Result<usize, Error> {
+        if super::directory_volume::DirectoryVolume::owns(path) {
+            return self.directories.write(path, offset, input);
+        }
         if path == "snapshot" {
             let bytes = self.snapshot.as_mut().ok_or(Error::Missing)?;
             let offset = usize::try_from(offset).map_err(|_| Error::InvalidInput)?;
@@ -92,6 +104,9 @@ impl hyper_fs_service::Volume for FixtureVolume {
     }
 
     fn create(&mut self, path: &str, directory: bool) -> Result<(), Error> {
+        if super::directory_volume::DirectoryVolume::owns(path) {
+            return self.directories.create(path, directory);
+        }
         if path == "snapshot" && !directory && self.snapshot.is_none() {
             self.snapshot = Some(Vec::new());
             return Ok(());

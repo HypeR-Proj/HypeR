@@ -550,6 +550,11 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             Err(VfsServiceError::Process(ProcessError::Allocation))
         }
 
+        fn begin_directory_read(&self, _: HandleValue) -> Result<HandleValue, VfsServiceError> {
+            self.calls.set(self.calls.get().saturating_add(1));
+            Err(VfsServiceError::Process(ProcessError::Allocation))
+        }
+
         fn read_directory(
             &self,
             _: HandleValue,

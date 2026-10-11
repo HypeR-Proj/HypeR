@@ -357,6 +357,7 @@ impl File {
 
 pub struct ReadDir {
     handle: Arc<Handle>,
+    stream: Handle,
     path: Arc<PathBuf>,
     entries: [ffi::DirectoryEntry; 4],
     index: usize,
@@ -373,22 +374,26 @@ impl Iterator for ReadDir {
     fn next(&mut self) -> Option<Self::Item> {
         if self.index == self.count {
             let cookie = self.next.take()?;
+            let mut count = 0;
             let mut next = 0;
             self.entries = [ffi::DirectoryEntry::EMPTY; 4];
             if let Err(error) = cvt(unsafe {
                 ffi::__hyper_std_fs_readdir(
-                    self.handle.0,
+                    self.stream.0,
                     cookie,
                     self.entries.as_mut_ptr(),
-                    &mut self.count,
+                    &mut count,
                     &mut next,
                 )
             }) {
                 return Some(Err(error));
             }
-            if self.count > 4 || (next != 0 && next <= cookie) {
+            if count > 4 || (count == 0 && next != 0) || (next != 0 && next <= cookie) {
                 return Some(Err(io::ErrorKind::InvalidData.into()));
             }
+            // Commit only a validated page. On failure the old page remains
+            // exhausted and `self.next` has been taken, so another call stops.
+            self.count = count;
             self.next = if next == 0 { None } else { Some(next) };
             self.index = 0;
             if self.count == 0 {
@@ -458,8 +463,11 @@ pub fn readdir(path: &Path) -> io::Result<ReadDir> {
     let bytes = path_bytes(path)?;
     let mut handle = 0;
     cvt(unsafe { ffi::__hyper_std_fs_directory(bytes.as_ptr(), bytes.len(), &mut handle) })?;
+    let handle = Arc::new(Handle(handle));
+    let stream = begin_directory_read(&handle)?;
     Ok(ReadDir {
-        handle: Arc::new(Handle(handle)),
+        handle,
+        stream,
         path: Arc::new(path.to_owned()),
         entries: [ffi::DirectoryEntry::EMPTY; 4],
         index: 0,
@@ -467,6 +475,12 @@ pub fn readdir(path: &Path) -> io::Result<ReadDir> {
         next: Some(0),
     })
 }
+fn begin_directory_read(directory: &Handle) -> io::Result<Handle> {
+    let mut stream = 0;
+    cvt(unsafe { ffi::__hyper_std_fs_begin_readdir(directory.0, &mut stream) })?;
+    Ok(Handle(stream))
+}
+
 pub fn stat(path: &Path) -> io::Result<FileAttr> {
     let path = path_bytes(path)?;
     let mut info = ffi::FileInfo::default();
@@ -700,19 +714,21 @@ pub fn remove_dir_all(path: &Path) -> io::Result<()> {
             remove_observed(&frame.parent, &frame.name, &frame.identity)?;
             continue;
         };
+        let stream = begin_directory_read(&frame.directory)?;
         let mut entries = [ffi::DirectoryEntry::EMPTY; 4];
         let mut count = 0;
         let mut next = 0;
         cvt(unsafe {
             ffi::__hyper_std_fs_readdir(
-                frame.directory.0,
+                stream.0,
                 cookie,
                 entries.as_mut_ptr(),
                 &mut count,
                 &mut next,
             )
         })?;
-        if count > 4 || (next != 0 && next <= cookie) {
+        drop(stream);
+        if count > 4 || (count == 0 && next != 0) || (next != 0 && next <= cookie) {
             return Err(io::ErrorKind::InvalidData.into());
         }
         // Process just the first remaining child, then restart enumeration.

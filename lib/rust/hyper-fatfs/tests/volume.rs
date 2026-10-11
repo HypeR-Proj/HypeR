@@ -612,7 +612,10 @@ fn fat_flush_error_is_reported_and_volume_is_not_reused() {
         (state.reads, state.writes, state.flushes)
     };
     assert_eq!(fs.read_status(), Err(Error::Block(BlockError::Io)));
-    assert!(matches!(fs.entry("", 0), Err(Error::Block(BlockError::Io))));
+    assert!(matches!(
+        directory_entry(&mut fs, "", 0),
+        Err(Error::Block(BlockError::Io))
+    ));
     assert_eq!(
         fs.write_at("dirty.txt", 0, b"lost"),
         Err(Error::Block(BlockError::Io))
@@ -1011,22 +1014,28 @@ fn fat_iterator_preserves_names_end_and_io_errors() {
     require_ok(fs.remove("deleted-long-name.txt"));
     let mut names = Vec::new();
     for index in 0..3 {
-        if let Some(entry) = require_ok(fs.entry("", index)) {
+        if let Some(entry) = require_ok(directory_entry(&mut fs, "", index)) {
             names.push(entry.name().to_owned());
         } else {
             assert_eq!(index, 2);
         }
     }
     assert_eq!(names, ["SHORT.TXT".to_owned(), unicode]);
-    assert!(require_ok(fs.entry("", 3)).is_none());
+    assert!(require_ok(directory_entry(&mut fs, "", 3)).is_none());
     require_ok(fs.sync());
     drop(fs);
     // Force an actual directory cache miss before injecting the I/O error.
     let mut fs = require_ok(FatVolume::mount(disk.clone()));
     require_ok(disk.0.lock()).fail_reads = true;
-    assert!(matches!(fs.entry("", 0), Err(Error::Block(BlockError::Io))));
+    assert!(matches!(
+        directory_entry(&mut fs, "", 0),
+        Err(Error::Block(BlockError::Io))
+    ));
     let reads = require_ok(disk.0.lock()).reads;
-    assert!(matches!(fs.entry("", 0), Err(Error::Block(BlockError::Io))));
+    assert!(matches!(
+        directory_entry(&mut fs, "", 0),
+        Err(Error::Block(BlockError::Io))
+    ));
     assert_eq!(require_ok(disk.0.lock()).reads, reads);
 }
 
@@ -1118,7 +1127,7 @@ fn fat_inplace_lfn_parser_preserves_malformed_sequence_behavior() {
         }
         let mut fs = require_ok(FatVolume::mount(disk.clone()));
         if defect == "end" {
-            assert!(require_ok(fs.entry("", 0)).is_none());
+            assert!(require_ok(directory_entry(&mut fs, "", 0)).is_none());
         } else if defect == "unicode" {
             let writes = require_ok(disk.0.lock()).writes;
             assert!(matches!(
@@ -1127,14 +1136,17 @@ fn fat_inplace_lfn_parser_preserves_malformed_sequence_behavior() {
             ));
             assert_eq!(require_ok(disk.0.lock()).writes, writes);
             assert!(matches!(
-                fs.entry("", 0),
+                directory_entry(&mut fs, "", 0),
                 Err(Error::Block(BlockError::Corrupt))
             ));
         } else {
             assert!(matches!(fs.create(&alias, false), Err(Error::Exists)));
-            let entry = require_ok(require_ok(fs.entry("", 0)).ok_or("missing short entry"));
+            let entry = require_ok(
+                require_ok(directory_entry(&mut fs, "", 0)).ok_or("missing short entry"),
+            );
             assert_eq!(entry.name(), alias);
-            let next = require_ok(require_ok(fs.entry("", 1)).ok_or("missing next entry"));
+            let next =
+                require_ok(require_ok(directory_entry(&mut fs, "", 1)).ok_or("missing next entry"));
             assert_eq!(next.name(), "NEXT.TXT");
             let mut data = [0; 8];
             assert_eq!(require_ok(fs.read_at(&alias, 0, &mut data)), 8);
@@ -1172,9 +1184,9 @@ fn fat_restarted_lfn_chain_cannot_retain_an_older_long_suffix() {
         root[96] = 0;
     }
     let mut fs = require_ok(FatVolume::mount(disk));
-    let entry = require_ok(require_ok(fs.entry("", 0)).ok_or("new entry"));
+    let entry = require_ok(require_ok(directory_entry(&mut fs, "", 0)).ok_or("new entry"));
     assert_eq!(entry.name(), "new-name.txt");
-    assert!(require_ok(fs.entry("", 1)).is_none());
+    assert!(require_ok(directory_entry(&mut fs, "", 1)).is_none());
     let mut data = [0; 3];
     assert_eq!(require_ok(fs.read_at("new-name.txt", 0, &mut data)), 3);
     assert_eq!(&data, b"new");
@@ -1184,17 +1196,189 @@ fn fat_restarted_lfn_chain_cannot_retain_an_older_long_suffix() {
 fn directory_children_exclude_fat_dot_entries() {
     let mut fs = require_ok(FatVolume::mount(Disk::fresh()));
     require_ok(fs.create("parent", true));
-    assert!(require_ok(fs.entry("parent", 0)).is_none());
+    assert!(require_ok(directory_entry(&mut fs, "parent", 0)).is_none());
     require_ok(fs.create("parent/child.txt", false));
     require_ok(fs.create("parent/nested", true));
     assert_eq!(
-        require_ok(require_ok(fs.entry("parent", 0)).ok_or("first child")).name(),
+        require_ok(require_ok(directory_entry(&mut fs, "parent", 0)).ok_or("first child")).name(),
         "child.txt"
     );
     assert_eq!(
-        require_ok(require_ok(fs.entry("parent", 1)).ok_or("second child")).name(),
+        require_ok(require_ok(directory_entry(&mut fs, "parent", 1)).ok_or("second child")).name(),
         "nested"
     );
-    assert!(require_ok(fs.entry("parent", 2)).is_none());
-    assert!(require_ok(fs.entry("parent/nested", 0)).is_none());
+    assert!(require_ok(directory_entry(&mut fs, "parent", 2)).is_none());
+    assert!(require_ok(directory_entry(&mut fs, "parent/nested", 0)).is_none());
+}
+
+// Deliberately interleave 24 fragmented chains, exceeding the FAT seek cache.
+// Empty files need no data clusters; all work below is directory enumeration.
+fn fragmented_directories(count: usize) -> Disk {
+    let disk = Disk::fresh();
+    let mut state = require_ok(disk.0.lock());
+    let set_fat = |state: &mut State, cluster: u32, next: u32| {
+        for base in [32, 632] {
+            let sector = state
+                .sectors
+                .entry(base + u64::from(cluster / 128))
+                .or_insert([0; 512]);
+            let within = (cluster as usize % 128) * 4;
+            sector[within..within + 4].copy_from_slice(&next.to_le_bytes());
+        }
+    };
+    set_fat(&mut state, 2, 3);
+    set_fat(&mut state, 3, 0x0fff_ffff);
+    let mut root = [0; 1024];
+    for directory in 0..24usize {
+        let entry = &mut root[directory * 32..(directory + 1) * 32];
+        entry[..11].copy_from_slice(format!("D{directory:07}   ").as_bytes());
+        entry[11] = 0x10;
+        entry[26..28].copy_from_slice(&(128 + directory as u16).to_le_bytes());
+        let clusters = (count + 1).div_ceil(16);
+        for index in 0..clusters {
+            let cluster = 128 + directory as u32 + index as u32 * 24;
+            set_fat(
+                &mut state,
+                cluster,
+                if index + 1 < clusters {
+                    cluster + 24
+                } else {
+                    0x0fff_ffff
+                },
+            );
+            let mut bytes = [0; 512];
+            for (slot, entry) in bytes.chunks_exact_mut(32).enumerate() {
+                let item = index * 16 + slot;
+                if item >= count {
+                    break;
+                }
+                entry[..11].copy_from_slice(format!("F{item:07}TXT").as_bytes());
+                entry[11] = 0x20;
+            }
+            state.sectors.insert(1232 + u64::from(cluster - 2), bytes);
+        }
+    }
+    state
+        .sectors
+        .insert(1232, require_ok(root[..512].try_into()));
+    state
+        .sectors
+        .insert(1233, require_ok(root[512..].try_into()));
+    drop(state);
+    disk
+}
+
+fn scan_fragmented_directories(count: usize) -> usize {
+    use hyper_filesystem::protocol::{DIRECTORY_BATCH_BYTES, DirectoryBatch, DirectoryCursor};
+    let disk = fragmented_directories(count);
+    let mut volume = require_ok(FatVolume::mount(disk.clone()));
+    let before = require_ok(disk.0.lock()).reads;
+    let mut cursors = [Some(DirectoryCursor::START); 24];
+    let mut seen = [0; 24];
+    let mut output = [0; DIRECTORY_BATCH_BYTES];
+    while cursors.iter().any(Option::is_some) {
+        for (directory, cursor) in cursors.iter_mut().enumerate() {
+            let Some(position) = *cursor else {
+                continue;
+            };
+            let path = format!("D{directory:07}");
+            let length = require_ok(volume.read_directory(&path, position, &mut output));
+            let batch = require_ok(DirectoryBatch::decode(&output[..length]).ok_or("batch"));
+            assert_eq!(batch.start_cursor(), position);
+            for record in batch.records() {
+                assert_eq!(record.name(), format!("F{:07}.TXT", seen[directory]));
+                seen[directory] += 1;
+                *cursor = Some(record.next_cursor());
+            }
+            if batch.eof() {
+                *cursor = None;
+            }
+        }
+    }
+    assert_eq!(seen, [count; 24]);
+    require_ok(disk.0.lock()).reads - before
+}
+
+#[test]
+fn directory_batches_resume_interleaved_fragmented_chains_with_linear_reads() {
+    let smaller = scan_fragmented_directories(256);
+    let larger = scan_fragmented_directories(1024);
+    assert!(
+        larger <= smaller * 5 + 32,
+        "directory I/O grew superlinearly: {smaller} -> {larger}"
+    );
+    assert!(
+        larger < 1024,
+        "too many directory device requests: {larger}"
+    );
+}
+
+#[test]
+fn directory_checkpoints_allow_unrelated_mutation_but_reject_cross_directory_reuse() {
+    use hyper_filesystem::protocol::{DIRECTORY_MIN_BYTES, DirectoryBatch, DirectoryCursor};
+    let mut volume = require_ok(FatVolume::mount(Disk::fresh()));
+    require_ok(volume.create("source", true));
+    require_ok(volume.create("destination", true));
+    for index in 0..24 {
+        require_ok(volume.create(&format!("source/{}-{index:03}.txt", "é".repeat(100)), false));
+    }
+    let mut output = [0; DIRECTORY_MIN_BYTES];
+    let length = require_ok(volume.read_directory("source", DirectoryCursor::START, &mut output));
+    let batch = require_ok(DirectoryBatch::decode(&output[..length]).ok_or("batch"));
+    assert!(!batch.eof());
+    let cursor = require_ok(batch.records().last().ok_or("record")).next_cursor();
+    assert!(matches!(
+        volume.read_directory("other", cursor, &mut output),
+        Err(Error::InvalidInput)
+    ));
+    let length = require_ok(volume.read_directory("source", cursor, &mut output));
+    let bytes = output[..length].to_vec();
+    assert_eq!(
+        require_ok(volume.read_directory("source", cursor, &mut output)),
+        length
+    );
+    assert_eq!(&output[..length], bytes);
+    require_ok(volume.create("destination/new", false));
+    assert!(volume.read_directory("source", cursor, &mut output).is_ok());
+}
+
+// Small fixture assertions may select an ordinal locally; the media API only
+// exposes resumable batches and never rescans an ordinal directory prefix.
+fn directory_entry(
+    volume: &mut FatVolume<Disk>,
+    path: &str,
+    mut index: usize,
+) -> Result<Option<hyper_fatfs::Entry>, Error> {
+    use hyper_filesystem::protocol::{
+        DIRECTORY_BATCH_BYTES, DirectoryBatch, DirectoryCursor, Entry,
+    };
+    let mut cursor = DirectoryCursor::START;
+    let mut bytes = [0; DIRECTORY_BATCH_BYTES];
+    loop {
+        let length = volume.read_directory(path, cursor, &mut bytes)?;
+        let batch = DirectoryBatch::decode(&bytes[..length]).ok_or(Error::Corrupt)?;
+        for record in batch.records() {
+            if index == 0 {
+                let mut entry = Entry::empty();
+                record.entry_into(&mut entry);
+                let directory = entry.directory();
+                let read_only = entry.read_only();
+                return Ok(Some(hyper_fatfs::Entry {
+                    name: entry.name,
+                    name_len: entry.name_len,
+                    directory,
+                    read_only,
+                    size: entry.size,
+                    created: entry.created,
+                    accessed: entry.accessed,
+                    modified: entry.modified,
+                }));
+            }
+            index -= 1;
+            cursor = record.next_cursor();
+        }
+        if batch.eof() {
+            return Ok(None);
+        }
+    }
 }

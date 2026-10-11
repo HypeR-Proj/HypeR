@@ -20,7 +20,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use hyper::mm::FallibleArc;
 use hyper_filesystem::{
     Timestamp,
-    protocol::{self, Entry, Error, Operation, Request, Response},
+    protocol::{self, DirectoryBatch, DirectoryCursor, Entry, Error, Operation, Request, Response},
 };
 
 pub(super) struct Health {
@@ -116,24 +116,8 @@ impl Transport {
         {
             return Err(Error::ReadOnly);
         }
-        let result = self.exchange(operation, path, target, offset, length, times);
-        if result.as_ref().err().is_some_and(|error| error.terminal()) {
-            self.health.fail();
-        }
-        result
-    }
-    fn exchange(
-        &mut self,
-        operation: Operation,
-        path: &str,
-        target: &str,
-        offset: u64,
-        length: u64,
-        times: [Option<Timestamp>; 2],
-    ) -> Result<Response, Error> {
-        self.sequence = self.sequence.checked_add(1).ok_or(Error::Closed)?;
-        let request = Request {
-            sequence: self.sequence,
+        let result = self.exchange(Request {
+            sequence: 0,
             operation,
             path,
             target,
@@ -141,7 +125,19 @@ impl Transport {
             length,
             accessed: times[0],
             modified: times[1],
-        };
+            cursor: DirectoryCursor::START,
+        });
+        if result.as_ref().err().is_some_and(|error| error.terminal()) {
+            self.health.fail();
+        }
+        result
+    }
+    fn exchange(&mut self, mut request: Request<'_>) -> Result<Response, Error> {
+        self.sequence = self.sequence.checked_add(1).ok_or(Error::Closed)?;
+        request.sequence = self.sequence;
+        let operation = request.operation;
+        let path = request.path;
+        let target = request.target;
         let size = protocol::HEADER_BYTES
             .checked_add(path.len())
             .and_then(|n| n.checked_add(target.len()))
@@ -198,20 +194,42 @@ impl Transport {
         *entry = self.call(Operation::Stat, path, "", 0, 0, [None; 2])?.entry;
         Ok(())
     }
-    pub(super) fn entry_into(
+    /// Directory checkpoints originate in a validated backend batch and stay in
+    /// the kernel-owned stream. Native cookies never enter this request.
+    pub(super) fn read_directory(
         &mut self,
         path: &str,
-        index: usize,
-        entry: &mut Entry,
-    ) -> Result<bool, Error> {
-        let response = self.call(Operation::Entry, path, "", index as u64, 0, [None; 2])?;
-        let present = response.result?;
-        if present > 1 {
+        cursor: DirectoryCursor,
+        output: &mut [u8; protocol::DIRECTORY_BATCH_BYTES],
+    ) -> Result<usize, Error> {
+        self.health.check()?;
+        let result = (|| {
+            let response = self.exchange(Request {
+                sequence: 0,
+                operation: Operation::ReadDirectory,
+                path,
+                target: "",
+                offset: 0,
+                length: output.len() as u64,
+                accessed: None,
+                modified: None,
+                cursor,
+            })?;
+            let actual = usize::try_from(response.result?).map_err(|_| Error::Corrupt)?;
+            let destination = output.get_mut(..actual).ok_or(Error::Corrupt)?;
+            self.buffer
+                .read_exposed(0, destination)
+                .map_err(|_| Error::Io)?;
+            let batch = DirectoryBatch::decode(destination).ok_or(Error::Corrupt)?;
+            if batch.start_cursor() != cursor {
+                return Err(Error::Corrupt);
+            }
+            Ok(actual)
+        })();
+        if result.as_ref().err().is_some_and(|error| error.terminal()) {
             self.health.fail();
-            return Err(Error::Corrupt);
         }
-        *entry = response.entry;
-        Ok(present != 0)
+        result
     }
     pub(super) fn read_link(&mut self, path: &str, output: &mut [u8]) -> Result<usize, Error> {
         if output.len() > protocol::PATH_BYTES {

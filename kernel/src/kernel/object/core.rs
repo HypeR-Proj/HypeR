@@ -45,6 +45,7 @@ const EXECUTABLE_AUTHORITY_OBJECT_KIND: u32 =
 const VMO_OBJECT_KIND: u32 = hyper::abi::native::HYPER_NATIVE_OBJECT_VMO;
 const VMAR_OBJECT_KIND: u32 = hyper::abi::native::HYPER_NATIVE_OBJECT_VMAR;
 const CONSOLE_OBJECT_KIND: u32 = hyper::abi::native::HYPER_NATIVE_OBJECT_CONSOLE;
+const DIRECTORY_STREAM_OBJECT_KIND: u32 = hyper::abi::native::HYPER_NATIVE_OBJECT_DIRECTORY_STREAM;
 const DIRECTORY_OBJECT_KIND: u32 = hyper::abi::native::HYPER_NATIVE_OBJECT_DIRECTORY;
 const FILE_OBJECT_KIND: u32 = hyper::abi::native::HYPER_NATIVE_OBJECT_FILE;
 const PROCESS_BUILDER_OBJECT_KIND: u32 = hyper::abi::native::HYPER_NATIVE_OBJECT_PROCESS_BUILDER;
@@ -144,6 +145,7 @@ impl ObjectKind {
     /// Capability-scoped host-console kind declared by the generated ABI schema.
     pub(crate) const CONSOLE: Self = Self(CONSOLE_OBJECT_KIND);
     /// Capability-relative filesystem directory authority.
+    pub(crate) const DIRECTORY_STREAM: Self = Self(DIRECTORY_STREAM_OBJECT_KIND);
     pub(crate) const DIRECTORY: Self = Self(DIRECTORY_OBJECT_KIND);
     /// One opened filesystem file.
     pub(crate) const FILE: Self = Self(FILE_OBJECT_KIND);
@@ -190,6 +192,7 @@ impl ObjectKind {
             | VMO_OBJECT_KIND
             | VMAR_OBJECT_KIND
             | CONSOLE_OBJECT_KIND
+            | DIRECTORY_STREAM_OBJECT_KIND
             | DIRECTORY_OBJECT_KIND
             | FILE_PROTECTION_OBJECT_KIND
             | FILE_OBJECT_KIND

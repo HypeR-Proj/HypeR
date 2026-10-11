@@ -6,10 +6,16 @@
 //! Every path is relative, UTF-8, without empty, dot or parent components.
 
 use crate::Timestamp;
+
+mod directory;
+pub use directory::{
+    DIRECTORY_BATCH_BYTES, DIRECTORY_MIN_BYTES, DirectoryBatch, DirectoryBatchBuilder,
+    DirectoryCursor, DirectoryRecord,
+};
 pub const DATA_BYTES: usize = 512 * 1024;
 pub const PATH_BYTES: usize = 4096;
 pub const NAME_BYTES: usize = 1020;
-pub const HEADER_BYTES: usize = 80;
+pub const HEADER_BYTES: usize = 112;
 pub const REQUEST_BYTES: usize = HEADER_BYTES + PATH_BYTES * 2;
 pub const RESPONSE_BYTES: usize = 1152;
 pub const FILE: u32 = 1;
@@ -20,7 +26,7 @@ pub const SYMLINK: u32 = 3;
 #[repr(u64)]
 pub enum Operation {
     Stat = 1,
-    Entry,
+    ReadDirectory,
     Read,
     Write,
     Create,
@@ -35,7 +41,7 @@ impl Operation {
     pub fn decode(value: u64) -> Option<Self> {
         Some(match value {
             1 => Self::Stat,
-            2 => Self::Entry,
+            2 => Self::ReadDirectory,
             3 => Self::Read,
             4 => Self::Write,
             5 => Self::Create,
@@ -126,6 +132,7 @@ impl Entry {
 }
 #[derive(Clone, Copy)]
 pub struct Request<'a> {
+    pub cursor: DirectoryCursor,
     pub sequence: u64,
     pub operation: Operation,
     pub offset: u64,
@@ -137,7 +144,11 @@ pub struct Request<'a> {
 }
 impl<'a> Request<'a> {
     pub fn encode(&self, output: &mut [u8]) -> Option<usize> {
-        if self.sequence == 0 || !valid_path(self.path) || !valid_path(self.target) {
+        if self.sequence == 0
+            || !valid_path(self.path)
+            || !valid_path(self.target)
+            || (self.operation != Operation::ReadDirectory && !self.cursor.is_start())
+        {
             return None;
         }
         let length = HEADER_BYTES
@@ -153,6 +164,7 @@ impl<'a> Request<'a> {
         put(output, 40, self.target.len() as u64);
         put_time(output, 48, self.accessed);
         put_time(output, 64, self.modified);
+        self.cursor.encode(&mut output[80..112]);
         output[HEADER_BYTES..HEADER_BYTES + self.path.len()].copy_from_slice(self.path.as_bytes());
         output[HEADER_BYTES + self.path.len()..].copy_from_slice(self.target.as_bytes());
         Some(length)
@@ -168,6 +180,7 @@ impl<'a> Request<'a> {
             return None;
         }
         let request = Self {
+            cursor: DirectoryCursor::decode(input.get(80..112)?)?,
             sequence: get(input, 0)?,
             operation: Operation::decode(get(input, 8)?)?,
             offset: get(input, 16)?,
@@ -177,7 +190,11 @@ impl<'a> Request<'a> {
             accessed: get_time(input, 48)?,
             modified: get_time(input, 64)?,
         };
-        if request.sequence == 0 || !valid_path(request.path) || !valid_path(request.target) {
+        if request.sequence == 0
+            || !valid_path(request.path)
+            || !valid_path(request.target)
+            || (request.operation != Operation::ReadDirectory && !request.cursor.is_start())
+        {
             return None;
         }
         Some(request)
@@ -266,13 +283,68 @@ fn valid_result(operation: Operation, result: Result<u64, Error>) -> bool {
     match operation {
         Operation::Read | Operation::Write => value <= DATA_BYTES as u64,
         Operation::ReadLink => value <= PATH_BYTES as u64,
-        Operation::Entry => value <= 1,
+        Operation::ReadDirectory => {
+            value >= directory::BATCH_HEADER_BYTES as u64 && value <= DIRECTORY_BATCH_BYTES as u64
+        }
         _ => value == 0,
     }
 }
 fn valid_name(bytes: &[u8]) -> bool {
     core::str::from_utf8(bytes)
         .is_ok_and(|name| !name.contains(['/', '\0']) && name != "." && name != "..")
+}
+
+/// Compact entry encoding for reclaimable kernel metadata cache records.
+pub fn entry_encode_into(entry: &Entry, output: &mut [u8]) -> Option<usize> {
+    let name = entry.name.get(..entry.name_len)?;
+    if !valid_name(name)
+        || !matches!(entry.kind, FILE | DIRECTORY | SYMLINK)
+        || entry.mode & !0o777 != 0
+    {
+        return None;
+    }
+    let length = 80usize.checked_add(name.len())?;
+    let output = output.get_mut(..length)?;
+    output.fill(0);
+    put(output, 0, u64::from(entry.kind));
+    put(output, 8, u64::from(entry.mode));
+    put(output, 16, entry.size);
+    put(output, 24, name.len() as u64);
+    put_time(output, 32, entry.created);
+    put_time(output, 48, entry.accessed);
+    put_time(output, 64, entry.modified);
+    output[80..].copy_from_slice(name);
+    Some(length)
+}
+
+/// Decode exactly one complete compact entry into caller-owned name storage.
+pub fn entry_decode_into(bytes: &[u8], entry: &mut Entry) -> Option<usize> {
+    let kind = u32::try_from(get(bytes, 0)?).ok()?;
+    let mode = u32::try_from(get(bytes, 8)?).ok()?;
+    let name_len = usize::try_from(get(bytes, 24)?).ok()?;
+    if name_len > NAME_BYTES
+        || bytes.len() != 80 + name_len
+        || !matches!(kind, FILE | DIRECTORY | SYMLINK)
+        || mode & !0o777 != 0
+    {
+        return None;
+    }
+    let name = bytes.get(80..)?;
+    if !valid_name(name) {
+        return None;
+    }
+    let created = get_time(bytes, 32)?;
+    let accessed = get_time(bytes, 48)?;
+    let modified = get_time(bytes, 64)?;
+    entry.kind = kind;
+    entry.mode = mode;
+    entry.size = get(bytes, 16)?;
+    entry.name_len = name_len;
+    entry.name[..name_len].copy_from_slice(name);
+    entry.created = created;
+    entry.accessed = accessed;
+    entry.modified = modified;
+    Some(bytes.len())
 }
 pub fn valid_path(path: &str) -> bool {
     path.len() <= PATH_BYTES

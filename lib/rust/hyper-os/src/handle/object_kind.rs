@@ -244,6 +244,12 @@ object_types!(
         "guest address-space mapping"
     ),
     (
+        DirectoryStreamObject,
+        HYPER_NATIVE_OBJECT_DIRECTORY_STREAM,
+        "directory-stream",
+        "directory enumeration"
+    ),
+    (
         FileProtectionObject,
         HYPER_NATIVE_OBJECT_FILE_PROTECTION,
         "file-protection",

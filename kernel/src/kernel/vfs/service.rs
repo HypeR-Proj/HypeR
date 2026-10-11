@@ -74,13 +74,27 @@ pub(crate) fn open_directory(
     Ok(process.create_object(child, rights)?)
 }
 
+/// Create independent iteration authority using only the source Directory's READ right.
+pub(crate) fn begin_directory_read(
+    process: &Process,
+    directory: HandleValue,
+) -> Result<HandleValue, ServiceError> {
+    let directory = process.resolve_handle::<DirectoryObject>(directory, Rights::READ)?;
+    let rights = Rights::from_bits(super::rights_contract::directory_stream_rights(
+        directory.rights().bits(),
+    ))
+    .ok_or(ServiceError::InvalidInput)?;
+    let stream = directory.object().begin_read(&process.resource_domain())?;
+    Ok(process.create_object(stream, rights)?)
+}
+
 pub(crate) fn read_directory(
     process: &Process,
     directory: HandleValue,
     cookie: u64,
     page: &mut DirectoryPage,
 ) -> Result<(), ServiceError> {
-    let directory = process.resolve_handle::<DirectoryObject>(directory, Rights::READ)?;
+    let directory = process.resolve_handle::<super::DirectoryStream>(directory, Rights::READ)?;
     directory
         .object()
         .read_page(cookie, page)

@@ -18,7 +18,8 @@ impl DirectoryObject {
         device: crate::kernel::vfs::remote::Transport,
         sponsor: &ResourceDomain,
     ) -> Result<(), Error> {
-        let filesystem = FilesystemInstance::try_from_remote(device, sponsor)?;
+        let filesystem =
+            FilesystemInstance::try_from_remote(device, sponsor, self.namespace.cache())?;
         self.mount_filesystem(path, filesystem, sponsor)
     }
 
