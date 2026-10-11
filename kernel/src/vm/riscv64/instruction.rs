@@ -58,6 +58,13 @@ pub struct MmioInstruction {
 }
 
 impl MmioInstruction {
+    /// Stores transfer only the low access-width bits of the source register.
+    /// In particular, RV64 `sw` discards a sign-extended address's upper half.
+    pub const fn write_value(self, value: u64) -> u64 {
+        let shift = 64 - self.width.bytes() * 8;
+        (value << shift) >> shift
+    }
+
     pub const fn read_value(self, value: u64) -> u64 {
         let bits = self.width.bytes() * 8;
         let shift = 64 - bits;

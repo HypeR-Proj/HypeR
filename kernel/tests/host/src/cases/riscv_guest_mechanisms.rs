@@ -34,6 +34,41 @@ fn integer_loads_preserve_signedness_and_x0_destination() {
 }
 
 #[test]
+fn integer_stores_truncate_source_register_to_access_width() {
+    let source = 0xffff_ffff_8abc_1234;
+    for (funct, expected) in [(0, 0x34), (1, 0x1234), (2, 0x8abc_1234), (3, source)] {
+        for instruction in [
+            GuestInstruction::Fetched(0x0050_0023 | (funct << 12)),
+            GuestInstruction::Transformed(0x0050_0023 | (funct << 12)),
+        ] {
+            let decoded = crate::require_ok(decode_mmio(instruction, MemoryAccess::Write));
+            assert_eq!(decoded.operation, MmioRegister::Store { rs2: 5 });
+            assert_eq!(decoded.write_value(source), expected);
+        }
+    }
+    // C.SW/C.SWSP and C.SD/C.SDSP obey the same transfer-width rule.
+    for (word, expected) in [
+        (0xc01c, 0x8abc_1234),
+        (0xc01e, 0x8abc_1234),
+        (0xe01c, source),
+        (0xe01e, source),
+    ] {
+        let decoded = crate::require_ok(decode_mmio(
+            GuestInstruction::Fetched(word),
+            MemoryAccess::Write,
+        ));
+        assert_eq!(decoded.instruction_bytes, 2);
+        assert_eq!(decoded.write_value(source), expected);
+    }
+    let transformed_compressed = crate::require_ok(decode_mmio(
+        GuestInstruction::Transformed(0x0050_2021),
+        MemoryAccess::Write,
+    ));
+    assert_eq!(transformed_compressed.instruction_bytes, 2);
+    assert_eq!(transformed_compressed.write_value(source), 0x8abc_1234);
+}
+
+#[test]
 fn transformed_compressed_access_keeps_original_pc_length() {
     let word = 0x0000_2181; // Expanded C.LW with rd=3, original length two.
     assert_eq!(

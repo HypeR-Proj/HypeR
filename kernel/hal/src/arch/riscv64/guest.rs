@@ -418,7 +418,9 @@ fn dispatch_mmio(frame: &mut super::exception::TrapFrame, fault: GuestMemoryFaul
     }
     let operation = match decoded.operation {
         MmioRegister::Load { .. } => MmioOperation::Read,
-        MmioRegister::Store { rs2 } => MmioOperation::Write(frame.general[usize::from(rs2)]),
+        MmioRegister::Store { rs2 } => {
+            MmioOperation::Write(decoded.write_value(frame.general[usize::from(rs2)]))
+        }
     };
     let action =
         crate::arch::vm::dispatch_mmio(MmioAccess::new(fault.address(), decoded.width, operation));
