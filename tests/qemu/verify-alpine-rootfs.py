@@ -11,6 +11,8 @@ import subprocess
 import sys
 import time
 
+from guest_console import synchronize_guest_console
+
 
 def run(args):
     command = [sys.executable, '-B', 'scripts/run-io-vm.py', '--qemu', args.qemu,
@@ -73,8 +75,9 @@ def run(args):
         def attach():
             state(b'running')
             send(b'vmm console alpine\n')
-            expect(rb'HypeR guest: Linux userspace is running\n')
+            expect(rb'HypeR guest: Linux userspace is running')
             expect(rb'~ # ')
+            synchronize_guest_console(send, expect, args.qemu, timeout=180)
 
         def guest(command, marker):
             # Split the result marker in shell syntax so echo cannot satisfy it.

@@ -11,9 +11,9 @@ use hyper_os::vm::{self, PowerOperation};
 use hyper_os::wait::{self, ObjectSignals, WaitItem};
 use hyper_vm_image::guest_fdt;
 use hyper_vm_image::guest_fdt::io::{DmaRange, IoDevices, MmioDevice, SharedMemory};
+use hyper_vm_support::console::Port;
 use hyper_vm_support::io_backend::{Backend, Completion};
 use hyper_vm_support::io_guest::Image;
-use hyper_vm_support::console::Port;
 use std::io::{self, Read, Write};
 use std::num::NonZeroU64;
 use std::process::ExitCode;
@@ -401,9 +401,17 @@ fn suite(startup: &Startup<'_>) -> Result<()> {
     }
     outcome.map_err(|error| format!("supervision: {error}"))?;
     cleanup.map_err(|error| format!("cleanup: {error}"))?;
+    // VM retirement and Native backend termination are separate boundaries.
+    // Each console worker retains its own GuestMemory capability; merely
+    // dropping its Port detaches the thread and races release of that grant.
+    for guest in guests {
+        guest
+            .output
+            .join()
+            .map_err(|error| format!("join console: {error:?}"))?;
+    }
     println!("IO-VM-SMOKE: both guests stopped; checking DMA admission");
-    drop(guests);
-    // Retired diagnostic/device handles cannot pin a hardware-write admission.
+    // No mapping or backend grant remains to pin hardware-write admission.
     io.memory
         .write_all_at(0, &[0])
         .map_err(|error| format!("I/O RAM after retirement: {error:?}"))?;

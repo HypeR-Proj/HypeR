@@ -13,7 +13,8 @@ import time
 
 from session import Session, native_command
 
-from guest_console import append_console_output
+from guest_console import (append_console_output, guest_console_startup,
+                           synchronize_guest_console)
 
 
 # Shared CI TCG hosts can exceed 180 seconds while a fresh Alpine SMP guest
@@ -48,14 +49,17 @@ def main():
                 if status.endswith(b'failed'):
                     raise RuntimeError('VM failed during guest reset')
                 if status.endswith(b'running'):
-                    send(b'vmm console alpine')
-                    result = await_text(rb'Connected to alpine\.|hyper-sh\$ ')
-                    if result.startswith(b'Connected'):
-                        # Reattachment need not replay an already consumed
-                        # shell prompt; request a fresh empty command response.
-                        send(b'')
-                        await_text(rb'~ # ', timeout=GUEST_BOOT_TIMEOUT_SECONDS)
-                        return
+                    with guest_console_startup(session):
+                        send(b'vmm console alpine')
+                        result = await_text(rb'Connected to alpine\.|hyper-sh\$ ')
+                        if result.startswith(b'Connected'):
+                            # Reattachment need not replay an already consumed
+                            # shell prompt; request a fresh empty response.
+                            send(b'')
+                            await_text(rb'~ # ', timeout=GUEST_BOOT_TIMEOUT_SECONDS)
+                            synchronize_guest_console(session.send, await_text, qemu,
+                                                      timeout=GUEST_BOOT_TIMEOUT_SECONDS)
+                            return
                     # The old runtime may exit between status and attach.
                     # A failed attach returns to the host shell; retry until
                     # the fresh instance publishes its console endpoint.

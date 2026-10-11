@@ -9,7 +9,8 @@ import re
 import sys
 
 from session import Session, native_command
-from guest_console import GUEST_LOG, append_console_output
+from guest_console import (GUEST_LOG, append_console_output, guest_console_startup,
+                           synchronize_guest_console)
 
 
 def console_lines(*lines):
@@ -171,19 +172,12 @@ def main():
         # must drain available output without waiting for that child's EOF.
         run('/system/bin/std-test --child detached-output', rb'OUTPUT_OWNER_EXITED', timeout=5)
         if verify_vm:
-            send(b'vmm console alpine\n')
-            await_text(rb'Connected to alpine\.', timeout=30)
-            await_text(rb'~ # ', timeout=60)
+            with guest_console_startup(session):
+                send(b'vmm console alpine\n')
+                await_text(rb'Connected to alpine\.', timeout=30)
+                await_text(rb'~ # ', timeout=60)
+                synchronize_guest_console(send, await_text, qemu, timeout=120)
             aarch64 = 'aarch64' in os.path.basename(qemu)
-            uart_tty = 'ttyAMA0' if aarch64 else 'ttyS0'
-            # The first hvc prompt can overtake boot diagnostics still draining
-            # through the UART. Flush that stream before strict terminal checks.
-            # Keep emergency printk visible for the diagnostic-path check below.
-            send(("PS1=''; dmesg -n 1; printf '\\nCONSOLE_UART_DRAINED\\n' "
-                  f"> /dev/{uart_tty}; read -r console_ack\n").encode())
-            await_text(rb'\nCONSOLE_UART_DRAINED\n', timeout=120)
-            send(b"\nPS1='~ # '; printf '\\nCONSOLE_READY\\n'\n")
-            await_text(rb'\nCONSOLE_READY\n~ # ')
             send(guest_console_identity_command(aarch64))
             output = await_text(rb'\nCONSOLE_ID_END\n~ # ')
             verify_guest_console_identity(

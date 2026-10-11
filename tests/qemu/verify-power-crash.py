@@ -11,6 +11,7 @@ import sys
 import time
 
 from session import Session, native_command
+from guest_console import guest_console_startup, synchronize_guest_console
 
 
 spec = importlib.util.spec_from_file_location(
@@ -67,8 +68,11 @@ def main():
                 if mode == 'powered-off':
                     await_text(rb'hyper-sh\$ ')
                     wait_state(b'running')
-                    send(b'vmm console alpine')
-                    await_text(rb'~ # ', timeout=guest_smp.GUEST_BOOT_TIMEOUT_SECONDS)
+                    with guest_console_startup(session):
+                        send(b'vmm console alpine')
+                        await_text(rb'~ # ', timeout=guest_smp.GUEST_BOOT_TIMEOUT_SECONDS)
+                        synchronize_guest_console(session.send, await_text, qemu,
+                                                  timeout=guest_smp.GUEST_BOOT_TIMEOUT_SECONDS)
                     send(b'printf "POWER_CRASH_ONLINE="; cat /sys/devices/system/cpu/online')
                     await_text(rb'\nPOWER_CRASH_ONLINE=0-3\n')
                     await_text(rb'~ # ')

@@ -9,6 +9,7 @@ import sys
 import time
 
 from session import Session, native_command
+from guest_console import guest_console_startup, synchronize_guest_console
 from handle_checks import verify_handles
 from command_checks import verify_command_options
 
@@ -190,12 +191,14 @@ def main():
             state('alpine', 'running')
             run('vmm affinity io 0 0', rb'vCPU 0: affinity accepted')
             run('vmm delete io', rb'stop the VM', failed=True)
-            send(b'vmm console io\n')
-            await_text(rb'Connected to io\.')
-            # Validate the guest launched through the CLI, not a kernel boot
-            # shortcut or another VM's retained output.
-            await_text(rb'HypeR guest: Linux userspace is running')
-            await_text(rb'~ # ')
+            with guest_console_startup(session):
+                send(b'vmm console io\n')
+                await_text(rb'Connected to io\.')
+                # Validate the guest launched through the CLI, not a kernel
+                # boot shortcut or another VM's retained output.
+                await_text(rb'HypeR guest: Linux userspace is running')
+                await_text(rb'~ # ')
+                synchronize_guest_console(send, await_text, qemu)
             send(b'\x1b[1;1Recho HYPER_CLI_GUEST_OK\n')
             await_text(rb'\nHYPER_CLI_GUEST_OK\n')
             send(b'\x1dq')

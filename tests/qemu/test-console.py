@@ -4,11 +4,18 @@
 
 """Check terminal expectations against multiplexed kernel log records."""
 import importlib.util
+from functools import partial
 from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
+
+from guest_console import (CONSOLE_READY, UART_DRAINED, append_console_output,
+                           guest_console_startup, startup_ack_command,
+                           startup_drain_command, synchronize_guest_console)
+from session import Session
 
 spec = importlib.util.spec_from_file_location(
     'verify_console', Path(__file__).with_name('verify-console.py'))
@@ -85,6 +92,88 @@ class ConsoleTests(unittest.TestCase):
                                  capture_output=True)
         self.assertNotEqual(failure.returncode, 0)
         self.assertEqual(failure.stdout, b'')
+
+    def test_startup_handshake_preserves_hvc_prompt_inside_uart_printk(self):
+        # Replay the CI failure: filtering the complete printk line removes
+        # the only interactive prompt even though hvc and userspace are ready.
+        mixed = (b'[ HypeR guest: /init reached\r\n'
+                 b' HypeR guest: Linux userspace is running3\r\n'
+                 b'5.451684] Asymmetric key parser registered\r\n'
+                 b'[   35.454723] Block lay~ # e\x1b[6nr SCSI generic loaded\r\n')
+        filtered = bytearray()
+        append_console_output(filtered, mixed, filter_guest_logs=True)
+        self.assertNotIn(b'~ # ', filtered)
+        for qemu in ('/usr/bin/qemu-system-aarch64', '/usr/bin/qemu-system-riscv64'):
+            with self.subTest(qemu=qemu), tempfile.TemporaryDirectory() as directory:
+                drain = startup_drain_command(qemu)
+                ack = startup_ack_command()
+                script = (
+                    'import sys,time\n'
+                    'def emit(data):\n'
+                    ' sys.stdout.buffer.write(data); sys.stdout.flush()\n'
+                    "assert sys.stdin.buffer.readline() == b'vmm console alpine\\n'\n"
+                    f"emit(b'Connected to alpine.\\r\\n' + {mixed!r})\n"
+                    f'assert sys.stdin.buffer.readline() == {drain!r}\n'
+                    # The echoed source contains the marker text, but never
+                    # the complete marker line required by the handshake.
+                    f'emit({drain!r})\n'
+                    "emit(b'[ 42.644524] Run /init as init process\\r\\n')\n"
+                    f"emit(b'\\r\\n' + {UART_DRAINED!r} + b'\\r\\n')\n"
+                    "assert sys.stdin.buffer.readline() == b'\\n'\n"
+                    f'assert sys.stdin.buffer.readline() == {ack[1:]!r}\n'
+                    f"emit(b'\\r\\n' + {CONSOLE_READY!r} + b'\\r\\n~ # ')\n"
+                    "assert sys.stdin.buffer.readline() == b'echo AFTER_DRAIN\\n'\n"
+                    "emit(b'AFT[ 43.0] diagnostic\\r\\nER_DRAIN\\r\\n~ # ')\n"
+                    'time.sleep(30)\n')
+                output_filter = partial(append_console_output, filter_guest_logs=True)
+                with Session([sys.executable, '-u', '-c', script],
+                             Path(directory) / 'console.log',
+                             output_filter=output_filter) as session:
+                    with guest_console_startup(session):
+                        session.send(b'vmm console alpine\n')
+                        session.await_text(rb'Connected to alpine\.', timeout=5)
+                        session.await_text(rb'~ # ', timeout=5)
+                        synchronize_guest_console(session.send, session.await_text,
+                                                  qemu, timeout=5)
+                    self.assertIs(session.output_filter, output_filter)
+                    session.send(b'echo AFTER_DRAIN\n')
+                    session.await_text(rb'AFTER_DRAIN\n~ # ', timeout=5)
+                self.assertIn(mixed, (Path(directory) / 'console.log').read_bytes())
+
+    def test_startup_cli_uses_the_same_architecture_commands(self):
+        helper = str(Path(__file__).with_name('guest_console.py'))
+        for architecture, uart in (('aarch64', b'ttyAMA0'), ('riscv64', b'ttyS0')):
+            qemu = f'/usr/bin/qemu-system-{architecture}'
+            command = subprocess.run(
+                [sys.executable, '-B', helper, '--startup-command', 'drain', '--qemu', qemu],
+                capture_output=True, check=True).stdout
+            self.assertEqual(command, startup_drain_command(qemu))
+            self.assertIn(b'/dev/' + uart, command)
+            self.assertIsNone(re.search(rb'\n' + UART_DRAINED + rb'\r?\n', command))
+        command = subprocess.run(
+            [sys.executable, '-B', helper, '--startup-command', 'ack'],
+            capture_output=True, check=True).stdout
+        self.assertEqual(command, startup_ack_command())
+        self.assertIsNone(re.search(rb'\n' + CONSOLE_READY + rb'\r?\n~ # ', command))
+
+    def test_boot_evidence_survives_a_host_record_inside_guest_printk(self):
+        raw = (b'[ 28.348014] Run /init as in<4>[ 51.268594] HypeR: '
+               b'masked virtual timer PPI without an active vCPU\r\n'
+               b'it process\r\n')
+        command = [sys.executable, '-B', str(Path(__file__).with_name('guest_console.py'))]
+        output = subprocess.run(command, input=raw, capture_output=True, check=True).stdout
+        self.assertEqual(output, b'[ 28.348014] Run /init as init process\r\n')
+
+    def test_startup_filter_is_restored_after_timeout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output_filter = partial(append_console_output, filter_guest_logs=True)
+            with Session([sys.executable, '-u', '-c', 'import time; time.sleep(30)'],
+                         Path(directory) / 'console.log', output_filter=output_filter) as session:
+                with self.assertRaises(TimeoutError):
+                    with guest_console_startup(session):
+                        synchronize_guest_console(session.send, session.await_text,
+                                                  'qemu-system-aarch64', timeout=0.02)
+                self.assertIs(session.output_filter, output_filter)
 
     def test_interleaved_kernel_records_preserve_terminal_contract(self):
         pattern = console.console_lines(b'inherit-data', b'TERMINAL_INHERIT_OK', b'hyper-sh$ ')

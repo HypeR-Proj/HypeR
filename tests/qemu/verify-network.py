@@ -28,7 +28,8 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from board_config import Board
-from guest_console import append_console_output
+from guest_console import (append_console_output, guest_console_startup,
+                           synchronize_guest_console)
 from session import Session
 
 
@@ -193,13 +194,16 @@ class Scenario:
         raise TimeoutError(f'{name} did not reach {wanted.decode()}')
 
     @contextmanager
-    def console(self, vm):
+    def console(self, vm, qemu):
         name = vm['name']
         self.state(name, b'running')
-        self.send(f'vmm console {name}\n'.encode())
-        self.session.await_text(re.escape(f'Connected to {name}.'.encode()))
-        self.send(b'\n')
-        self.session.await_text(rb'~ # ', timeout=180)
+        with guest_console_startup(self.session):
+            self.send(f'vmm console {name}\n'.encode())
+            self.session.await_text(re.escape(f'Connected to {name}.'.encode()))
+            self.send(b'\n')
+            self.session.await_text(rb'~ # ', timeout=180)
+            synchronize_guest_console(self.send, self.session.await_text,
+                                      qemu, timeout=180)
         try:
             yield
         finally:
@@ -359,23 +363,23 @@ def run(args):
         for vm in guests:
             scenario.native(f'vmm start {vm["name"]}')
         for vm in guests:
-            with scenario.console(vm):
+            with scenario.console(vm, args.qemu):
                 scenario.automatic_network(vm)
                 scenario.transfer()
                 if args.external_url:
                     scenario.external_transfer(args.external_url)
                 scenario.storage(vm, create=True)
         for vm in guests:
-            with scenario.console(vm):
+            with scenario.console(vm, args.qemu):
                 scenario.reset_network(vm)
         # Both clients remain usable after the other's endpoint reset.
         for vm in guests:
-            with scenario.console(vm):
+            with scenario.console(vm, args.qemu):
                 scenario.transfer()
         for vm in guests:
             scenario.stop(vm)
             scenario.native(f'vmm start {vm["name"]}')
-            with scenario.console(vm):
+            with scenario.console(vm, args.qemu):
                 scenario.automatic_network(vm)
                 scenario.transfer()
                 scenario.storage(vm)

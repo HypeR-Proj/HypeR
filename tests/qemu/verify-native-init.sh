@@ -108,19 +108,22 @@ while :; do
     fi
     prompt_ready=true
     case "$command_phase" in
-        guest_console | guest_echo | guest_enter | std_input | top) ;;
+        guest_console | guest_drain | guest_ready | guest_bootlog | guest_echo | guest_enter | std_input | top) ;;
         *)
             prompts=$(awk '{ count += gsub(/hyper-sh\$ /, "") }
                 END { print count + 0 }' "$native_output")
             [ "$prompts" -ge "$prompt_target" ] || prompt_ready=false
             ;;
     esac
-    # Guest UART output is a byte stream, unlike Native Console TX frames.
-    # Retain its CR/LF bytes while removing complete host and Linux printk
-    # records that can split tty echo. The raw log still retains diagnostics;
-    # the helper checks fatal failures before and after reassembly.
+    # UART diagnostics and hvc terminal bytes are independent streams. Keep
+    # Linux records during startup: a record can contain the only hvc prompt.
+    # Once both streams drain, preserve tty CR/LF while filtering printk that
+    # interrupts subsequent echo. Raw diagnostics and fatal checks remain.
     case "$command_phase" in
-        guest_console | guest_echo | guest_enter)
+        guest_console | guest_drain | guest_ready | guest_bootlog)
+            python3 -B "$script_dir/guest_console.py" <"$log" >"$guest_output"
+            ;;
+        guest_echo | guest_enter)
             python3 -B "$script_dir/guest_console.py" --filter-guest-logs <"$log" >"$guest_output"
             ;;
     esac
@@ -151,8 +154,35 @@ while :; do
             fi
             ;;
         guest_console)
-            if grep -q 'HypeR guest: Linux userspace is running' "$log" &&
+            if grep -q 'HypeR guest: Linux userspace is running' "$guest_output" &&
                 grep -Fq '~ # ' "$guest_output"; then
+                python3 -B "$script_dir/guest_console.py" --startup-command drain \
+                    --qemu "$qemu" >&3
+                command_phase='guest_drain'
+            fi
+            ;;
+        guest_drain)
+            if awk '/^HYPER_GUEST_UART_DRAINED\r?$/ { found = 1 }
+                    END { exit !found }' "$guest_output"; then
+                python3 -B "$script_dir/guest_console.py" --startup-command ack >&3
+                command_phase='guest_ready'
+            fi
+            ;;
+        guest_ready)
+            if awk '/^HYPER_GUEST_READY\r?$/ { ready = 1; next }
+                    ready && /^~ # / { found = 1 }
+                    END { exit !found }' "$guest_output"; then
+                # console_loglevel can suppress queued boot printk before the
+                # UART emits it. Inspect the retained kernel log explicitly;
+                # the split printf marker cannot be satisfied by command echo.
+                printf '%s\n' "dmesg | grep -F 'Run /init as init process' >/dev/null && printf '\\nHYPER_GUEST_BOOTLOG_%s\\n' OK" >&3
+                command_phase='guest_bootlog'
+            fi
+            ;;
+        guest_bootlog)
+            if awk '/^HYPER_GUEST_BOOTLOG_OK\r?$/ { ready = 1; next }
+                    ready && /^~ # / { found = 1 }
+                    END { exit !found }' "$guest_output"; then
                 # No Enter yet: a line-buffered relay must not hide guest echo.
                 printf 'echo HYPER_GUEST_CONSOLE_RX' >&3
                 command_phase='guest_echo'
@@ -423,12 +453,16 @@ while :; do
             echo "verified Native services, dynamic/static std, and application startup"
             exit 0
         fi
+        # Retain Linux boot records while removing complete host records that
+        # can split a UART message. Native line assertions above remain strict.
+        python3 -B "$script_dir/guest_console.py" <"$log" >"$guest_output"
         if grep -Fq 'HypeR vm-manager: ready' "$native_output" &&
             grep -Fq 'HypeR init: VM fleet configured' "$native_output" &&
             grep -Fq 'HypeR vm-runtime: starting' "$native_output" &&
-            grep -q 'Run /init as init process' "$log" &&
-            grep -q 'HypeR guest: /init reached' "$log" &&
-            grep -q 'HypeR guest: Linux userspace is running' "$log"; then
+            awk '/^HYPER_GUEST_BOOTLOG_OK\r?$/ { found = 1 }
+                 END { exit !found }' "$guest_output" &&
+            grep -q 'HypeR guest: /init reached' "$guest_output" &&
+            grep -q 'HypeR guest: Linux userspace is running' "$guest_output"; then
             echo "verified Native services and userspace-managed Linux VM startup"
             exit 0
         fi
@@ -441,8 +475,13 @@ while :; do
     if [ "$command_phase" != "$observed_phase" ]; then
         now=$(date +%s)
         echo "Native acceptance: $observed_phase -> $command_phase ($((now - phase_started))s phase, $((now - started))s total)"
+        # Startup, synchronization, and boot-log proof share the original boot
+        # deadline; the handshake must not turn a stuck guest into a longer wait.
+        case "$observed_phase:$command_phase" in
+            guest_console:guest_drain | guest_drain:guest_ready | guest_ready:guest_bootlog) ;;
+            *) phase_started=$now ;;
+        esac
         observed_phase=$command_phase
-        phase_started=$now
     fi
     sleep 1
 done

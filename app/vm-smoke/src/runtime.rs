@@ -185,7 +185,7 @@ impl Guest {
         }
     }
 
-    fn stop(&self, expected: VirtualCpuTermination) -> Result<()> {
+    fn stop(self, expected: VirtualCpuTermination) -> Result<()> {
         vm::request_stop(self.machine.as_handle_ref())
             .map_err(|error| format!("request VM stop: {error:?}"))?;
         vm::wait_terminated(self.machine.as_handle_ref(), deadline()?).map_err(|error| {
@@ -206,7 +206,7 @@ impl Guest {
         if info.terminal != Some(expected) {
             return Err(format!("guest terminal: {:?}", info.terminal));
         }
-        Ok(())
+        self.output.join().map_err(show)
     }
 }
 
