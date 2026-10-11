@@ -137,10 +137,15 @@ hyper_call_result_t hyper_directory_open_directory(hyper_native_handle_t directo
 				  (uintptr_t)path, path_size, requested_rights, 0, 0);
 }
 
-hyper_call_result_t hyper_directory_read(hyper_native_handle_t directory, uint64_t cookie,
+hyper_call_result_t hyper_directory_begin_read(hyper_native_handle_t directory)
+{
+	return hyper_native_call6(HYPER_NATIVE_SYS_DIRECTORY_BEGIN_READ, directory, 0, 0, 0, 0, 0);
+}
+
+hyper_call_result_t hyper_directory_read(hyper_native_handle_t stream, uint64_t cookie,
 					 hyper_native_directory_entry_t *records, size_t capacity)
 {
-	return hyper_native_call6(HYPER_NATIVE_SYS_DIRECTORY_READ, directory, cookie,
+	return hyper_native_call6(HYPER_NATIVE_SYS_DIRECTORY_READ, stream, cookie,
 				  (uintptr_t)records, capacity, 0, 0);
 }
 

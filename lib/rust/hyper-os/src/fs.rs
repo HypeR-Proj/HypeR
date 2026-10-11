@@ -12,7 +12,9 @@ pub use protection::FileProtection;
 
 use core::num::NonZeroU64;
 
-use crate::handle::{DirectoryObject, FileObject, HandleRef, OwnedHandle, Rights};
+use crate::handle::{
+    DirectoryObject, DirectoryStreamObject, FileObject, HandleRef, OwnedHandle, Rights,
+};
 use crate::{Error, Result, Status};
 
 const _: () = assert!(hyper_abi::HYPER_NATIVE_DIRECTORY_MAX_PATH_BYTES <= usize::MAX as u64);
@@ -351,48 +353,20 @@ impl Directory {
         Ok(Self { handle })
     }
 
-    /// Starts a bounded directory scan owned by this Directory borrow.
-    #[must_use]
-    pub const fn reader(&self) -> DirectoryReader<'_> {
-        DirectoryReader {
-            directory: self,
-            next_cookie: Some(0),
-        }
-    }
-
-    fn read_page(&self, cursor: u64) -> Result<(DirectoryPage, Option<u64>)> {
-        let mut records = [EMPTY_RAW_DIRECTORY_ENTRY; DIRECTORY_PAGE_CAPACITY];
-        let result = raw_ops::read_directory(self.handle.as_handle_ref(), cursor, &mut records);
+    /// Starts an independent, handle-owned scan using only this Directory's READ right.
+    /// Closing the reader releases its position; cache pages remain reclaimable.
+    pub fn reader(&self) -> Result<DirectoryReader> {
+        let directory = self.handle.as_handle_ref();
+        let result = raw_ops::begin_directory_read(directory);
         Status::from_raw(result.status).into_result()?;
-        let count = usize::try_from(result.value0).map_err(|_| Error::InvalidResponse)?;
-        if count > DIRECTORY_PAGE_CAPACITY
-            || (count == 0 && result.value1 != 0)
-            || (count < DIRECTORY_PAGE_CAPACITY && result.value1 != 0)
-            || (result.value1 != 0 && result.value1 == cursor)
-        {
-            return Err(Error::InvalidResponse);
-        }
-
-        let mut entries = [None; DIRECTORY_PAGE_CAPACITY];
-        for (slot, raw) in entries.iter_mut().zip(records.iter()).take(count) {
-            *slot = Some(decode_directory_entry(raw)?);
-        }
-        if records
-            .get(count..)
-            .ok_or(Error::InvalidResponse)?
-            .iter()
-            .any(|record| *record != EMPTY_RAW_DIRECTORY_ENTRY)
-        {
-            return Err(Error::InvalidResponse);
-        }
-
-        Ok((
-            DirectoryPage {
-                entries,
-                len: count,
-            },
-            NonZeroU64::new(result.value1).map(NonZeroU64::get),
-        ))
+        // SAFETY: success publishes a fresh stream owner distinct from the retained Directory.
+        let stream = unsafe {
+            crate::handle::adopt_produced_handle_excluding(result.value0, &[directory.raw()])?
+        };
+        Ok(DirectoryReader {
+            stream,
+            next_cookie: Some(0),
+        })
     }
 
     /// Recovers the generic typed owner for delegation or explicit close.
@@ -567,19 +541,53 @@ pub struct ReadOutcome {
     pub file_size: u64,
 }
 
-/// Stateful cursor which cannot be detached from its Directory authority.
-pub struct DirectoryReader<'directory> {
-    directory: &'directory Directory,
+/// An independent directory scan. Its handle owns only bounded iteration state.
+pub struct DirectoryReader {
+    stream: OwnedHandle<DirectoryStreamObject>,
     next_cookie: Option<u64>,
 }
 
-impl DirectoryReader<'_> {
+impl DirectoryReader {
+    fn read_page(&self, cursor: u64) -> Result<(DirectoryPage, Option<u64>)> {
+        let mut records = [EMPTY_RAW_DIRECTORY_ENTRY; DIRECTORY_PAGE_CAPACITY];
+        let result = raw_ops::read_directory(self.stream.as_handle_ref(), cursor, &mut records);
+        Status::from_raw(result.status).into_result()?;
+        let count = usize::try_from(result.value0).map_err(|_| Error::InvalidResponse)?;
+        if count > DIRECTORY_PAGE_CAPACITY
+            || (count == 0 && result.value1 != 0)
+            || (result.value1 != 0 && result.value1 == cursor)
+        {
+            return Err(Error::InvalidResponse);
+        }
+
+        let mut entries = [None; DIRECTORY_PAGE_CAPACITY];
+        for (slot, raw) in entries.iter_mut().zip(records.iter()).take(count) {
+            *slot = Some(decode_directory_entry(raw)?);
+        }
+        if records
+            .get(count..)
+            .ok_or(Error::InvalidResponse)?
+            .iter()
+            .any(|record| *record != EMPTY_RAW_DIRECTORY_ENTRY)
+        {
+            return Err(Error::InvalidResponse);
+        }
+
+        Ok((
+            DirectoryPage {
+                entries,
+                len: count,
+            },
+            NonZeroU64::new(result.value1).map(NonZeroU64::get),
+        ))
+    }
+
     /// Reads the next page, or returns `None` after the scan reaches its end.
     pub fn next_page(&mut self) -> Result<Option<DirectoryPage>> {
         let Some(cookie) = self.next_cookie else {
             return Ok(None);
         };
-        let (page, next_cookie) = self.directory.read_page(cookie)?;
+        let (page, next_cookie) = self.read_page(cookie)?;
         self.next_cookie = next_cookie;
         if page.len == 0 {
             Ok(None)
@@ -734,7 +742,7 @@ pub(crate) fn validate_path(path: &str) -> Result<()> {
 
 #[cfg(not(test))]
 mod raw_ops {
-    use super::{DirectoryObject, HandleRef, Rights};
+    use super::{DirectoryObject, DirectoryStreamObject, HandleRef, Rights};
     use crate::Result;
 
     pub(super) fn open(
@@ -770,8 +778,15 @@ mod raw_ops {
         }
     }
 
-    pub(super) fn read_directory(
+    pub(super) fn begin_directory_read(
         directory: HandleRef<'_, DirectoryObject>,
+    ) -> hyper_sys::CallResult {
+        // SAFETY: the caller retains the Directory and adopts the returned stream.
+        unsafe { hyper_sys::directory_begin_read(directory.raw().get()) }
+    }
+
+    pub(super) fn read_directory(
+        directory: HandleRef<'_, DirectoryStreamObject>,
         cookie: u64,
         records: &mut [hyper_abi::HyperNativeDirectoryEntry; super::DIRECTORY_PAGE_CAPACITY],
     ) -> hyper_sys::CallResult {
@@ -839,7 +854,7 @@ mod raw_ops {
 
 #[cfg(test)]
 mod raw_ops {
-    use super::{DirectoryObject, HandleRef, Rights};
+    use super::{DirectoryObject, DirectoryStreamObject, HandleRef, Rights};
     use crate::Result;
 
     const CONTENT: &[u8] = b"HypeR VFS test image";
@@ -881,8 +896,18 @@ mod raw_ops {
         }
     }
 
-    pub(super) fn read_directory(
+    pub(super) fn begin_directory_read(
         _directory: HandleRef<'_, DirectoryObject>,
+    ) -> hyper_sys::CallResult {
+        hyper_sys::CallResult {
+            status: 0,
+            value0: 0x600_u64 | u64::from(hyper_abi::HYPER_NATIVE_OBJECT_DIRECTORY_STREAM),
+            value1: 0,
+        }
+    }
+
+    pub(super) fn read_directory(
+        _directory: HandleRef<'_, DirectoryStreamObject>,
         cookie: u64,
         records: &mut [hyper_abi::HyperNativeDirectoryEntry; super::DIRECTORY_PAGE_CAPACITY],
     ) -> hyper_sys::CallResult {
@@ -1004,7 +1029,7 @@ mod tests {
     #[test]
     fn directory_pages_expose_validated_names_and_kinds() -> Result<(), Error> {
         let directory = root_directory()?;
-        let mut reader = directory.reader();
+        let mut reader = directory.reader()?;
         let Some(page) = reader.next_page()? else {
             return Err(Error::InvalidResponse);
         };

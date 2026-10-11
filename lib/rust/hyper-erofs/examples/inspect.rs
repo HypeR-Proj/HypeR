@@ -32,16 +32,32 @@ fn main() -> Result<(), String> {
         .map_err(|error| format!("stat: {error:?}"))?;
     match entry.kind {
         hyper_erofs::Kind::Directory => {
-            let mut index = 0;
-            while let Some(entry) = volume
-                .entry(&path, index)
-                .map_err(|error| format!("entry: {error:?}"))?
-            {
-                println!(
-                    "{:?}\t{:o}\t{}\t{}",
-                    entry.kind, entry.mode, entry.size, entry.name
-                );
-                index += 1;
+            use hyper_filesystem::protocol::{
+                DIRECTORY_BATCH_BYTES, DirectoryBatch, DirectoryCursor, Entry,
+            };
+            let mut cursor = DirectoryCursor::START;
+            let mut bytes = [0; DIRECTORY_BATCH_BYTES];
+            let mut entry = Entry::empty();
+            loop {
+                let length = volume
+                    .read_directory(&path, cursor, &mut bytes)
+                    .map_err(|error| format!("directory: {error:?}"))?;
+                let batch =
+                    DirectoryBatch::decode(&bytes[..length]).ok_or("invalid directory batch")?;
+                for record in batch.records() {
+                    record.entry_into(&mut entry);
+                    println!(
+                        "{}\t{:o}\t{}\t{}",
+                        entry.kind,
+                        entry.mode,
+                        entry.size,
+                        entry.name()
+                    );
+                    cursor = record.next_cursor();
+                }
+                if batch.eof() {
+                    break;
+                }
             }
         }
         kind => {

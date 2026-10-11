@@ -132,6 +132,13 @@ int64_t __hyper_std_fs_stat(const char *path, size_t size, uint32_t options,
 	return status;
 }
 
+int64_t __hyper_std_fs_begin_readdir(uint64_t directory, uint64_t *stream)
+{
+	hyper_call_result_t result = hyper_directory_begin_read(directory);
+	*stream = result.status == 0 ? result.value0 : 0;
+	return result.status;
+}
+
 int64_t __hyper_std_fs_readdir(uint64_t handle, uint64_t cookie,
 			       hyper_native_directory_entry_t *entries, size_t *count,
 			       uint64_t *next)

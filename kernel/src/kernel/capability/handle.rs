@@ -808,6 +808,7 @@ impl HandleTable {
             return Err(HandleError::WrongObjectType);
         }
         Ok(ResolvedObject {
+            rights: handle.rights.union(),
             object: match handle.object().pin::<T>() {
                 Some(object) => object,
                 None => super::invariant_violation(),
@@ -2110,6 +2111,7 @@ impl<const N: usize> Drop for HandleReservation<N> {
 /// Type-checked internal object reference retained beyond the handle-table lock.
 pub(crate) struct ResolvedObject<T: KernelObject> {
     object: super::super::object::KernelRef<T, OperationPin>,
+    rights: Rights,
 }
 
 /// Type-erased wait authority retained beyond the handle-table lock.
@@ -2135,6 +2137,12 @@ impl ResolvedWaitable {
 }
 
 impl<T: KernelObject> ResolvedObject<T> {
+    /// Source grant captured atomically with authority resolution. Derivations
+    /// use this snapshot without reopening a possibly closed or reused handle.
+    pub(crate) fn rights(&self) -> Rights {
+        self.rights
+    }
+
     /// Returns the compiler-checked payload reference.
     ///
     /// `HandleTable::resolve` checked type coherence before constructing this

@@ -3,6 +3,9 @@
 
 //! Real ramfs namespace and publication contracts in scheduled kernel context.
 
+#[path = "../../../tests/kernel/vfs_namespace/directory.rs"]
+mod directory;
+
 #[path = "../../../tests/kernel/vfs_namespace/content.rs"]
 mod content;
 
@@ -62,6 +65,7 @@ pub(crate) fn run() -> Result<(), TestError> {
     let namespace =
         super::instance::MountNamespace::try_new(filesystem, cache).map_err(Error::from)?;
     let root = DirectoryObject::try_root(namespace, &domain)?;
+    directory::run(&root, &domain, &scratch)?;
     content::run(&root, &domain, &scratch)?;
     protection::run(&root, &domain, &scratch)?;
     #[cfg(any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64))]

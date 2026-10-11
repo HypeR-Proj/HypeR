@@ -108,11 +108,30 @@ FAT long-name buffer inside its traversal frame. Metadata lookup copies into
 the volume's caller-owned output buffer; directory and file lookup return only
 a small stream or cursor. The borrowed entry cannot escape the visitor. This
 keeps owned long-name return values out of the outer VFS call chain without
-allocating on each I/O operation or repeating sector reads. The public upstream
+allocating on each I/O operation. The public upstream
 iterator still uses the same parser and retains its end/error behavior.
 Private mutation cursors retain only the located short-entry metadata, byte
 positions and filesystem owner; rename, remove and creation do not carry an
 unused long-name buffer into subsequent disk operations.
+
+`FatVolume::read_directory(path, cursor, output)` returns a batch of at most
+4 KiB containing names, attributes, an EOF flag and per-entry continuation
+checkpoints. The initial zero cursor resolves the directory path; subsequent
+requests restore its first/current cluster and record offset directly. They do
+not repeat parent lookup or walk the cluster-chain prefix. Long-name parsing
+resumes only at complete directory-entry boundaries. Independent scans retain
+separate checkpoints in the kernel, without an iterator table or whole-directory
+snapshot in the worker. The older indexed `entry(path, index)` API is removed.
+
+These physical checkpoints are trusted kernel state, not application cookies.
+The kernel binds each one to its mounted directory and invalidates affected
+streams before directory changes or ancestor moves. The adapter additionally
+checks the cursor format, path fingerprint, cluster bounds and record alignment;
+those checks are not a substitute for the kernel's authority and mutation
+fence. Changes to unrelated directories do not invalidate a scan. Kernel
+directory and attribute caches share the file-cache pressure and reclamation
+mechanism; discarding a cached batch leaves the stream's small continuation
+state available for another bounded worker request.
 
 Parent resolution and directory scanning use separate stack frames. Metadata
 inspection also completes before mutation starts, so its filename scratch is
@@ -147,8 +166,11 @@ the mount sponsor. Each binding has its own fallible allocation, so removing it
 releases its storage and charge without retaining a historical table capacity.
 Its charge also covers the full node and content-record allocations retained
 by weak references, conservatively overlapping their charges while live.
-Two linked lists provide a constant-work housekeeping cursor; teardown is
-iterative. A quota failure during unpublished preparation requests one finite
+Balanced indices locate bindings by ID and canonical path, comparing full
+paths even when their placement hashes collide. A numeric successor cursor
+allows bounded housekeeping without rescanning a prefix; index removal
+allocates nothing, and teardown is iterative. A quota failure during
+unpublished preparation requests one finite
 cache sweep for the denying resource domain, including descendant sponsors.
 The worker drops matching clean pages outside the cache lock and tries idle
 namespace cleanup without waiting for a volume mutex. The requester then

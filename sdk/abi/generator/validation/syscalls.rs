@@ -295,6 +295,25 @@ fn validate_results(
             ProducedObject::Kind(kind) => require_object_kind(schema, syscall.name, kind)?,
         }
         match handle.rights {
+            ProducedRights::InheritedSubset {
+                authority_source,
+                allowed_rights,
+            } => {
+                if !syscall.arguments.iter().any(|candidate| {
+                    candidate.name == authority_source && candidate.kind == ValueKind::Handle
+                }) {
+                    return invalid(format!(
+                        "syscall {} result {} names invalid inherited-rights source {authority_source}",
+                        syscall.name, result.name
+                    ));
+                }
+                if allowed_rights == 0 || allowed_rights & !supported_rights != 0 {
+                    return invalid(format!(
+                        "syscall {} result {} inherits undeclared or empty object rights",
+                        syscall.name, result.name
+                    ));
+                }
+            }
             ProducedRights::RequestedSubsetOf(argument) => {
                 if !syscall.arguments.iter().any(|candidate| {
                     candidate.name == argument && candidate.kind == ValueKind::Rights

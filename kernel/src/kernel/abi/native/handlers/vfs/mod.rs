@@ -85,6 +85,21 @@ fn parse_directory_open(
 }
 
 #[inline(never)]
+pub(in crate::kernel::abi::native) fn sys_directory_begin_read(
+    services: &impl VfsServices,
+    arguments: &Arguments,
+) -> DeferredAction {
+    let result = (|| {
+        require_zero(&arguments[1..])?;
+        let directory = parse_handle(arguments[0])?;
+        services
+            .begin_directory_read(directory)
+            .map_err(status_from_vfs_service_error)
+    })();
+    DeferredAction::Return(handle_result(result))
+}
+
+#[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_directory_read(
     services: &impl VfsServices,
     arguments: &Arguments,

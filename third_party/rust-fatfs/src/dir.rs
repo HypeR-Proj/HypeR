@@ -742,7 +742,48 @@ pub struct DirIter<'a, IO: ReadWriteSeek, TP, OCC> {
     err: bool,
 }
 
+/// A directory-record boundary produced by an iterator. The mounted-volume
+/// owner must reject positions after directory mutation and must never accept
+/// raw physical positions from an untrusted application.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DirectoryPosition {
+    pub first_cluster: u32,
+    pub current_cluster: u32,
+    pub offset: u32,
+}
+
 impl<'a, IO: ReadWriteSeek, TP, OCC> DirIter<'a, IO, TP, OCC> {
+    pub fn position(&mut self) -> Result<DirectoryPosition, Error<IO::Error>> {
+        let (first_cluster, current_cluster, offset) = match &mut self.stream {
+            DirRawStream::File(file) => file.directory_position(),
+            DirRawStream::Root(raw) => (
+                0,
+                0,
+                u32::try_from(raw.seek(SeekFrom::Current(0))?).map_err(|_| Error::InvalidInput)?,
+            ),
+        };
+        Ok(DirectoryPosition {
+            first_cluster,
+            current_cluster,
+            offset,
+        })
+    }
+
+    pub(crate) fn restore_position(
+        &mut self,
+        position: DirectoryPosition,
+    ) -> Result<(), Error<IO::Error>> {
+        match &mut self.stream {
+            DirRawStream::File(file) => {
+                file.restore_directory_position(position.current_cluster, position.offset)
+            }
+            DirRawStream::Root(raw) => {
+                raw.seek(SeekFrom::Start(u64::from(position.offset)))?;
+            }
+        }
+        Ok(())
+    }
+
     fn new(
         stream: DirRawStream<'a, IO, TP, OCC>,
         fs: &'a FileSystem<IO, TP, OCC>,

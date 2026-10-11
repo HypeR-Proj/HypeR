@@ -32,6 +32,46 @@ pub struct Volume<D> {
 }
 
 impl<D: Device> Volume<D> {
+    /// Returns a bounded batch using a trusted kernel-owned checkpoint. The
+    /// immutable inode number avoids repeating parent-path searches on resume.
+    pub fn read_directory(
+        &mut self,
+        path: &str,
+        cursor: hyper_filesystem::protocol::DirectoryCursor,
+        output: &mut [u8],
+    ) -> Result<usize, Error> {
+        use hyper_filesystem::protocol::DirectoryBatchBuilder;
+        if !hyper_filesystem::protocol::valid_path(path) {
+            return Err(Error::InvalidInput);
+        }
+        let mut batch = DirectoryBatchBuilder::new(output, cursor).ok_or(Error::InvalidInput)?;
+        let path_key = path.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x100_0000_01b3)
+        });
+        let (inode, offset, index) = if cursor.is_start() {
+            (self.lookup(path)?, 0, 0)
+        } else {
+            if cursor.words[0] != directory::CURSOR_TAG || cursor.words[3] != path_key {
+                return Err(Error::InvalidInput);
+            }
+            (
+                Inode::load(&mut self.reader, &self.superblock, cursor.words[1])?,
+                u64::from(cursor.words[2] as u32),
+                (cursor.words[2] >> 32) as usize,
+            )
+        };
+        let eof = directory::read_batch(
+            &mut self.reader,
+            &self.superblock,
+            inode,
+            offset,
+            index,
+            path_key,
+            &mut batch,
+        )?;
+        batch.finish(eof).ok_or(Error::Corrupt)
+    }
+
     /// Return the original device after the service has stopped using the mount.
     pub fn into_device(self) -> D {
         self.reader.device
@@ -45,7 +85,7 @@ impl<D: Device> Volume<D> {
             return Err(Error::Corrupt);
         }
         // Validate the root's first directory block before exposing the mount.
-        directory::find(&mut reader, &superblock, root, None, 0)?;
+        directory::find(&mut reader, &superblock, root, None)?;
         Ok(Self {
             reader,
             superblock,
@@ -78,7 +118,6 @@ impl<D: Device> Volume<D> {
                 &self.superblock,
                 inode,
                 Some(part.as_bytes()),
-                0,
             )?
             .ok_or(Error::Missing)?;
             inode = Inode::load(&mut self.reader, &self.superblock, child.nid)?;
@@ -93,22 +132,6 @@ impl<D: Device> Volume<D> {
     pub fn stat(&mut self, path: &str) -> Result<Entry, Error> {
         let inode = self.lookup(path)?;
         entry(inode, path.rsplit('/').next().ok_or(Error::InvalidInput)?)
-    }
-
-    pub fn entry(&mut self, path: &str, index: usize) -> Result<Option<Entry>, Error> {
-        let directory = self.lookup(path)?;
-        let Some(child) =
-            directory::find(&mut self.reader, &self.superblock, directory, None, index)?
-        else {
-            return Ok(None);
-        };
-        let inode = Inode::load(&mut self.reader, &self.superblock, child.nid)?;
-        if child.kind.is_some_and(|kind| kind != inode.kind) {
-            return Err(Error::Corrupt);
-        }
-        let name =
-            core::str::from_utf8(&child.name[..child.length]).map_err(|_| Error::Unsupported)?;
-        entry(inode, name).map(Some)
     }
 
     pub fn read(&mut self, path: &str, offset: u64, output: &mut [u8]) -> Result<usize, Error> {

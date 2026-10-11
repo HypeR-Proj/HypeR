@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Bounded kernel-owned cache for immutable file data.
+//! Bounded kernel-owned cache for immutable file data and filesystem metadata.
 //!
 //! The cache owns only clean, immutable payloads. A miss reserves one slot
 //! under the cache lock, but the caller allocates and fills its payload after
@@ -165,7 +165,9 @@ struct CacheControl<Page> {
     admission_pauses: usize,
 }
 
-/// Immutable file-data cache with worker-managed metadata capacity.
+/// Immutable I/O page cache with worker-managed metadata capacity. Typed keys
+/// distinguish file data, directory batches, and name/attribute records; all
+/// payload kinds share the same admission and pressure-reclaim policy.
 pub(crate) struct FileDataCache<Page> {
     state: CacheLock<CacheControl<Page>>,
     budget: FallibleArc<Budget>,

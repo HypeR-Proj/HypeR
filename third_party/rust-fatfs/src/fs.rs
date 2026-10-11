@@ -693,6 +693,38 @@ impl<IO: Read + Write + Seek, TP, OCC> FileSystem<IO, TP, OCC> {
         Ok(())
     }
 
+    /// Restores a trusted directory checkpoint without walking its parent path
+    /// or cluster-chain prefix. Geometry is checked here; the caller owns the
+    /// directory identity and mutation fence protecting the checkpoint.
+    pub fn resume_directory(
+        &self,
+        position: crate::dir::DirectoryPosition,
+    ) -> Result<crate::dir::DirIter<'_, IO, TP, OCC>, Error<IO::Error>> {
+        let valid_cluster = |cluster| cluster >= 2 && cluster - 2 < self.total_clusters;
+        if position.offset % 32 != 0
+            || (position.first_cluster != 0 && !valid_cluster(position.first_cluster))
+            || (position.current_cluster != 0 && !valid_cluster(position.current_cluster))
+            || (position.first_cluster != 0
+                && (position.offset == 0) != (position.current_cluster == 0))
+        {
+            return Err(Error::InvalidInput);
+        }
+        let dir = if position.first_cluster == 0 {
+            if self.fat_type == FatType::Fat32 || position.current_cluster != 0 {
+                return Err(Error::InvalidInput);
+            }
+            self.root_dir()
+        } else {
+            Dir::new(
+                DirRawStream::File(File::new(Some(position.first_cluster), None, self)),
+                self,
+            )
+        };
+        let mut iter = dir.iter();
+        iter.restore_position(position)?;
+        Ok(iter)
+    }
+
     /// Returns a root directory object allowing for futher penetration of a filesystem structure.
     pub fn root_dir(&self) -> Dir<'_, IO, TP, OCC> {
         trace!("root_dir");

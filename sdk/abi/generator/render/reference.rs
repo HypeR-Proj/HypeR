@@ -189,6 +189,10 @@ fn describe_produced_handle(name: &str, handle: schema::ProducedHandle) -> Strin
     };
     let rights = match handle.rights {
         ProducedRights::RequestedSubsetOf(argument) => format!("subset-from({argument})"),
+        ProducedRights::InheritedSubset {
+            authority_source,
+            allowed_rights,
+        } => format!("inherited-from({authority_source}), mask=0x{allowed_rights:x}"),
         ProducedRights::ExactRequested {
             argument,
             allowed_rights,

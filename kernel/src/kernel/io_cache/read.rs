@@ -12,8 +12,9 @@ use super::{
 const PAGE_BYTES: usize = PAGE_SIZE as usize;
 const MAX_READ_BYTES: usize = 512 * 1024;
 
-/// One complete logical page, or the complete final page up to known EOF.
-/// Each allocation is independent; retaining one page cannot pin a bulk read.
+/// One independently reclaimable page of immutable file bytes or filesystem
+/// metadata. A typed cache key keeps the payload formats separate. Retaining
+/// one page cannot pin a bulk read or an entire directory.
 pub(crate) struct FilePage<Owner = ()> {
     bytes: super::storage::PageBytes,
     owner: Owner,
@@ -32,7 +33,20 @@ impl<Owner> FilePage<Owner> {
         })
     }
 
-    fn refill(&mut self, bytes: &[u8], owner: Owner) -> Refill {
+    pub(crate) fn try_copy_parts(parts: &[&[u8]], owner: Owner) -> Result<Self, CacheError> {
+        Ok(Self {
+            bytes: super::storage::PageBytes::try_copy_parts(parts)?,
+            owner,
+        })
+    }
+
+    pub(crate) fn refill_parts(&mut self, parts: &[&[u8]], owner: Owner) -> Refill {
+        self.bytes.replace_parts(parts);
+        self.owner = owner;
+        Refill::Ready
+    }
+
+    pub(crate) fn refill(&mut self, bytes: &[u8], owner: Owner) -> Refill {
         self.bytes.replace(bytes);
         // Refill runs only after unique ownership, outside the cache lock.
         // Replacing this generic sidecar can release the old file identity.
@@ -40,7 +54,6 @@ impl<Owner> FilePage<Owner> {
         Refill::Ready
     }
 
-    #[cfg_attr(not(test), cfg(feature = "kernel-self-test"))]
     pub(crate) fn bytes(&self) -> &[u8] {
         self.bytes.as_slice()
     }

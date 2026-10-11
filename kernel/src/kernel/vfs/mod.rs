@@ -11,6 +11,7 @@
 
 //! Kernel-owned VFS namespace, capability objects, and file-data policy.
 
+mod directory;
 mod executable;
 mod file_data;
 mod file_record;
@@ -34,6 +35,7 @@ mod rights_contract;
 mod scratch;
 pub(crate) mod service;
 
+pub(crate) use directory::DirectoryStream;
 pub(crate) use executable::ExecutableSnapshot;
 pub(crate) use file_record::CachePage;
 #[cfg(feature = "kernel-self-test")]
@@ -45,9 +47,9 @@ pub(crate) use objects::{
 pub(crate) use protection::{FileProtection, FileProtectionObject};
 pub(crate) use scratch::{ScratchBudget, ScratchString, ScratchVec};
 pub(crate) use service::{
-    ServiceError as VfsServiceError, create_directory, create_file, directory_info, file_info,
-    open_directory, open_file, protect_file, read_directory, read_file_at, remove_entry,
-    resize_file, write_file_at,
+    ServiceError as VfsServiceError, begin_directory_read, create_directory, create_file,
+    directory_info, file_info, open_directory, open_file, protect_file, read_directory,
+    read_file_at, remove_entry, resize_file, write_file_at,
 };
 
 use hyper::fs::ramfs::RamFs;

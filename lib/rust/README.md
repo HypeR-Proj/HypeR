@@ -138,8 +138,12 @@ VM control handles or transferable capability channels.
 `fs::Directory` provides capability-relative creation/removal; `fs::File`
 provides explicit-offset reads/writes, atomic append and resize. WRITE must be
 present on the originating Directory before writable File authority can be
-opened. Open owners survive unlink; enumeration returns owned metadata with
-opaque, mutation-safe cursors. Prefer `std::fs` when path and stream operations
+opened. Open owners survive unlink. `Directory::reader()` returns a fallible,
+independent `DirectoryReader` owning a DirectoryStream handle; it requires only
+Directory READ. Each reader retains bounded iteration state rather than cache
+pages. Mutations of the scanned remote directory, or renames of it or an ancestor,
+invalidate the scan; unrelated directory and file-content changes preserve traversal. Cookies are opaque and bound to their stream.
+Prefer `std::fs` when path and stream operations
 are sufficient; keep Native handles for explicit delegation and executable
 provenance.
 

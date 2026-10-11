@@ -17,6 +17,7 @@ use alloc::boxed::Box;
 use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use fatfs::{Read, Seek, SeekFrom, Write};
 
+mod directory;
 mod read_map;
 mod sector_cache;
 mod write_buffer;
@@ -429,27 +430,11 @@ impl<D: BlockDevice> FatVolume<D> {
             None => result,
         }
     }
-    pub fn entry(&mut self, directory: &str, index: usize) -> Result<Option<Entry>, Error> {
-        let mut result = Entry::empty();
-        self.entry_into(directory, index, &mut result)
-            .map(|found| found.then_some(result))
-    }
-    /// Fill caller-owned storage with the indexed child, excluding `.` and
-    /// `..`. Large name buffers never cross return slots.
-    pub fn entry_into(
-        &mut self,
-        directory: &str,
-        index: usize,
-        result: &mut Entry,
-    ) -> Result<bool, Error> {
-        self.find_entry(directory, Some(index), None, result)
-    }
     #[inline(never)]
     fn find_entry(
         &mut self,
         directory: &str,
-        index: Option<usize>,
-        name: Option<&str>,
+        name: &str,
         result: &mut Entry,
     ) -> Result<bool, Error> {
         validate_path(directory)?;
@@ -460,7 +445,7 @@ impl<D: BlockDevice> FatVolume<D> {
             } else {
                 fs.root_dir().open_dir(directory).map_err(Error::from)?
             };
-            Self::scan_entry(&dir, index, name, result, readonly)
+            Self::scan_entry(&dir, name, result, readonly)
         })
     }
     // Resolving the parent and scanning it are sequential operations: keep
@@ -468,70 +453,26 @@ impl<D: BlockDevice> FatVolume<D> {
     #[inline(never)]
     fn scan_entry(
         dir: &fatfs::Dir<'_, Disk<D>, super::fat_time::Clock, fatfs::LossyOemCpConverter>,
-        index: Option<usize>,
-        name: Option<&str>,
+        name: &str,
         result: &mut Entry,
         readonly: bool,
     ) -> Result<bool, Error> {
         let mut iterator = dir.iter();
-        let mut position = 0_usize;
         while let Some(found) = iterator
             .visit_next(|entry| -> Result<bool, Error> {
                 if matches!(entry.short_file_name_as_bytes(), b"." | b"..") {
                     return Ok(false);
                 }
-                let current = position;
-                position = position.checked_add(1).ok_or(Error::Corrupt)?;
-                if index.is_some_and(|wanted| current != wanted) {
-                    return Ok(false);
-                }
-                result.name_len = 0;
-                result.directory = entry.is_dir();
-                result.read_only = readonly
-                    || entry
-                        .attributes()
-                        .contains(fatfs::FileAttributes::READ_ONLY);
-                result.size = entry.len();
-                result.created = super::fat_time::decode(entry.created());
-                result.accessed = super::fat_time::decode(fatfs::DateTime::new(
-                    entry.accessed(),
-                    fatfs::Time::new(0, 0, 0, 0),
-                ));
-                result.modified = super::fat_time::decode(entry.modified());
-                if let Some(name) = entry.long_file_name_as_ucs2_units() {
-                    for ch in core::char::decode_utf16(name.iter().copied()) {
-                        let ch = ch.map_err(|_| Error::Corrupt)?;
-                        let mut bytes = [0; 4];
-                        let text = ch.encode_utf8(&mut bytes);
-                        let end = result
-                            .name_len
-                            .checked_add(text.len())
-                            .filter(|end| *end <= result.name.len())
-                            .ok_or(Error::Corrupt)?;
-                        result.name[result.name_len..end].copy_from_slice(text.as_bytes());
-                        result.name_len = end;
-                    }
-                } else {
-                    let name = entry.short_file_name_as_bytes();
-                    if !name.is_ascii() {
-                        return Err(Error::Unsupported);
-                    }
-                    result.name[..name.len()].copy_from_slice(name);
-                    result.name_len = name.len();
-                }
-                if result.name_len == 0 || result.name().contains(['/', '\\', '\0']) {
-                    return Err(Error::Corrupt);
-                }
-                if name.is_some_and(|wanted| {
-                    !result
-                        .name()
-                        .chars()
-                        .flat_map(char::to_uppercase)
-                        .eq(wanted.chars().flat_map(char::to_uppercase))
-                        && !entry
-                            .short_file_name_as_bytes()
-                            .eq_ignore_ascii_case(wanted.as_bytes())
-                }) {
+                Self::fill_entry(entry, result, readonly)?;
+                if !result
+                    .name()
+                    .chars()
+                    .flat_map(char::to_uppercase)
+                    .eq(name.chars().flat_map(char::to_uppercase))
+                    && !entry
+                        .short_file_name_as_bytes()
+                        .eq_ignore_ascii_case(name.as_bytes())
+                {
                     return Ok(false);
                 }
                 Ok(true)
@@ -561,7 +502,7 @@ impl<D: BlockDevice> FatVolume<D> {
             return Ok(());
         }
         let (directory, name) = path.rsplit_once('/').unwrap_or(("", path));
-        if self.find_entry(directory, None, Some(name), result)? {
+        if self.find_entry(directory, name, result)? {
             Ok(())
         } else {
             Err(Error::Missing)

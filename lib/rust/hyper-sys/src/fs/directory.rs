@@ -64,17 +64,39 @@ pub unsafe fn directory_open_directory(
     }
 }
 
-/// Reads one fixed-capacity page from a Directory enumeration.
+/// Creates an independent directory stream without acquiring traversal rights.
 ///
 /// # Safety
 ///
-/// `directory` must remain live with read rights. `records` must identify
+/// `directory` must remain live with READ. On success the caller owns the
+/// `DirectoryStream` handle returned in `value0` and must eventually close it.
+#[inline]
+pub unsafe fn directory_begin_read(directory: abi::HyperNativeHandle) -> CallResult {
+    // SAFETY: the caller retains the source authority and adopts the result.
+    unsafe {
+        ffi_native_call6(
+            abi::HYPER_NATIVE_SYS_DIRECTORY_BEGIN_READ,
+            directory,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
+    }
+}
+
+/// Reads one fixed-capacity page from an independently owned `DirectoryStream`.
+///
+/// # Safety
+///
+/// `stream` must remain live with READ. `records` must identify
 /// writable storage for `capacity` directory-entry records for the complete
 /// syscall. Callers must pass the exact capacity published by the Native ABI
 /// and treat the returned continuation cookie as opaque.
 #[inline]
 pub unsafe fn directory_read(
-    directory: abi::HyperNativeHandle,
+    stream: abi::HyperNativeHandle,
     cookie: u64,
     records: *mut abi::HyperNativeDirectoryEntry,
     capacity: usize,
@@ -84,7 +106,7 @@ pub unsafe fn directory_read(
     unsafe {
         ffi_native_call6(
             abi::HYPER_NATIVE_SYS_DIRECTORY_READ,
-            directory,
+            stream,
             cookie,
             records.addr() as u64,
             capacity as u64,

@@ -106,13 +106,15 @@ on the old root and does not launch the system graph.
 
 ## Request and shared-memory contract
 
-`hyper-filesystem` defines explicit little-endian messages for stat, directory
-entry enumeration, positioned reads and writes, create, remove, rename, resize,
-sync, timestamps and reading symbolic-link targets. It contains no FAT attributes
+`hyper-filesystem` defines explicit little-endian messages for stat, batched
+directory enumeration, positioned reads and writes, create, remove, rename,
+resize, sync, timestamps and reading symbolic-link targets. It contains no FAT attributes
 or on-disk structures. Paths are bounded UTF-8 relative paths without dot, parent
 or empty components.
 Directory enumeration returns ordinary children; format adapters exclude
-on-disk `.` and `..` entries before indexing results. The
+on-disk `.` and `..` entries. A batch contains complete attributes and a private
+continuation after each child; FAT resumes its cluster/byte position and EROFS
+resumes its inode/block position without scanning the preceding children. The
 protocol preserves symlinks as namespace objects and returns their stored target
 bytes. The common VFS performs bounded resolution, including absolute and parent
 components. Canonical paths remain the content identity contract; distinct
@@ -120,12 +122,20 @@ on-disk hard-link paths do not yet share a kernel content identity.
 
 Each mount owns one ordered `ByteChannel` and one resident 512 KiB writable VMO.
 The kernel serializes requests under a sleepable mount mutex. Metadata travels
-in the channel; file bytes travel in the shared range. The kernel finishes
-writing an input range before publishing a write request. Receiving a request
+in the channel; file bytes and directory batches travel in the shared range.
+Directory replies carry at most 4 KiB, with an exact starting checkpoint,
+record count, EOF indication, and validated variable-length names and attributes.
+A non-EOF reply must make progress; a batch cannot repeat a checkpoint or return
+to its starting checkpoint. The kernel copies and validates the complete
+batch before retaining it; it never caches a live shared-memory view. The kernel
+finishes writing an input range before publishing a write request. Receiving a request
 transfers ownership of that range to the sole worker. Publishing its reply gives
 ownership back. The kernel never treats shared bytes as borrowed Rust objects.
 The response must match the operation and increasing request identifier, fit the
 exact frame size, and contain valid lengths, names, kinds and timestamps.
+A valid media name longer than the Native 255-byte component limit fails that
+enumeration with `Unsupported`; it neither truncates the name nor retires the
+mount. The filesystem wire format permits up to 1,020 UTF-8 bytes for FAT names.
 
 A request timeout, channel closure or malformed reply permanently
 retires the mount generation. Its shared range is never reused for another
@@ -153,7 +163,8 @@ the `Retired` phase reports completed resource teardown.
 The kernel checks local endpoint health even before satisfying a cache hit, so
 cached bytes cannot hide a closed service. Restarting a process does not reconnect
 an old mount: recovery needs a fresh mount generation. A hot cache hit needs no
-server round trip and does not take the mount transaction mutex.
+server round trip. File-data hits do not take the mount transaction mutex;
+name, attribute and directory hits use that mutex to serialize with mutations.
 
 ## Identity, cache and mutation ordering
 
@@ -170,6 +181,40 @@ last handle leaves its identity available while cached pages survive; reopening
 from the same or another process can hit them. After all live and cached owners
 disappear, a new open receives a fresh incarnation. Quota and pressure reclaim
 release pages and expired registry records without making filesystem IPC calls.
+
+Directory enumeration uses a separate `DirectoryStream` capability derived
+from Directory READ authority. Each stream owns a fixed namespace location and
+small trusted current/previous positions, not the directory's contents. Public
+cookies are monotonic tokens bound to that stream; they never contain media
+addresses. Only the latest input token may be replayed after failed copyout.
+Separate readers are independent; duplicating a stream shares its progress.
+
+The kernel retains directory batches and exact-name attributes in the same
+physical-page cache as file contents. Reopening a directory in another process
+can reuse those batches. Enumeration seeds the attribute cache so subsequent
+`stat` or open of a canonical child need not rescan the backend directory. An
+alias or a cache miss still consults the worker; a partial batch never proves
+that an absent name does not exist. Hashes select cache entries, but full names
+and checkpoints are compared before accepting them.
+
+All these pages use the existing admission watermarks, background reclaim,
+allocation-failure reclaim and domain filtering. Under pressure, cache index
+storage shrinks and individually allocated identity indices retire with expired
+bindings. No per-directory heap index or userspace directory snapshot grows
+outside this accounting. An open stream does not prevent its cached pages from
+being evicted: it resumes from its private checkpoint, and pressure causes
+ordinary bounded backend reads without retaining their results.
+
+Namespace changes invalidate the affected parent streams before the backend
+operation. Rename also invalidates streams in a moved subtree because their
+path bindings change. The caller restarts such a scan with a new stream; a
+mutation in an unrelated directory does not interrupt it. Writes, truncation
+and timestamp changes advance a separate volume metadata revision before the
+worker call. That conservatively discards cached attributes and directory
+batches, while leaving valid traversal positions usable. Both revisions are
+checked under the volume mutex; a delayed reply cannot repopulate an obsolete
+view. These rules also cover partially successful mutations and cached backend
+failure checks. Ramfs retains its existing monotonic child-position semantics.
 
 Executable and shared-library loads use ordinary File capabilities and explicit
 `PROTECT` content protection. A protection token pins file identity and length,
@@ -223,9 +268,16 @@ the mount, close/reopen cache reuse, worker death after
 cache fill, manager-owner channel closure, worker death during a pending read,
 stopping one requesting process while another keeps using the mount, and
 rejecting overflowing writes derived from worker-controlled file lengths before
-publishing any write request. The
-fixture is selected by an explicit Cargo feature and is never packaged in the
-normal system or development profile.
+publishing any write request. It also checks cold directory RPC counts,
+close/reopen enumeration and attribute reuse, independent readers racing
+unrelated namespace changes, write-driven attribute invalidation, stale
+continuation rejection, safe Rust iterator termination after a stale checkpoint,
+and worker death with warm directory pages. These are
+deterministic correctness and operation-count checks, not throughput thresholds.
+Kernel tests also reclaim encoded directory and lookup pages while retaining a
+live directory identity and scalar continuation. The fixture is selected by an
+explicit Cargo feature and is never packaged in the normal system or development
+profile.
 
 CI runs this fixture with a 54 MHz counter, matching the Pi 5 frequency, so
 counter ticks cannot accidentally pass as the absolute nanosecond deadlines

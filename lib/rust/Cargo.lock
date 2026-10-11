@@ -27,6 +27,9 @@ version = "0.0.0"
 [[package]]
 name = "hyper-erofs"
 version = "0.0.0"
+dependencies = [
+ "hyper-filesystem",
+]
 
 [[package]]
 name = "hyper-fatfs"

@@ -147,6 +147,9 @@ pub(in crate::kernel) fn dispatch_deferred(
         abi::HYPER_NATIVE_SYS_DIRECTORY_OPEN_DIRECTORY => {
             handlers::sys_directory_open_directory(services, invocation.arguments())
         }
+        abi::HYPER_NATIVE_SYS_DIRECTORY_BEGIN_READ => {
+            handlers::sys_directory_begin_read(services, invocation.arguments())
+        }
         abi::HYPER_NATIVE_SYS_DIRECTORY_READ => {
             handlers::sys_directory_read(services, invocation.arguments())
         }

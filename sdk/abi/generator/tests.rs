@@ -794,6 +794,7 @@ fn object_transfer_classes_match_the_audited_contract() {
         ("native_block", TransferClass::RendezvousOnly),
         ("guest_mapping", TransferClass::RendezvousOnly),
         ("file_protection", TransferClass::Forbidden),
+        ("directory_stream", TransferClass::General),
     ];
     assert_eq!(schema::OBJECT_KINDS.len(), expected.len());
     for (kind, expected) in schema::OBJECT_KINDS.iter().zip(expected) {
@@ -946,4 +947,42 @@ fn reserves_zero_for_success_and_rejects_positive_statuses() {
     assert!(
         matches!(validate(&candidate), Err(Error::InvalidSchema(message)) if message.contains("positive value"))
     );
+}
+
+#[test]
+fn directory_stream_derivation_requires_read_only_and_separates_cursor_authority() {
+    let begin = schema::SYSCALLS
+        .iter()
+        .find(|call| call.name == "directory_begin_read");
+    assert!(matches!(
+        begin
+            .and_then(|call| call.arguments.first())
+            .and_then(|argument| argument.handle),
+        Some(schema::HandleArgument {
+            object: schema::ObjectConstraint::Kind("directory"),
+            required_rights: schema::RIGHT_READ,
+            disposition: schema::HandleDisposition::Borrow
+        })
+    ));
+    assert!(
+        matches!(begin.and_then(|call| call.results.first()).and_then(|result| result.handle),
+        Some(schema::ProducedHandle {
+            object: ProducedObject::Kind("directory_stream"),
+            rights: ProducedRights::InheritedSubset {
+                authority_source: "directory", allowed_rights
+            }
+        }) if allowed_rights == schema::DIRECTORY_STREAM_RIGHTS)
+    );
+    let read = schema::SYSCALLS
+        .iter()
+        .find(|call| call.name == "directory_read");
+    assert!(matches!(
+        read.and_then(|call| call.arguments.first())
+            .and_then(|argument| argument.handle),
+        Some(schema::HandleArgument {
+            object: schema::ObjectConstraint::Kind("directory_stream"),
+            required_rights: schema::RIGHT_READ,
+            disposition: schema::HandleDisposition::Borrow
+        })
+    ));
 }

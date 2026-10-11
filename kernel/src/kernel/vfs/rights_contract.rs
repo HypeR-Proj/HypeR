@@ -25,6 +25,17 @@ pub(crate) const DIRECTORY_SUPPORTED_RIGHTS: u64 = native::HYPER_NATIVE_RIGHT_DU
     | native::HYPER_NATIVE_RIGHT_LOCK_FILE
     | native::HYPER_NATIVE_RIGHT_PROTECT;
 
+pub(crate) const DIRECTORY_STREAM_SUPPORTED_RIGHTS: u64 = native::HYPER_NATIVE_RIGHT_READ
+    | native::HYPER_NATIVE_RIGHT_DUPLICATE
+    | native::HYPER_NATIVE_RIGHT_TRANSFER
+    | native::HYPER_NATIVE_RIGHT_INSPECT;
+
+/// Enumeration preserves restrictions on inspection and capability propagation.
+/// The caller separately verifies READ before deriving this grant.
+pub(crate) const fn directory_stream_rights(source: u64) -> u64 {
+    source & DIRECTORY_STREAM_SUPPORTED_RIGHTS
+}
+
 /// Computes the source authority required to create one File capability.
 ///
 /// Traversal always requires `READ`. Every right carried by the result must

@@ -36,6 +36,19 @@ pub struct Extent {
 }
 
 impl<'a, IO: ReadWriteSeek, TP, OCC> File<'a, IO, TP, OCC> {
+    pub(crate) fn directory_position(&self) -> (u32, u32, u32) {
+        (
+            self.first_cluster.unwrap_or(0),
+            self.current_cluster.unwrap_or(0),
+            self.offset,
+        )
+    }
+
+    pub(crate) fn restore_directory_position(&mut self, current: u32, offset: u32) {
+        self.current_cluster = (current != 0).then_some(current);
+        self.offset = offset;
+    }
+
     pub(crate) fn new(
         first_cluster: Option<u32>,
         entry: Option<DirEntryEditor>,

@@ -96,9 +96,9 @@ pub(crate) struct DirectoryEntrySnapshot {
 }
 
 pub(crate) struct DirectoryPage {
-    entries: [Option<DirectoryEntrySnapshot>; DIRECTORY_PAGE_CAPACITY],
-    len: usize,
-    next_cookie: u64,
+    pub(super) entries: [Option<DirectoryEntrySnapshot>; DIRECTORY_PAGE_CAPACITY],
+    pub(super) len: usize,
+    pub(super) next_cookie: u64,
 }
 
 impl DirectoryPage {
@@ -681,48 +681,12 @@ impl DirectoryObject {
         }
     }
 
-    pub(crate) fn read_page(&self, cookie: u64, page: &mut DirectoryPage) -> Result<(), Error> {
-        // One caller-owned page, including while the backend blocks. Do not
-        // return this large array through nested Result temporaries.
-        page.len = 0;
-        page.next_cookie = 0;
-        let current = self.current.location(&self.namespace.mounts.snapshot());
-        let mut cursor = cookie;
-        while page.len < DIRECTORY_PAGE_CAPACITY {
-            let Some(entry) = self.namespace.read_directory_entry(&current, cursor)? else {
-                return Ok(());
-            };
-            let entry_name = core::str::from_utf8(&entry.name[..entry.length])
-                .map_err(|_| Error::Backend(super::instance::Error::InvalidBackendResult))?;
-            if Name::new(entry_name).is_err()
-                || entry.next_cookie == 0
-                || entry.next_cookie == cursor
-            {
-                return Err(Error::Backend(super::instance::Error::InvalidBackendResult));
-            }
-            let mut name = [0_u8; MAX_NAME_BYTES];
-            let Some(destination) = name.get_mut(..entry_name.len()) else {
-                return Err(Error::Backend(super::instance::Error::InvalidBackendResult));
-            };
-            destination.copy_from_slice(entry_name.as_bytes());
-            page.entries[page.len] = Some(DirectoryEntrySnapshot {
-                name,
-                name_length: u32::try_from(entry_name.len())
-                    .map_err(|_| Error::Backend(super::instance::Error::InvalidBackendResult))?,
-                attributes: entry.attributes,
-            });
-            page.len += 1;
-            cursor = entry.next_cookie;
-        }
-
-        if self
-            .namespace
-            .read_directory_entry(&current, cursor)?
-            .is_some()
-        {
-            page.next_cookie = cursor;
-        }
-        Ok(())
+    pub(crate) fn begin_read(
+        &self,
+        sponsor: &ResourceDomain,
+    ) -> Result<super::DirectoryStream, Error> {
+        let location = self.current.location(&self.namespace.mounts.snapshot());
+        super::DirectoryStream::try_new(self.namespace.clone(), location, sponsor)
     }
 
     pub(crate) fn info(&self) -> Result<DirectoryInfo, Error> {
