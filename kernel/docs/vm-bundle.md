@@ -273,11 +273,12 @@ complete receipt, including input, scheduling and terminal relay overhead.
 It is intentionally excluded from CI and rejects CI environments.
 
 An exploratory macOS ARM64 run with QEMU 11.1.2, multithreaded TCG, four host
-vCPUs and 1 GiB RAM measured a 32 KiB output median of 31.97 seconds through
-SBSA UART versus 1.10 seconds through hvc0 across three samples per device
-(about 29 times faster). A separate 256 KiB hvc0 transfer completed in 1.57
-seconds with exact payload verification. These are development-environment
-observations, not hardware throughput guarantees or acceptance thresholds.
+vCPUs and 1 GiB RAM measured 32 KiB output in 24.92–67.83 seconds through
+SBSA UART and 0.79–1.27 seconds through hvc0, across three samples per device.
+The medians were 66.95 and 0.82 seconds respectively. Each payload was verified
+exactly. The wide UART variation is part of this exploratory result; these are
+development-environment observations, not hardware throughput guarantees or
+acceptance thresholds.
 
 Physical AArch64 qualification still needs concurrent guest output/runtime
 consumption under migration, forced runtime termination, and repeated VM
