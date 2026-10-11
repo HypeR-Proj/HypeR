@@ -20,6 +20,25 @@ FAILURE_MARKERS = (
 )
 UART_DRAINED = b'HYPER_GUEST_UART_DRAINED'
 CONSOLE_READY = b'HYPER_GUEST_READY'
+# Shared x86 CI runners can still be progressing through Linux boot after
+# 90 seconds of cross-architecture TCG. This budget is only for guest startup;
+# ordinary command deadlines remain owned by each acceptance scenario.
+GUEST_BOOT_TIMEOUT_SECONDS = int(os.environ.get('QEMU_GUEST_BOOT_TIMEOUT_SECONDS', '360'))
+if GUEST_BOOT_TIMEOUT_SECONDS <= 0:
+    raise ValueError('QEMU_GUEST_BOOT_TIMEOUT_SECONDS must be positive')
+
+
+def guest_boot_deadline(timeout=GUEST_BOOT_TIMEOUT_SECONDS):
+    """Return the remaining budget shared by all waits in one guest startup."""
+    deadline = time.monotonic() + timeout
+
+    def remaining():
+        seconds = deadline - time.monotonic()
+        if seconds <= 0:
+            raise TimeoutError('guest console startup timed out')
+        return seconds
+
+    return remaining
 
 
 def uart_console(qemu):
@@ -45,22 +64,23 @@ def startup_ack_command():
 
 
 @contextmanager
-def guest_console_startup(session):
+def guest_console_startup(session, *, timeout=GUEST_BOOT_TIMEOUT_SECONDS):
     """Preserve hvc bytes inside UART printk lines until both streams drain.
 
     Enter before attaching so a read that contains both the attach reply and
     the first prompt cannot discard that prompt through printk filtering.
     Host records and failure detection remain active throughout the handshake.
+    The yielded callable supplies the remaining shared deadline to each wait.
     """
     saved_filter = session.output_filter
     session.output_filter = append_console_output
     try:
-        yield
+        yield guest_boot_deadline(timeout)
     finally:
         session.output_filter = saved_filter
 
 
-def synchronize_guest_console(send, await_text, qemu, *, timeout=60):
+def synchronize_guest_console(send, await_text, qemu, *, timeout=GUEST_BOOT_TIMEOUT_SECONDS):
     """After the first prompt, drain UART and require a fresh hvc/tty reply.
 
     Both callbacks transfer complete byte strings; send must not append a
@@ -68,13 +88,10 @@ def synchronize_guest_console(send, await_text, qemu, *, timeout=60):
     Informational printk is suppressed only in this test guest; emergency
     diagnostics remain visible. One deadline bounds the entire handshake.
     """
-    deadline = time.monotonic() + timeout
+    remaining = guest_boot_deadline(timeout)
 
     def expect(pattern):
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise TimeoutError('guest console startup handshake timed out')
-        return await_text(pattern, timeout=remaining)
+        return await_text(pattern, timeout=remaining())
 
     send(startup_drain_command(qemu))
     expect(rb'\n' + UART_DRAINED + rb'\r?\n')
@@ -112,7 +129,14 @@ if __name__ == '__main__':
     parser.add_argument('--startup-command', choices=('drain', 'ack'),
                         help='emit a guest startup handshake command for shell tests')
     parser.add_argument('--qemu', help='QEMU executable, used to select the diagnostic UART')
+    parser.add_argument('--boot-timeout', action='store_true',
+                        help='print the shared guest startup budget for shell tests')
     args = parser.parse_args()
+    if args.boot_timeout:
+        if args.startup_command or args.filter_guest_logs:
+            parser.error('--boot-timeout cannot emit startup commands or filter logs')
+        print(GUEST_BOOT_TIMEOUT_SECONDS)
+        sys.exit(0)
     if args.startup_command:
         if args.filter_guest_logs:
             parser.error('startup commands cannot filter logs')

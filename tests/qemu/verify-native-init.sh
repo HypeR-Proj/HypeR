@@ -19,13 +19,18 @@ bootargs=$7
 verify_vm=${HYPER_TEST_VM:-1}
 case "$verify_vm" in 0|1) ;; *) echo "HYPER_TEST_VM must be 0 or 1" >&2; exit 2 ;; esac
 memory_value='[0-9]+(\.[0-9])? (B|KiB|MiB|GiB|TiB|PiB|EiB)'
+script_dir=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 timeout_seconds=${QEMU_BOOT_TIMEOUT_SECONDS:-90}
-total_timeout_seconds=${QEMU_NATIVE_TIMEOUT_SECONDS:-300}
+guest_boot_timeout_seconds=$(python3 -B "$script_dir/guest_console.py" --boot-timeout)
+default_total_timeout=300
+if [ "$verify_vm" = 1 ]; then
+    default_total_timeout=$((guest_boot_timeout_seconds + 240))
+fi
+total_timeout_seconds=${QEMU_NATIVE_TIMEOUT_SECONDS:-$default_total_timeout}
 temp=$(mktemp -d -t hyper-native-init.XXXXXX)
 input=$temp/input
 native_output=$temp/native-output
 guest_output=$temp/guest-output
-script_dir=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 log=${QEMU_TEST_LOG:-$temp/output.log}
 pid=
 
@@ -86,8 +91,13 @@ send_commands() {
 }
 while :; do
     now=$(date +%s)
+    case "$command_phase" in
+        guest_console | guest_drain | guest_ready | guest_bootlog)
+            phase_timeout_seconds=$guest_boot_timeout_seconds ;;
+        *) phase_timeout_seconds=$timeout_seconds ;;
+    esac
     if [ "$((now - started))" -ge "$total_timeout_seconds" ] ||
-        [ "$((now - phase_started))" -ge "$timeout_seconds" ]; then
+        [ "$((now - phase_started))" -ge "$phase_timeout_seconds" ]; then
         break
     fi
     if grep -Eq 'HypeR: kernel startup.*failed|HypeR crash monitor' "$log" ||
@@ -475,7 +485,7 @@ while :; do
     if [ "$command_phase" != "$observed_phase" ]; then
         now=$(date +%s)
         echo "Native acceptance: $observed_phase -> $command_phase ($((now - phase_started))s phase, $((now - started))s total)"
-        # Startup, synchronization, and boot-log proof share the original boot
+        # Startup, synchronization, and boot-log proof share one guest boot
         # deadline; the handshake must not turn a stuck guest into a longer wait.
         case "$observed_phase:$command_phase" in
             guest_console:guest_drain | guest_drain:guest_ready | guest_ready:guest_bootlog) ;;
@@ -487,5 +497,5 @@ while :; do
 done
 
 cat "$log" >&2
-echo "Native acceptance timed out in $command_phase ($((now - phase_started))s phase, $((now - started))s total; limits ${timeout_seconds}s/${total_timeout_seconds}s)" >&2
+echo "Native acceptance timed out in $command_phase ($((now - phase_started))s phase, $((now - started))s total; limits ${phase_timeout_seconds}s/${total_timeout_seconds}s)" >&2
 exit 1

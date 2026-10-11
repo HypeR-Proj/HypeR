@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 
-from guest_console import synchronize_guest_console
+from guest_console import guest_boot_deadline, synchronize_guest_console
 
 
 def run(args):
@@ -74,10 +74,11 @@ def run(args):
 
         def attach():
             state(b'running')
+            boot_timeout = guest_boot_deadline()
             send(b'vmm console alpine\n')
-            expect(rb'HypeR guest: Linux userspace is running')
-            expect(rb'~ # ')
-            synchronize_guest_console(send, expect, args.qemu, timeout=180)
+            expect(rb'HypeR guest: Linux userspace is running', timeout=boot_timeout())
+            expect(rb'~ # ', timeout=boot_timeout())
+            synchronize_guest_console(send, expect, args.qemu, timeout=boot_timeout())
 
         def guest(command, marker):
             # Split the result marker in shell syntax so echo cannot satisfy it.

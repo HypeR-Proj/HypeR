@@ -197,13 +197,13 @@ class Scenario:
     def console(self, vm, qemu):
         name = vm['name']
         self.state(name, b'running')
-        with guest_console_startup(self.session):
+        with guest_console_startup(self.session) as boot_timeout:
             self.send(f'vmm console {name}\n'.encode())
             self.session.await_text(re.escape(f'Connected to {name}.'.encode()))
             self.send(b'\n')
-            self.session.await_text(rb'~ # ', timeout=180)
+            self.session.await_text(rb'~ # ', timeout=boot_timeout())
             synchronize_guest_console(self.send, self.session.await_text,
-                                      qemu, timeout=180)
+                                      qemu, timeout=boot_timeout())
         try:
             yield
         finally:

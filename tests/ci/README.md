@@ -80,13 +80,18 @@ The RISC-V Native image includes userspace VM provisioning. Its Native suite
 checks Linux guest startup on one and four host harts and runtime-crash recovery;
 this does not imply multi-vCPU RISC-V guest support.
 
-Native acceptance reports each phase transition with elapsed times. Each phase
-has a 90-second progress deadline (`QEMU_BOOT_TIMEOUT_SECONDS`), and the complete
-multi-command run has a 300-second deadline (`QEMU_NATIVE_TIMEOUT_SECONDS`).
+Native acceptance reports each phase transition with elapsed times. Ordinary
+phases have a 90-second deadline (`QEMU_BOOT_TIMEOUT_SECONDS`). Guest startup,
+console synchronization, and the boot-log probe share one 360-second deadline
+(`QEMU_GUEST_BOOT_TIMEOUT_SECONDS`), matching the Python guest boot tests. These
+waits consume the remaining budget rather than restarting it at each marker.
+The complete Native run defaults to the guest boot budget plus 240 seconds
+(600 seconds normally), or 300 seconds without a guest. Override that total
+with `QEMU_NATIVE_TIMEOUT_SECONDS`.
 The workflow retains the raw Native console log alongside runtime-crash logs,
 including on failure, so a stalled phase can be distinguished from exhaustion
 of the overall test budget.
-The separate guest SMP scenario allows a fixed 300 seconds for each guest boot
+The guest SMP scenario uses the same fixed guest startup budget for each boot
 or reboot on shared TCG runners; ordinary commands retain a 90-second deadline.
 On failure it prints the raw serial tail, including filtered guest boot records.
 Ordinary command submissions wait for the expected shell prompt count, so a

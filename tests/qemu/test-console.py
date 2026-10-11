@@ -5,15 +5,17 @@
 """Check terminal expectations against multiplexed kernel log records."""
 import importlib.util
 from functools import partial
+import os
 from pathlib import Path
 import re
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 from guest_console import (CONSOLE_READY, UART_DRAINED, append_console_output,
-                           guest_console_startup, startup_ack_command,
+                           guest_boot_deadline, guest_console_startup, startup_ack_command,
                            startup_drain_command, synchronize_guest_console)
 from session import Session
 
@@ -174,6 +176,35 @@ class ConsoleTests(unittest.TestCase):
                         synchronize_guest_console(session.send, session.await_text,
                                                   'qemu-system-aarch64', timeout=0.02)
                 self.assertIs(session.output_filter, output_filter)
+
+    def test_guest_startup_waits_share_one_deadline(self):
+        # Completing one boot marker cannot grant the next marker a fresh
+        # full timeout; command scenarios outside startup keep their own limits.
+        with patch('guest_console.time.monotonic', side_effect=(100, 101, 104, 105)):
+            remaining = guest_boot_deadline(5)
+            self.assertEqual(remaining(), 4)
+            self.assertEqual(remaining(), 1)
+            with self.assertRaises(TimeoutError):
+                remaining()
+        session = Mock(output_filter=None)
+        with patch('guest_console.time.monotonic', side_effect=(100, 103, 105)):
+            with guest_console_startup(session, timeout=5) as remaining:
+                self.assertEqual(remaining(), 2)
+                with self.assertRaises(TimeoutError):
+                    remaining()
+        self.assertIsNone(session.output_filter)
+
+    def test_guest_boot_budget_cli_respects_explicit_override(self):
+        command = [sys.executable, '-B', str(Path(__file__).with_name('guest_console.py')),
+                   '--boot-timeout']
+        environment = dict(os.environ, QEMU_GUEST_BOOT_TIMEOUT_SECONDS='17')
+        output = subprocess.run(command, env=environment, capture_output=True, check=True)
+        self.assertEqual(output.stdout, b'17\n')
+        for invalid in ('0', '-1', 'invalid'):
+            environment['QEMU_GUEST_BOOT_TIMEOUT_SECONDS'] = invalid
+            output = subprocess.run(command, env=environment, capture_output=True)
+            self.assertNotEqual(output.returncode, 0)
+            self.assertEqual(output.stdout, b'')
 
     def test_interleaved_kernel_records_preserve_terminal_contract(self):
         pattern = console.console_lines(b'inherit-data', b'TERMINAL_INHERIT_OK', b'hyper-sh$ ')

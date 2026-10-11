@@ -172,11 +172,11 @@ def main():
         # must drain available output without waiting for that child's EOF.
         run('/system/bin/std-test --child detached-output', rb'OUTPUT_OWNER_EXITED', timeout=5)
         if verify_vm:
-            with guest_console_startup(session):
+            with guest_console_startup(session) as boot_timeout:
                 send(b'vmm console alpine\n')
                 await_text(rb'Connected to alpine\.', timeout=30)
-                await_text(rb'~ # ', timeout=60)
-                synchronize_guest_console(send, await_text, qemu, timeout=120)
+                await_text(rb'~ # ', timeout=boot_timeout())
+                synchronize_guest_console(send, await_text, qemu, timeout=boot_timeout())
             aarch64 = 'aarch64' in os.path.basename(qemu)
             send(guest_console_identity_command(aarch64))
             output = await_text(rb'\nCONSOLE_ID_END\n~ # ')
