@@ -160,7 +160,9 @@ fn rollback_active_handler(registration: Option<crate::kernel::irq::interrupt::R
     }
 }
 
-pub(crate) fn set_host_timer_enabled(enabled: bool) -> Result<(), Error> {
+/// Gates the physical interrupt source used by the active guest's timer.
+/// This is independent of the host tick and must stay masked without a vCPU.
+pub(crate) fn set_guest_timer_source_enabled(enabled: bool) -> Result<(), Error> {
     let interrupt = HOST_TIMER_INTERRUPT.load(Ordering::Acquire);
     if interrupt == NO_HOST_TIMER {
         return Ok(());
@@ -423,7 +425,9 @@ fn handle_source_recovery(_interrupt: VirtualInterrupt, context: usize) -> Handl
     };
     let can_unmask = match update_active_interrupts(crate::hal::vm::handle_maintenance_interrupt) {
         Ok(Some(Ok(can_unmask))) => can_unmask,
-        Ok(None) => true,
+        // Detachment disables the live CNTV bank. Only activation of a new
+        // owner may reopen its PPI; a host tick cannot restore guest ownership.
+        Ok(None) => false,
         Ok(Some(Err(error))) => {
             crate::hal::vm::quiesce_virtual_interrupt_delivery();
             crate::pr_err!("HypeR: virtual-timer recovery failed: {error:?}");
