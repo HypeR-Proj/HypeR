@@ -746,6 +746,31 @@ class BoardTests(unittest.TestCase):
                 self.assertEqual(stream.read(17), b'guest-sector-zero')
             self.assertEqual(disk.stat().st_size, 8 * 1024**2)
 
+    def test_real_erofs_system_image_is_reproducible(self):
+        # Exercise the installed tool, including CI's erofs-utils 1.7, rather
+        # than mocking its command line and accepting unsupported options.
+        try:
+            mkfs = packer.image_tool('mkfs.erofs', 'mkfs.erofs', 'erofs-utils')
+        except ValueError as error:
+            self.skipTest(str(error))
+        board = Board.parse(self.source)
+        system = next(part for part in board.partitions if part.content == 'system')
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            root = directory / 'root'
+            root.mkdir()
+            (root / 'hello').write_bytes(b'system file\n')
+            (root / 'link').symlink_to('hello')
+            contents = []
+            for name in ('first', 'second'):
+                staging = directory / name
+                staging.mkdir()
+                images = packer.prepare_native_volumes(board, staging, root, None, None, mkfs)
+                self.assertEqual(set(images), {system.name})
+                contents.append(images[system.name].read_bytes())
+            self.assertEqual(struct.unpack_from('<I', contents[0], 1024)[0], 0xe0f5e1e2)
+            self.assertEqual(contents[0], contents[1])
+
 
 if __name__ == '__main__':
     unittest.main()

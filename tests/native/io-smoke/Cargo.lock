@@ -7,6 +7,10 @@ name = "hyper-abi"
 version = "0.0.0"
 
 [[package]]
+name = "hyper-block"
+version = "0.0.0"
+
+[[package]]
 name = "hyper-io-smoke"
 version = "0.0.0"
 dependencies = [
@@ -38,6 +42,7 @@ dependencies = [
 name = "hyper-service"
 version = "0.0.0"
 dependencies = [
+ "hyper-block",
  "hyper-os",
 ]
 

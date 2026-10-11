@@ -252,7 +252,9 @@ def prepare_native_volumes(board, staging, system_root, mkfs, mcopy, mkfs_erofs,
             continue
         if part.filesystem == 'erofs':
             tool = image_tool(mkfs_erofs, 'mkfs.erofs', 'erofs-utils')
-            subprocess.run([tool, '-b4096', '-x-1', '-T0', '-Uclear', '--all-root',
+            # erofs-utils 1.7 accepts UUIDs, but not the newer "clear" alias.
+            subprocess.run([tool, '-b4096', '-x-1', '-T0',
+                            '-U00000000-0000-0000-0000-000000000000', '--all-root',
                             str(image), str(root)], check=True)
         elif part.filesystem == 'fat':
             with image.open('xb') as stream:
