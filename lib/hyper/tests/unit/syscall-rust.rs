@@ -43,6 +43,60 @@ fn transport(status: HyperNativeStatus) {
     // kernel transport. It treats handles/scalars as opaque values and does not
     // dereference payload pointers. All pointer objects outlive each call.
     unsafe {
+        expect!(
+            HYPER_NATIVE_SYS_FILESYSTEM_MOUNT_RAMFS,
+            [handle, bytes.as_ptr() as u64, bytes.len() as u64, 0, 0, 0]
+        );
+        result(
+            sys::filesystem_mount_ramfs(handle, bytes.as_ptr(), bytes.len()),
+            status,
+        );
+        expect!(HYPER_NATIVE_SYS_FILE_PROTECT, [handle, 0, 0, 0, 0, 0]);
+        result(sys::file_protect(handle), status);
+        let mapping = HyperNativePrivateMapping {
+            source_offset: 0,
+            source_length: 0,
+            address: 0,
+            size: 0,
+            data_offset: 0,
+            permissions: 0,
+            mode: 0,
+        };
+        expect!(
+            HYPER_NATIVE_SYS_VMAR_MAP_FILE,
+            [
+                handle,
+                other,
+                offset,
+                &mapping as *const _ as u64,
+                core::mem::size_of_val(&mapping) as u64,
+                0
+            ]
+        );
+        assert_eq!(
+            sys::vmar_map_file(
+                handle,
+                other,
+                offset,
+                &mapping,
+                core::mem::size_of_val(&mapping)
+            ),
+            status
+        );
+        check_consumed();
+        let request = HyperNativeFilesystemRootSwitch {
+            new_root: 0,
+            new_root_length: 0,
+            put_old: 0,
+            put_old_length: 0,
+            moves: 0,
+            move_count: 0,
+        };
+        expect!(
+            HYPER_NATIVE_SYS_FILESYSTEM_SWITCH_ROOT,
+            [handle, &request as *const _ as u64, 0, 0, 0, 0]
+        );
+        result(sys::filesystem_switch_root(handle, &request), status);
         let affinity_words = [3_u64, 1_u64 << 63];
         expect!(
             HYPER_NATIVE_SYS_VIRTUAL_CPU_SET_AFFINITY,

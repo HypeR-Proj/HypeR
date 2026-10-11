@@ -68,8 +68,11 @@ pub(in crate::kernel) fn dispatch_deferred(
         abi::HYPER_NATIVE_SYS_VMO_CREATE_SNAPSHOT => {
             handlers::sys_vmo_create_snapshot(services, invocation.arguments())
         }
-        abi::HYPER_NATIVE_SYS_FILE_CREATE_SNAPSHOT => {
-            handlers::sys_file_create_snapshot(services, invocation.arguments())
+        abi::HYPER_NATIVE_SYS_FILE_PROTECT => {
+            handlers::sys_file_protect(services, invocation.arguments())
+        }
+        abi::HYPER_NATIVE_SYS_VMAR_MAP_FILE => {
+            handlers::sys_vmar_map_file(services, invocation.arguments())
         }
         abi::HYPER_NATIVE_SYS_VMAR_MAP_PRIVATE => {
             handlers::sys_vmar_map_private(services, invocation.arguments())
@@ -378,8 +381,20 @@ pub(in crate::kernel) fn dispatch_deferred(
         abi::HYPER_NATIVE_SYS_NATIVE_BLOCK_ACTIVATE => {
             handlers::sys_native_block_activate(services, invocation.arguments())
         }
-        abi::HYPER_NATIVE_SYS_NATIVE_BLOCK_MOUNT => {
-            handlers::sys_native_block_mount(services, invocation.arguments())
+        abi::HYPER_NATIVE_SYS_NATIVE_BLOCK_TRANSFER => {
+            handlers::sys_native_block_transfer(services, invocation.arguments())
+        }
+        abi::HYPER_NATIVE_SYS_FILESYSTEM_MOUNT_RAMFS => {
+            handlers::sys_filesystem_mount_ramfs(services, invocation.arguments())
+        }
+        abi::HYPER_NATIVE_SYS_FILESYSTEM_SWITCH_ROOT => {
+            handlers::sys_filesystem_switch_root(services, invocation.arguments())
+        }
+        abi::HYPER_NATIVE_SYS_FILESYSTEM_UNMOUNT => {
+            handlers::sys_filesystem_unmount(services, invocation.arguments())
+        }
+        abi::HYPER_NATIVE_SYS_FILESYSTEM_MOUNT => {
+            handlers::sys_filesystem_mount(services, invocation.arguments())
         }
         abi::HYPER_NATIVE_SYS_GUEST_NOTIFICATION_CONTROL => {
             handlers::sys_guest_notification_control(services, invocation.arguments())
@@ -404,9 +419,6 @@ pub(in crate::kernel) fn dispatch_deferred(
         }
         abi::HYPER_NATIVE_SYS_VMO_CREATE => {
             handlers::sys_vmo_create(services, invocation.arguments())
-        }
-        abi::HYPER_NATIVE_SYS_FILE_CREATE_EXECUTABLE_VMO => {
-            handlers::sys_file_create_executable_vmo(services, invocation.arguments())
         }
         abi::HYPER_NATIVE_SYS_VMO_READ => handlers::sys_vmo_read(services, invocation.arguments()),
         abi::HYPER_NATIVE_SYS_VMO_WRITE => {

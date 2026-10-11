@@ -137,9 +137,12 @@ The shared runtime retains authorized duplicates of startup directory, task
 and stdio capabilities before application code can take its startup handles.
 The rooted std filesystem namespace requires an explicit startup root grant;
 a cwd grant alone does not implicitly become a process root. Such callers can
-still use confined Native Directory APIs. A supplied root cursor is normalized
+still use confined Native Directory APIs. A supplied root cursor is scoped
 at its current node, and that same process root governs absolute paths, cwd
-derivation and child delegation. Relative paths start at the delegated
+derivation and child delegation. A namespace-root grant retains its following
+anchor through this scoping operation and follows an authorized root switch;
+a fixed directory grant remains confined to its original node. Relative paths
+start at the delegated
 cwd, or root when no cwd is supplied; absolute paths and absolute symlink targets
 start at the delegated root. Parent traversal cannot escape that root.
 
@@ -169,7 +172,7 @@ acknowledge in-memory changes without restart persistence. Board deployments
 also mount FAT at `/data` through the Native block frontend and I/O VM; sync
 flushes that backend, with durability dependent on device completion and flush
 semantics. FAT has additional limits on links, modes, unlink and rename;
-see [FAT semantics](../../../kernel/docs/fat.md). The std surface does not
+see [FAT semantics](../../../docs/fat.md). The std surface does not
 make unsupported backend operations available.
 Recursive deletion uses pinned directory capabilities and conditional removal,
 so replacing an entry with a symlink cannot redirect traversal into its target.

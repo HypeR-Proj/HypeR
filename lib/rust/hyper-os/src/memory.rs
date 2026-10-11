@@ -3,13 +3,15 @@
 
 //! Safe ownership and bounded transfer operations for Native VMOs.
 
-use crate::handle::{AnyObject, FileObject, HandleRef, OwnedHandle, Rights, VmoObject};
+use crate::handle::{AnyObject, HandleRef, OwnedHandle, Rights, VmoObject};
 
 mod private;
+mod shared;
 use crate::{Error, Result, Status};
 pub use private::{
     PrivateMapping, PrivateMappingCloseError, PrivateMappingMode, PrivateMappingOptions,
 };
+pub use shared::SharedReadMapping;
 
 const WRITABLE_RIGHTS: Rights = Rights::DUPLICATE
     .union(Rights::TRANSFER)
@@ -161,7 +163,7 @@ impl WritableVmo {
     }
 }
 
-/// Immutable bytes captured from one VMO or file-content generation.
+/// Immutable bytes captured from one VMO.
 /// A private mapping may be writable without granting write access to this source.
 pub struct SnapshotVmo {
     handle: OwnedHandle<VmoObject>,
@@ -172,12 +174,6 @@ impl SnapshotVmo {
     pub fn from_vmo(source: HandleRef<'_, VmoObject>) -> Result<Self> {
         // SAFETY: source is borrowed; successful creation transfers one owner.
         let result = unsafe { hyper_sys::vmo_create_snapshot(source.raw().get()) };
-        Self::adopt(result, source.raw())
-    }
-
-    pub fn from_file(source: HandleRef<'_, FileObject>) -> Result<Self> {
-        // SAFETY: source is borrowed; the returned size belongs to this snapshot.
-        let result = unsafe { hyper_sys::file_create_snapshot(source.raw().get()) };
         Self::adopt(result, source.raw())
     }
 

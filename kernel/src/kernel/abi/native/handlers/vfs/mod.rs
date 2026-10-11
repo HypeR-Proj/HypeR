@@ -23,6 +23,10 @@ use hyper::abi::native::{
     HyperNativeDirectoryEntry, HyperNativeDirectoryInfo, HyperNativeFileInfo, HyperNativeStatus,
 };
 mod metadata;
+mod namespace;
+pub(in crate::kernel::abi::native) use namespace::{
+    sys_filesystem_mount_ramfs, sys_filesystem_switch_root,
+};
 
 type Status = abi::HyperNativeStatus;
 const INVALID: Status = abi::HYPER_NATIVE_STATUS_INVALID_ARGUMENT;
@@ -556,3 +560,21 @@ pub(in crate::kernel::abi::native) use metadata::{
 
 #[cfg(feature = "kernel-self-test")]
 pub(in crate::kernel::abi::native) use metadata::run_wire_self_test;
+
+#[inline(never)]
+pub(in crate::kernel::abi::native) fn sys_file_protect(
+    services: &impl VfsServices,
+    arguments: &Arguments,
+) -> DeferredAction {
+    let result = (|| {
+        require_zero(&arguments[1..])?;
+        let file = parse_handle(arguments[0])?;
+        services
+            .protect_file(file)
+            .map_err(status_from_vfs_service_error)
+    })();
+    DeferredAction::Return(match result {
+        Ok((handle, size)) => success([handle.get(), size]),
+        Err(error) => failure(error),
+    })
+}

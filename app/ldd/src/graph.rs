@@ -9,7 +9,7 @@ use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
 
-// Includes the main image and interpreter, as in lib/dynamic-loader's object table.
+// Includes the main image and loader, as in lib/dynamic-loader's object table.
 const MAX_IMAGES: usize = 16;
 
 #[derive(Debug)]
@@ -23,12 +23,13 @@ pub struct Object {
     pub name: String,
     pub path: PathBuf,
     pub image: Result<Image, Failure>,
-    pub interpreter: bool,
+    pub loader: bool,
     pub dependencies: Vec<usize>,
 }
 
 pub struct Graph {
     pub library_directory: PathBuf,
+    pub declared_interpreter: Option<String>,
     pub objects: Vec<Object>,
 }
 
@@ -52,20 +53,29 @@ fn open_image(path: &Path) -> io::Result<(PathBuf, Image)> {
 /// Inspects the current files without mapping executable pages or invoking the
 /// interpreter. Names are scoped to one directory, just as for Native rtld;
 /// file changes during the scan are not a process-wide atomic snapshot.
-pub fn inspect(path: &Path, library_directory: Option<&Path>, direct: bool) -> io::Result<Graph> {
+pub fn inspect(
+    path: &Path,
+    library_directory: Option<&Path>,
+    direct: bool,
+    loader: Option<&Path>,
+) -> io::Result<Graph> {
     let input_name = path.file_name().and_then(|name| name.to_str());
     let (path, image) = open_image(path)?;
     let directory = library_directory.map(Path::to_path_buf).unwrap_or_else(|| {
-        PathBuf::from(format!("/lib/{}-hyper-hyper", image.architecture.name()))
+        PathBuf::from(format!(
+            "/system/lib/{}-hyper-hyper",
+            image.architecture.name()
+        ))
     });
     let mut builder = Builder {
         graph: Graph {
             library_directory: directory,
+            declared_interpreter: image.interpreter.clone(),
             objects: vec![Object {
                 name: String::from("<main>"),
                 path,
                 image: Ok(image),
-                interpreter: false,
+                loader: false,
                 dependencies: Vec::new(),
             }],
         },
@@ -86,9 +96,25 @@ pub fn inspect(path: &Path, library_directory: Option<&Path>, direct: bool) -> i
         "<main>"
     };
     builder.names.insert(name.to_owned(), 0);
-    if let Some(path) = interpreter {
-        let name = format!("ld-hyper-{}.so", root_image.architecture.name());
-        let index = builder.add(&name, Path::new(&path), true)?;
+    // PT_INTERP identifies the Native linker ABI. Deployment selects its actual
+    // file in /system, independently of the bootstrap /lib64 namespace.
+    let default_loader = interpreter.as_deref().map(|path| {
+        if path == format!("/lib64/ld-hyper-{}.so", root_image.architecture.name()) {
+            PathBuf::from(format!("/system{path}"))
+        } else {
+            PathBuf::from(path)
+        }
+    });
+    if let Some(path) = loader.or(default_loader.as_deref()) {
+        let name = if interpreter.is_some() {
+            format!("ld-hyper-{}.so", root_image.architecture.name())
+        } else {
+            path.file_name().map_or_else(
+                || String::from("<loader>"),
+                |name| name.to_string_lossy().into_owned(),
+            )
+        };
+        let index = builder.add(&name, path, true)?;
         builder.graph.objects[0].dependencies.push(index);
         if !direct {
             builder.expand(index)?;
@@ -105,7 +131,7 @@ struct Builder {
 }
 
 impl Builder {
-    fn add(&mut self, name: &str, path: &Path, interpreter: bool) -> io::Result<usize> {
+    fn add(&mut self, name: &str, path: &Path, loader: bool) -> io::Result<usize> {
         if self.graph.objects.len() == MAX_IMAGES {
             return Err(elf::invalid(
                 "dependency graph exceeds Native loader limit of 16 images",
@@ -133,7 +159,7 @@ impl Builder {
         let object = Object {
             name: name.to_owned(),
             path: resolved_path,
-            interpreter,
+            loader,
             dependencies: Vec::new(),
             image: result.map_err(|error| {
                 if error.kind() == io::ErrorKind::NotFound {

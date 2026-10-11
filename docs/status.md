@@ -76,16 +76,22 @@ The current foundation includes:
   stack reclamation through the shared runtime;
 - a writable kernel ramfs with rooted traversal, links, rename, metadata and
   advisory locks, optional RTC-backed UTC, a small kernel bootstrap contract,
-  an AArch64/RISC-V userspace ELF64 mapper, and a capability-relative runtime linker for Native `/init` and its
-  services, with eager relocation, W^X/RELRO enforcement, guarded stacks, and
+  an AArch64/RISC-V static bootstrap loader, and an explicitly delegated formal
+  executable loader/runtime linker for system programs, with eager relocation,
+  W^X/RELRO enforcement, guarded stacks, and
   scheduler-owned Process publication;
-- immutable file/VMO snapshots and private mappings with copy-on-write or
-  eager allocation; complete executable source pages can be reused across
-  processes while relocations and other writes remain private. Shared writable
-  VMOs and guest memory retain stable physical backing; this is not live
-  address-space cloning or fork;
-- a manifest-driven Native init which constructs services transactionally and
-  delegates monotonically attenuated capabilities;
+- independent File `PROTECT` authority and process-local protection tokens;
+  private file mappings retain stable content identity and reclaim clean pages
+  for later refault, while relocations and other writes remain private. Generic
+  memory-VMO snapshots still support copy-on-write or eager private mappings.
+  Shared writable VMOs and guest memory retain stable physical backing; this
+  is not live address-space cloning or fork;
+- manifest-driven stage-1 and system init which construct services transactionally,
+  transfer core supervision once, and delegate monotonically attenuated
+  capabilities; a separately authorized, atomic VFS root switch retains the
+  original RAM root at `/boot`, preserves live file and mount identities, and
+  precedes system-service launch. System files use EROFS by default or RAM
+  with the same startup flow;
 - capability-scoped Native `ps` and `handle` tools with immutable task names,
   explicit Process-to-Thread ownership, decoded object purposes and rights,
   and KOIDs that remain diagnostic correlation values rather than authority;
@@ -110,7 +116,7 @@ The current foundation includes:
 - a capability-scoped Native VM manager contained by a bounded fleet resource
   domain, plus isolated per-VM runtimes which parse FIT images, own guest VMOs,
   construct Linux firmware data, and supervise installed VMs from userspace;
-- a multi-client VM control plane and `/bin/vmm` lifecycle client, with one
+- a multi-client VM control plane and `/system/bin/vmm` lifecycle client, with one
   exclusive runtime-provided console connection per VM, caller-allocated shared
   output pages, and userspace retention independent of the physical Console;
 - boot-relative, severity-tagged kernel log buffering, lock-independent Thread
@@ -146,8 +152,9 @@ peer exit, stale completion rejection and interrupted MMIO retirement.
 Linux build, modules, services, rootfs assembly and source packaging live in
 [HypeR-io-vm](https://github.com/roolrz/HypeR-io-vm). HypeR owns Native deployment,
 DT generation and digest-pinned import. Default AArch64 `make run` keeps the
-Native shell and starts the resident I/O VM, whose shared queues back the FAT
-configuration volume mounted at `/data`. The manager loads `/data/vms.json`;
+Native shell and starts the resident I/O VM, whose shared queues back separate
+EROFS system and FAT configuration volumes, mounted at `/system` and `/data`.
+The manager loads `/data/vms.json`;
 `vmm start alpine` boots its configured disk-backed guest. `make` prepares these
 artifacts, while `make run` only launches them. The optional `RUN_PROFILE=io`
 standby profile deliberately omits Native storage and business clients.
@@ -170,8 +177,8 @@ The QEMU guest path uses a Native virtio-mmio frontend and Linux vhost-net/TAP,
 bridged to an assigned virtio-net uplink and QEMU user networking. A VM can have
 a disk, a network interface, or both. Both devices share one guest-memory grant
 and mailbox, with separate notification bindings and reset epochs. All vhost
-users must drain before the shared mapping can be released. Native client zero
-reserves a future network identity without creating a frontend or link.
+users must drain before the shared mapping can be released. Client zero owns physical-block management and has no active network frontend
+or link; Native networking remains reserved for future work.
 
 The reference GICv2/GICv3 controller exposes 256 interrupt IDs, and physical
 assignment supports multiple controllers with common VM publication and

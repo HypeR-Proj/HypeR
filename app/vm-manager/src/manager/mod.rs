@@ -30,6 +30,7 @@ const MAX_CLIENTS: usize = 8;
 /// Long-lived fleet authority separated from disposable VM instances.
 pub(super) struct FleetManager {
     runtime_image: File,
+    loader: File,
     libraries: Directory,
     factory: OwnedHandle<hyper_os::handle::TaskFactoryObject>,
     fleet_domain: OwnedHandle<ResourceDomainObject>,
@@ -51,6 +52,7 @@ impl FleetManager {
             .map(CapabilityChannel::from_handle);
         let mut manager = Self {
             runtime_image: File::from_handle(startup.take(vm_contract::RUNTIME_IMAGE)?),
+            loader: File::from_handle(startup.take(process_contract::CHILD_LOADER)?),
             libraries: Directory::from_handle(
                 startup.take(process_contract::CHILD_LIBRARY_DIRECTORY)?,
             ),

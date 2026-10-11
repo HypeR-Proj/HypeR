@@ -7,11 +7,11 @@ use hyper::abi::native::{
     HYPER_NATIVE_STATUS_ACCESS_DENIED, HYPER_NATIVE_STATUS_BAD_HANDLE,
     HYPER_NATIVE_STATUS_BAD_STATE, HYPER_NATIVE_STATUS_BUFFER_TOO_SMALL, HYPER_NATIVE_STATUS_BUSY,
     HYPER_NATIVE_STATUS_CANCELLED, HYPER_NATIVE_STATUS_FAULT, HYPER_NATIVE_STATUS_INTERNAL,
-    HYPER_NATIVE_STATUS_INVALID_ARGUMENT, HYPER_NATIVE_STATUS_NO_MEMORY,
-    HYPER_NATIVE_STATUS_NOT_FOUND, HYPER_NATIVE_STATUS_NOT_SUPPORTED, HYPER_NATIVE_STATUS_OK,
-    HYPER_NATIVE_STATUS_PEER_CLOSED, HYPER_NATIVE_STATUS_RESOURCE_LIMIT,
-    HYPER_NATIVE_STATUS_TIMED_OUT, HYPER_NATIVE_STATUS_WOULD_BLOCK, HyperNativeStatus,
-    NativeResult,
+    HYPER_NATIVE_STATUS_INVALID_ARGUMENT, HYPER_NATIVE_STATUS_IO_ERROR,
+    HYPER_NATIVE_STATUS_NO_MEMORY, HYPER_NATIVE_STATUS_NOT_FOUND,
+    HYPER_NATIVE_STATUS_NOT_SUPPORTED, HYPER_NATIVE_STATUS_OK, HYPER_NATIVE_STATUS_PEER_CLOSED,
+    HYPER_NATIVE_STATUS_RESOURCE_LIMIT, HYPER_NATIVE_STATUS_TIMED_OUT,
+    HYPER_NATIVE_STATUS_WOULD_BLOCK, HyperNativeStatus, NativeResult,
 };
 
 use crate::kernel::accounting::ResourceError;
@@ -458,7 +458,9 @@ pub(super) const fn status_from_vmo_error(
         crate::kernel::mm::user_space::VmoError::Allocation => HYPER_NATIVE_STATUS_NO_MEMORY,
         crate::kernel::mm::user_space::VmoError::Backend(error) => status_from_page_error(error),
         crate::kernel::mm::user_space::VmoError::Busy
-        | crate::kernel::mm::user_space::VmoError::CowRequired => HYPER_NATIVE_STATUS_BUSY,
+        | crate::kernel::mm::user_space::VmoError::CowRequired
+        | crate::kernel::mm::user_space::VmoError::BackingNotResident => HYPER_NATIVE_STATUS_BUSY,
+        crate::kernel::mm::user_space::VmoError::BackingIo => HYPER_NATIVE_STATUS_IO_ERROR,
         crate::kernel::mm::user_space::VmoError::InvalidRange
         | crate::kernel::mm::user_space::VmoError::SizeOverflow => {
             HYPER_NATIVE_STATUS_INVALID_ARGUMENT
@@ -491,6 +493,7 @@ pub(super) fn status_from_vm_service_error(
         crate::kernel::vm::service::Error::ResourceLimit => HYPER_NATIVE_STATUS_RESOURCE_LIMIT,
         crate::kernel::vm::service::Error::NoMemory => HYPER_NATIVE_STATUS_NO_MEMORY,
         crate::kernel::vm::service::Error::Fault => HYPER_NATIVE_STATUS_FAULT,
+        crate::kernel::vm::service::Error::Io => HYPER_NATIVE_STATUS_IO_ERROR,
         crate::kernel::vm::service::Error::Internal => HYPER_NATIVE_STATUS_INTERNAL,
     }
 }
@@ -517,10 +520,7 @@ fn status_from_bootstrap_error(
     use crate::kernel::process::bootstrap::Error;
     match error {
         Error::Channel(error) => status_from_byte_channel_error(error),
-        Error::Vfs(error) => status_from_vfs_error(error),
-        Error::Memory(error) => status_from_memory_object_error(error),
         Error::Process(error) => status_from_process_error(error),
-        Error::Scheduler(_) => HYPER_NATIVE_STATUS_INTERNAL,
     }
 }
 
@@ -535,7 +535,6 @@ pub(super) fn status_from_console_service_error(error: ConsoleServiceError) -> H
 
 pub(super) fn status_from_vfs_service_error(error: VfsServiceError) -> HyperNativeStatus {
     match error {
-        VfsServiceError::Block(error) => status_from_vm_service_error(error),
         VfsServiceError::FileLock(error) => {
             use crate::kernel::vfs::locks::LockError;
             match error {
@@ -560,18 +559,14 @@ pub(super) const fn status_from_vfs_error(error: VfsError) -> HyperNativeStatus 
     match error {
         VfsError::Allocation => HYPER_NATIVE_STATUS_NO_MEMORY,
         VfsError::AllocationSize => HYPER_NATIVE_STATUS_INTERNAL,
-        VfsError::Backend(crate::kernel::vfs::instance::Error::Fat(error)) => {
-            use hyper::fs::{block::Error as BlockError, fat::Error as FatError};
+        VfsError::Backend(crate::kernel::vfs::instance::Error::Remote(error)) => {
+            use hyper_filesystem::protocol::Error as BackendError;
             match error {
-                FatError::NoSpace => hyper::abi::native::HYPER_NATIVE_STATUS_NO_SPACE,
-                FatError::Block(BlockError::ReadOnly) => {
-                    hyper::abi::native::HYPER_NATIVE_STATUS_READ_ONLY
-                }
-                FatError::Unsupported | FatError::Block(BlockError::Unsupported) => {
-                    HYPER_NATIVE_STATUS_NOT_SUPPORTED
-                }
-                FatError::Allocation => HYPER_NATIVE_STATUS_NO_MEMORY,
-                FatError::Block(BlockError::Exhausted) => HYPER_NATIVE_STATUS_RESOURCE_LIMIT,
+                BackendError::NoSpace => hyper::abi::native::HYPER_NATIVE_STATUS_NO_SPACE,
+                BackendError::ReadOnly => hyper::abi::native::HYPER_NATIVE_STATUS_READ_ONLY,
+                BackendError::Unsupported => HYPER_NATIVE_STATUS_NOT_SUPPORTED,
+                BackendError::Allocation => HYPER_NATIVE_STATUS_NO_MEMORY,
+                BackendError::ResourceLimit => HYPER_NATIVE_STATUS_RESOURCE_LIMIT,
                 _ => hyper::abi::native::HYPER_NATIVE_STATUS_IO_ERROR,
             }
         }
@@ -730,6 +725,7 @@ pub(super) const fn status_from_logical_error(
         AddressSpaceError::Allocation => HYPER_NATIVE_STATUS_NO_MEMORY,
         AddressSpaceError::Busy | AddressSpaceError::CowRequired => HYPER_NATIVE_STATUS_BUSY,
         AddressSpaceError::Backend(error) => status_from_page_error(error),
+        AddressSpaceError::BackingIo => HYPER_NATIVE_STATUS_IO_ERROR,
         AddressSpaceError::BackingNotResident
         | AddressSpaceError::EmptyRange
         | AddressSpaceError::InvalidAddressSpace

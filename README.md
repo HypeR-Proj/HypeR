@@ -24,10 +24,10 @@ Host Extensions).
 
 ```mermaid
 flowchart TB
-    Apps("Native userspace<br/>Applications · VM management · I/O services")
+    Apps("Native userspace<br/>Applications · VM management · I/O services · Filesystems")
     Guests("Guest VMs")
 
-    Kernel["HypeR kernel<br/>Scheduling · Memory · Capabilities · Virtualization<br/>VFS · FAT · Native block frontend for /data"]
+    Kernel["HypeR kernel<br/>Scheduling · Memory · Capabilities · Virtualization<br/>VFS · Page cache · Native block frontend"]
     IO["Independent trusted Linux I/O VM<br/>vhost-scsi / LIO · vhost-net / TAP · Physical drivers"]
     Disk[("Physical storage")]
     Net[("Network uplink")]
@@ -35,7 +35,7 @@ flowchart TB
     Apps -->|Native API / Rust std| Kernel
     Guests -.->|Guest execution| Kernel
     Guests -->|virtio-scsi / virtio-net · shared pages| IO
-    Kernel <-->|/data · shared I/O queues| IO
+    Kernel <-->|Native volumes · shared I/O queues| IO
     IO -->|Assigned device access / DMA| Disk
     IO -->|Assigned network controller| Net
 
@@ -53,8 +53,21 @@ flowchart TB
 `/data` goes through the kernel VFS and Native block frontend; guest disks use
 virtio-scsi. Guest networking uses virtio-net through the same trusted Linux
 I/O VM, which automatically bridges each guest TAP to the configured uplink.
-Native io-runtime owns the shared-memory bindings and mounts `/data`.
+Native io-runtime owns the shared-memory bindings and delegates named volumes
+to fs-backend. That manager applies fstab and starts separate FAT or EROFS
+workers; file operations reach the worker directly through kernel VFS, while
+cache hits stay in the kernel.
 HypeR Native reserves a future network endpoint without establishing a link.
+
+The default [boot/system layout](docs/boot-layout.md) keeps static core services
+and a recovery shell in RAM at `/boot`, with ordinary programs on a read-only
+EROFS `/system` volume. The RAM archive is the initial root; after adopting
+core supervision, system init switches to a new ramfs root and retains the
+original root at `/boot`. The formal root contains `/boot`, `/system`, `/data`
+and `/tmp`, without root-level aliases. `BOARD_SYSTEM_LAYOUT=ramfs` keeps
+`/system` in RAM with the same root switch and supervision handoff. These paths and the
+handoff are userspace policy: the kernel mounts the RAM archive as `/` and
+bootstraps `/init` through `/lib/userspace-loader-hyper-<arch>`.
 
 Both business guests and the Linux I/O VM execute under the HypeR kernel.
 Native VM management services control their lifecycles through capabilities;
@@ -227,14 +240,18 @@ make
 make run
 ```
 
-The build imports the matching protocol version 3 appliance from the committed
-GHCR digest pin. See [I/O VM build and validation](docs/io-vm.md#build-and-validation)
-for package verification and the `boards/qemu.json` deployment.
+The build normally imports the protocol version 3 appliance from the committed
+GHCR digest pin. Owner-controlled GPT discovery currently needs the updated
+block-management backend through `IO_VM_PACKAGE`; its release is not yet pinned.
+See [I/O VM build and validation](docs/io-vm.md#build-and-validation)
+for package requirements and the `boards/qemu.json` deployment.
 
 This boots the AArch64 system with the HypeR shell and a resident Linux I/O VM
 in QEMU. The first build downloads pinned assets and creates a persistent board
 disk; `make run` launches those existing artifacts without building them.
-HypeR mounts its configuration volume at `/data`. Start the default guest with
+HypeR mounts its read-only system volume at `/system` and its writable
+persistent data volume at `/data`. System init adopts the existing core services
+and launches VM management. Start the default guest with
 `vmm start alpine`; Alpine enables its network interface and starts DHCP
 automatically. Later builds preserve on-disk VM definitions, guest images and
 root filesystems; see [updating existing deployments](docs/board-storage.md#updating-existing-deployments)

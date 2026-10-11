@@ -12,8 +12,9 @@ or proxy an external service without changing the Native capability model.
 Block devices form a separate backend boundary. A filesystem is not required
 to be block-backed, and a block driver is not part of the VFS object model.
 
-The system root is a writable, kernel-resident ramfs initialized from the
-immutable boot archive. Namespace traversal, ramfs metadata, storage and
+The initial root is a writable, kernel-resident ramfs initialized from the
+immutable boot archive. Userspace can replace it through the generic namespace
+operations described below. Namespace traversal, ramfs metadata, storage and
 synchronization remain in the kernel. Other filesystem implementations and
 block services may run in userspace; neither placement is required by VFS.
 
@@ -52,8 +53,9 @@ root filesystem, a new read, write, or executable grant requires at least one
 corresponding mode bit (`0444`, `0222`, or `0111`). No user/group identity or
 Unix permission-selection policy is implied. Existing open capabilities retain
 their rights after mode changes. Creation may grant the creator its requested
-rights even when the initial mode is zero. `SET_ATTRIBUTES` and `LOCK_FILE`
-are separate rights from data access.
+rights even when the initial mode is zero. `SET_ATTRIBUTES`, `LOCK_FILE`, and
+`PROTECT` are separate rights from data access. File or child-directory
+`PROTECT` authority must already be present on the source Directory.
 
 Native reads and writes use explicit offsets; append selects the current end under
 the same per-file lock that commits the write. SDK file objects may maintain their own offsets. Unix file-descriptor tables,
@@ -76,12 +78,18 @@ released before backend operations. The shared sleeping content gate spans
 regular-file I/O. A later remote adapter may block or perform IPC under that
 gate without retaining a spinlock.
 
-Executable lookup has a separate, fallible snapshot contract. Immutable
-kernel-resident storage may be borrowed, while a mutable or remote backend must
-materialize immutable owned bytes before the loader validates them. The caller
-supplies the resource domain that must reserve and retain the owned snapshot's
-memory charge; backend errors and quota failures are never collapsed into
-"not executable."
+User loaders receive an ordinary File with explicit `READ | EXECUTE | PROTECT`
+authority. They protect the content before reading the length or ELF headers,
+then map selected file ranges into their own address space. No whole-file
+snapshot VMO is exposed. Protected mappings retain file identity and read
+through the ordinary cache on demand; they do not retain unrelated ELF data.
+Backing failure remains an error even when cached bytes are available.
+
+The kernel's restricted bootstrap-loader parser has a separate temporary input:
+it borrows immutable boot archive bytes or copies the selected loader under the
+content gate. Owned parser bytes are charged to the requesting child domain,
+never to a shared filesystem sponsor. Segment installation copies the required
+bytes into the new process, after which the temporary parser input is released.
 
 The ramfs backend is synchronous and kernel-resident. Import does not require
 a userspace server; opening and loading `/init` runs on a scheduled kernel
@@ -94,26 +102,26 @@ publication.
 ## File-data cache
 
 The common VFS layer owns file-content coherence. Ramfs nodes embed one
-`FileContent`; cacheable FAT nodes share a `FileRecord` which owns it. Independent
+`FileContent`; cacheable remote nodes share a `FileRecord` which owns it. Independent
 opens and aliases therefore use the same content gate and identity. Its
 sleeping gate protects a non-repeating content revision and optional known
 length. Cache entries are keyed by filesystem identity, node incarnation,
 content revision and page index. A path or raw reusable inode number is never
 a cache key. A clean page also retains an opaque content-owner pin; the portable
-cache has no dependency on VFS types. This preserves FAT identity across the
+cache has no dependency on VFS types. This preserves remote file identity across the
 last close and a later open while pages remain, including opens by another
 process. Page reclamation releases these pins outside the cache lock. The record
 contains only its identity, content state and quota charge; advisory locks and
 mount pins remain on the active node. Cached records do not keep unlink busy.
 After every record owner disappears, reopening requires a fresh incarnation.
-FAT bindings use individually charged storage, released when the binding is
+Remote bindings use individually charged storage, released when the binding is
 removed. If retained content exhausts a mount sponsor or ancestor quota,
 unpublished preparation can request a finite domain-scoped cache sweep and
 binding cleanup. Cache admission remains paused through that retry; neither
 backend mutations nor handle-publication callbacks are replayed.
 
-Reads, writes, append, resize, open-with-truncate and executable snapshots use
-this common gate. A mutation advances the revision and forgets the known length
+Reads, writes, append, resize, open-with-truncate, content protection
+acquisition and temporary kernel loader reads use this common gate. A mutation advances the revision and forgets the known length
 before calling the backend, including attempts that later return an error:
 part of the file may already have changed. Old cache entries remain unreachable
 and are reclaimed by ordinary eviction. Open-with-truncate retains its existing
@@ -175,11 +183,24 @@ allocation preparation can additionally request a scheduled reclaim pass for
 the actual buddy order or denying resource domain, even when usage is below
 the pressure watermark. The worker scans a finite snapshot in bounded batches
 and does not wait for pinned pages, in-flight loads or filesystem locks.
+It then visits protected file mappings process by process and in increasing
+virtual-address order, examining at most 64 pages per batch. Each range is
+advanced before its retirement attempt, so refaulting pages or a conflicting
+mapping operation cannot keep the sweep on the same address. Newer processes
+and pages refaulted behind the cursor wait for a later pressure request.
 Requests use non-repeating generations; cancellation and delayed completion
 cannot complete a later request. Request serialization ends before retrying
 preparation, while a separate guard keeps cache admissions paused through the
 retry. Mutating syscalls are not replayed. Competing ordinary allocations or
 unreclaimable fragmentation can still cause a bounded retry to fail.
+
+Mapped-page reclamation is best effort: preparing a replacement mapping
+transaction and page-table root needs temporary memory and requester-domain
+quota before the old pages can be safely released. A hard quota with no such
+headroom can therefore prevent reclamation and leave the original operation
+failing with insufficient resources. Reclaim never borrows the filesystem
+sponsor's or a global domain's quota to bypass that limit. Process teardown
+detaches file-source protection without this fallible replacement step.
 
 The memory observer includes cache payloads in used kernel memory and reports
 unpinned indexed pages as reclaimable; pinned and loading pages are not
@@ -203,7 +224,7 @@ and backend errors are never hidden as cache misses.
 Backends provide raw range I/O, metadata, stable node identity and a cheap read
 admission check. Cached data and cached length still honor a failed or closed
 backend once that state is latched; the check does not probe the media on a
-cache hit. FAT uses this common reader; it owns no file-page cache algorithm.
+cache hit. Remote filesystems use this common reader; it owns no file-page cache algorithm.
 Writes continue through the existing synchronous backend path and explicit
 `file_sync` durability contract. Dirty-page writeback, external coherence,
 direct I/O and shared writable mappings require separate protocols. Destructors
@@ -223,10 +244,16 @@ preparing or copying a userspace destination. Backend callbacks must not reenter
 the common file operation and acquire the same content gate recursively.
 
 Mount construction is prepare-then-publish. Publication is the only point at
-which a namespace can discover the mount. Future unmount removes namespace
-reachability before quiescing; existing open objects and operation pins remain
-valid. Final destruction releases only already-quiescent memory. Remote close,
-writeback, device teardown, and waiting belong to explicit retirement work.
+which a namespace can discover the mount. Unmount first freezes new admission;
+open files, directory capabilities, active lookups and child mounts make it
+return `Busy`. A remote mount then drains backend operations and synchronizes
+the volume before atomically removing namespace reachability. Failed sync or a
+concurrent topology change leaves the mount attached and reopens admission.
+Successful publication closes the remote filesystem's health state; stale cache
+records cannot bypass retirement. The userspace filesystem manager stops the
+worker and returns the block capability. There is no forced or lazy unmount.
+Final destruction releases only already-quiescent memory; waiting and fallible
+storage work belong to the explicit retirement path.
 
 ## Writable ramfs
 
@@ -250,20 +277,22 @@ append placement and that prefix's write are atomic together.
 
 File creation prepares the node, accounting and handle publication before
 committing its name. Failed preparation leaves the namespace unchanged.
-Executable snapshots borrow unchanged archive bytes or own a charged immutable
-copy taken under the file lock. Later writes cannot modify an admitted image.
+Temporary kernel loader inputs borrow unchanged archive bytes or own a
+requester-charged copy taken under the file lock. Userland file mappings instead
+retain explicit content protection for as long as they depend on the file.
 
 Ramfs bypasses page retention because its owned bytes are authoritative storage,
 while sharing the common file-content coordination contract. Cached writable
 backends use the same revision and mutation protocol; a clean read cache does
 not require dirty-page writeback. The backend seam
 in `instance.rs` separates node leases, owned metadata, data operations and
-executable snapshots from path policy. A userspace filesystem adapter can add
-its own lease variant and request lifetime/cancellation protocol there; block
-transport stays below the filesystem adapter. A userspace filesystem server
-protocol is not implemented. The current block-backed path mounts the
-kernel [FAT32 adapter](fat.md) over a NativeBlock service supplied by the
-trusted Linux I/O VM; see the [I/O VM contract](../../docs/io-vm.md).
+temporary loader reads from path policy. The generic userspace adapter owns canonical path identities and ordered
+request lifetime/cancellation there; block transport stays below the Native
+filesystem worker. [Filesystem services](../../docs/filesystem-services.md)
+describes the bounded shared-buffer protocol, failure retirement and sequential
+readahead. FAT parsing runs in `/svc/fs-fat`, selected on demand by the
+`/svc/fs-backend` manager. The trusted Linux I/O VM remains the physical block
+backend; see the [I/O VM contract](../../docs/io-vm.md).
 
 The Native surface includes atomic open/create/create-new/truncate, file
 write/append/resize, directory creation, rename with replacement, regular-file
@@ -327,6 +356,48 @@ with bounded path bytes, depth and symlink expansion. A writer in progress is
 waited for through the namespace mutex; repeated concurrent changes can return
 `Busy`. Canonical paths describe the observed spelling, not a new authority.
 
+The initial root Directory has an explicit namespace-root anchor. Duplicating
+it, or deriving a scope from it, preserves that anchor; opening a child Directory
+instead fixes the capability to the selected location. Namespace-root anchors
+follow `filesystem_switch_root`, while fixed roots keep their confinement and
+existing files keep their node, mount and cache identities.
+
+`filesystem_mount_ramfs` prepares an independent memory filesystem.
+Internal RAM subtree bindings support root-switch preparation without a public
+bind-mount syscall or aliases of remote workers with independent retirement.
+`filesystem_switch_root` atomically changes the root and its mount topology,
+attaches the old root at the caller-specified destination and moves the explicitly
+listed mounts or RAM subtrees. A RAM subtree becomes a mount with a new `MountId`;
+its old directory entry is removed in the same transaction, while filesystem
+nodes and cached file contents are retained. Mounted descendants below a promoted
+RAM subtree and moves whose source overlaps that subtree are rejected. The new root must be the
+root of another mounted filesystem; at most sixteen moves are accepted.
+New-root child mounts remain attached;
+other old mounts remain below the old root. All three namespace operations
+require `MANAGE_NAMESPACE | WRITE | EXECUTE` on a Directory whose traversal root
+and current location both follow the namespace root. The initial init receives
+this authority; ordinary directory grants do not confer it.
+Move destinations must be distinct directories in the new root filesystem,
+outside its existing child mounts, and cannot cover each other or those mounts.
+The new-root path and move sources resolve in the old namespace. The old-root
+attachment and move destinations resolve relative to the new root, including
+when written with a leading slash.
+
+All path validation, allocation and mountpoint pinning precede publication.
+Affected filesystem mutation locks are acquired in `FilesystemId` order. RAM
+subtree detachment and the topology replacement publish within their mutation
+epochs; a failed preparation leaves the old directories and topology intact. A
+concurrent topology change returns `Busy` without partial moves. No spinlock
+spans backend I/O, and switching roots does not flush, unmount or restart a
+filesystem worker. Promoting a RAM subtree preserves existing File capabilities
+and scopes whose fixed root is inside that subtree. Each RAM subtree mount owns
+its root independently of directory links, so the promoted root remains writable.
+A namespace-root scope whose cwd retains a location inside the promoted subtree
+on its old mount becomes detached: relative lookup fails, while absolute lookup
+still follows its namespace root. Cwds outside promoted subtrees retain their
+paths below the relocated old root. Paths such as `/boot` and `/system` are
+supplied by userspace.
+
 Final-component nofollow opens and identity-conditioned removal support safe
 recursive deletion. Each traversal pins its parent Directory and uses a child
 basename, so replacing a name with a symlink cannot redirect deletion outside
@@ -340,6 +411,47 @@ path depth and retained name bytes; there is no maximum-depth allocation or
 maximum-size quota reservation for every open. Growth admits both old and new
 capacity before replacing storage. Each retry releases its own buffers, and
 returned paths retain their charges until userspace copyout finishes.
+
+## Content protection
+
+`PROTECT` authorizes an explicit content-protection acquisition; it does not
+imply `READ`, `WRITE`, `EXECUTE`, or an active lock. `file_protect` waits for the
+current per-file operation and returns a process-local `FileProtection` token
+and the stable file size. Multiple independent holders may coexist. Once
+acquired, all writes, append, resize and truncating opens through the canonical
+node return `Busy`, including already-open writable handles and hard-link
+aliases. Metadata, names and advisory locks remain separate mechanisms.
+
+Protection tokens support only `MAP | INSPECT`. They cannot be duplicated or
+transferred. Ordinary File handles can carry attenuated `PROTECT` authority,
+but moving or duplicating a File does not move an existing protection grant.
+Removing `PROTECT` from a File prevents further acquisitions without revoking
+already granted protection. Closing the token releases its own hold even when
+an internal operation/inspection pin retains the token object's allocation.
+
+A file mapping verifies that the token protects the exact canonical content
+and that its destination VMAR belongs to the calling process. It retains its
+own guard, so closing the token cannot permit a writer to change pages needed
+by an existing mapping. Once all of a process's threads are quiescent and its
+handles close, teardown drops its file-source guards without allocating or
+waiting for escaped VMAR references. Those references may retain requester-paid
+pages, but cannot preserve protection or refill from the file. Another process's
+independent protection is unaffected.
+Acquisition and handle publication roll back if allocation, quota or concurrent
+process exit rejects the token. Guard metadata is charged to the requester;
+a guard retains no file-data pages and does not trigger a whole-file read.
+
+Protected file mappings retain a mount/node lease. Ordinary clean cache entries
+remain reclaimable; mapping-page retirement separately revokes translations
+before releasing the physical page. A subsequent fault reads the same protected
+file range. Mapping pages are currently requester-charged copies populated from
+the shared read cache, not shared physical mappings of its cache pages. Both
+clean copies can be reclaimed independently. Modified private pages cannot be
+recovered from the file and remain
+resident in the absence of swap. The protection keeps contents stable, not pages
+resident. Protection is only meaningful for media whose writers all pass through
+the authoritative filesystem service; out-of-band raw media writes violate the
+filesystem contract.
 
 ## Advisory file locks
 

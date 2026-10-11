@@ -12,18 +12,22 @@
 //! Kernel-owned VFS namespace, capability objects, and file-data policy.
 
 mod executable;
-mod fat;
 mod file_data;
 mod file_record;
 pub(crate) mod instance;
 mod lock_state;
 pub(crate) mod locks;
+mod mount_admission;
 mod mounts;
 #[cfg(feature = "kernel-self-test")]
 pub(crate) mod namespace_test;
 mod objects;
+mod protection;
+mod protection_state;
 mod ramfs;
+pub(crate) mod read_ahead;
 mod read_contract;
+pub(super) mod remote;
 mod resolve;
 mod resolve_state;
 mod rights_contract;
@@ -38,15 +42,15 @@ pub(crate) use objects::{
     DirectoryEntrySnapshot, DirectoryInfo, DirectoryObject, DirectoryPage, Error,
     Error as VfsError, FileInfo, FileObject, FileOpenOptions, Metadata, MetadataUpdate,
 };
+pub(crate) use protection::{FileProtection, FileProtectionObject};
 pub(crate) use scratch::{ScratchBudget, ScratchString, ScratchVec};
 pub(crate) use service::{
     ServiceError as VfsServiceError, create_directory, create_file, directory_info, file_info,
-    open_directory, open_file, read_directory, read_file_at, remove_entry, resize_file,
-    write_file_at,
+    open_directory, open_file, protect_file, read_directory, read_file_at, remove_entry,
+    resize_file, write_file_at,
 };
 
 use hyper::fs::ramfs::RamFs;
-use hyper::fs::{NodeAttributes, NodeKind};
 use hyper::mm::{AllocationError, FallibleArc};
 use hyper::sync::PublishedOnce;
 
@@ -70,33 +74,6 @@ impl From<AllocationError> for InitializationError {
 impl From<instance::Error> for InitializationError {
     fn from(error: instance::Error) -> Self {
         Self::FileSystem(error)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum LookupError {
-    Backend(instance::Error),
-    InvalidPath,
-    NotInitialized,
-}
-
-/// Backend-neutral immutable executable view used before the first Process exists.
-pub(crate) struct BootstrapFile {
-    attributes: NodeAttributes,
-    executable: Option<ExecutableSnapshot>,
-}
-
-impl BootstrapFile {
-    pub(crate) const fn kind(&self) -> NodeKind {
-        self.attributes.kind()
-    }
-
-    pub(crate) const fn is_executable(&self) -> bool {
-        self.attributes.is_executable()
-    }
-
-    pub(crate) fn into_executable(self) -> Option<ExecutableSnapshot> {
-        self.executable
     }
 }
 
@@ -156,32 +133,4 @@ pub(crate) fn root_directory(
 ) -> Result<DirectoryObject, Error> {
     let namespace = SYSTEM_NAMESPACE.get().ok_or(Error::Missing)?;
     DirectoryObject::try_root(namespace.clone(), sponsor)
-}
-
-/// Transitional trusted lookup used only to obtain the first executable.
-///
-/// The initial Process does not exist yet and therefore cannot carry a
-/// Directory handle. Every subsequent userspace lookup is capability-relative.
-pub(crate) fn lookup(
-    path: &str,
-    sponsor: &super::accounting::ResourceDomain,
-) -> Result<Option<BootstrapFile>, LookupError> {
-    let namespace = SYSTEM_NAMESPACE.get().ok_or(LookupError::NotInitialized)?;
-    let root = namespace.root();
-    let location = match resolve::file(namespace, &root, path, &ScratchBudget::new(sponsor)) {
-        Ok(location) => location,
-        Err(Error::Missing) => return Ok(None),
-        Err(Error::Backend(error)) => return Err(LookupError::Backend(error)),
-        Err(_) => return Err(LookupError::InvalidPath),
-    };
-    let filesystem = location.mount().filesystem();
-    let attributes = filesystem
-        .attributes(location.node())
-        .map_err(LookupError::Backend)?;
-    Ok(Some(BootstrapFile {
-        attributes,
-        executable: filesystem
-            .executable_snapshot(location.node(), sponsor)
-            .map_err(LookupError::Backend)?,
-    }))
 }

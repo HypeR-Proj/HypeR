@@ -55,18 +55,14 @@ fn prepare_process(
         .map_err(|_| Error::Construction)?;
     let image_range = UserSlice::new(UserAddress::new(IMAGE_BASE), PAGE_SIZE * 3)
         .map_err(|_| Error::Construction)?;
-    let pin = crate::kernel::task::scheduler::preempt_disable().map_err(|_| Error::Scheduler)?;
     let address_space = prepare_native_entry_self_test(
         domain.clone(),
         image_range,
         code_range,
         stack_range,
         program,
-        &pin,
-    );
-    crate::kernel::task::scheduler::preempt_enable_and_reschedule(pin)
-        .map_err(|_| Error::Scheduler)?;
-    let address_space = address_space.map_err(|_| Error::AddressSpace)?;
+    )
+    .map_err(|_| Error::AddressSpace)?;
     let image = ProcessImage::try_native(
         machine,
         code_range.base(),

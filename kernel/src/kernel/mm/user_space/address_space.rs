@@ -3,6 +3,8 @@
 
 //! Concurrent VMAR authority and transactional native address-space mappings.
 
+mod file;
+
 use alloc::vec::Vec;
 use core::mem::{ManuallyDrop, size_of};
 use core::sync::atomic::{AtomicU64, Ordering};
@@ -144,6 +146,7 @@ pub(crate) enum AddressSpaceError<BackendError, AccountError> {
     Account(AccountError),
     Allocation,
     BackingNotResident,
+    BackingIo,
     Backend(BackendError),
     Busy,
     CowRequired,
@@ -180,6 +183,8 @@ impl<BackendError, AccountError> From<VmoError<BackendError, AccountError>>
             VmoError::Backend(error) => Self::Backend(error),
             VmoError::Busy => Self::Busy,
             VmoError::CowRequired => Self::CowRequired,
+            VmoError::BackingNotResident => Self::BackingNotResident,
+            VmoError::BackingIo => Self::BackingIo,
             VmoError::InvalidRange => Self::InvalidRange,
             VmoError::SizeOverflow => Self::SizeOverflow,
         }
@@ -689,7 +694,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
         self.prepare_map_private_view(vmar, range, view, permissions, maximum)
     }
 
-    pub(super) fn prepare_map_private_view(
+    pub(crate) fn prepare_map_private_view(
         &self,
         vmar: Vmar,
         range: UserSlice,
@@ -1638,6 +1643,18 @@ impl<'a, Backend: PageBackend, Account: MemoryAccount> PreparedMappingChange<'a,
         })
     }
 
+    pub(crate) fn publish_file_instructions(
+        &self,
+        context: &Backend::InstructionPublicationContext,
+    ) -> SpaceResult<Backend, Account, ()> {
+        for mapping in &self.replacement.records {
+            if let Some(view) = mapping.object.private() {
+                view.publish_file_pages(context)?;
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn snapshots(&self) -> impl Iterator<Item = MappingSnapshot> + '_ {
         self.replacement
             .records
@@ -1671,7 +1688,7 @@ impl<'a, Backend: PageBackend, Account: MemoryAccount> PreparedMappingChange<'a,
             .map_err(|_| AddressSpaceError::SizeOverflow)?;
         let charge = self
             .address_space
-            .try_storage_charge::<PhysicalAddress>(count)?;
+            .try_storage_charge::<Option<PhysicalAddress>>(count)?;
         let pages = resident_pages(
             &mapping.object,
             mapping.snapshot.object_offset,
@@ -1747,7 +1764,7 @@ impl<'a, Backend: PageBackend, Account: MemoryAccount> PreparedMappingChange<'a,
 }
 
 pub(crate) struct PreparedPageSnapshot<Backend: PageBackend, Account: MemoryAccount> {
-    pages: Vec<PhysicalAddress>,
+    pages: Vec<Option<PhysicalAddress>>,
     _charge: Option<Account::Charge>,
     mapping_index: usize,
     _pins: FallibleArc<MappingSet<Backend, Account>>,
@@ -1771,7 +1788,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> PreparedPageSnapshot<Backend,
                 .unwrap_or(false)
     }
 
-    pub(crate) fn pages(&self) -> &[PhysicalAddress] {
+    pub(crate) fn pages(&self) -> &[Option<PhysicalAddress>] {
         &self.pages
     }
 }

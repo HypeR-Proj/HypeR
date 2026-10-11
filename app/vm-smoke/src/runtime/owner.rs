@@ -9,39 +9,13 @@ use core::mem::MaybeUninit;
 use hyper_os::capability_channel::{
     CapabilityChannel, CapabilityDisposition, CapabilityReceiveSlot,
 };
-use hyper_os::handle::{
-    CapabilityChannelObject, RightsOffer, TypedObject, VirtualMachineCreationLeaseObject,
-};
+use hyper_os::handle::{CapabilityChannelObject, RightsOffer, VirtualMachineCreationLeaseObject};
 use hyper_os::startup::StartupPurpose;
 use hyper_os::task::ProcessBuilder;
 
 const LEASE: StartupPurpose<VirtualMachineCreationLeaseObject> = StartupPurpose::new(0x1000);
 const CHANNEL: StartupPurpose<CapabilityChannelObject> = StartupPurpose::new(0x1001);
 const OBSERVER_RIGHTS: Rights = Rights::WAIT.union(Rights::INSPECT);
-
-fn inherit<T: TypedObject>(
-    builder: &ProcessBuilder,
-    startup: &Startup<'_>,
-    purpose: StartupPurpose<T>,
-) -> Result<()> {
-    builder
-        .add_handle_duplicate(
-            startup.borrow(purpose).map_err(|error| {
-                format!(
-                    "borrow child startup purpose {:#x}: {error:?}",
-                    purpose.as_raw()
-                )
-            })?,
-            purpose.as_raw(),
-            RightsOffer::SameRights,
-        )
-        .map_err(|error| {
-            format!(
-                "inherit child startup purpose {:#x}: {error:?}",
-                purpose.as_raw()
-            )
-        })
-}
 
 pub(super) fn parent(startup: &mut Startup<'_>) -> Result<()> {
     let (channel, child_channel) =
@@ -52,9 +26,25 @@ pub(super) fn parent(startup: &mut Startup<'_>) -> Result<()> {
     let executable = directory
         .open(
             "/init",
-            hyper_os::fs::FileRights::READ.union(hyper_os::fs::FileRights::EXECUTE),
+            hyper_os::fs::FileRights::READ
+                .union(hyper_os::fs::FileRights::EXECUTE)
+                .union(hyper_os::fs::FileRights::PROTECT)
+                .union(hyper_os::fs::FileRights::DUPLICATE)
+                .union(hyper_os::fs::FileRights::TRANSFER),
         )
         .map_err(|error| format!("owner open /init: {error:?}"))?;
+    #[cfg(target_arch = "aarch64")]
+    const LOADER: &str = "/lib/userspace-loader-hyper-aarch64";
+    #[cfg(target_arch = "riscv64")]
+    const LOADER: &str = "/lib/userspace-loader-hyper-riscv64";
+    #[cfg(target_arch = "x86_64")]
+    const LOADER: &str = "/lib/userspace-loader-hyper-x86_64";
+    let loader = directory
+        .open(
+            LOADER,
+            hyper_os::fs::FileRights::READ.union(hyper_os::fs::FileRights::EXECUTE),
+        )
+        .map_err(show)?;
     let builder = ProcessBuilder::create(
         startup
             .borrow(startup::TASK_FACTORY)
@@ -66,6 +56,7 @@ pub(super) fn parent(startup: &mut Startup<'_>) -> Result<()> {
             .borrow(startup::RESOURCE_DOMAIN)
             .map_err(|error| format!("owner resource domain: {error:?}"))?,
         executable.as_handle_ref(),
+        loader.as_handle_ref(),
     )
     .map_err(|error| format!("owner create process builder: {error:?}"))?;
     builder.set_name("vm-smoke-owner").map_err(show)?;
@@ -92,7 +83,6 @@ pub(super) fn parent(startup: &mut Startup<'_>) -> Result<()> {
             RightsOffer::SameRights,
         )
         .map_err(|error| format!("inherit runtime console: {error:?}"))?;
-    inherit(&builder, startup, startup::DYNAMIC_LIBRARY_DIRECTORY)?;
     builder
         .seal()
         .map_err(|error| format!("owner seal process: {error:?}"))?;

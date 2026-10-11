@@ -7,16 +7,45 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use hyper::mm::FallibleArc;
 use hyper::sync::SpinLock;
 
-use super::instance::{Error, FilesystemInstance, Location, Mount};
+use super::instance::{Error, FilesystemInstance, Location, Mount, MountPin};
 use super::scratch::{ScratchBudget, ScratchString, ScratchVec};
 use crate::kernel::accounting::{CommittedCharge, ResourceDomain, ResourceDomainId};
 
+mod root_switch;
+
 const MAX_MOUNTS: usize = 128;
+pub(super) const MAX_ROOT_MOVES: usize =
+    hyper::abi::native::HYPER_NATIVE_FILESYSTEM_SWITCH_ROOT_MAX_MOVES as usize;
 
 #[derive(Clone)]
 struct Attachment {
     covered: Location,
     mounted: FallibleArc<Mount>,
+    _pin: FallibleArc<AttachmentPin>,
+}
+
+struct AttachmentPin {
+    _charge: CommittedCharge,
+    _pin: MountPin,
+}
+
+impl Attachment {
+    fn prepare(
+        covered: Location,
+        mounted: FallibleArc<Mount>,
+        sponsor: &ResourceDomain,
+    ) -> Result<Self, Error> {
+        let charge = super::instance::allocation_charge::<AttachmentPin>(sponsor)?;
+        let pin = covered.mount().filesystem().pin_mount(covered.node())?;
+        Ok(Self {
+            covered,
+            mounted,
+            _pin: FallibleArc::try_new(AttachmentPin {
+                _charge: charge,
+                _pin: pin,
+            })?,
+        })
+    }
 }
 
 struct Topology {
@@ -25,32 +54,42 @@ struct Topology {
 }
 
 #[derive(Clone)]
-pub(super) struct View(Option<FallibleArc<Topology>>);
+pub(super) struct View {
+    root: Location,
+    topology: Option<FallibleArc<Topology>>,
+}
 
 impl View {
+    pub(super) fn root(&self) -> &Location {
+        &self.root
+    }
+
     fn entries(&self) -> &[Attachment] {
-        match &self.0 {
+        match &self.topology {
             Some(topology) => &topology.entries,
             None => &[],
         }
     }
 
     fn same(&self, other: &Self) -> bool {
-        match (&self.0, &other.0) {
+        if self.root != other.root {
+            return false;
+        }
+        match (&self.topology, &other.topology) {
             (None, None) => true,
             (Some(left), Some(right)) => core::ptr::eq(&**left, &**right),
             _ => false,
         }
     }
 
-    pub(super) fn enter(&self, location: Location) -> Location {
+    pub(super) fn enter(&self, location: Location) -> Result<Location, Error> {
         match self
             .entries()
             .iter()
             .find(|entry| entry.covered == location)
         {
             Some(entry) => Location::new(entry.mounted.clone(), entry.mounted.root()),
-            None => location,
+            None => Ok(location),
         }
     }
 
@@ -96,10 +135,10 @@ impl View {
                         if *location != attachment.covered {
                             return Err(Error::InvalidInput);
                         }
-                        *location = Location::new(mount.clone(), mount.root());
+                        *location = Location::new(mount.clone(), mount.root())?;
                     }
                     for (node, name) in local {
-                        result.push((Location::new(mount.clone(), node), name))?;
+                        result.push((Location::new(mount.clone(), node)?, name))?;
                     }
                 }
                 return Ok(result);
@@ -127,9 +166,12 @@ pub(super) struct MountTable {
 }
 
 impl MountTable {
-    pub(super) const fn new() -> Self {
+    pub(super) fn new(root: Location) -> Self {
         Self {
-            current: SpinLock::new(View(None)),
+            current: SpinLock::new(View {
+                root,
+                topology: None,
+            }),
             reclaim_cursor: AtomicUsize::new(0),
         }
     }
@@ -142,11 +184,7 @@ impl MountTable {
         self.current.with(|current| current.same(view))
     }
 
-    pub(super) fn reclaim_file_records(
-        &self,
-        root: &FilesystemInstance,
-        mut limit: usize,
-    ) -> usize {
+    pub(super) fn reclaim_file_records(&self, mut limit: usize) -> usize {
         let view = self.snapshot();
         let count = view.entries().len() + 1;
         let start = self.reclaim_cursor.fetch_add(1, Ordering::Relaxed) % count;
@@ -157,7 +195,7 @@ impl MountTable {
             }
             let index = (start + offset) % count;
             let filesystem = if index == 0 {
-                root
+                view.root.mount().filesystem()
             } else {
                 view.entries()[index - 1].mounted.filesystem()
             };
@@ -168,66 +206,139 @@ impl MountTable {
         reclaimed
     }
 
-    pub(super) fn reclaim_idle_records(
-        &self,
-        root: &FilesystemInstance,
-        domain: Option<ResourceDomainId>,
-    ) {
+    pub(super) fn reclaim_idle_records(&self, domain: Option<ResourceDomainId>) {
         // Cloning the immutable topology requires no allocation. Never hold
         // the mount-table lock while trying a filesystem's namespace mutex.
         let view = self.snapshot();
-        root.reclaim_idle_records(domain);
+        view.root.mount().filesystem().reclaim_idle_records(domain);
         for attachment in view.entries() {
             attachment.mounted.filesystem().reclaim_idle_records(domain);
         }
     }
 
+    /// Freeze admission before syncing; table locks never span backend IPC.
+    /// The caller has dropped its resolution Location before entering here.
+    pub(super) fn detach(
+        &self,
+        old: &View,
+        mounted: &FallibleArc<Mount>,
+        sponsor: &ResourceDomain,
+    ) -> Result<(), Error> {
+        if !old
+            .entries()
+            .iter()
+            .any(|entry| entry.mounted.id() == mounted.id())
+        {
+            return Err(Error::InvalidInput);
+        }
+        let mut entries = ScratchVec::new(ScratchBudget::new(sponsor));
+        entries.try_reserve_exact(old.entries().len())?;
+        for entry in old.entries() {
+            if entry.mounted.id() != mounted.id() {
+                entries.push(entry.clone())?;
+            }
+        }
+        let mut replacement = Some(Self::prepare_view(old.root.clone(), entries, sponsor)?);
+        mounted.freeze()?;
+        let result = mounted.unmount_with(|| {
+            let retired = self.current.with(|current| {
+                if !current.same(old) {
+                    return Err(Error::Busy);
+                }
+                let prepared = replacement.take().ok_or(Error::InvalidBackendResult)?;
+                Ok(core::mem::replace(current, prepared))
+            })?;
+            drop(retired);
+            Ok(())
+        });
+        if result.is_err() {
+            mounted.thaw();
+        }
+        result
+    }
+
+    /// The caller resolves against `old`; never publish a stale path after a
+    /// concurrent root replacement or mount change.
     pub(super) fn attach(
         &self,
+        old: &View,
         covered: Location,
         filesystem: FallibleArc<FilesystemInstance>,
         sponsor: &ResourceDomain,
     ) -> Result<(), Error> {
-        if covered
-            .mount()
-            .filesystem()
-            .attributes(covered.node())?
-            .kind()
-            != hyper::fs::NodeKind::Directory
-        {
-            return Err(Error::NotDirectory);
-        }
-        let old = self.snapshot();
-        if old.entries().len() >= MAX_MOUNTS
+        let mounted = Mount::try_new(filesystem, Some(sponsor))?;
+        self.attach_mount(old, covered, mounted, sponsor)
+    }
+
+    #[cfg(feature = "kernel-self-test")]
+    pub(super) fn bind_ramfs(
+        &self,
+        old: &View,
+        source: &Location,
+        covered: Location,
+        sponsor: &ResourceDomain,
+    ) -> Result<(), Error> {
+        let mounted = Mount::try_bind(source, sponsor)?;
+        self.attach_mount(old, covered, mounted, sponsor)
+    }
+
+    fn attach_mount(
+        &self,
+        old: &View,
+        covered: Location,
+        mounted: FallibleArc<Mount>,
+        sponsor: &ResourceDomain,
+    ) -> Result<(), Error> {
+        if covered == old.root
+            || old.entries().len() >= MAX_MOUNTS
             || old.covers(&covered)
-            || old
-                .entries()
-                .iter()
-                .any(|entry| covered == Location::new(entry.mounted.clone(), entry.mounted.root()))
+            || old.entries().iter().any(|entry| {
+                covered.mount().id() == entry.mounted.id()
+                    && covered.node().get() == entry.mounted.root().get()
+            })
         {
             return Err(Error::Busy);
         }
-        let pin = covered.mount().filesystem().pin_mount(covered.node())?;
-        let mounted = Mount::try_new(filesystem, Some(pin), Some(sponsor))?;
+        let attachment = Attachment::prepare(covered, mounted, sponsor)?;
         let mut entries = ScratchVec::new(ScratchBudget::new(sponsor));
         entries.try_reserve_exact(old.entries().len() + 1)?;
         for entry in old.entries() {
             entries.push(entry.clone())?;
         }
-        entries.push(Attachment { covered, mounted })?;
+        entries.push(attachment)?;
+        let replacement = Self::prepare_view(old.root.clone(), entries, sponsor)?;
+        self.publish(old, replacement)
+    }
+
+    fn prepare_view(
+        root: Location,
+        entries: ScratchVec<Attachment>,
+        sponsor: &ResourceDomain,
+    ) -> Result<View, Error> {
         let charge = super::instance::allocation_charge::<Topology>(sponsor)?;
-        let mut replacement = Some(View(Some(FallibleArc::try_new(Topology {
-            _charge: charge,
-            entries,
-        })?)));
-        let retired = self.current.with(|current| {
-            if !current.same(&old) {
-                return Err(Error::Busy);
-            }
-            let prepared = replacement.take().ok_or(Error::InvalidBackendResult)?;
-            Ok(core::mem::replace(current, prepared))
-        })?;
+        Ok(View {
+            root,
+            topology: Some(FallibleArc::try_new(Topology {
+                _charge: charge,
+                entries,
+            })?),
+        })
+    }
+
+    fn publish(&self, old: &View, replacement: View) -> Result<(), Error> {
+        let mut prepared = Some(replacement);
+        let retired = self.replace(old, &mut prepared)?;
         drop(retired);
         Ok(())
+    }
+
+    fn replace(&self, old: &View, prepared: &mut Option<View>) -> Result<View, Error> {
+        self.current.with(|current| {
+            if !current.same(old) {
+                return Err(Error::Busy);
+            }
+            let replacement = prepared.take().ok_or(Error::InvalidBackendResult)?;
+            Ok(core::mem::replace(current, replacement))
+        })
     }
 }

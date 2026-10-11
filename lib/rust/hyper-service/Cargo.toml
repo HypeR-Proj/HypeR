@@ -11,6 +11,7 @@ publish.workspace = true
 description = "Typed service contracts for HypeR Native system applications"
 
 [dependencies]
+hyper-block = { path = "../hyper-block" }
 hyper-os = { path = "../hyper-os" }
 
 [lints]

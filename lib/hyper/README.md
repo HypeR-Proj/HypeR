@@ -104,15 +104,19 @@ needed for the entry vector and handoff frames. This differs from the 64 KiB
 default for ordinary SDK workers.
 
 The kernel supplies a temporary stack and its VMAR through the bootstrap
-channel. `userspace-loader` maps the application and interpreter, then encodes
+channel. The caller-selected loader maps the application and encodes
 INITIAL_STACK_VMAR and stack geometry in the SDK-private startup vector.
-Runtime initialization
+The stage-1 loader accepts only static applications; the formal dynamic loader
+accepts static and dynamic applications and resolves dynamic dependencies itself.
+There is no second interpreter mapping or loader handoff. Runtime initialization
 creates the final main stack through the same allocator as worker stacks,
 copies startup strings and records, and performs a non-returning assembly SP
-switch. It releases the bootstrap mapping and VMAR from the new stack before
-constructors and app entry. It also releases the userspace-loader mapping and
-acknowledges readiness to the parent. Readiness precedes constructors and `main`;
-it is not an application-health acknowledgement. Init has no waiting parent.
+switch. It releases the bootstrap stack mapping and VMAR from the new stack before
+constructors and app entry. For a static application it also releases the selected
+loader mapping; a dynamic application retains the formal loader for constructors
+and runtime linking. It then acknowledges readiness to the parent. Readiness
+precedes constructors and `main`; it is not an application-health acknowledgement.
+Init has no waiting parent.
 The consumed handle is omitted from the app startup view. The dynamic loader
 uses the same shared-runtime handoff as static CRT;
 it never restores the abandoned bootstrap SP. Normal

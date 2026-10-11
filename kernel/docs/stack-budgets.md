@@ -18,7 +18,7 @@ stack or reduce an ABI batch merely to hide a large temporary.
 ## Reproducing the checks
 
 Run `make test-stack ARCH=aarch64`. This builds a dedicated initramfs in
-`target/stack-audit/aarch64`, substituting the std workload for its `/bin/ps`
+`target/stack-audit/aarch64`, substituting the std workload for its `/system/bin/ps`
 so the existing shell policy supplies thread inspection authority. The normal
 application output and production initramfs are preserved. The workload checks
 thread scan pagination, snapshot isolation, boundary/eager/COW mappings, and
@@ -74,7 +74,7 @@ Interactive serial writes use a 128-byte specialization; full 4096-byte writes
 retain their complete buffer, one usercopy and one publication, preserving
 failure and partial-write behavior without allocating per input event.
 
-FAT directory parsing fills a caller-owned entry and borrows its long-name
+The userspace FAT worker directory parser fills a caller-owned entry and borrows its long-name
 buffer. A mounted volume owns one persistent sector-cache allocation in place
 of its former outer volume allocation, reducing mount return-value copies
 without adding allocations or I/O. ELF segments retain their validated ELF

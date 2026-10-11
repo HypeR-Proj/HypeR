@@ -353,12 +353,13 @@ pub(super) fn capability_record_bytes<Record>(record_count: u64) -> Result<u64, 
 
 pub(super) fn parse_builder_create(
     arguments: &Arguments,
-) -> Result<[HandleValue; 4], HyperNativeStatus> {
+) -> Result<[HandleValue; 5], HyperNativeStatus> {
     Ok([
         parse_handle(arguments[0])?,
         parse_handle(arguments[1])?,
         parse_handle(arguments[2])?,
         parse_handle(arguments[3])?,
+        parse_handle(arguments[4])?,
     ])
 }
 
@@ -471,6 +472,7 @@ pub(super) fn parse_object_kind(
             Ok(ObjectKind::GUEST_NOTIFICATION)
         }
         hyper::abi::native::HYPER_NATIVE_OBJECT_GUEST_MEMORY => Ok(ObjectKind::GUEST_MEMORY),
+        hyper::abi::native::HYPER_NATIVE_OBJECT_NATIVE_BLOCK => Ok(ObjectKind::NATIVE_BLOCK),
         HYPER_NATIVE_OBJECT_VIRTUAL_CPU => Ok(ObjectKind::VIRTUAL_CPU),
         HYPER_NATIVE_OBJECT_VIRTUAL_SERIAL => Ok(ObjectKind::VIRTUAL_SERIAL),
         _ => Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT),

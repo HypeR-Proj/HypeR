@@ -3,6 +3,7 @@
 
 //! Transactional capability rendezvous with failure-safe Rust ownership.
 
+use alloc::vec::Vec;
 use core::mem::MaybeUninit;
 use core::num::NonZeroU64;
 use core::slice;
@@ -260,15 +261,12 @@ impl CapabilityChannel {
                 return Err(Error::InvalidCapabilityDisposition);
             }
         }
-        let mut records = [empty_disposition(); MAX_CAPABILITIES];
-        for (output, disposition) in records.iter_mut().zip(dispositions.iter()) {
-            *output = disposition.record;
-        }
-        let status = raw_ops::try_send(
-            self.handle.as_handle_ref(),
-            bytes,
-            records.get(..dispositions.len()).unwrap_or(&[]),
-        );
+        let mut records = Vec::new();
+        records
+            .try_reserve_exact(dispositions.len())
+            .map_err(|_| Error::Status(Status::NO_MEMORY))?;
+        records.extend(dispositions.iter().map(|disposition| disposition.record));
+        let status = raw_ops::try_send(self.handle.as_handle_ref(), bytes, &records);
         Status::from_raw(status).into_result()?;
         for disposition in dispositions {
             disposition.commit();
@@ -294,10 +292,20 @@ impl CapabilityChannel {
                 handles: slots.len() as u64,
             });
         }
-        let mut raw_slots = [empty_receive_slot(); MAX_CAPABILITIES];
-        for (raw, slot) in raw_slots.iter_mut().zip(slots.iter()) {
-            *raw = slot.raw_request()?;
+        let mut raw_slots = Vec::new();
+        raw_slots
+            .try_reserve_exact(slots.len())
+            .map_err(|_| Error::Status(Status::NO_MEMORY))?;
+        for slot in slots.iter() {
+            raw_slots.push(slot.raw_request()?);
         }
+        // Allocate all owner storage before the syscall can commit a transfer.
+        // Successful output must be adopted even when later validation fails.
+        let mut owners = Vec::new();
+        owners
+            .try_reserve_exact(slots.len())
+            .map_err(|_| Error::Status(Status::NO_MEMORY))?;
+        owners.resize_with(slots.len(), || None);
         let endpoint = self.handle.as_handle_ref();
         let result = raw_ops::receive(
             endpoint,
@@ -322,7 +330,7 @@ impl CapabilityChannel {
         }
         // Take ownership of every distinct nonzero successful output before
         // any fallible count conversion or validation can return.
-        let mut owners = collect_successful_owners(&raw_slots, endpoint.raw())?;
+        collect_successful_owners(&raw_slots, endpoint.raw(), &mut owners)?;
         let actual_bytes = usize::try_from(result.value0).map_err(|_| Error::InvalidResponse)?;
         let actual_capabilities =
             usize::try_from(result.value1).map_err(|_| Error::InvalidResponse)?;
@@ -349,29 +357,11 @@ impl CapabilityChannel {
     }
 }
 
-const fn empty_disposition() -> hyper_abi::HyperNativeCapabilityDisposition {
-    hyper_abi::HyperNativeCapabilityDisposition {
-        handle: 0,
-        rights: 0,
-        expected_kind: 0,
-        operation: 0,
-    }
-}
-
-const fn empty_receive_slot() -> hyper_abi::HyperNativeCapabilityReceiveSlot {
-    hyper_abi::HyperNativeCapabilityReceiveSlot {
-        handle: 0,
-        rights: 0,
-        expected_kind: 0,
-        flags: 0,
-    }
-}
-
 fn collect_successful_owners(
-    raw_slots: &[hyper_abi::HyperNativeCapabilityReceiveSlot; MAX_CAPABILITIES],
+    raw_slots: &[hyper_abi::HyperNativeCapabilityReceiveSlot],
     endpoint: NonZeroU64,
-) -> Result<[Option<OwnedHandle<AnyObject>>; MAX_CAPABILITIES]> {
-    let mut owners = [const { None }; MAX_CAPABILITIES];
+    owners: &mut [Option<OwnedHandle<AnyObject>>],
+) -> Result<()> {
     let mut repeated = false;
     for (index, slot) in raw_slots.iter().enumerate() {
         let Some(raw) = NonZeroU64::new(slot.handle) else {
@@ -394,15 +384,15 @@ fn collect_successful_owners(
     if repeated {
         Err(Error::InvalidResponse)
     } else {
-        Ok(owners)
+        Ok(())
     }
 }
 
 fn validate_received_slots(
-    raw_slots: &[hyper_abi::HyperNativeCapabilityReceiveSlot; MAX_CAPABILITIES],
+    raw_slots: &[hyper_abi::HyperNativeCapabilityReceiveSlot],
     slots: &[CapabilityReceiveSlot],
     actual: usize,
-    owners: &[Option<OwnedHandle<AnyObject>>; MAX_CAPABILITIES],
+    owners: &[Option<OwnedHandle<AnyObject>>],
 ) -> Result<()> {
     for (index, (raw, requested)) in raw_slots.iter().zip(slots).enumerate() {
         if (index < actual) != (raw.handle != 0) {
@@ -533,6 +523,10 @@ mod raw_ops {
             if let Some(slot) = slots.first_mut() {
                 slot.handle = crate::handle::TEST_SENTINEL_HANDLE;
             }
+        } else if deadline == 5 {
+            for (index, slot) in slots.iter_mut().enumerate() {
+                slot.handle = u64::from(slot.expected_kind) + (index as u64 + 4) * 256;
+            }
         } else if deadline == 4 {
             for slot in slots.iter_mut() {
                 slot.handle = u64::from(slot.expected_kind) + 512;
@@ -607,6 +601,42 @@ mod tests {
             sender.try_send(b"commit", &mut [move_disposition])?;
         }
         assert!(source.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn full_inventory_moves_atomically_and_receive_has_no_inline_owner_array() -> crate::Result<()>
+    {
+        let (sender, receiver) = CapabilityChannel::create()?;
+        let rights =
+            Rights::from_bits(hyper_abi::HYPER_NATIVE_RIGHTS_MASK).ok_or(Error::InvalidResponse)?;
+        let mut slots: alloc::vec::Vec<_> = (0..super::MAX_CAPABILITIES)
+            .map(|_| CapabilityReceiveSlot::new::<EventObject>(rights))
+            .collect();
+        let mut bytes = [MaybeUninit::uninit(); 8];
+        let message = receiver.receive(5, &mut bytes, &mut slots)?;
+        assert_eq!(message.capability_count(), 64);
+        let mut owners: alloc::vec::Vec<_> = slots
+            .iter_mut()
+            .map(|slot| slot.take::<EventObject>())
+            .collect::<crate::Result<_>>()?;
+        for payload in [b"reject".as_slice(), b"commit".as_slice()] {
+            let mut offers: alloc::vec::Vec<_> = owners
+                .iter_mut()
+                .map(|owner| {
+                    CapabilityDisposition::move_handle(owner, RightsOffer::Exact(Rights::TRANSFER))
+                })
+                .collect::<crate::Result<_>>()?;
+            let result = sender.try_send(payload, &mut offers);
+            drop(offers);
+            if payload == b"reject" {
+                assert!(matches!(result, Err(Error::Status(Status::WOULD_BLOCK))));
+                assert!(owners.iter().all(Option::is_some));
+            } else {
+                result?;
+                assert!(owners.iter().all(Option::is_none));
+            }
+        }
         Ok(())
     }
 

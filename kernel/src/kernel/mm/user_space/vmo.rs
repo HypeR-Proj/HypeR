@@ -7,12 +7,15 @@ use alloc::vec::Vec;
 use core::mem::size_of;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use hyper::mm::{AllocationError, FallibleArc, PAGE_SIZE, PhysicalAddress, WeakFallibleArc};
+use hyper::mm::{AllocationError, FallibleArc, PAGE_SIZE, PhysicalAddress};
 use hyper::sync::InterruptSpinLock;
 
 use super::contract::{MemoryAccount, MemoryCharge, PageBackend};
 
+mod file_source;
 mod private_view;
+use file_source::FileBacking;
+pub(crate) use file_source::FilePageSource;
 pub(super) use private_view::{PinnedPrivateRange, PrivateView, PrivateViewBuilder};
 
 #[cfg(not(test))]
@@ -42,6 +45,8 @@ pub(crate) enum VmoError<BackendError, AccountError> {
     Backend(BackendError),
     Busy,
     CowRequired,
+    BackingNotResident,
+    BackingIo,
     InvalidRange,
     SizeOverflow,
 }
@@ -96,29 +101,11 @@ pub(crate) struct SnapshotVmo<Backend: PageBackend, Account: MemoryAccount> {
     inner: FallibleArc<VmoInner<Backend, Account>>,
 }
 
-pub(crate) struct WeakSnapshotVmo<Backend: PageBackend, Account: MemoryAccount> {
-    inner: WeakFallibleArc<VmoInner<Backend, Account>>,
-}
-
 impl<B: PageBackend, A: MemoryAccount> Clone for SnapshotVmo<B, A> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
         }
-    }
-}
-
-impl<B: PageBackend, A: MemoryAccount> Clone for WeakSnapshotVmo<B, A> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
-}
-
-impl<B: PageBackend, A: MemoryAccount> WeakSnapshotVmo<B, A> {
-    pub(crate) fn upgrade(&self) -> Option<SnapshotVmo<B, A>> {
-        self.inner.upgrade().map(|inner| SnapshotVmo { inner })
     }
 }
 
@@ -140,7 +127,7 @@ impl<B: PageBackend, A: MemoryAccount> SnapshotVmo<B, A> {
         })
     }
 
-    #[cfg(any(test, feature = "kernel-self-test"))]
+    #[cfg(test)]
     pub(crate) fn resident_physical_page(&self, offset: u64) -> VmoResult<B, A, PhysicalAddress> {
         if !offset.is_multiple_of(PAGE_SIZE) {
             return Err(VmoError::InvalidRange);
@@ -157,24 +144,6 @@ impl<B: PageBackend, A: MemoryAccount> SnapshotVmo<B, A> {
     }
     pub(crate) fn read(&self, offset: u64, bytes: &mut [u8]) -> VmoResult<B, A, ()> {
         read_owned_inner(&self.inner, offset, bytes)
-    }
-    pub(crate) fn downgrade(&self) -> WeakSnapshotVmo<B, A> {
-        WeakSnapshotVmo {
-            inner: self.inner.downgrade(),
-        }
-    }
-    pub(crate) fn try_executable(
-        &self,
-        _provenance: &ExecutableProvenance,
-        context: &B::InstructionPublicationContext,
-    ) -> VmoResult<B, A, ExecutableVmo<B, A>> {
-        let owner = WritableVmo {
-            inner: self.inner.clone(),
-        };
-        owner.publish_instruction_pages(context)?;
-        Ok(ExecutableVmo {
-            inner: self.inner.clone(),
-        })
     }
 }
 
@@ -247,13 +216,6 @@ pub(crate) struct ExecutableProvenance {
 #[cfg(test)]
 impl ExecutableProvenance {
     pub(crate) const fn for_test() -> Self {
-        Self { _private: () }
-    }
-}
-
-#[cfg(feature = "kernel-self-test")]
-impl ExecutableProvenance {
-    pub(crate) const fn for_kernel_self_test() -> Self {
         Self { _private: () }
     }
 }
@@ -891,7 +853,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> MappingObject<Backend, Accoun
                     .pages
                     .get(index)
                     .and_then(Option::as_ref)
-                    .ok_or(VmoError::InvalidRange)?;
+                    .ok_or(VmoError::BackingNotResident)?;
                 Ok(page
                     .owner
                     .with(|owned| view.backend.physical_address(&owned.page)))
@@ -1295,7 +1257,7 @@ pub(super) fn resident_pages<Backend: PageBackend, Account: MemoryAccount>(
     object: &MappingObject<Backend, Account>,
     offset: u64,
     length: u64,
-) -> VmoResult<Backend, Account, Vec<PhysicalAddress>> {
+) -> VmoResult<Backend, Account, Vec<Option<PhysicalAddress>>> {
     let length_usize = usize::try_from(length).map_err(|_| VmoError::SizeOverflow)?;
     validate_range(object.size(), offset, length_usize)?;
     let (first, count) = covered_pages(offset, length_usize)?;
@@ -1304,7 +1266,13 @@ pub(super) fn resident_pages<Backend: PageBackend, Account: MemoryAccount>(
         .try_reserve_exact(count)
         .map_err(|_| VmoError::Allocation)?;
     for index in first..first + count {
-        result.push(object.physical_page(index as u64 * PAGE_SIZE)?);
+        result.push(match object.physical_page(index as u64 * PAGE_SIZE) {
+            Ok(page) => Some(page),
+            Err(VmoError::BackingNotResident) if object.private().is_some_and(|v| v.is_file()) => {
+                None
+            }
+            Err(error) => return Err(error),
+        });
     }
     Ok(result)
 }

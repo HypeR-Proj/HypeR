@@ -4,9 +4,11 @@
 //! Owned access to capability-relative filesystem objects.
 
 mod metadata;
+mod protection;
 pub use metadata::{
     FileMetadata, LinkBehavior, LockMode, MetadataUpdate, OpenMode, SyncScope, Timestamp,
 };
+pub use protection::FileProtection;
 
 use core::num::NonZeroU64;
 
@@ -150,6 +152,7 @@ impl FileRights {
     pub const EXECUTE: Self = Self(Rights::EXECUTE);
     pub const SET_ATTRIBUTES: Self = Self(Rights::SET_ATTRIBUTES);
     pub const LOCK_FILE: Self = Self(Rights::LOCK_FILE);
+    pub const PROTECT: Self = Self(Rights::PROTECT);
 
     const ALLOWED: Rights = Rights::READ
         .union(Rights::WRITE)
@@ -158,7 +161,8 @@ impl FileRights {
         .union(Rights::TRANSFER)
         .union(Rights::EXECUTE)
         .union(Rights::SET_ATTRIBUTES)
-        .union(Rights::LOCK_FILE);
+        .union(Rights::LOCK_FILE)
+        .union(Rights::PROTECT);
 
     /// Narrows generic rights to those meaningful for files.
     #[must_use]
@@ -195,6 +199,7 @@ impl DirectoryRights {
     pub const EXECUTE: Self = Self(Rights::EXECUTE);
     pub const SET_ATTRIBUTES: Self = Self(Rights::SET_ATTRIBUTES);
     pub const LOCK_FILE: Self = Self(Rights::LOCK_FILE);
+    pub const PROTECT: Self = Self(Rights::PROTECT);
 
     const ALLOWED: Rights = Rights::READ
         .union(Rights::WRITE)
@@ -203,7 +208,8 @@ impl DirectoryRights {
         .union(Rights::TRANSFER)
         .union(Rights::EXECUTE)
         .union(Rights::SET_ATTRIBUTES)
-        .union(Rights::LOCK_FILE);
+        .union(Rights::LOCK_FILE)
+        .union(Rights::PROTECT);
 
     #[must_use]
     pub const fn from_rights(rights: Rights) -> Option<Self> {
@@ -718,7 +724,7 @@ fn decode_directory_info(raw: hyper_abi::HyperNativeDirectoryInfo) -> Result<Dir
     })
 }
 
-fn validate_path(path: &str) -> Result<()> {
+pub(crate) fn validate_path(path: &str) -> Result<()> {
     if path.is_empty() || path.len() > MAX_PATH_BYTES || path.as_bytes().contains(&0) {
         Err(Error::InvalidPath)
     } else {
@@ -982,6 +988,8 @@ mod tests {
         assert!(FileRights::from_rights(Rights::READ.union(Rights::TRANSFER)).is_some());
         assert!(FileRights::from_rights(Rights::WRITE).is_some());
         assert!(FileRights::from_rights(Rights::CREATE_PROCESS).is_none());
+        assert!(FileRights::from_rights(Rights::MANAGE_NAMESPACE).is_none());
+        assert!(DirectoryRights::from_rights(Rights::MANAGE_NAMESPACE).is_none());
         assert!(DirectoryRights::from_rights(Rights::READ.union(Rights::EXECUTE)).is_some());
         assert!(DirectoryRights::from_rights(Rights::WRITE).is_some());
     }

@@ -64,11 +64,31 @@ Read [boot.S](../kernel/hal/src/arch/aarch64/boot.S), then the
 environment; the common startup sequence establishes memory, scheduling,
 interrupts, time and platform/VM services before publishing userspace.
 
-[Kernel init](../kernel/src/kernel/init/mod.rs) loads `/init` and prepares its
-initial capabilities. [Native init runtime](../app/init/src/runtime.rs) consumes
+[Kernel init](../kernel/src/kernel/init/mod.rs) snapshots `/init`, maps the selected
+bootstrap loader and prepares initial capabilities. The userspace loader
+validates and maps init itself. [Native init runtime](../lib/service-manager/src/runtime.rs) consumes
 the service manifest and supervises services. The virtual console manager in
-[session](../app/session/src/main.rs) starts the shell after the console exists
+[session](../bootstrap/stage1/session/src/main.rs) starts the shell after the console exists
 and can restart it after exit. A shell is not itself a boot-critical service.
+
+The two init entry points share the [service manager](../lib/service-manager/src/lib.rs).
+[Boot init](../bootstrap/stage1/init/src/main.rs) starts the core services; the
+[handoff protocol](../lib/service-manager/src/runtime/handoff.rs) starts system init
+with a read-only description of those services and its prospective capabilities.
+System init validates its system manifest before registering the receive operation.
+One capability rendezvous moves every core Process supervisor and carries the
+management capabilities and group leases. That successful operation is the ownership
+commit; boot init then exits without waiting for an acknowledgement. Preparation
+failure leaves core supervision and the recovery shell with boot init.
+
+After adoption, [root-switch policy](../lib/service-manager/src/runtime/root_switch.rs)
+prepares a new ramfs root and invokes the generic VFS namespace operation.
+That is a separate commit: it publishes the new root and moved mount edges
+together, retaining the old root at `/boot`. Namespace-root capabilities follow
+the switch, while fixed directory capabilities remain confined to their
+original locations. A rejected switch keeps core supervision in system init
+and leaves the original namespace usable; the system service graph starts
+only after the switch succeeds. See [boot layout](boot-layout.md).
 
 For image contents and launch commands, use the
 [getting-started guide](getting-started.md) and
@@ -246,9 +266,11 @@ loads a new image and address space.
   [Process owner](../kernel/src/kernel/process/owner.rs) and
   [startup publication](../kernel/src/kernel/process/owner/start.rs).
   The kernel commits capabilities and a runnable bootstrap Thread together.
-  [userspace-loader](../lib/userspace-loader/README.md) then maps the application
-  and interpreter and creates its startup vector;
-  [dynamic-loader](../lib/dynamic-loader/README.md) owns dynamic linking.
+  The selected userspace loader maps the application and constructs its startup
+  vector. The [bootstrap loader](../bootstrap/stage1/userspace-loader/README.md)
+  accepts static core programs; the
+  [formal loader](../lib/dynamic-loader/README.md) handles both static and dynamic
+  system programs, including dependency loading and relocation.
   SDK start waits for runtime readiness, before constructors and `main`.
   A loader failure after kernel commit
   stops and joins the child rather than returning a retryable builder.
@@ -264,8 +286,9 @@ loads a new image and address space.
   [Runtime initialization](../lib/hyper/src/runtime.c) copies startup data;
   [bootstrap handoff](../lib/hyper/src/bootstrap.c) builds the final entry vector,
   switches to the final stack and only then releases the kernel bootstrap
-  reservation and userspace-loader mapping. The
-  [address-layout table](../lib/userspace-loader/README.md#address-layout)
+  reservation. Static programs also retire the loader mapping; dynamic programs
+  retain their formal loader for runtime linking. The
+  [address-layout table](../lib/elf-loader/README.md#address-layout)
   separates current placement policy from the kernel entry contract.
   See [stack APIs](../lib/hyper/README.md#guarded-growable-stacks) before changing
   stack size or cleanup. A userspace stack is separate from its kernel stack.
@@ -311,13 +334,16 @@ flowchart TB
     app["Native file operation"] --> vfs["Kernel VFS<br/>Resolve path and check rights"]
     subgraph kernel["HypeR kernel"]
         vfs --> ramfs["ramfs<br/>In-memory file data"]
-        vfs --> fat["/data · FAT filesystem"]
-        fat --> block["Native block initiator"]
+        vfs --> remote["Generic filesystem service adapter"]
+        block["Native block initiator"]
     end
+    remote -->|Cache miss / mutation RPC| fat["Native fs-fat worker"]
+    fat -->|Sector transfer| block
     block -->|Shared virtio-scsi queues| io["Linux I/O VM<br/>Storage backend"]
     io --> disk[("Assigned storage")]
     class app app
-    class vfs,ramfs,fat,block core
+    class vfs,ramfs,remote,block core
+    class fat app
     class io,disk machine
     classDef app fill:#eff6ff,stroke:#2563eb,color:#172554
     classDef core fill:#f0fdfa,stroke:#0f766e,color:#134e4a
@@ -326,20 +352,24 @@ flowchart TB
 
 For ramfs, read [the VFS adapter](../kernel/src/kernel/vfs/ramfs.rs) and
 [ramfs implementation](../kernel/src/fs/ramfs.rs).
-For `/data`, read [the FAT adapter](../kernel/src/kernel/vfs/fat.rs),
+For `/data`, read [the remote filesystem adapter](../kernel/src/kernel/vfs/remote.rs),
+[common service protocol](../lib/rust/hyper-filesystem/src/protocol.rs),
+[FAT media engine](../lib/rust/hyper-fatfs/src/volume.rs),
 [block interface](../kernel/src/fs/block.rs),
 [Native block owner](../kernel/src/kernel/block/mod.rs),
 [request lifecycle](../kernel/src/kernel/block/request.rs) and
 [queue wire format](../kernel/src/kernel/block/wire.rs).
 
-[Native storage](../app/io-runtime/src/runtime/storage.rs) negotiates the
-configuration-volume client and its dedicated shared pool;
-[I/O runtime](../app/io-runtime/src/runtime/mod.rs) mounts it and publishes readiness.
-Once established, individual filesystem requests use the kernel block queues
-and notifications directly. io-runtime is not a userspace relay for each read
-or write. VFS and FAT remain in HypeR's kernel; the Linux backend supplies block
-storage, not pathname lookup. Consult [FAT semantics](../kernel/docs/fat.md)
-for differences from ramfs.
+[Native storage](../bootstrap/stage1/io-runtime/src/runtime/storage.rs) negotiates each
+configured Native volume client and moves its capability to
+[fs-backend](../bootstrap/stage1/fs-backend/src/main.rs). That manager detects the format,
+applies fstab, launches a separate FAT or EROFS worker for each mount and remains
+outside the data path. Kernel VFS
+and cache hits need no worker round trip; misses and mutations go directly to
+the worker through [filesystem RPC](filesystem-services.md). Neither io-runtime
+nor fs-backend relays individual file operations. The Linux I/O VM supplies
+block storage, not pathname lookup. Consult [FAT semantics](fat.md) for
+differences from ramfs.
 
 **Following a write:** separate acceptance by the file operation, completion of
 the block request and persistence guarantees. Inspect the backend's sync/flush
@@ -386,9 +416,9 @@ Read [vm-runtime I/O setup](../app/vm-runtime/src/io_devices.rs),
 [asynchronous backend control](../lib/vm-support/src/io_backend.rs).
 [The runtime supervisor](../app/vm-runtime/src/supervisor.rs) services deferred
 MMIO and backend replies without holding the vCPU in a synchronous RPC.
-The [I/O broker](../app/io-runtime/src/runtime/broker/mod.rs) authorizes client sessions;
-[client bindings](../app/io-runtime/src/runtime/broker/client.rs) own their admission and retirement;
-[broker exchange](../app/io-runtime/src/broker_exchange.rs) handles their control
+The [I/O broker](../bootstrap/stage1/io-runtime/src/runtime/broker/mod.rs) authorizes client sessions;
+[client bindings](../bootstrap/stage1/io-runtime/src/runtime/broker/client.rs) own their admission and retirement;
+[broker exchange](../bootstrap/stage1/io-runtime/src/broker_exchange.rs) handles their control
 traffic. [The protocol](../lib/vm-support/src/io_protocol.rs) defines the
 negotiation records.
 
@@ -654,16 +684,16 @@ flowchart LR
 
 For physical input, read [PL011](../kernel/src/drivers/serial/pl011/mod.rs),
 [the kernel console device](../kernel/src/kernel/device/console.rs), then
-[console-input](../app/console-input/src/main.rs) and its
-[input handling library](../app/console-input/src/lib.rs).
+[console-input](../bootstrap/stage1/console-input/src/main.rs) and its
+[input handling library](../bootstrap/stage1/console-input/src/lib.rs).
 This separates UART reception/IRQ problems from stream handling problems.
 
-[Session](../app/session/src/main.rs) owns `VirtualConsole`, its transport and
+[Session](../bootstrap/stage1/session/src/main.rs) owns `VirtualConsole`, its transport and
 the relay. `serve` creates fresh shell channels and invokes
-[child launch](../app/session/src/child.rs); `relay` watches the child and its
+[child launch](../bootstrap/stage1/session/src/child.rs); `relay` watches the child and its
 streams. The outer lifetime survives an individual shell exit, with a delay
 protecting against a rapid restart loop. The matching physical output service
-is [console-output](../app/console-output/src/main.rs).
+is [console-output](../bootstrap/stage1/console-output/src/main.rs).
 
 For guest attachment, read [vmm console](../app/vmm/src/console.rs),
 [vm-runtime console](../app/vm-runtime/src/console.rs) and
@@ -686,9 +716,9 @@ runtime unchanged even when the source file looks correct.
 | Question | Follow this path |
 | --- | --- |
 | Which executable is deployed, and where? | [component declarations](../mk/README.md) → [deployment tool](../scripts/app-deployment.py) |
-| Is the service graph valid? | [manifest parsing](../app/init/src/manifest/parse.rs) → [planning](../app/init/src/manifest/plan/mod.rs) |
-| Who supplies a service's capabilities? | [provisioning](../app/init/src/runtime/provision.rs) → [launcher](../app/init/src/runtime/launcher.rs) |
-| What happens when it exits? | [runtime supervisor](../app/init/src/runtime/supervisor.rs) and [supervision policy](../app/init/src/supervision.rs) |
+| Is the service graph valid? | [manifest parsing](../lib/service-manager/src/manifest/parse.rs) → [planning](../lib/service-manager/src/manifest/plan/mod.rs) |
+| Who supplies a service's capabilities? | [provisioning](../lib/service-manager/src/runtime/provision.rs) → [launcher](../lib/service-manager/src/runtime/launcher.rs) |
+| What happens when it exits? | [runtime supervisor](../lib/service-manager/src/runtime/supervisor.rs) and [supervision policy](../lib/service-manager/src/supervision.rs) |
 | Which files and volumes go into a board image? | [board configuration](../scripts/board_config.py) → [bootstrap generation](../scripts/board_bootstrap.py) → [disk packer](../scripts/pack-board-image.py) |
 | Which I/O VM build is imported? | [package lock](../scripts/io-vm.lock.json) and [I/O VM documentation](io-vm.md) |
 
@@ -700,7 +730,7 @@ that an existing persistent configuration volume was reset.
 
 Read [deployment tests](../tests/build/app-deployment.py) and
 [board-image tests](../tests/build/board-image.py) alongside packaging changes.
-For service configuration, [check-services](../app/init/examples/check-services.rs)
+For service configuration, [check-services](../lib/service-manager/examples/check-services.rs)
 provides a host-side entry into the manifest validation rather than requiring
 a boot merely to discover invalid service wiring.
 

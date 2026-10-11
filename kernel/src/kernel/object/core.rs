@@ -24,6 +24,7 @@ const DEVICE_ASSIGNMENT_AUTHORITY_OBJECT_KIND: u32 =
     hyper::abi::native::HYPER_NATIVE_OBJECT_DEVICE_ASSIGNMENT_AUTHORITY;
 const PHYSICAL_DEVICE_OBJECT_KIND: u32 = hyper::abi::native::HYPER_NATIVE_OBJECT_PHYSICAL_DEVICE;
 const GUEST_MAILBOX_OBJECT_KIND: u32 = hyper::abi::native::HYPER_NATIVE_OBJECT_GUEST_MAILBOX;
+const FILE_PROTECTION_OBJECT_KIND: u32 = hyper::abi::native::HYPER_NATIVE_OBJECT_FILE_PROTECTION;
 const GUEST_MAPPING_OBJECT_KIND: u32 = hyper::abi::native::HYPER_NATIVE_OBJECT_GUEST_MAPPING;
 const NATIVE_BLOCK_OBJECT_KIND: u32 = hyper::abi::native::HYPER_NATIVE_OBJECT_NATIVE_BLOCK;
 const GUEST_NOTIFICATION_OBJECT_KIND: u32 =
@@ -108,6 +109,7 @@ type FinalReapQueueLock<T> = InterruptSpinLock<T, TestReapQueueMask>;
 pub(crate) struct ObjectKind(u32);
 
 impl ObjectKind {
+    pub(crate) const FILE_PROTECTION: Self = Self(FILE_PROTECTION_OBJECT_KIND);
     pub(crate) const DEVICE_ASSIGNMENT_AUTHORITY: Self =
         Self(DEVICE_ASSIGNMENT_AUTHORITY_OBJECT_KIND);
     pub(crate) const PHYSICAL_DEVICE: Self = Self(PHYSICAL_DEVICE_OBJECT_KIND);
@@ -189,6 +191,7 @@ impl ObjectKind {
             | VMAR_OBJECT_KIND
             | CONSOLE_OBJECT_KIND
             | DIRECTORY_OBJECT_KIND
+            | FILE_PROTECTION_OBJECT_KIND
             | FILE_OBJECT_KIND
             | PROCESS_BUILDER_OBJECT_KIND
             | TASK_INSPECTOR_OBJECT_KIND
@@ -875,6 +878,12 @@ impl<T: KernelObject> KernelRef<T, Scheduler> {
 }
 
 impl<T: KernelObject> KernelRef<T, OperationPin> {
+    /// Filesystem RPC retains transport identity, not userspace authority.
+    /// Final client/server handle closure must still retire the channel.
+    pub(crate) fn into_filesystem_transport(self) -> KernelRef<T, KernelService> {
+        KernelRef::from_owner(self.owner.into_class(ReferenceKind::KernelService))
+    }
+
     /// Commits a validated operation reference into persistent VM-device
     /// ownership after the corresponding userspace handle is consumed.
     ///

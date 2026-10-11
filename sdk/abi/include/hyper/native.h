@@ -88,6 +88,7 @@ typedef int64_t hyper_native_status_t;
 #define HYPER_NATIVE_OBJECT_GUEST_NOTIFICATION UINT32_C(31)
 #define HYPER_NATIVE_OBJECT_NATIVE_BLOCK UINT32_C(32)
 #define HYPER_NATIVE_OBJECT_GUEST_MAPPING UINT32_C(33)
+#define HYPER_NATIVE_OBJECT_FILE_PROTECTION UINT32_C(34)
 
 #define HYPER_NATIVE_TRANSFER_CLASS_FORBIDDEN UINT32_C(0)
 #define HYPER_NATIVE_TRANSFER_CLASS_GENERAL UINT32_C(1)
@@ -129,10 +130,13 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
         case HYPER_NATIVE_OBJECT_GUEST_NOTIFICATION: return HYPER_NATIVE_TRANSFER_CLASS_RENDEZVOUS_ONLY;
         case HYPER_NATIVE_OBJECT_NATIVE_BLOCK: return HYPER_NATIVE_TRANSFER_CLASS_RENDEZVOUS_ONLY;
         case HYPER_NATIVE_OBJECT_GUEST_MAPPING: return HYPER_NATIVE_TRANSFER_CLASS_RENDEZVOUS_ONLY;
+        case HYPER_NATIVE_OBJECT_FILE_PROTECTION: return HYPER_NATIVE_TRANSFER_CLASS_FORBIDDEN;
         default: return HYPER_NATIVE_TRANSFER_CLASS_FORBIDDEN;
     }
 }
 
+#define HYPER_NATIVE_RIGHT_PROTECT (UINT64_C(1) << 35)
+#define HYPER_NATIVE_RIGHT_MANAGE_NAMESPACE (UINT64_C(1) << 34)
 #define HYPER_NATIVE_RIGHT_INSPECT_DETAILS (UINT64_C(1) << 33)
 #define HYPER_NATIVE_RIGHT_BIND_WAIT (UINT64_C(1) << 30)
 #define HYPER_NATIVE_RIGHT_DUPLICATE (UINT64_C(1) << 0)
@@ -168,7 +172,7 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
 #define HYPER_NATIVE_RIGHT_SET_ATTRIBUTES (UINT64_C(1) << 31)
 #define HYPER_NATIVE_RIGHT_LOCK_FILE (UINT64_C(1) << 32)
 
-#define HYPER_NATIVE_RIGHTS_MASK UINT64_C(0x3ffffffff)
+#define HYPER_NATIVE_RIGHTS_MASK UINT64_C(0xfffffffff)
 
 #define HYPER_NATIVE_SIGNAL_PHYSICAL_DEVICE_READABLE (UINT64_C(1) << 0)
 #define HYPER_NATIVE_SIGNAL_NATIVE_BLOCK_PEER_CLOSED (UINT64_C(1) << 0)
@@ -196,6 +200,11 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
 #define HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_WRITABLE (UINT64_C(1) << 1)
 #define HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_PEER_CLOSED (UINT64_C(1) << 2)
 
+#define HYPER_NATIVE_FILESYSTEM_SWITCH_ROOT_MAX_MOVES UINT64_C(16)
+#define HYPER_NATIVE_NATIVE_BLOCK_TRANSFER_BYTES UINT64_C(524288)
+#define HYPER_NATIVE_NATIVE_BLOCK_BATCH_MAX UINT64_C(4)
+#define HYPER_NATIVE_NATIVE_BLOCK_BATCH_RECORD_BYTES UINT64_C(16)
+#define HYPER_NATIVE_NATIVE_BLOCK_TRANSFER_FRAME_BYTES UINT64_C(524352)
 #define HYPER_NATIVE_OBJECT_DETAIL_EMPTY UINT64_C(0)
 #define HYPER_NATIVE_OBJECT_DETAIL_THREAD UINT64_C(1)
 #define HYPER_NATIVE_OBJECT_DETAIL_VMAR UINT64_C(2)
@@ -344,7 +353,7 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
 #define HYPER_NATIVE_BYTE_CHANNEL_MAX_QUEUED_MESSAGES UINT64_C(16)
 #define HYPER_NATIVE_BYTE_CHANNEL_MAX_QUEUED_BYTES UINT64_C(1048576)
 #define HYPER_NATIVE_CAPABILITY_CHANNEL_MAX_MESSAGE_BYTES UINT64_C(4096)
-#define HYPER_NATIVE_CAPABILITY_CHANNEL_MAX_HANDLES UINT64_C(16)
+#define HYPER_NATIVE_CAPABILITY_CHANNEL_MAX_HANDLES UINT64_C(64)
 #define HYPER_NATIVE_CAPABILITY_DISPOSITION_MOVE UINT64_C(0)
 #define HYPER_NATIVE_CAPABILITY_DISPOSITION_DUPLICATE UINT64_C(1)
 #define HYPER_NATIVE_CONSOLE_MAX_TRANSFER_BYTES UINT64_C(4096)
@@ -433,7 +442,6 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
 #define HYPER_NATIVE_SYS_OBJECT_INSPECTOR_DERIVE_RESOURCE_DOMAIN UINT64_C(43)
 #define HYPER_NATIVE_SYS_DIRECTORY_OPEN_DIRECTORY UINT64_C(44)
 #define HYPER_NATIVE_SYS_VMO_CREATE UINT64_C(45)
-#define HYPER_NATIVE_SYS_FILE_CREATE_EXECUTABLE_VMO UINT64_C(46)
 #define HYPER_NATIVE_SYS_VMO_READ UINT64_C(47)
 #define HYPER_NATIVE_SYS_VMO_WRITE UINT64_C(48)
 #define HYPER_NATIVE_SYS_VMAR_ALLOCATE UINT64_C(49)
@@ -502,7 +510,6 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
 #define HYPER_NATIVE_SYS_DIRECTORY_OPEN_FILE_WITH_OPTIONS UINT64_C(112)
 #define HYPER_NATIVE_SYS_VIRTUAL_MACHINE_CREATION_LEASE_GET_PLATFORM_INFO UINT64_C(113)
 #define HYPER_NATIVE_SYS_VMO_CREATE_SNAPSHOT UINT64_C(114)
-#define HYPER_NATIVE_SYS_FILE_CREATE_SNAPSHOT UINT64_C(115)
 #define HYPER_NATIVE_SYS_VMAR_MAP_PRIVATE UINT64_C(116)
 #define HYPER_NATIVE_SYS_VIRTUAL_MACHINE_GET_POWER_REQUEST UINT64_C(117)
 #define HYPER_NATIVE_SYS_VIRTUAL_MACHINE_COMPLETE_POWER_REQUEST UINT64_C(118)
@@ -524,7 +531,7 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
 #define HYPER_NATIVE_SYS_GUEST_NOTIFICATION_CONTROL UINT64_C(134)
 #define HYPER_NATIVE_SYS_NATIVE_BLOCK_CREATE UINT64_C(135)
 #define HYPER_NATIVE_SYS_NATIVE_BLOCK_ACTIVATE UINT64_C(136)
-#define HYPER_NATIVE_SYS_NATIVE_BLOCK_MOUNT UINT64_C(137)
+#define HYPER_NATIVE_SYS_FILESYSTEM_MOUNT UINT64_C(137)
 #define HYPER_NATIVE_SYS_GUEST_MAPPING_CREATE UINT64_C(138)
 #define HYPER_NATIVE_SYS_GUEST_MAPPING_RELEASE UINT64_C(139)
 #define HYPER_NATIVE_SYS_DEVICE_CLAIM_MATCHING UINT64_C(140)
@@ -538,6 +545,12 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
 #define HYPER_NATIVE_SYS_VIRTUAL_CPU_SET_AFFINITY UINT64_C(148)
 #define HYPER_NATIVE_SYS_SYSTEM_CONFIG UINT64_C(149)
 #define HYPER_NATIVE_SYS_OBJECT_INSPECTOR_READ_DETAILS UINT64_C(150)
+#define HYPER_NATIVE_SYS_FILESYSTEM_UNMOUNT UINT64_C(151)
+#define HYPER_NATIVE_SYS_FILESYSTEM_MOUNT_RAMFS UINT64_C(152)
+#define HYPER_NATIVE_SYS_FILESYSTEM_SWITCH_ROOT UINT64_C(154)
+#define HYPER_NATIVE_SYS_FILE_PROTECT UINT64_C(155)
+#define HYPER_NATIVE_SYS_VMAR_MAP_FILE UINT64_C(156)
+#define HYPER_NATIVE_SYS_NATIVE_BLOCK_TRANSFER UINT64_C(496)
 
 static inline uint64_t hyper_native_failure_result_mask(
     uint64_t syscall_number, hyper_native_status_t status)
@@ -560,6 +573,38 @@ static inline uint64_t hyper_native_failure_result_mask(
     }
     return UINT64_C(0);
 }
+
+#define HYPER_NATIVE_FILESYSTEM_ROOT_SWITCH_MIN_SIZE UINT64_C(48)
+typedef struct hyper_native_filesystem_root_switch_t {
+    uint64_t new_root;
+    uint64_t new_root_length;
+    uint64_t put_old;
+    uint64_t put_old_length;
+    uint64_t moves;
+    uint64_t move_count;
+} hyper_native_filesystem_root_switch_t;
+HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_filesystem_root_switch_t) == 48, "filesystem_root_switch size");
+HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_filesystem_root_switch_t) == 8, "filesystem_root_switch alignment");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_filesystem_root_switch_t, new_root) == 0, "filesystem_root_switch.new_root offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_filesystem_root_switch_t, new_root_length) == 8, "filesystem_root_switch.new_root_length offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_filesystem_root_switch_t, put_old) == 16, "filesystem_root_switch.put_old offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_filesystem_root_switch_t, put_old_length) == 24, "filesystem_root_switch.put_old_length offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_filesystem_root_switch_t, moves) == 32, "filesystem_root_switch.moves offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_filesystem_root_switch_t, move_count) == 40, "filesystem_root_switch.move_count offset");
+
+#define HYPER_NATIVE_FILESYSTEM_MOUNT_MOVE_MIN_SIZE UINT64_C(32)
+typedef struct hyper_native_filesystem_mount_move_t {
+    uint64_t source;
+    uint64_t source_length;
+    uint64_t target;
+    uint64_t target_length;
+} hyper_native_filesystem_mount_move_t;
+HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_filesystem_mount_move_t) == 32, "filesystem_mount_move size");
+HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_filesystem_mount_move_t) == 8, "filesystem_mount_move alignment");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_filesystem_mount_move_t, source) == 0, "filesystem_mount_move.source offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_filesystem_mount_move_t, source_length) == 8, "filesystem_mount_move.source_length offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_filesystem_mount_move_t, target) == 16, "filesystem_mount_move.target offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_filesystem_mount_move_t, target_length) == 24, "filesystem_mount_move.target_length offset");
 
 #define HYPER_NATIVE_OBJECT_DETAILS_MIN_SIZE UINT64_C(88)
 typedef struct hyper_native_object_details_t {
@@ -891,37 +936,33 @@ HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_capability_receive_slot_t, rights)
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_capability_receive_slot_t, expected_kind) == 16, "capability_receive_slot.expected_kind offset");
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_capability_receive_slot_t, flags) == 20, "capability_receive_slot.flags offset");
 
-#define HYPER_NATIVE_LOADER_STARTUP_MIN_SIZE UINT64_C(88)
+#define HYPER_NATIVE_LOADER_STARTUP_MIN_SIZE UINT64_C(72)
 typedef struct hyper_native_loader_startup_t {
     uint32_t size;
     uint32_t handle_count;
     uint32_t data_size;
     uint32_t flags;
     uint64_t executable;
-    uint64_t executable_size;
     uint64_t root_vmar;
     uint64_t stack_vmar;
     uint64_t stack_base;
     uint64_t stack_size;
     uint64_t loader_base;
     uint64_t loader_size;
-    uint64_t runtime_directory;
 } hyper_native_loader_startup_t;
-HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_loader_startup_t) == 88, "loader_startup size");
+HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_loader_startup_t) == 72, "loader_startup size");
 HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_loader_startup_t) == 8, "loader_startup alignment");
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_loader_startup_t, size) == 0, "loader_startup.size offset");
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_loader_startup_t, handle_count) == 4, "loader_startup.handle_count offset");
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_loader_startup_t, data_size) == 8, "loader_startup.data_size offset");
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_loader_startup_t, flags) == 12, "loader_startup.flags offset");
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_loader_startup_t, executable) == 16, "loader_startup.executable offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_loader_startup_t, executable_size) == 24, "loader_startup.executable_size offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_loader_startup_t, root_vmar) == 32, "loader_startup.root_vmar offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_loader_startup_t, stack_vmar) == 40, "loader_startup.stack_vmar offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_loader_startup_t, stack_base) == 48, "loader_startup.stack_base offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_loader_startup_t, stack_size) == 56, "loader_startup.stack_size offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_loader_startup_t, loader_base) == 64, "loader_startup.loader_base offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_loader_startup_t, loader_size) == 72, "loader_startup.loader_size offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_loader_startup_t, runtime_directory) == 80, "loader_startup.runtime_directory offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_loader_startup_t, root_vmar) == 24, "loader_startup.root_vmar offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_loader_startup_t, stack_vmar) == 32, "loader_startup.stack_vmar offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_loader_startup_t, stack_base) == 40, "loader_startup.stack_base offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_loader_startup_t, stack_size) == 48, "loader_startup.stack_size offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_loader_startup_t, loader_base) == 56, "loader_startup.loader_base offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_loader_startup_t, loader_size) == 64, "loader_startup.loader_size offset");
 
 #define HYPER_NATIVE_STARTUP_HANDLE_MIN_SIZE UINT64_C(16)
 typedef struct hyper_native_startup_handle_t {

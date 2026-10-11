@@ -7,7 +7,20 @@
   "boot": "rpi5-firmware",
   "disk": {
     "uuid": "90bbd4bb-efff-4640-89dc-f0d58a6d3467",
-    "config-mib": 64
+    "partitions": [
+      {
+        "label": "hyper-data",
+        "size-mib": 64,
+        "filesystem": "fat",
+        "content": "data"
+      },
+      {
+        "label": "hyper-system",
+        "size-mib": 64,
+        "filesystem": "erofs",
+        "content": "system"
+      }
+    ]
   },
   "files": {
     "hyper.img": "hyper",
@@ -26,7 +39,7 @@
     "configuration": {
       "memory-bytes": 134217728,
       "vcpus": 1,
-      "bootargs": "console=ttyAMA0 earlycon=pl011,mmio32,0x09000000 rdinit=/init loglevel=4 hyper.role=io hyper.mode=standby hyper.volumes=required"
+      "bootargs": "console=ttyAMA0 earlycon=pl011,mmio32,0x09000000 rdinit=/init loglevel=4 hyper.role=io hyper.mode=standby"
     },
     "io-device": {
       "profile": "bcm2712-sdhci",

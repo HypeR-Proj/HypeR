@@ -85,46 +85,6 @@ pub(crate) fn create_vmo(process: &Process, size: u64) -> Result<HandleValue, Se
     Ok(process.create_object(object, writable_vmo_rights())?)
 }
 
-pub(crate) fn create_file_executable_vmo(
-    process: &Process,
-    file: HandleValue,
-) -> Result<(HandleValue, u64), ServiceError> {
-    let file = process.resolve_handle::<FileObject>(file, Rights::READ.union(Rights::EXECUTE))?;
-    let snapshot = file
-        .object()
-        .executable_snapshot(&process.resource_domain())?;
-    let byte_count =
-        u64::try_from(snapshot.bytes().len()).map_err(|_| ServiceError::InvalidInput)?;
-    let pin = crate::kernel::task::scheduler::preempt_disable().map_err(ServiceError::Scheduler)?;
-    let executable = snapshot.storage().try_executable(
-        &super::ExecutableProvenance::for_native_image_loader(),
-        &pin,
-    );
-    crate::kernel::task::scheduler::preempt_enable_without_reschedule(pin)
-        .map_err(ServiceError::Scheduler)?;
-    let executable = VmoObject::from_executable(
-        executable.map_err(MemoryObjectError::Vmo)?,
-        &process.resource_domain(),
-    )?;
-    Ok((
-        process.create_object(executable, executable_vmo_rights())?,
-        byte_count,
-    ))
-}
-
-pub(crate) fn create_file_snapshot(
-    process: &Process,
-    file: HandleValue,
-) -> Result<(HandleValue, u64), ServiceError> {
-    let file = process.resolve_handle::<FileObject>(file, Rights::READ)?;
-    let snapshot = file
-        .object()
-        .readable_snapshot(&process.resource_domain())?;
-    let size = u64::try_from(snapshot.bytes().len()).map_err(|_| ServiceError::InvalidInput)?;
-    let object = VmoObject::from_snapshot(snapshot.storage().clone(), &process.resource_domain())?;
-    Ok((process.create_object(object, snapshot_vmo_rights())?, size))
-}
-
 pub(crate) fn create_vmo_snapshot(
     process: &Process,
     vmo: HandleValue,
@@ -244,6 +204,82 @@ pub(crate) fn map_private(
         space.prepare_change(prepared)?.commit()?;
         Ok(())
     })
+}
+
+/// Content-protected file mappings are process-local and charge their resident
+/// pages to the destination process, never the shared filesystem sponsor.
+pub(crate) fn map_file(
+    process: &Process,
+    vmar: HandleValue,
+    file: HandleValue,
+    protection: HandleValue,
+    request: PrivateMappingRequest,
+) -> Result<(), ServiceError> {
+    let permission =
+        permissions(u64::from(request.permissions)).ok_or(ServiceError::InvalidInput)?;
+    if !permission.is_valid()
+        || permission == Permissions::NONE
+        || u64::from(request.mode) != hyper::abi::native::HYPER_NATIVE_PRIVATE_MAPPING_COPY_ON_WRITE
+    {
+        return Err(ServiceError::InvalidInput);
+    }
+    let range = aligned_range(request.address, request.size)?;
+    let executable = permission.contains(Access::Execute);
+    let file_rights = if executable {
+        Rights::READ.union(Rights::EXECUTE)
+    } else {
+        Rights::READ
+    };
+    let file = process.resolve_handle::<FileObject>(file, file_rights)?;
+    let token = process
+        .resolve_handle::<crate::kernel::vfs::FileProtectionObject>(protection, Rights::MAP)?;
+    let guard = token.object().protection_for(file.object())?;
+    let vmar = process.resolve_handle::<VmarObject>(vmar, Rights::MAP)?;
+    let space = vmar.object().address_space();
+    let current = process.address_space_owner()?;
+    if !core::ptr::eq(space, &*current) {
+        return Err(ServiceError::Vfs(VfsError::AccessDenied));
+    }
+    crate::kernel::mm::reclaim::retry_prepare_with(
+        || {
+            retry_mapping_transaction(process, || {
+                let source =
+                    hyper::mm::try_box(guard.clone()).map_err(|_| ProcessError::Allocation)?;
+                let view = space
+                    .logical()
+                    .prepare_file_view(
+                        source,
+                        range.length(),
+                        request.source_offset,
+                        request.source_length,
+                        request.data_offset,
+                        executable,
+                    )
+                    .map_err(MachineError::Logical)?;
+                let maximum = if executable {
+                    Permissions::read_execute()
+                } else {
+                    Permissions::read_write()
+                };
+                let prepared = space
+                    .logical()
+                    .prepare_map_private_view(
+                        vmar.object().token(),
+                        range,
+                        view,
+                        permission,
+                        maximum,
+                    )
+                    .map_err(MachineError::Logical)?;
+                space.prepare_change(prepared)?.commit()?;
+                Ok(())
+            })
+        },
+        |error| match error {
+            ServiceError::Machine(error) => crate::kernel::mm::reclaim::user_memory_target(error),
+            _ => None,
+        },
+    )
 }
 
 pub(crate) fn read_vmo(
@@ -562,15 +598,6 @@ const fn writable_vmo_rights() -> Rights {
         .union(Rights::INSPECT)
         .union(Rights::READ)
         .union(Rights::WRITE)
-        .union(Rights::MAP)
-}
-
-const fn executable_vmo_rights() -> Rights {
-    Rights::DUPLICATE
-        .union(Rights::TRANSFER)
-        .union(Rights::INSPECT)
-        .union(Rights::READ)
-        .union(Rights::EXECUTE)
         .union(Rights::MAP)
 }
 

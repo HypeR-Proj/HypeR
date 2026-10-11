@@ -102,6 +102,8 @@ pub(super) struct CapabilityReceiveTarget {
     byte_output: Option<UserWriteReservation>,
     slot_output: Option<UserWriteReservation>,
     handles: Option<ProcessHandleBatchReservation>,
+    slot_bytes: Vec<u8>,
+    _slot_charge: Option<CommittedCharge>,
 }
 
 pub(crate) fn capability_channel_create(
@@ -242,21 +244,19 @@ pub(crate) fn capability_channel_receive(
     {
         return Err(CapabilityChannelServiceError::InvalidInput);
     }
-    let slot_contract = copy_receive_contract(process, slot_records)?;
     let byte_capacity = slice_length(byte_output)?;
     if byte_capacity > MAX_CAPABILITY_BYTES {
         return Err(CapabilityChannelServiceError::InvalidInput);
     }
-    let contract = CapabilityReceiveContract::new(byte_capacity, slot_contract.slots())?;
+    let (contract, decode_charge) = copy_receive_contract(process, byte_capacity, slot_records)?;
+    let slot_count = contract.slot_count();
     let prepared = endpoint
         .object()
         .prepare_receive(&process.resource_domain(), contract)?;
-    let target = CapabilityReceiveTarget::prepare(
-        process,
-        byte_output,
-        slot_records,
-        contract.slot_count(),
-    )?;
+    // The persistent registration now owns its vector's accounting. Retain
+    // the decode charge until here so preemption cannot leave it uncharged.
+    drop(decode_charge);
+    let target = CapabilityReceiveTarget::prepare(process, byte_output, slot_records, slot_count)?;
     Ok(prepared.attach_target(target).wait(
         &process.resource_domain(),
         deadline_nanoseconds,
@@ -375,6 +375,7 @@ impl PreparedCapabilitySend {
             .ok_or(CapabilityChannelServiceError::InvalidInput)?;
         let charged_bytes = byte_count
             .checked_add(request_bytes)
+            .and_then(|bytes| bytes.checked_add(record_bytes))
             .and_then(|bytes| u64::try_from(bytes).ok())
             .ok_or(CapabilityChannelServiceError::InvalidInput)?;
         let charge = process
@@ -401,7 +402,7 @@ impl PreparedCapabilitySend {
             process.copy_from_user(source, &mut owned_bytes)?;
         }
 
-        let mut raw = [0u8; MAX_CAPABILITY_RECORD_BUFFER];
+        let mut raw = try_zeroed_bytes(record_bytes)?;
         if let (Some(source), false) = (records, record_bytes == 0) {
             let destination = raw
                 .get_mut(..record_bytes)
@@ -443,7 +444,25 @@ impl CapabilityReceiveTarget {
         byte_output: Option<UserSlice>,
         slot_output: Option<UserSlice>,
         slot_count: usize,
-    ) -> Result<Self, ProcessError> {
+    ) -> Result<Self, CapabilityChannelServiceError> {
+        let record_bytes = slot_count
+            .checked_mul(CAPABILITY_RECORD_BYTES)
+            .ok_or(CapabilityChannelServiceError::InvalidInput)?;
+        let charge = if record_bytes == 0 {
+            None
+        } else {
+            Some(
+                process
+                    .resource_domain()
+                    .reserve(
+                        ResourceAmount::ZERO
+                            .with(ResourceKind::KernelMemoryBytes, record_bytes as u64),
+                    )
+                    .map_err(ProcessError::from)?
+                    .commit(),
+            )
+        };
+        let slot_bytes = try_zeroed_bytes(record_bytes)?;
         let [byte_output, slot_output] = process.reserve_user_writes([byte_output, slot_output])?;
         let handles = if slot_count == 0 {
             None
@@ -455,6 +474,8 @@ impl CapabilityReceiveTarget {
             byte_output,
             slot_output,
             handles,
+            slot_bytes,
+            _slot_charge: charge,
         })
     }
 
@@ -471,7 +492,7 @@ impl CapabilityReceiveTarget {
     }
 
     fn write_outputs(
-        &self,
+        &mut self,
         bytes: &[u8],
         values: &[HandleValue],
         contracts: &[CapabilitySlotContract],
@@ -488,7 +509,7 @@ impl CapabilityReceiveTarget {
         if values.is_empty() {
             return Ok(());
         }
-        let mut records = [0u8; MAX_CAPABILITY_RECORD_BUFFER];
+        let records = &mut self.slot_bytes;
         for (index, (value, contract)) in values.iter().zip(contracts).enumerate() {
             let start = match index.checked_mul(CAPABILITY_RECORD_BYTES) {
                 Some(start) => start,
@@ -496,7 +517,7 @@ impl CapabilityReceiveTarget {
             };
             let record = match records.get_mut(start..start + CAPABILITY_RECORD_BYTES) {
                 Some(record) => record,
-                None => capability_service_invariant("slot record exceeded fixed buffer"),
+                None => capability_service_invariant("slot record exceeded prepared output buffer"),
             };
             encode_receive_slot(record, *value, *contract);
         }
@@ -538,32 +559,56 @@ impl Drop for CapabilityReceiveTarget {
 
 fn copy_receive_contract(
     process: &Process,
+    byte_capacity: usize,
     records: Option<UserSlice>,
-) -> Result<CapabilityReceiveContract, CapabilityChannelServiceError> {
+) -> Result<(CapabilityReceiveContract, Option<CommittedCharge>), CapabilityChannelServiceError> {
     let record_bytes = slice_length(records)?;
     if record_bytes > MAX_CAPABILITY_RECORD_BUFFER || record_bytes % CAPABILITY_RECORD_BYTES != 0 {
         return Err(CapabilityChannelServiceError::InvalidInput);
     }
     let count = record_bytes / CAPABILITY_RECORD_BYTES;
-    let mut raw = [0u8; MAX_CAPABILITY_RECORD_BUFFER];
+    // Decoding owns wire storage and a temporary typed vector before the
+    // registered contract takes over its own charge. Account this peak too.
+    let temporary_bytes = record_bytes + 2 * count * core::mem::size_of::<CapabilitySlotContract>();
+    let decode_charge = if temporary_bytes == 0 {
+        None
+    } else {
+        Some(
+            process
+                .resource_domain()
+                .reserve(
+                    ResourceAmount::ZERO
+                        .with(ResourceKind::KernelMemoryBytes, temporary_bytes as u64),
+                )
+                .map_err(ProcessError::from)?
+                .commit(),
+        )
+    };
+    let mut raw = try_zeroed_bytes(record_bytes)?;
     if let (Some(source), false) = (records, record_bytes == 0) {
         let destination = raw
             .get_mut(..record_bytes)
             .ok_or(CapabilityChannelServiceError::InvalidInput)?;
         process.copy_from_user(source, destination)?;
     }
-    let empty = CapabilitySlotContract {
-        rights: Rights::NONE,
-        expected_kind: None,
-    };
-    let mut contracts = [empty; MAX_CAPABILITIES];
-    for (output, record) in contracts
-        .iter_mut()
-        .zip(raw[..record_bytes].chunks_exact(CAPABILITY_RECORD_BYTES))
-    {
-        *output = decode_receive_slot(record)?;
+    let mut contracts = Vec::new();
+    contracts
+        .try_reserve_exact(count)
+        .map_err(|_| CapabilityChannelError::Allocation)?;
+    for record in raw.chunks_exact(CAPABILITY_RECORD_BYTES) {
+        contracts.push(decode_receive_slot(record)?);
     }
-    CapabilityReceiveContract::new(0, &contracts[..count]).map_err(Into::into)
+    let contract = CapabilityReceiveContract::new(byte_capacity, &contracts)?;
+    Ok((contract, decode_charge))
+}
+
+fn try_zeroed_bytes(length: usize) -> Result<Vec<u8>, CapabilityChannelServiceError> {
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(length)
+        .map_err(|_| CapabilityChannelError::Allocation)?;
+    bytes.resize(length, 0);
+    Ok(bytes)
 }
 
 fn decode_send_disposition(

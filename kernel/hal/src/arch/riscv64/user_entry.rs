@@ -11,9 +11,7 @@ use core::mem::{offset_of, size_of};
 use core::ptr::NonNull;
 use hyper::abi::native::{NativeInvocation, NativeResult};
 use hyper::hal::interrupt::{EntryAction, InterruptId, InterruptOrigin};
-use hyper::hal::user::{
-    NativeCallAction, NativeCallService, UserFault, UserFaultKind, UserRunBinding,
-};
+use hyper::hal::user::{NativeCallAction, NativeCallService, UserFault, UserRunBinding};
 #[cfg(feature = "kernel-self-test")]
 use hyper::sync::atomic::AtomicUsize;
 use hyper::sync::atomic::{AtomicPtr, AtomicU64, Ordering};
@@ -211,7 +209,7 @@ fn stopped_exit(context: &mut UserContext) -> Result<UserExit<'_>, Error> {
     let payload = match context.machine.exit_kind {
         EXIT_NATIVE => ExitPayload::NativeCall(invocation(&context.machine.frame)?),
         EXIT_FAULT => ExitPayload::Fault(UserFault::new(
-            fault_kind(context.machine.frame.cause),
+            super::user_contract::fault_kind(context.machine.frame.cause),
             context.machine.frame.cause,
             context.machine.frame.fault_address,
             context.machine.frame.pc,
@@ -507,17 +505,7 @@ fn current_binding(context: &MachineContext) -> Result<UserRunBinding, Error> {
     )
     .ok_or(Error::InvalidMachineState)
 }
-fn fault_kind(cause: u64) -> UserFaultKind {
-    match cause {
-        0 | 4 | 6 => UserFaultKind::Alignment,
-        1 | 12 => UserFaultKind::InstructionAbort,
-        5 | 7 | 13 => UserFaultKind::DataAbort,
-        15 => UserFaultKind::WritePageFault,
-        2 => UserFaultKind::IllegalInstruction,
-        3 => UserFaultKind::Breakpoint,
-        _ => UserFaultKind::OtherSynchronous,
-    }
-}
+
 fn fail_stop() -> ! {
     hyper::debug::invariant_failure("riscv64 Native entry ownership invariant")
 }

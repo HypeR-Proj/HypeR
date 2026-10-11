@@ -17,6 +17,7 @@ mod object;
 mod process_builder;
 mod task;
 mod vfs;
+mod vfs_namespace;
 mod vm;
 
 use crate::kernel::abi::native::{HandleServices, ImmediateServices, UserMemoryServices};

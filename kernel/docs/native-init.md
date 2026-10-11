@@ -6,9 +6,14 @@ SPDX-License-Identifier: Apache-2.0
 # Native init contract
 
 The production kernel boot path starts one Native userspace process from the
-firmware-provided initial ramdisk. Linux guest autostart is userspace policy:
-init provisions the VM manager and its isolated VM runtime through Native
-capabilities. Kernel self-test images contain no Linux loader or default VM.
+firmware-provided initial ramdisk. Linux guest autostart is userspace policy.
+In the default deployment, stage-1 init starts core storage and recovery
+services, then transfers supervision to system init. System init switches the
+VFS root and provisions the VM manager, which creates isolated VM runtimes
+through Native capabilities. These stages and paths beyond initial startup are
+not kernel requirements. Kernel self-test images contain no Linux loader or
+default VM. See the [boot layout](../../docs/boot-layout.md) for the default
+deployment and recovery behavior.
 
 The AArch64 reference guest selects GICv2 or GICv3 from the creation lease's
 platform metadata. The `aarch64_gic_version` field is 2 or 3 on supported Arm
@@ -36,10 +41,10 @@ and otherwise falls back to a
 bootstrap Console capability, allowing init to report startup errors before
 the console services exist.
 
-The default application build uses dynamic linking, including for init. Its
-interpreter and runtime libraries must therefore be available in the initial
-ramdisk. Rust `std` support and dynamic linking are separate choices; using
-`std` does not require a shared Rust standard-library image.
+Init and the other `bootstrap/stage1` programs link statically, independently
+of the ordinary application's dynamic delivery graph. Rust `std` support and
+dynamic linking are separate choices; using `std` does not require a shared
+Rust standard-library image or the formal environment's loader.
 
 ## Initial ramdisk
 
@@ -56,38 +61,45 @@ or trailing slashes, duplicate canonical names, and a non-directory root entry
 are rejected. A conventional `.` directory entry is accepted but is not
 indexed.
 
-The archive must contain `/init` and `/lib64/userspace-loader-hyper-<arch>` as
-regular files with at least one executable mode bit. The default dynamically
-linked init also needs its interpreter and dependency libraries. Both `system`
-and `development` deployment profiles install the two loaders; the userspace
-loader is required even for a statically linked init.
+The archive is the initial `/`. Its `/init` and
+`/lib/userspace-loader-hyper-<arch>` paths must resolve to regular files with an
+executable mode bit. Ordinary filesystem symlinks are permitted; `/boot` and
+`/system` have no special meaning to the kernel. The in-tree stage-1 loader
+accepts static `/init` only; this is its userspace policy, not a kernel
+requirement on init. Another userspace model may supply its own loader at the
+same path, provided it satisfies the bootstrap ELF and channel contract.
+The formal dynamic loader and its libraries may be absent until userspace
+mounts a system volume.
 
 ## Executable image
 
-Every Native process first enters `/lib64/userspace-loader-hyper-<arch>`, including
-`/init`. The kernel validates and retains this restricted bootstrap ELF once;
-it maps shared immutable segments and an empty guarded stack for each child.
-Its first argument register carries a ByteChannel handle. The queued launch
-message describes installed executable/VMAR capabilities, a bootstrap-only
-`/lib64` directory, mapping bounds and opaque SDK data. The kernel does not
-parse application ELF, construct argv/auxv, or perform Native application
-relocation. This does not change kernel-image relocation during boot.
+Only initial startup selects a loader by pathname. Descendant process builders
+receive an executable File with `READ|EXECUTE|PROTECT|DUPLICATE|TRANSFER`
+and a loader File with `READ|EXECUTE`. The child receives only
+`READ|EXECUTE|PROTECT` on the target; builder creation preserves file identity,
+not a frozen content version. The kernel validates and maps the loader's restricted ELF,
+then enters it on an empty guarded stack. Its first argument register carries
+a ByteChannel handle. The queued 72-byte `loader_startup` header describes the
+executable/VMAR capabilities and mapping bounds, followed by tagged capabilities
+and opaque SDK data. No runtime or library directory is opened implicitly by
+the kernel. Application ELF, argv/auxv and application relocation are userspace
+responsibilities. Kernel-image relocation during boot is unchanged.
 
-The [userspace loader](../../lib/userspace-loader/README.md) owns ordinary
-ELF64 admission, application/interpreter mappings and the System V stack.
-It accepts branded AArch64 and RISC-V `ET_EXEC`/`ET_DYN` images, enforces
-nonoverlapping readable load segments and rejects W+X, nonempty ELF TLS and
-executable stacks. `PT_INTERP` names a direct file in `/lib64`. The interpreter
-is mapped at 256 MiB; dynamic main program headers must be exposed by a consistent
-`PT_PHDR`. Dependencies start at 512 MiB and resolve only through the delegated
-architecture library directory. Bootstrap-only file/directory handles close
-before program execution.
+The [bootstrap loader](../../bootstrap/stage1/userspace-loader/README.md) accepts
+static core executables. The [formal loader](../../lib/dynamic-loader/README.md)
+loads both static and dynamic programs. They share bounded ELF64 mapping and
+stack encoding in [lib/elf-loader](../../lib/elf-loader/README.md), accepting
+branded AArch64/RISC-V `ET_EXEC`/`ET_DYN` images and rejecting overlapping load
+segments, W+X, nonempty ELF TLS and executable stacks. A dynamic `PT_INTERP`
+must match `/lib64/ld-hyper-<arch>.so`; the formal loader validates that identity
+instead of opening a second interpreter. Dependencies resolve only through
+the delegated architecture library Directory.
 
-The [dynamic loader](../../lib/dynamic-loader/README.md) self-relocates at its
-entry, then owns symbol resolution, dependency loading, RELA/RELR, RELRO and
-constructors. Static CRT performs its own relative relocation. Both share the
-SDK's final-stack handoff. Relocation can never grant writable access to code;
-the kernel independently enforces executable provenance and W^X on mappings.
+The formal loader self-relocates at entry, then owns symbol resolution,
+dependency loading, RELA/RELR, RELRO and constructors. Static CRT performs its
+own relative relocation. Both paths share the SDK's final-stack handoff.
+Relocation can never grant writable access to code; the kernel independently
+enforces executable provenance and W^X on mappings.
 
 The [Native 64-bit application ABI](syscall-abi.md#native-64-bit-application-address-space-contract)
 uses architecture-specific application and system-managed user regions.
@@ -115,7 +127,9 @@ policy, not a fixed-address app ABI. Only the initial usable extent is mapped.
 Before any constructors or app entry execute, the runtime copies arguments,
 environment strings, auxiliary entries and handle records out of bootstrap
 storage, switches SP through an architecture-specific non-returning handoff,
-and releases the bootstrap image and stack reservation from the final stack.
+and releases the bootstrap stack reservation from the final stack. Static
+programs also release their selected loader; dynamic programs retain the formal
+loader for its continuation, constructors and later `dlopen` operations.
 It then acknowledges startup to the parent before executing constructors. No old C
 frame is resumed. The dynamic loader makes this handoff through the relocated
 shared runtime before constructors; static CRT uses the same implementation.
@@ -134,9 +148,15 @@ regions have independent VMARs, so this reservation is not a heap size limit.
 The kernel still owns the root address space and
 resource accounting; allocator policy lives in `lib/hyper`.
 
-Application bytes reach the child as an immutable executable VMO. The userspace
-loader maps private segment views: complete source pages may be shared, partial
-pages are sanitized, and BSS is zero-filled. Executable pages are
+The child receives an ordinary executable File. Its userspace loader acquires
+`PROTECT` before reading size or ELF bytes, then maps file-backed private
+segments. Partial pages are sanitized and BSS is zero-filled. Active mappings
+retain protection independently of the parser token and File handles. Clean
+pages may be discarded under memory pressure and faulted back from the protected
+file; modified private pages remain charged to the process. No whole-file
+snapshot is exported to userspace. Owner-process teardown detaches protected
+sources after its threads stop; external VMAR owners cannot prolong protection
+or allow further file refills in that dead address space. Executable pages are
 instruction-coherent before RX publication; relocations target writable private
 data and never require a writable code alias. Kernel Process publication occurs
 once the bootstrap environment is prepared, before application parsing and
@@ -144,8 +164,11 @@ dynamic linking. A loader failure after that point terminates an already
 published child; on a failed startup result the SDK requests stop, then waits
 for termination. Successful readiness precedes constructors and
 `main`, so it does not promise that application initialization will succeed.
+Later file-backed instruction or data faults can also fail: exhausted bounded
+reclaim/refill retries terminate the Process as an unhandled page fault. Explicit
+mapping and copy syscalls instead report allocation, quota or I/O failure statuses.
 
-See the [loader address layout](../../lib/userspace-loader/README.md#address-layout)
+See the [loader address layout](../../lib/elf-loader/README.md#address-layout)
 for the current mapping windows and their policy boundaries.
 
 ## Bootstrap capabilities
@@ -159,22 +182,39 @@ initial set can use the existing batch reservation and publication transaction.
 
 The production init transaction reserves and writes only the authorities init
 currently consumes: the root `ResourceDomain`, root `TaskGroup`,
-`TaskFactory`, root and `/lib/<arch>-hyper-hyper` `Directory` capabilities, system `TaskInspector`
-and `ObjectInspector` views, the process root VMAR, the runtime-owned initial
-stack VMAR, and (when available) Console, VM creation and device-assignment
-authorities. Future handle values are
-encoded while unresolved and the complete batch is published before the
+`TaskFactory`, root `Directory`, system `TaskInspector`, `ObjectInspector`,
+`MemoryInspector` and `CpuInspector` views, the process root VMAR, the
+runtime-owned initial stack VMAR, and (when available) Console, VM creation and
+device-assignment authorities. Future handle values are encoded while unresolved
+and the complete batch is published before the
 initial Thread can run. No self-Process handle is installed in its own table.
-The root VMAR and executable File-to-VMO path are delegated with narrowly
-typed rights for runtime linking; writable and executable VMO variants retain
-disjoint authority ceilings.
+The root VMAR and executable File are delegated with narrowly typed rights for
+runtime linking. File mappings require READ and a matching process-local
+protection token, plus EXECUTE for executable segments; writes cannot obtain
+executable authority.
+
+The initial root Directory is an explicit namespace-root anchor and includes
+`MANAGE_NAMESPACE`. Duplicates retain the anchor; opened directories remain
+fixed capabilities. Generic namespace operations permit userspace to mount
+ramfs and atomically replace the root. Internal subtree binding is not a public syscall. They do not select
+`/boot`, `/system` or any service graph. The default supervision handoff transfers
+this management authority to system init; ordinary service and shell directory
+grants omit it.
 
 The kernel selects `/init` as the first application's executable and starts it
-through the userspace loader; it neither interprets the service manifest nor
-preloads system services. Init reads `/etc/hyper/services.json` through its root
-`Directory`, validates the complete dependency and capability graph, and then uses the
-one-shot `ProcessBuilder` object to construct each child. A builder owns every
-staged startup capability immediately after successful insertion. Starting a
+through the bootstrap userspace loader; it neither interprets the service manifest nor
+preloads system services. Stage-1 init reads the core graph at
+`/etc/hyper/services.json` through its root `Directory`, validates its dependency
+and capability graph, and uses the one-shot `ProcessBuilder` object to construct
+each child. The candidate system init validates the combined core/system graph
+before accepting the existing Process supervisors. That rendezvous commits
+supervision ownership; the subsequent namespace switch is a separate commit.
+A failed switch preserves the old root and leaves core services supervised by
+system init, without launching formal services. A failed pre-commit handoff
+instead leaves supervision with stage-1 init.
+
+A builder owns every staged startup capability immediately after successful
+insertion. Starting a
 sealed builder publishes the child, atomically replaces the consumed builder
 authority with a supervisor Process handle and result channel in the parent, and only then makes
 the initial child Thread runnable. The SDK waits for loader completion and
@@ -192,7 +232,7 @@ client, without restarting the manager or physical workers. Init neither launche
 nor monitors the shell as a system service.
 
 The manager receives explicit delegatable root Directory, TaskFactory, TaskGroup,
-ResourceDomain, child library and inspection capabilities. It attenuates these
+ResourceDomain, child loader, child library and inspection capabilities. It attenuates these
 into each shell's startup table. A VM connector is optional; when present, the
 manager can duplicate it but each shell gets only `WAIT|WRITE`. Each console
 instance keeps its own transport and client lifecycle. The current bootstrap
@@ -201,7 +241,7 @@ future work. Commands continue to get fresh handle-backed standard I/O, with
 blocking multi-object waits rather than polling.
 
 The shell also receives one persistent manager connector with exactly
-`WAIT|WRITE`. It cannot duplicate that authority. Each `/bin/vmm` launch
+`WAIT|WRITE`. It cannot duplicate that authority. Each `/system/bin/vmm` launch
 creates private control and capability-channel pairs, transfers only their
 manager endpoints through the connector, and gives the client endpoints to the
 new process. Consequently an attached guest console cannot monopolize the
@@ -222,7 +262,8 @@ Private roles such as `vm.provisioning` do not become generic app capabilities.
 The installed Rust SDK carries these typed contracts in `hyper-service`.
 
 The optional `virtual-machines.config` manifest field names the fleet config
-file. Init opens it through the root Directory and transfers the File capability
+file. The supervising init (system init in the default deployment) opens it
+through the root Directory and transfers the File capability
 to the unique service declaring the VM provisioning contract. The configuration
 contains named definitions and autostart policy; a Native-only manifest can omit
 it. Guest image paths are inputs to named VM definitions, not guest identities.
@@ -233,23 +274,29 @@ validates their capabilities; policy decisions need not move into the kernel or
 Linux I/O VM. This deployment contract does not claim that Native power-control
 operations are already implemented.
 
+The userspace service manifest selects `loader: "bootstrap"` for static core
+programs and `loader: "dynamic"` for formal programs; omitted means dynamic.
+This choice is separate from phase ordering and is not interpreted by the kernel.
 Every dynamically linked service receives the loader's library Directory with
-exactly `READ|EXECUTE`. Services which construct child processes receive a
+exactly `READ|EXECUTE|PROTECT`. Services which construct child processes receive a
 second, explicitly declared `process.child-library-directory` capability with
 the transport rights required to attenuate it into a child's loader slot. This
 keeps ordinary services from inheriting delegation authority merely because
-they use the dynamic runtime.
+they use the dynamic runtime. A service that launches children also needs an
+explicit `process.child-loader` executable capability. Loader and library
+capabilities are separate roles; possession of one does not imply the other.
 
 The manifest format reserves restart policies, but the current runtime accepts
 only `never` and requires at least one critical service. The physical Console
-input and output workers, the session service, and the VM manager are critical;
+input and output workers and the session service are critical;
 the interactive shell is a replaceable, noncritical client owned by the session
 manager. Init observes every
 service Process and the fleet's one-shot configuration result in one bounded
 `object_wait_many` set without polling. It reports terminal Process information
 before releasing each dead supervisor handle. A noncritical service exit is
-recorded and removed from the set; a critical exit or rejected fleet configuration
-stops the remaining graph. The manager acknowledges admission of the complete
+recorded and removed from the set; a critical exit stops the remaining graph.
+The default VM manager is noncritical: unavailable fleet configuration does not
+terminate Native storage or recovery. The manager acknowledges admission of the complete
 configuration before starting any autostart guest; empty fleets use the same
 result. Init then removes the result endpoint and continues supervising the
 manager Process. All guest starts, stops, and failures belong to the manager,
@@ -268,7 +315,7 @@ initramfs, and verifies that init loads the manifest, starts the session and
 shell Processes, launches `ps` and `handle` through scoped inspection handles,
 executes a constructor-bearing shared-object fixture through `dlopen`, runs an
 external echo command through the complete physical Console path, and attaches
-`/bin/vmm` to the separately buffered guest serial stream. The VM portion must
+`/system/bin/vmm` to the separately buffered guest serial stream. The VM portion must
 observe Linux userspace startup, deliver guest-console input, and detach
 through the local Ctrl-] menu.
 

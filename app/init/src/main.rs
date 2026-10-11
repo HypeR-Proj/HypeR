@@ -1,30 +1,20 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Initial `HypeR` Native userspace supervisor.
+//! System service supervisor entry point.
 
-#[cfg(target_os = "hyper")]
-extern crate hyper_vm_policy_shared as hyper_vm_policy;
-
-mod runtime;
-
-use hyper_os::startup::Startup;
 use std::process::ExitCode;
 
-fn application_main(mut startup: Startup<'_>) -> ExitCode {
-    match runtime::run(&mut startup) {
-        Ok(never) => match never {},
+fn main() -> ExitCode {
+    let Ok(mut startup) = hyper_rt::process::startup() else {
+        return ExitCode::FAILURE;
+    };
+    match hyper_service_manager::runtime::run_system(&mut startup) {
+        Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             use std::io::Write;
             let _ = std::io::stderr().write_all(error.diagnostic());
             ExitCode::FAILURE
         }
-    }
-}
-
-fn main() -> ExitCode {
-    match hyper_rt::process::startup() {
-        Ok(startup) => application_main(startup),
-        Err(_) => ExitCode::FAILURE,
     }
 }

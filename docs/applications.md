@@ -7,6 +7,9 @@ SPDX-License-Identifier: Apache-2.0
 
 Applications use the installed SDK, Rust std, and clap. Run `APP --help` for
 options (`echo` uses `-n`, `-e` and `-E`; its unknown options are literal text).
+Ordinary commands live in `/system/bin`; the recovery commands `sh`, `mount` and
+`umount` live in `/boot/bin`. The root has no `/bin` alias. System files are on EROFS by default or in RAM with
+`BOARD_SYSTEM_LAYOUT=ramfs`; both use the same init handoff and root switch.
 
 ## Files and system information
 
@@ -14,12 +17,12 @@ options (`echo` uses `-n`, `-e` and `-E`; its unknown options are literal text).
 | --- | --- |
 | `cat` | `cat FILE...`, `cat -n FILE`, `cat -bs FILE`, `cat -`; streams bytes without UTF-8 conversion. Number all lines with `-n`, only nonblank lines with `-b`, and squeeze repeated blank lines with `-s`. Numbering spans inputs. |
 | `grep` | `grep -in PATTERN FILE`, `grep -F TEXT`, `grep -v PATTERN`; filters files or stdin, with counting, filename and quiet modes; `-m NUM` limits selected lines per input and `-x` matches whole lines. |
-| `ls` | `ls /etc/hyper`, `ls FILE DIRECTORY`, `ls -a`, `ls --sort size -r`; defaults to permission mode, IEC size, and sorted names. `--bytes` gives exact file sizes; `-1` prints names only, `-d` lists a directory itself, `-t` sorts newest first, and `-S` sorts largest first. Directory sizes are shown as `-`. |
+| `ls` | `ls /boot/etc/hyper`, `ls FILE DIRECTORY`, `ls -a`, `ls --sort size -r`; defaults to permission mode, IEC size, and sorted names. Symlinks show `name@ -> target`, including dangling targets. `--bytes` gives exact file sizes; `-1` prints names only (retaining `@`, omitting targets), `-d` lists a directory itself, `-t` sorts newest first, and `-S` sorts largest first. Directory sizes are shown as `-`. |
 | `ps` | `ps -T`, `ps -p KOID`, `ps --name vm-runtime`; select decimal/hex KOIDs (repeat `-p` or use commas) and intersect with a name substring, optionally including threads. IDs print in hexadecimal; `--no-headers` prints rows only. Thread rows include `process=NAME`; kernel-owned threads use `OWNER=kernel`, and per-CPU idle threads are named `idle/CPU`. |
 | `free` | `free`, `free --bytes`, `free -m -c 5 -s 0.5`; physical totals, ownership and reclaimable cache pages. `-b/-k/-m/-g` select units; `-c` is a finite sample count (default 1), `-s` the interval. |
 | `top` | `top -d 0.5`, `top -b -n 3`; interactive refresh with q/Ctrl-C to quit, or plain finite batch snapshots. Rows sort by CPU usage; `--sort name/koid`, `-p KOID`, `--name TEXT` and `--limit NUM` select the view. |
 | `handle` | `handle shell`, `handle --kind physical-device`, `handle --all --object KOID`; inspect objects, process capabilities, and the processes holding an object. |
-| `ldd` | `ldd /bin/vmm`, `ldd --tree /svc/vm-runtime`, `ldd --direct /bin/ps`, `ldd -v FILE...`; inspect ELF interpreter and direct/transitive library dependencies without executing code. `--library-dir DIR` checks an alternate library set; unresolved or incompatible dependencies cause a failing exit status. |
+| `ldd` | `ldd /system/bin/vmm`, `ldd --tree /system/svc/vm-runtime`, `ldd --direct FILE`, `ldd -v FILE...`; inspect ELF interpreter and direct/transitive library dependencies without executing code. `--library-dir DIR` checks an alternate library set; unresolved or incompatible dependencies cause a failing exit status. |
 | `echo` | `echo hello world`, `echo -n text`, `echo -e 'one\ntwo'`; `-n` suppresses the newline, `-e` enables escapes and `-E` restores literal backslashes. |
 
 `cat`, `ls` and `ldd` report an error per failed path, continue with remaining paths,
@@ -28,7 +31,7 @@ stdout and stderr into one terminal queue before displaying its next prompt.
 `echo` is an ordinary application, not a second implementation inside the shell.
 
 The shell supports concurrent pipelines and file redirects, for example
-`cat /etc/hyper/vms.json | grep image > /matches`. See
+`cat /data/vms.json | grep image > /matches`. See
 [shell and text filtering](shell.md) for syntax, limits and grep options.
 
 Native std provides `std::os::hyper::fs::MetadataExt::mode()` for permission and
@@ -36,10 +39,12 @@ special mode bits. File type is queried separately. `metadata` follows symbolic
 links; `symlink_metadata` inspects the final link itself.
 `std::os::hyper::fs` supplies Native symlink and permission extensions.
 
-`ldd` follows the standard `/lib/<arch>-hyper-hyper/` deployment and prints
-resolved filesystem paths, including the `/lib -> lib64` alias. Its alternate
-directory option does not modify runtime loader policy. It checks dependency
-metadata and architecture/ELF ABI compatibility, not symbol bindings or
+`ldd /system/bin/vmm` uses the default system deployment: libraries come from
+`/system/lib/<arch>-hyper-hyper`, and the canonical ELF interpreter name
+`/lib64/ld-hyper-<arch>.so` is checked at `/system/lib64/ld-hyper-<arch>.so`.
+Other interpreter names are inspected literally. `--loader` and `--library-dir`
+select explicit locations when inspecting another deployment; these options
+do not modify runtime loader policy. It checks dependency metadata and architecture/ELF ABI compatibility, not symbol bindings or
 relocations. See [the command reference](../app/README.md#ldd-shared-library-dependency-inspection)
 for scope and diagnostics.
 
@@ -97,8 +102,9 @@ this SDK is still listed as `unknown(0x...)`, preserving its numeric type ID.
 The default service manifests grant the session and shell object inspector
 `INSPECT | INSPECT_DETAILS | DUPLICATE | TRANSFER`. The shell adds an inspector
 with exactly `INSPECT | INSPECT_DETAILS` only when the resolved executable path
-is `/bin/handle` (including the bare command `handle`). A copy at another path
-does not receive it. This is launcher policy for the trusted `/bin` namespace;
+is `/system/bin/handle` (including the bare command `handle`).
+A copy at another path does not receive it. This is launcher policy for these
+trusted command paths;
 the kernel checks rights and scope, never the executable name. The task inspector
 passed to `handle`, `ps`, and `top` retains basic `INSPECT` only. Neither inspector
 passed to `handle` has transfer, duplicate, or derive rights.
@@ -188,8 +194,10 @@ Ordinary command exchanges also have a 30-second response deadline; attached
 console sessions remain interactive without that time limit.
 
 Each VM owns a separate runtime process, resource domain, task group, lifecycle
-tracker, and console session. The current policy allows eight definitions and budgets up to eight business
-VM instances plus the resident I/O VM and manager overhead. Actual resource
+tracker, and console session. The current policy allows eight definitions and
+budgets up to eight business VM instances plus manager overhead in a dedicated
+fleet domain. The resident I/O VM uses the separate core-services domain and
+does not consume business fleet slots. Actual resource
 admission may fail below that ceiling. Guest memory, vCPU count and
 Linux boot arguments come exclusively from each definition's `configuration`.
 The default Alpine configuration uses 256 MiB and two vCPUs on AArch64 (one on
@@ -208,10 +216,10 @@ instance under the same definition and disconnects the old console session.
 
 ## Configuration
 
-Service wiring in `/etc/hyper/services.json` selects a separate VM configuration:
+System service wiring in `/system/etc/hyper/services.json` selects a separate VM configuration:
 
 ```json
-"virtual-machines": { "config": "/etc/hyper/vms.json" }
+"virtual-machines": { "config": "/boot/etc/hyper/vms.json" }
 ```
 
 The VM file contains definitions, not service capabilities:
@@ -255,7 +263,7 @@ FILE; `--from SOURCE` copies another named definition under NAME. Disk/network
 assignments and all runtime settings are copied together; `--start` starts the
 new instance. Two definitions cannot share an I/O client, an exclusive disk
 volume or a network MAC address. Native test images
-use `app/init/tests/config/vms.json` (or `vms-riscv64.json`).
+use `bootstrap/stage1/init/tests/config/vms.json` (or `vms-riscv64.json`).
 
 The `vcpus`, `memory-bytes` and `bootargs` fields are required. `bootargs` may be empty and is
 limited to 2048 UTF-8 bytes without NUL. Architecture comes only from the ITB's
@@ -296,16 +304,24 @@ Migration: rebuild old ITBs with the current packer and add `configuration` to
 existing JSON definitions. The v2 ITB contract rejects v1 bundles and embedded
 runtime policy; it never falls back to values from an image.
 
-Init waits for the manager to accept the complete fleet configuration, including
-an empty fleet or definitions with no autostart VMs. It continues supervising
-the manager as a critical service. Every guest lifecycle belongs to the manager:
-an autostart or later runtime failure marks that VM failed without stopping init
-or unrelated guests. Unavailable storage or rejected fleet configuration leaves
-the Native services running. The manager continues answering inspection requests
-but rejects VM creation and startup until a subsequent boot supplies a valid
-configuration. Critical service termination and malformed provisioning protocol
-still fail bootstrap; configuration unavailability is an explicit init request,
-not an implicit interpretation of a closed channel.
+Init waits up to 60 seconds for the manager to accept the complete fleet
+configuration, including an empty fleet or definitions with no autostart VMs.
+The default manifest makes vm-manager noncritical: its startup failure, malformed
+provisioning reply, or later exit cannot stop Native storage and core services.
+A broken provisioning exchange stops that manager, while a rejected or unavailable
+configuration leaves it running for inspection with VM admission disabled.
+An omitted fleet configuration receives the same explicit unavailable response.
+Each guest lifecycle belongs to the manager; an individual runtime failure marks
+that VM failed without stopping init or unrelated guests.
+
+I/O startup needs no business VM manager. Init creates the business resource
+domain, task group and provisioning channel only when launching the manager.
+Session's VMM client connection is separate from those resources. If no manager
+is configured or its launch fails, init closes the unused server endpoint so
+commands report unavailability promptly. The I/O broker remains a dependency of
+business guest I/O; losing its manager peer stops new client admission without
+stopping Native storage. A deployment can explicitly mark vm-manager critical
+if it requires system-wide shutdown on that service's failure.
 
 ## Validation
 
@@ -375,10 +391,11 @@ Default units retain small KiB quantities; `free --bytes` avoids rounding.
 
 ## Console and storage visibility
 
-The critical virtual console manager (`/svc/session`) starts and supervises the
-ordinary `/bin/sh` client. Ctrl-D or `exit` ends that client and opens a fresh
-shell on the same console. Init does not treat shell termination as a system
-failure. Shell channels are recreated on each launch; the physical transport
+The critical virtual console manager (`/svc/session`, later `/boot/svc/session`)
+waits for the initialization outcome, then starts `/system/bin/sh` on success or
+`/boot/svc/fallback-sh` for recovery (initially `/svc/fallback-sh`). A missing
+system shell or abnormal shell exit also selects recovery. Ctrl-D or `exit`
+restarts the selected shell on the same console; it is not a system failure. Shell channels are recreated on each launch; the physical transport
 continues to belong to the console services.
 
 On board images, `vmm list` and `vmm status NAME` include the infrastructure I/O VM
@@ -420,14 +437,17 @@ QEMU loads the hypervisor image directly from the host, so the configuration
 volume contains guest artifacts and configuration, not `hyper.img`. Pi 5 still
 needs its firmware boot files. Existing disks are intentionally preserved by
 `make` and `make run`; use `make rebuild` to reset the disk and refresh its
-packaged content. Normal `make` refreshes only the host-side kernel and ramdisk.
+packaged content. Normal `make` refreshes host-side kernel, ramdisk and system
+staging, then rejects a preserved disk whose `/system` payload is stale.
 
 `vmm list` and `vmm status NAME` distinguish RAM capacity from **allocated VM
 backing**. Allocation is a live kernel snapshot of resident primary backing:
 RAM, uploaded image pages not yet accessed by the guest, and explicitly admitted
 shared pools. The I/O VM currently has 128 MiB of boot RAM plus a separate 1 MiB
-Native storage initiator pool, so its allocated backing can exceed the displayed
-RAM capacity. Dynamically attached alias windows are not primary backing. The
+Native storage initiator pool for each Native volume. The default split layout
+has two pools, for `config` and `system`, so its allocated backing is 130 MiB;
+the configuration-only ramfs layout has one pool and 129 MiB. Dynamically
+attached alias windows are not primary backing. The
 metric excludes
 the runtime process, page tables, and I/O VM mappings of other guests' memory;
 it does not describe Linux's used/free memory. Repeated mappings of the same

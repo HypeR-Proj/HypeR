@@ -72,6 +72,7 @@ pub const HYPER_NATIVE_OBJECT_GUEST_MAILBOX: u32 = 30;
 pub const HYPER_NATIVE_OBJECT_GUEST_NOTIFICATION: u32 = 31;
 pub const HYPER_NATIVE_OBJECT_NATIVE_BLOCK: u32 = 32;
 pub const HYPER_NATIVE_OBJECT_GUEST_MAPPING: u32 = 33;
+pub const HYPER_NATIVE_OBJECT_FILE_PROTECTION: u32 = 34;
 
 pub const HYPER_NATIVE_TRANSFER_CLASS_FORBIDDEN: u32 = 0;
 pub const HYPER_NATIVE_TRANSFER_CLASS_GENERAL: u32 = 1;
@@ -117,10 +118,13 @@ pub const fn hyper_native_object_transfer_class(object_kind: u32) -> u32 {
         HYPER_NATIVE_OBJECT_GUEST_NOTIFICATION => HYPER_NATIVE_TRANSFER_CLASS_RENDEZVOUS_ONLY,
         HYPER_NATIVE_OBJECT_NATIVE_BLOCK => HYPER_NATIVE_TRANSFER_CLASS_RENDEZVOUS_ONLY,
         HYPER_NATIVE_OBJECT_GUEST_MAPPING => HYPER_NATIVE_TRANSFER_CLASS_RENDEZVOUS_ONLY,
+        HYPER_NATIVE_OBJECT_FILE_PROTECTION => HYPER_NATIVE_TRANSFER_CLASS_FORBIDDEN,
         _ => HYPER_NATIVE_TRANSFER_CLASS_FORBIDDEN,
     }
 }
 
+pub const HYPER_NATIVE_RIGHT_PROTECT: u64 = 1_u64 << 35;
+pub const HYPER_NATIVE_RIGHT_MANAGE_NAMESPACE: u64 = 1_u64 << 34;
 pub const HYPER_NATIVE_RIGHT_INSPECT_DETAILS: u64 = 1_u64 << 33;
 pub const HYPER_NATIVE_RIGHT_BIND_WAIT: u64 = 1_u64 << 30;
 pub const HYPER_NATIVE_RIGHT_DUPLICATE: u64 = 1_u64 << 0;
@@ -156,7 +160,7 @@ pub const HYPER_NATIVE_RIGHT_CREATE_VIRTUAL_MACHINE: u64 = 1_u64 << 29;
 pub const HYPER_NATIVE_RIGHT_SET_ATTRIBUTES: u64 = 1_u64 << 31;
 pub const HYPER_NATIVE_RIGHT_LOCK_FILE: u64 = 1_u64 << 32;
 
-pub const HYPER_NATIVE_RIGHTS_MASK: u64 = 0x3ffffffff;
+pub const HYPER_NATIVE_RIGHTS_MASK: u64 = 0xfffffffff;
 
 pub const HYPER_NATIVE_SIGNAL_PHYSICAL_DEVICE_READABLE: u64 = 1_u64 << 0;
 pub const HYPER_NATIVE_SIGNAL_NATIVE_BLOCK_PEER_CLOSED: u64 = 1_u64 << 0;
@@ -184,6 +188,11 @@ pub const HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_READABLE: u64 = 1_u64 << 0;
 pub const HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_WRITABLE: u64 = 1_u64 << 1;
 pub const HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_PEER_CLOSED: u64 = 1_u64 << 2;
 
+pub const HYPER_NATIVE_FILESYSTEM_SWITCH_ROOT_MAX_MOVES: u64 = 16;
+pub const HYPER_NATIVE_NATIVE_BLOCK_TRANSFER_BYTES: u64 = 524288;
+pub const HYPER_NATIVE_NATIVE_BLOCK_BATCH_MAX: u64 = 4;
+pub const HYPER_NATIVE_NATIVE_BLOCK_BATCH_RECORD_BYTES: u64 = 16;
+pub const HYPER_NATIVE_NATIVE_BLOCK_TRANSFER_FRAME_BYTES: u64 = 524352;
 pub const HYPER_NATIVE_OBJECT_DETAIL_EMPTY: u64 = 0;
 pub const HYPER_NATIVE_OBJECT_DETAIL_THREAD: u64 = 1;
 pub const HYPER_NATIVE_OBJECT_DETAIL_VMAR: u64 = 2;
@@ -332,7 +341,7 @@ pub const HYPER_NATIVE_BYTE_CHANNEL_MAX_MESSAGE_BYTES: u64 = 65536;
 pub const HYPER_NATIVE_BYTE_CHANNEL_MAX_QUEUED_MESSAGES: u64 = 16;
 pub const HYPER_NATIVE_BYTE_CHANNEL_MAX_QUEUED_BYTES: u64 = 1048576;
 pub const HYPER_NATIVE_CAPABILITY_CHANNEL_MAX_MESSAGE_BYTES: u64 = 4096;
-pub const HYPER_NATIVE_CAPABILITY_CHANNEL_MAX_HANDLES: u64 = 16;
+pub const HYPER_NATIVE_CAPABILITY_CHANNEL_MAX_HANDLES: u64 = 64;
 pub const HYPER_NATIVE_CAPABILITY_DISPOSITION_MOVE: u64 = 0;
 pub const HYPER_NATIVE_CAPABILITY_DISPOSITION_DUPLICATE: u64 = 1;
 pub const HYPER_NATIVE_CONSOLE_MAX_TRANSFER_BYTES: u64 = 4096;
@@ -421,7 +430,6 @@ pub const HYPER_NATIVE_SYS_TASK_INSPECTOR_DERIVE_RESOURCE_DOMAIN: u64 = 42;
 pub const HYPER_NATIVE_SYS_OBJECT_INSPECTOR_DERIVE_RESOURCE_DOMAIN: u64 = 43;
 pub const HYPER_NATIVE_SYS_DIRECTORY_OPEN_DIRECTORY: u64 = 44;
 pub const HYPER_NATIVE_SYS_VMO_CREATE: u64 = 45;
-pub const HYPER_NATIVE_SYS_FILE_CREATE_EXECUTABLE_VMO: u64 = 46;
 pub const HYPER_NATIVE_SYS_VMO_READ: u64 = 47;
 pub const HYPER_NATIVE_SYS_VMO_WRITE: u64 = 48;
 pub const HYPER_NATIVE_SYS_VMAR_ALLOCATE: u64 = 49;
@@ -490,7 +498,6 @@ pub const HYPER_NATIVE_SYS_CLOCK_GET_REALTIME: u64 = 111;
 pub const HYPER_NATIVE_SYS_DIRECTORY_OPEN_FILE_WITH_OPTIONS: u64 = 112;
 pub const HYPER_NATIVE_SYS_VIRTUAL_MACHINE_CREATION_LEASE_GET_PLATFORM_INFO: u64 = 113;
 pub const HYPER_NATIVE_SYS_VMO_CREATE_SNAPSHOT: u64 = 114;
-pub const HYPER_NATIVE_SYS_FILE_CREATE_SNAPSHOT: u64 = 115;
 pub const HYPER_NATIVE_SYS_VMAR_MAP_PRIVATE: u64 = 116;
 pub const HYPER_NATIVE_SYS_VIRTUAL_MACHINE_GET_POWER_REQUEST: u64 = 117;
 pub const HYPER_NATIVE_SYS_VIRTUAL_MACHINE_COMPLETE_POWER_REQUEST: u64 = 118;
@@ -512,7 +519,7 @@ pub const HYPER_NATIVE_SYS_GUEST_NOTIFICATION_CREATE: u64 = 133;
 pub const HYPER_NATIVE_SYS_GUEST_NOTIFICATION_CONTROL: u64 = 134;
 pub const HYPER_NATIVE_SYS_NATIVE_BLOCK_CREATE: u64 = 135;
 pub const HYPER_NATIVE_SYS_NATIVE_BLOCK_ACTIVATE: u64 = 136;
-pub const HYPER_NATIVE_SYS_NATIVE_BLOCK_MOUNT: u64 = 137;
+pub const HYPER_NATIVE_SYS_FILESYSTEM_MOUNT: u64 = 137;
 pub const HYPER_NATIVE_SYS_GUEST_MAPPING_CREATE: u64 = 138;
 pub const HYPER_NATIVE_SYS_GUEST_MAPPING_RELEASE: u64 = 139;
 pub const HYPER_NATIVE_SYS_DEVICE_CLAIM_MATCHING: u64 = 140;
@@ -526,6 +533,12 @@ pub const HYPER_NATIVE_SYS_DEVICE_IRQ_COMPLETE: u64 = 147;
 pub const HYPER_NATIVE_SYS_VIRTUAL_CPU_SET_AFFINITY: u64 = 148;
 pub const HYPER_NATIVE_SYS_SYSTEM_CONFIG: u64 = 149;
 pub const HYPER_NATIVE_SYS_OBJECT_INSPECTOR_READ_DETAILS: u64 = 150;
+pub const HYPER_NATIVE_SYS_FILESYSTEM_UNMOUNT: u64 = 151;
+pub const HYPER_NATIVE_SYS_FILESYSTEM_MOUNT_RAMFS: u64 = 152;
+pub const HYPER_NATIVE_SYS_FILESYSTEM_SWITCH_ROOT: u64 = 154;
+pub const HYPER_NATIVE_SYS_FILE_PROTECT: u64 = 155;
+pub const HYPER_NATIVE_SYS_VMAR_MAP_FILE: u64 = 156;
+pub const HYPER_NATIVE_SYS_NATIVE_BLOCK_TRANSFER: u64 = 496;
 
 pub const fn hyper_native_failure_result_mask(
     syscall_number: u64,
@@ -539,6 +552,42 @@ pub const fn hyper_native_failure_result_mask(
         _ => 0,
     }
 }
+
+pub const HYPER_NATIVE_FILESYSTEM_ROOT_SWITCH_MIN_SIZE: usize = 48;
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HyperNativeFilesystemRootSwitch {
+    pub new_root: u64,
+    pub new_root_length: u64,
+    pub put_old: u64,
+    pub put_old_length: u64,
+    pub moves: u64,
+    pub move_count: u64,
+}
+const _: () = assert!(core::mem::size_of::<HyperNativeFilesystemRootSwitch>() == 48);
+const _: () = assert!(core::mem::align_of::<HyperNativeFilesystemRootSwitch>() == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeFilesystemRootSwitch, new_root) == 0);
+const _: () = assert!(core::mem::offset_of!(HyperNativeFilesystemRootSwitch, new_root_length) == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeFilesystemRootSwitch, put_old) == 16);
+const _: () = assert!(core::mem::offset_of!(HyperNativeFilesystemRootSwitch, put_old_length) == 24);
+const _: () = assert!(core::mem::offset_of!(HyperNativeFilesystemRootSwitch, moves) == 32);
+const _: () = assert!(core::mem::offset_of!(HyperNativeFilesystemRootSwitch, move_count) == 40);
+
+pub const HYPER_NATIVE_FILESYSTEM_MOUNT_MOVE_MIN_SIZE: usize = 32;
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HyperNativeFilesystemMountMove {
+    pub source: u64,
+    pub source_length: u64,
+    pub target: u64,
+    pub target_length: u64,
+}
+const _: () = assert!(core::mem::size_of::<HyperNativeFilesystemMountMove>() == 32);
+const _: () = assert!(core::mem::align_of::<HyperNativeFilesystemMountMove>() == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeFilesystemMountMove, source) == 0);
+const _: () = assert!(core::mem::offset_of!(HyperNativeFilesystemMountMove, source_length) == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeFilesystemMountMove, target) == 16);
+const _: () = assert!(core::mem::offset_of!(HyperNativeFilesystemMountMove, target_length) == 24);
 
 pub const HYPER_NATIVE_OBJECT_DETAILS_MIN_SIZE: usize = 88;
 #[repr(C)]
@@ -921,7 +970,7 @@ const _: () = assert!(core::mem::offset_of!(HyperNativeCapabilityReceiveSlot, ri
 const _: () = assert!(core::mem::offset_of!(HyperNativeCapabilityReceiveSlot, expected_kind) == 16);
 const _: () = assert!(core::mem::offset_of!(HyperNativeCapabilityReceiveSlot, flags) == 20);
 
-pub const HYPER_NATIVE_LOADER_STARTUP_MIN_SIZE: usize = 88;
+pub const HYPER_NATIVE_LOADER_STARTUP_MIN_SIZE: usize = 72;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HyperNativeLoaderStartup {
@@ -930,30 +979,26 @@ pub struct HyperNativeLoaderStartup {
     pub data_size: u32,
     pub flags: u32,
     pub executable: u64,
-    pub executable_size: u64,
     pub root_vmar: u64,
     pub stack_vmar: u64,
     pub stack_base: u64,
     pub stack_size: u64,
     pub loader_base: u64,
     pub loader_size: u64,
-    pub runtime_directory: u64,
 }
-const _: () = assert!(core::mem::size_of::<HyperNativeLoaderStartup>() == 88);
+const _: () = assert!(core::mem::size_of::<HyperNativeLoaderStartup>() == 72);
 const _: () = assert!(core::mem::align_of::<HyperNativeLoaderStartup>() == 8);
 const _: () = assert!(core::mem::offset_of!(HyperNativeLoaderStartup, size) == 0);
 const _: () = assert!(core::mem::offset_of!(HyperNativeLoaderStartup, handle_count) == 4);
 const _: () = assert!(core::mem::offset_of!(HyperNativeLoaderStartup, data_size) == 8);
 const _: () = assert!(core::mem::offset_of!(HyperNativeLoaderStartup, flags) == 12);
 const _: () = assert!(core::mem::offset_of!(HyperNativeLoaderStartup, executable) == 16);
-const _: () = assert!(core::mem::offset_of!(HyperNativeLoaderStartup, executable_size) == 24);
-const _: () = assert!(core::mem::offset_of!(HyperNativeLoaderStartup, root_vmar) == 32);
-const _: () = assert!(core::mem::offset_of!(HyperNativeLoaderStartup, stack_vmar) == 40);
-const _: () = assert!(core::mem::offset_of!(HyperNativeLoaderStartup, stack_base) == 48);
-const _: () = assert!(core::mem::offset_of!(HyperNativeLoaderStartup, stack_size) == 56);
-const _: () = assert!(core::mem::offset_of!(HyperNativeLoaderStartup, loader_base) == 64);
-const _: () = assert!(core::mem::offset_of!(HyperNativeLoaderStartup, loader_size) == 72);
-const _: () = assert!(core::mem::offset_of!(HyperNativeLoaderStartup, runtime_directory) == 80);
+const _: () = assert!(core::mem::offset_of!(HyperNativeLoaderStartup, root_vmar) == 24);
+const _: () = assert!(core::mem::offset_of!(HyperNativeLoaderStartup, stack_vmar) == 32);
+const _: () = assert!(core::mem::offset_of!(HyperNativeLoaderStartup, stack_base) == 40);
+const _: () = assert!(core::mem::offset_of!(HyperNativeLoaderStartup, stack_size) == 48);
+const _: () = assert!(core::mem::offset_of!(HyperNativeLoaderStartup, loader_base) == 56);
+const _: () = assert!(core::mem::offset_of!(HyperNativeLoaderStartup, loader_size) == 64);
 
 pub const HYPER_NATIVE_STARTUP_HANDLE_MIN_SIZE: usize = 16;
 #[repr(C)]

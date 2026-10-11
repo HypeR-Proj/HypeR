@@ -22,13 +22,13 @@ pub(crate) use builder::{
     ProcessBuilder, ProcessBuilderError, StartupCapability, abort_process_builder,
     create_process_builder, start_process_builder,
 };
-pub(crate) use directory::{ProcessDiagnosticRef, ProcessScanCursor, scan};
+pub(crate) use directory::{
+    FilePageReclaimCursor, ProcessDiagnosticRef, ProcessScanCursor, reclaim_file_pages, scan,
+};
 pub(crate) use image::{
     AbiFamily, ExecutionRoute, ImageError, MachineAbi, ProcessImage, UserThreadStart,
 };
 pub(crate) use lifecycle::{ProcessPhase, TerminalReason, UserThreadPhase};
-#[cfg(not(feature = "kernel-self-test"))]
-pub(crate) use loader::initialize_loader;
 pub(crate) use loader::{Error as LoaderError, load_native};
 pub(crate) use objects::{ProcessObject, TaskFactory, TaskGroupObject, TaskObjectError};
 pub(crate) use owner::{

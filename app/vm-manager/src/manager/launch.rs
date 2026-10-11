@@ -16,7 +16,7 @@ use hyper_service::stdio as stdio_contract;
 use hyper_service::vm as vm_contract;
 use hyper_vm_manager::InstancePolicy;
 
-const RUNTIME_ARGUMENT: &str = "/svc/vm-runtime";
+const RUNTIME_ARGUMENT: &str = "/system/svc/vm-runtime";
 
 impl FleetManager {
     pub(super) fn start_instance(&mut self, vm: usize) -> Result<(), String> {
@@ -67,6 +67,7 @@ impl FleetManager {
             group.as_handle_ref(),
             domain.as_handle_ref(),
             self.runtime_image.as_handle_ref(),
+            self.loader.as_handle_ref(),
         )?;
         builder.set_name("vm-runtime")?;
         builder.add_argument(RUNTIME_ARGUMENT)?;
@@ -100,7 +101,7 @@ impl FleetManager {
         builder.add_handle_duplicate(
             self.libraries.as_handle_ref(),
             startup::DYNAMIC_LIBRARY_DIRECTORY.as_raw(),
-            RightsOffer::Exact(Rights::READ.union(Rights::EXECUTE)),
+            RightsOffer::Exact(Rights::READ.union(Rights::EXECUTE).union(Rights::PROTECT)),
         )?;
         builder.add_handle_duplicate(
             definition.image.as_handle_ref(),

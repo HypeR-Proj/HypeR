@@ -157,6 +157,8 @@ remain exploratory and do not establish production readiness.
 
 ## Later work
 
+- A full-featured Native shell as a separate application; retain the
+  [feature-frozen basic shell](shell.md) for bootstrap and recovery;
 - Native network APIs and a connection for the reserved Native endpoint;
 - transactional multi-vCPU management, richer VM supervision and accounting;
 - broader Native ABI/std coverage, ABI stabilization and generated bindings;

@@ -10,6 +10,7 @@ use super::{
 };
 use alloc::vec::Vec;
 use core::mem::size_of;
+use core::sync::atomic::{AtomicBool, Ordering};
 use hyper::mm::{FallibleArc, PAGE_SIZE};
 
 pub(super) struct PrivatePage<B: PageBackend, A: MemoryAccount> {
@@ -25,15 +26,19 @@ impl<B: PageBackend, A: MemoryAccount> Clone for PrivatePage<B, A> {
     }
 }
 
+mod file;
+use file::FileOrigin;
+
 /// One immutable physical-page version of an address-space-owned private view.
 /// Replacing this value never changes pages in an older mapping or pin.
 pub(crate) struct PrivateView<B: PageBackend, A: MemoryAccount> {
-    source: SnapshotVmo<B, A>,
+    file: Option<FileOrigin<A>>,
     pub(super) pages: Vec<Option<PrivatePage<B, A>>>,
     pub(super) backend: B,
     account: A,
     _charge: A::Charge,
     pub(super) executable: bool,
+    instructions_published: AtomicBool,
 }
 
 impl<B: PageBackend, A: MemoryAccount> PrivateView<B, A> {
@@ -126,12 +131,13 @@ impl<B: PageBackend, A: MemoryAccount> PrivateView<B, A> {
             pages.push(Some(PrivatePage { owner, writable }));
         }
         FallibleArc::try_new(Self {
-            source,
+            file: None,
             pages,
             backend,
             account,
             _charge: charge,
             executable: false,
+            instructions_published: AtomicBool::new(false),
         })
         .map_err(map_allocation)
     }
@@ -180,7 +186,7 @@ impl<B: PageBackend, A: MemoryAccount> PrivateView<B, A> {
         for (index, slot) in self.pages.iter().enumerate() {
             let Some(original) = slot else {
                 if index >= first && index < end {
-                    return Err(VmoError::InvalidRange);
+                    return Err(VmoError::BackingNotResident);
                 }
                 pages.push(None);
                 continue;
@@ -206,12 +212,13 @@ impl<B: PageBackend, A: MemoryAccount> PrivateView<B, A> {
             }));
         }
         FallibleArc::try_new(Self {
-            source: self.source.clone(),
+            file: self.file.clone(),
             pages,
             backend: self.backend.clone(),
             account: self.account.clone(),
             _charge: charge,
             executable: false,
+            instructions_published: AtomicBool::new(false),
         })
         .map_err(map_allocation)
     }
@@ -279,12 +286,15 @@ impl<B: PageBackend, A: MemoryAccount> PrivateView<B, A> {
         }
         Ok(Some(
             FallibleArc::try_new(Self {
-                source: self.source.clone(),
+                file: self.file.clone(),
                 pages,
                 backend: self.backend.clone(),
                 account: self.account.clone(),
                 _charge: charge,
                 executable: self.executable,
+                instructions_published: AtomicBool::new(
+                    self.instructions_published.load(Ordering::Acquire),
+                ),
             })
             .map_err(map_allocation)?,
         ))
@@ -300,7 +310,7 @@ impl<B: PageBackend, A: MemoryAccount> PrivateView<B, A> {
                     .pages
                     .get(index)
                     .and_then(Option::as_ref)
-                    .ok_or(VmoError::InvalidRange)?;
+                    .ok_or(VmoError::BackingNotResident)?;
                 page.owner.with(|owned| {
                     self.backend
                         .read_exposed(
@@ -326,7 +336,7 @@ impl<B: PageBackend, A: MemoryAccount> PrivateView<B, A> {
                     .pages
                     .get(index)
                     .and_then(Option::as_ref)
-                    .ok_or(VmoError::InvalidRange)?;
+                    .ok_or(VmoError::BackingNotResident)?;
                 page.owner.with(|owned| {
                     self.backend
                         .write_exposed(

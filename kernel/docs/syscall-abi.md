@@ -167,11 +167,12 @@ contracts; adding them requires explicit ownership and failure-path review.
 
 ### Native process startup
 
-The kernel maps only the installed restricted bootstrap ELF,
-`/lib64/userspace-loader-hyper-<arch>`, and an empty guarded temporary stack.
+The kernel maps only a caller-selected restricted loader ELF and an empty
+guarded temporary stack. Initial boot alone opens
+`/lib/userspace-loader-hyper-<arch>` to start `/init` from the RAM archive root.
 The first argument register carries a ByteChannel handle whose queued message
 contains `loader_startup`, tagged startup handles, and opaque startup data.
-The fixed record supplies executable VMO and mapping capabilities plus their
+The 72-byte fixed record supplies an executable File and mapping capabilities plus their
 actual bounds; handle values already belong to the child's table. The
 [generated ABI reference](../../sdk/abi/docs/native.md) defines record layouts,
 rights and syscall result slots.
@@ -179,8 +180,12 @@ rights and syscall result slots.
 `process_builder_set_data` replaces up to 16 KiB of opaque data; an empty input
 clears it. The kernel validates the bounds and copies the bytes, without parsing
 arguments or environment entries. Their encoding and limits belong to the SDK.
-Builder creation captures the executable snapshot; sealing prepares the
-bootstrap environment. Neither validates the application's ELF or resolves
+Builder creation derives a child File capability from explicit
+`READ|EXECUTE|PROTECT|DUPLICATE|TRANSFER` authority, attenuating the child grant
+to `READ|EXECUTE|PROTECT`. The selected loader requires `READ|EXECUTE`; its
+restricted image is captured only for kernel bootstrap preparation. The target
+File remains mutable until the child loader acquires content protection.
+Sealing prepares the bootstrap environment. Neither validates the application's ELF or resolves
 dependencies.
 
 `process_builder_start` consumes the sealed builder only on success and returns
@@ -196,7 +201,8 @@ Init uses the same bootstrap with empty startup data and no reply request.
 Application ELF parsing, initial `argc`/`argv`/`envp`/auxv, relocation, final
 stack placement and heap policy belong to the loaders and runtime. See the
 [Native init contract](native-init.md#executable-image) and
-[userspace loader](../../lib/userspace-loader/README.md) for that handoff.
+[bootstrap loader](../../bootstrap/stage1/userspace-loader/README.md) and
+[formal loader](../../lib/dynamic-loader/README.md) for their entry policies.
 
 ## Entry and completion contract
 
@@ -431,7 +437,7 @@ DUPLICATE  TRANSFER  WAIT  INSPECT
 Payload and mapping rights retain their literal meaning:
 
 ```text
-READ  WRITE  MAP  EXECUTE  RESIZE  PIN
+READ  WRITE  MAP  EXECUTE  PROTECT  RESIZE  PIN
 ```
 
 Task, VM, and hardware rights are named for the exact operation, for example
@@ -467,6 +473,40 @@ values. `directory_canonicalize` separately reports the spelling observed within
 an explicit directory scope; that spelling is neither a reverse-lookup authority
 nor a stable identity.
 
+### Namespace management
+
+`filesystem_mount_ramfs` and `filesystem_switch_root`
+require `MANAGE_NAMESPACE | WRITE | EXECUTE` on an explicit namespace-root
+Directory. Both its traversal root and current location must follow the live
+namespace root; a fixed directory opened at `/` is not equivalent. The initial
+process receives this right, and userspace decides whether to delegate it.
+The default service manager transfers it to system init without granting it to
+ordinary services or the recovery shell.
+
+Mounting ramfs creates independent writable memory storage. Internal subtree
+binding supports root promotion but is not a public syscall. Root switching
+accepts another mounted
+filesystem root, an attachment point for the old root, and at most sixteen
+mount or RAM-subtree moves. A RAM-subtree move detaches its old directory entry
+and creates a mount without copying file contents. Source paths resolve in the
+old namespace; the old-root attachment and move destinations resolve under the
+new root. Preparation does not change
+the published root or move mounts. Root and mount edges commit together, and
+a concurrent topology change returns `Busy` without a partial switch.
+
+Explicit namespace-root anchors follow the new root. Fixed directory and file
+capabilities keep their identities and confinement; a root-relative scope can
+retain its old cwd while absolute lookup follows the new root. Promoting a RAM
+subtree preserves existing File capabilities and scopes whose fixed root is
+inside that subtree. A namespace-root scope whose cwd retains a location inside
+the promoted subtree on its old mount becomes detached: relative lookup fails,
+while absolute lookup still follows its namespace root. Paths such as
+`/boot` and `/system`, service supervision and the choice to switch roots remain
+userspace policy. See [VFS rooted scopes](vfs.md#rooted-directory-scopes) for
+destination constraints and capability semantics.
+
+### Object lifetime
+
 The shared-reference count and active-handle count are different. Process handles
 and in-transit capabilities are active; wait registrations and internal kernel
 references are not. Transfer does not create a false zero transition. The last
@@ -495,7 +535,8 @@ references rather than paying for private handle-table lookups.
 Writable, immutable snapshot and executable VMO variants share one ABI kind but
 publish different per-instance rights ceilings. A writable VMO cannot acquire
 `EXECUTE`. Immutable snapshots grant `READ` and `MAP`; executable provenance is
-derived separately through an `ExecutableAuthority` or executable file grant.
+internal to kernel loader preparation; ordinary userspace file mappings use
+File EXECUTE authority plus content protection instead of an exported snapshot.
 Neither immutable variant can acquire `WRITE`. Executable views may share the
 same instruction-coherent immutable pages. A root VMAR
 object retains the exact native address-space owner and its generation-checked
@@ -759,13 +800,50 @@ require immutable executable provenance; writable authority cannot be upgraded
 to executable authority. W^X is the default. A mapping operation consumes
 typed user addresses and checked lengths, never Rust pointers.
 
-`vmo_create_snapshot` captures coherent immutable bytes while excluding writable
-mappings and exclusive hardware writers. `file_create_snapshot` captures one
-file-content generation; file snapshot results include the exact byte length
-from that generation. Snapshot backing is page rounded. A file's weak snapshot
-cache permits reuse while mappings retain that generation, and releases all
-source pages after its last owner disappears. Writes and resizing invalidate
-future cache lookup without modifying existing snapshots.
+`vmo_create_snapshot` captures coherent immutable memory-VMO bytes while
+excluding writable mappings and exclusive hardware writers. Files have no
+userspace snapshot-VMO operation.
+
+`PROTECT` is independent File/Directory authority, attenuated during handle
+copy, transfer and pathname derivation; it implies neither READ nor EXECUTE.
+`file_protect` acquires content exclusion on the canonical file and returns a
+process-local FileProtection token with MAP|INSPECT and the length sampled
+under that exclusion. Existing writable handles, append and truncate cannot
+bypass it. Names and other metadata remain mutable. The token cannot be
+copied or transferred. Closing it releases only that reference; a mapping
+keeps its independent reference until unmap or process teardown. Holding an
+ordinary File elsewhere never extends a terminated process's protection.
+After the owning process's threads stop and its handles close, teardown
+detaches protected sources without allocating memory. A VMAR held elsewhere
+may retain the dead address space's charged pages, but cannot keep content
+protected or refill pages from the file. This release does not require a new
+page-table transaction or destruction of every external VMAR handle.
+Content writes and resize return `BUSY` while protection remains. Missing
+`PROTECT` returns `ACCESS_DENIED`; acquiring protection does not itself read
+or retain the file contents. Backend failure remains an error on subsequent
+reads, including reads that could otherwise use cached pages.
+
+`vmar_map_file` accepts File READ (additionally EXECUTE for executable views),
+a matching FileProtection MAP token, and MAP on a VMAR owned by the calling
+process. It uses the same source offset, data interval and zero-fill record as
+`vmar_map_private`, but accepts only COPY_ON_WRITE mode. A token for a
+different file or EAGER mode returns
+`INVALID_ARGUMENT`. Mapping another process's VMAR returns `ACCESS_DENIED`.
+It retains protected file identity and range metadata, not a whole-file
+historical copy. Resident mapping pages and metadata are charged to the mapping
+process. Clean pages
+can be retired after page-table withdrawal and acknowledged TLB invalidation,
+then faulted back from the protected file. Modified COW pages cannot be
+discarded without another backing store. Kernel user-buffer copies must also
+fault missing pages in before acquiring their operation pins.
+
+Reclaim and refill are fallible. Explicit mapping or user-buffer copy syscalls
+report failures such as `RESOURCE_LIMIT`, `NO_MEMORY` or backend I/O errors.
+A hardware page fault has no syscall result: if bounded reclaim/refill retries
+cannot resolve it, the kernel terminates the Process as an unhandled page
+fault. Creating a lazy mapping therefore does not guarantee that every future
+memory access will succeed. Reclaim is best effort; page-table withdrawal may
+itself need temporary transaction quota and memory before it can release pages.
 
 `vmar_map_private` installs an address-space-owned view of immutable bytes. Its
 request names a page-aligned source offset, data offset within the first page,
@@ -836,10 +914,10 @@ contracts. These are representative implemented families; consult the
 | Handles | Close, duplicate, replace/attenuate, handle and object information |
 | Accounting | ResourceDomain and TaskGroup creation, resource sponsorship |
 | Tasks | ProcessBuilder construction/seal/start/abort; Process stop and exit; Thread create/start/exit/yield/sleep/request-stop |
-| Memory | VMO creation/read/write/snapshot; file executable/snapshot views; VMAR allocate/map/private-map/unmap/protect/destroy |
+| Memory | VMO creation/read/write/snapshot; protected file mappings; VMAR allocate/map/private-map/unmap/protect/destroy |
 | IPC | ByteChannel queues, CapabilityChannel rendezvous, Event create/signal |
 | Wait | Object wait-one/wait-many; WaitSet create/add/rearm/remove/wait; atomic wait/wake |
-| Filesystem | Capability-relative Directory operations, File data/metadata/sync and advisory locks |
+| Filesystem | Capability-relative Directory operations, File data/metadata/sync, content protection and advisory locks; authorized ramfs mount and atomic root switching |
 | Virtualization | Creation leases, PendingVirtualMachine construction/install/abort, VM stop and power completion, vCPU start/affinity/MMIO completion, VirtualSerial |
 | Physical devices and I/O | DeviceAssignmentAuthority, PhysicalDevice claims/MMIO/IRQ, GuestMemory, GuestMapping, GuestMailbox, GuestNotification and NativeBlock |
 
@@ -853,8 +931,8 @@ quarantined devices may retain it until host reboot.
 
 Timer, EventPair, Counter, exception endpoint/token, atomic requeue, and generic
 DMA-map/revoke calls are not current Native operations. `ExecutableAuthority`
-and its creation right remain reserved; executable VMOs currently derive from
-Files. Reserved rights or accounting fields do not establish callable APIs.
+and its creation right remain reserved; file EXECUTE authorizes executable
+protected mappings, not an exported file snapshot VMO. Reserved rights or accounting fields do not establish callable APIs.
 
 ## AArch64 Tier-1 execution
 
@@ -982,7 +1060,9 @@ SDK main and worker stacks use independent automatically placed child VMARs,
 including their guard pages; they do not consume a fixed SDK stack arena. The
 kernel supplies a temporary bootstrap stack. The runtime creates the final
 main stack through its ordinary stack allocator, copies startup data, switches
-SP, then retires the bootstrap image and stack.
+SP, then retires the bootstrap stack. Static programs also retire their selected
+loader image; dynamically linked programs retain the formal loader for its
+continuation, constructors and later dynamic-link operations.
 
 `SYSTEM_CONFIG_APPLICATION_ADDRESS_LIMIT` (key 2) returns the selected HAL
 application-exclusive address limit in value0, with value1 zero. It describes

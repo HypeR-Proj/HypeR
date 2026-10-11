@@ -15,6 +15,7 @@ use crate::kernel::accounting::{
     CommittedCharge, ResourceAmount, ResourceDomain, ResourceDomainObject, ResourceError,
     ResourceKind,
 };
+use crate::kernel::authority::Rights;
 use crate::kernel::capability::{
     HandleFlags, HandleInfo, HandleTransferOperation, HandleTransferRequest, HandleTransferRoute,
     HandleValue, InTransitCapabilities, PreparedHandle,
@@ -35,6 +36,9 @@ use super::builder_policy::BuilderStorable;
 use super::{
     LoaderError, PreparedProcess, Process, TaskFactory, TaskGroup, TaskGroupObject, load_native,
 };
+pub(super) const EXECUTABLE_RIGHTS: Rights =
+    Rights::READ.union(Rights::EXECUTE).union(Rights::PROTECT);
+
 const _: () = assert!(hyper::cpu::MAX_CPUS <= ABI_AFFINITY_WORDS * u64::BITS as usize);
 const _: () = assert!(MAX_STARTUP_HANDLES > 1);
 const MAX_USER_STARTUP_HANDLES: usize = MAX_STARTUP_HANDLES - 2;
@@ -113,7 +117,8 @@ struct BuilderPlan {
     // lookup after construction.
     group: TaskGroup,
     domain: ResourceDomain,
-    executable: ExecutableSnapshot,
+    executable: PreparedHandle,
+    loader: Option<ExecutableSnapshot>,
     data: Vec<u8>,
     thread_name: Option<String>,
     affinity: CpuMask,
@@ -184,7 +189,7 @@ impl SealedProcessBuild {
     pub(super) fn data(&self) -> &[u8] {
         &self.plan.data
     }
-    pub(super) fn executable(&self) -> &ExecutableSnapshot {
+    pub(super) fn executable(&self) -> &PreparedHandle {
         &self.plan.executable
     }
 
@@ -297,9 +302,10 @@ impl ProcessBuilder {
         _factory: &TaskFactory,
         group: &TaskGroupObject,
         domain: &ResourceDomainObject,
-        executable: &FileObject,
+        executable: PreparedHandle,
+        loader: &FileObject,
     ) -> Result<ObjectPublication<Self>, ProcessBuilderError<()>> {
-        let executable = executable
+        let loader = loader
             .executable_snapshot(domain.domain())
             .map_err(ProcessBuilderError::ExecutableFile)?;
         let object_charge = reserve_builder_charge(domain.domain())?;
@@ -315,6 +321,7 @@ impl ProcessBuilder {
                 group: group.group().clone(),
                 domain: domain.domain().clone(),
                 executable,
+                loader: Some(loader),
                 data,
                 thread_name: None,
                 affinity: CpuMask::ALL,
@@ -399,11 +406,14 @@ impl ProcessBuilder {
     /// Every error leaves the builder Open and reusable. Sealing claims no
     /// source handles, creates no Thread and publishes no Process identity.
     pub(crate) fn seal(&self) -> Result<(), ProcessBuilderError<()>> {
-        let plan = self.take_open_plan()?;
+        let mut plan = self.take_open_plan()?;
         let prepared = match prepare_sealed_process(&plan) {
             Ok(prepared) => prepared,
             Err(error) => return self.finish_open_operation(plan, Err(error)),
         };
+        // Installed loader pages own independent storage. No full-image snapshot
+        // survives sealing, even if the caller leaves the builder dormant.
+        drop(plan.loader.take());
         let mut sealed = Some(SealedProcessBuild {
             child: Some(prepared),
             plan,
@@ -651,6 +661,46 @@ impl ProcessBuilder {
     }
 }
 
+/// Copies only the authority needed by the child's ELF loader. The normal
+/// capability transfer transaction checks READ, EXECUTE, PROTECT, DUPLICATE and
+/// TRANSFER together; EXECUTE alone never becomes readable child authority.
+fn copy_executable_for_child(
+    caller: &Process,
+    executable: HandleValue,
+) -> Result<PreparedHandle, ProcessBuilderError<()>> {
+    let request = HandleTransferRequest {
+        value: executable,
+        offered_rights: None,
+        rights: EXECUTABLE_RIGHTS,
+        offered_kind: None,
+        expected_kind: Some(ObjectKind::FILE),
+        operation: HandleTransferOperation::Copy,
+    };
+    let transfer = caller
+        .prepare_handle_transfer(
+            core::slice::from_ref(&request),
+            None,
+            Some(ObjectKind::PROCESS_BUILDER),
+            HandleTransferRoute::StagedStartup,
+        )
+        .map_err(ProcessBuilderError::Process)?;
+    let authority = match transfer.commit() {
+        Ok(authority) => authority,
+        Err(failure) => {
+            let error = failure.error;
+            failure.transfer.rollback();
+            return Err(ProcessBuilderError::Process(error));
+        }
+    };
+    let (mut handles, charge) = authority.into_prepared_handles();
+    let executable = handles
+        .pop()
+        .unwrap_or_else(|| builder_invariant_violation());
+    drop(handles);
+    drop(charge);
+    Ok(executable)
+}
+
 /// Creates and publishes one builder from independently checked authorities.
 pub(crate) fn create_process_builder(
     caller: &Process,
@@ -658,6 +708,7 @@ pub(crate) fn create_process_builder(
     group: HandleValue,
     domain: HandleValue,
     executable: HandleValue,
+    loader: HandleValue,
 ) -> Result<HandleValue, ProcessBuilderError<()>> {
     let factory = caller
         .resolve_handle::<TaskFactory>(factory, crate::kernel::authority::Rights::CREATE_PROCESS)
@@ -674,8 +725,10 @@ pub(crate) fn create_process_builder(
             crate::kernel::authority::Rights::RESOURCE_DOMAIN_SPONSOR,
         )
         .map_err(ProcessBuilderError::Process)?;
-    let executable = caller
-        .resolve_handle::<FileObject>(executable, crate::kernel::authority::Rights::EXECUTE)
+    let executable = copy_executable_for_child(caller, executable)?;
+
+    let loader = caller
+        .resolve_handle::<FileObject>(loader, Rights::READ.union(Rights::EXECUTE))
         .map_err(ProcessBuilderError::Process)?;
 
     let reservation = caller
@@ -685,7 +738,8 @@ pub(crate) fn create_process_builder(
         factory.object(),
         group.object(),
         domain.object(),
-        executable.object(),
+        executable,
+        loader.object(),
     ) {
         Ok(publication) => publication,
         Err(error) => {
@@ -809,7 +863,11 @@ fn prepare_sealed_process(plan: &BuilderPlan) -> Result<PreparedProcess, Process
         return Err(ProcessBuilderError::MissingName);
     }
     let domain = plan.domain.clone();
-    let loaded = load_native(domain.clone()).map_err(ProcessBuilderError::Image)?;
+    let loader = plan
+        .loader
+        .as_ref()
+        .unwrap_or_else(|| builder_invariant_violation());
+    let loaded = load_native(loader, domain.clone()).map_err(ProcessBuilderError::Image)?;
     let prepared = match PreparedProcess::try_new(
         loaded.image,
         plan.group.clone(),

@@ -18,6 +18,9 @@ pub fn escaped(text: &str) -> String {
 }
 
 pub fn write(graph: &Graph, tree: bool, verbose: bool, output: &mut impl Write) -> io::Result<()> {
+    if let Some(interpreter) = &graph.declared_interpreter {
+        writeln!(output, "    declared interpreter: {}", escaped(interpreter))?;
+    }
     if verbose {
         writeln!(
             output,
@@ -26,20 +29,17 @@ pub fn write(graph: &Graph, tree: bool, verbose: bool, output: &mut impl Write) 
         )?;
         metadata(&graph.objects[0], "    ", output)?;
     }
+    let is_static = graph.objects[0]
+        .image
+        .as_ref()
+        .is_ok_and(|image| image.static_executable);
+    if is_static {
+        writeln!(output, "    statically linked")?;
+    }
     if graph.objects.len() == 1 && graph.objects[0].dependencies.is_empty() {
-        let is_static = graph.objects[0]
-            .image
-            .as_ref()
-            .is_ok_and(|image| image.static_executable);
-        writeln!(
-            output,
-            "    {}",
-            if is_static {
-                "statically linked"
-            } else {
-                "no shared-library dependencies"
-            }
-        )?;
+        if !is_static {
+            writeln!(output, "    no shared-library dependencies")?;
+        }
         return Ok(());
     }
     if tree {
@@ -65,8 +65,8 @@ fn row(object: &Object, prefix: &str, suffix: &str, output: &mut impl Write) -> 
         Err(Failure::Invalid(error)) => write!(output, "{path} [{}]", escaped(error))?,
         Ok(_) => write!(output, "{path}")?,
     }
-    if object.interpreter {
-        write!(output, " (interpreter)")?;
+    if object.loader {
+        write!(output, " (loader)")?;
     }
     writeln!(output, "{suffix}")
 }

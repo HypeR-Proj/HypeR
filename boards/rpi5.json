@@ -7,7 +7,25 @@
   "boot": "rpi5-firmware",
   "disk": {
     "uuid": "4e3c0876-f362-4395-9fcd-4d17002d2725",
-    "config-mib": 1024
+    "partitions": [
+      {
+        "label": "hyper-data",
+        "size-mib": 1024,
+        "filesystem": "fat",
+        "content": "data"
+      },
+      {
+        "label": "hyper-system",
+        "size-mib": 64,
+        "filesystem": "erofs",
+        "content": "system"
+      },
+      {
+        "label": "alpine",
+        "size-mib": 2048,
+        "image": "alpine-rootfs"
+      }
+    ]
   },
   "files": {
     "hyper.img": "hyper",
@@ -24,8 +42,6 @@
       "name": "alpine",
       "image": "vm/alpine.itb",
       "autostart": false,
-      "disk-mib": 2048,
-      "disk-image": "alpine-rootfs",
       "configuration": {
         "memory-bytes": 268435456,
         "vcpus": 2,
@@ -34,6 +50,9 @@
       "network": {
         "network": "default",
         "mac": "02:48:59:00:00:01"
+      },
+      "disk": {
+        "source": "PARTLABEL=alpine"
       }
     }
   ],
@@ -44,7 +63,7 @@
     "configuration": {
       "memory-bytes": 134217728,
       "vcpus": 1,
-      "bootargs": "console=ttyAMA0 earlycon=pl011,mmio32,0x09000000 rdinit=/init loglevel=4 hyper.role=io hyper.mode=standby hyper.volumes=required"
+      "bootargs": "console=ttyAMA0 earlycon=pl011,mmio32,0x09000000 rdinit=/init loglevel=4 hyper.role=io hyper.mode=standby"
     },
     "io-device": {
       "profile": "bcm2712-sdhci",

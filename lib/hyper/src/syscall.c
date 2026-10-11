@@ -169,11 +169,6 @@ hyper_call_result_t hyper_vmo_create_snapshot(hyper_native_handle_t vmo)
 	return hyper_native_call6(HYPER_NATIVE_SYS_VMO_CREATE_SNAPSHOT, vmo, 0, 0, 0, 0, 0);
 }
 
-hyper_call_result_t hyper_file_create_snapshot(hyper_native_handle_t file)
-{
-	return hyper_native_call6(HYPER_NATIVE_SYS_FILE_CREATE_SNAPSHOT, file, 0, 0, 0, 0, 0);
-}
-
 hyper_native_status_t hyper_vmar_map_private(hyper_native_handle_t vmar,
 					     hyper_native_handle_t snapshot,
 					     const hyper_native_private_mapping_t *mapping,
@@ -187,11 +182,6 @@ hyper_native_status_t hyper_vmar_map_private(hyper_native_handle_t vmar,
 hyper_call_result_t hyper_vmo_create(uint64_t size)
 {
 	return hyper_native_call6(HYPER_NATIVE_SYS_VMO_CREATE, size, 0, 0, 0, 0, 0);
-}
-
-hyper_call_result_t hyper_file_create_executable_vmo(hyper_native_handle_t file)
-{
-	return hyper_native_call6(HYPER_NATIVE_SYS_FILE_CREATE_EXECUTABLE_VMO, file, 0, 0, 0, 0, 0);
 }
 
 hyper_native_status_t hyper_vmo_read(hyper_native_handle_t vmo, uint64_t offset, void *output,
@@ -247,10 +237,11 @@ hyper_native_status_t hyper_vmar_destroy(hyper_native_handle_t vmar)
 hyper_call_result_t hyper_process_builder_create(hyper_native_handle_t factory,
 						 hyper_native_handle_t group,
 						 hyper_native_handle_t domain,
-						 hyper_native_handle_t executable)
+						 hyper_native_handle_t executable,
+						 hyper_native_handle_t loader)
 {
 	return hyper_native_call6(HYPER_NATIVE_SYS_PROCESS_BUILDER_CREATE, factory, group, domain,
-				  executable, 0, 0);
+				  executable, loader, 0);
 }
 
 hyper_call_result_t hyper_resource_domain_create(hyper_native_handle_t parent,
@@ -392,9 +383,12 @@ hyper_native_status_t hyper_process_builder_set_name(hyper_native_handle_t build
 		.status;
 }
 
-hyper_native_status_t hyper_process_builder_set_data(hyper_native_handle_t builder, const void *data, size_t size)
+hyper_native_status_t hyper_process_builder_set_data(hyper_native_handle_t builder,
+						     const void *data, size_t size)
 {
-	return hyper_native_call6(HYPER_NATIVE_SYS_PROCESS_BUILDER_SET_DATA, builder, (uintptr_t)data, size, 0, 0, 0).status;
+	return hyper_native_call6(HYPER_NATIVE_SYS_PROCESS_BUILDER_SET_DATA, builder,
+				  (uintptr_t)data, size, 0, 0, 0)
+		.status;
 }
 
 hyper_native_status_t hyper_process_builder_set_affinity(hyper_native_handle_t builder,
@@ -479,9 +473,9 @@ hyper_call_result_t hyper_task_inspector_scan_threads(hyper_native_handle_t insp
 }
 
 hyper_call_result_t hyper_object_inspector_read_details(hyper_native_handle_t inspector,
-						      uint64_t process, uint64_t target,
-						      uint64_t cursor,
-						      hyper_native_object_details_t *record)
+							uint64_t process, uint64_t target,
+							uint64_t cursor,
+							hyper_native_object_details_t *record)
 {
 	return hyper_native_call6(HYPER_NATIVE_SYS_OBJECT_INSPECTOR_READ_DETAILS, inspector,
 				  process, target, cursor, (uintptr_t)record, sizeof(*record));
@@ -835,4 +829,36 @@ hyper_call_result_t hyper_virtual_machine_creation_lease_get_platform_info(
 {
 	return hyper_native_call6(HYPER_NATIVE_SYS_VIRTUAL_MACHINE_CREATION_LEASE_GET_PLATFORM_INFO,
 				  lease, profile, (uintptr_t)info, sizeof(*info), 0, 0);
+}
+
+hyper_call_result_t hyper_filesystem_mount_ramfs(hyper_native_handle_t directory, const void *path,
+						 size_t path_length)
+{
+	return hyper_native_call6(HYPER_NATIVE_SYS_FILESYSTEM_MOUNT_RAMFS, directory,
+				  (uintptr_t)path, path_length, 0, 0, 0);
+}
+
+hyper_call_result_t
+hyper_filesystem_switch_root(hyper_native_handle_t directory,
+			     const hyper_native_filesystem_root_switch_t *request)
+{
+	return hyper_native_call6(HYPER_NATIVE_SYS_FILESYSTEM_SWITCH_ROOT, directory,
+				  (uintptr_t)request, 0, 0, 0, 0);
+}
+
+/* Content protection is process-local; closing this token cannot release a
+ * separate reference held by a live file-backed mapping. */
+hyper_call_result_t hyper_file_protect(hyper_native_handle_t file)
+{
+	return hyper_native_call6(HYPER_NATIVE_SYS_FILE_PROTECT, file, 0, 0, 0, 0, 0);
+}
+
+hyper_native_status_t hyper_vmar_map_file(hyper_native_handle_t vmar, hyper_native_handle_t file,
+					  hyper_native_handle_t protection,
+					  const hyper_native_private_mapping_t *mapping,
+					  size_t mapping_size)
+{
+	return hyper_native_call6(HYPER_NATIVE_SYS_VMAR_MAP_FILE, vmar, file, protection,
+				  (uintptr_t)mapping, mapping_size, 0)
+		.status;
 }

@@ -71,6 +71,7 @@ impl ProcessBuilderServices for DeferredProcessServices<'_> {
         group: HandleValue,
         domain: HandleValue,
         executable: HandleValue,
+        loader: HandleValue,
     ) -> Result<HandleValue, ProcessBuilderServiceError> {
         crate::kernel::process::create_process_builder(
             self.process,
@@ -78,6 +79,7 @@ impl ProcessBuilderServices for DeferredProcessServices<'_> {
             group,
             domain,
             executable,
+            loader,
         )
         .map_err(ProcessBuilderServiceError::Builder)
     }

@@ -14,7 +14,9 @@ pub use sdhci::{MmioWindow, SdhciDevice, SdhciRevision};
 
 const PAGE_SIZE: u64 = 4096;
 const SHARED_PHANDLE: u32 = 0xffff_0004;
-const MAX_DMA_RANGES: usize = 8;
+// One I/O VM RAM range plus up to nine Native pools, with one dynamic
+// aperture interval around each exclusion and at the end of physical space.
+const MAX_DMA_RANGES: usize = 21;
 /// Imported physical pages use one immutable bus translation. This keeps low
 /// Pi host RAM from colliding with the reference guest's MMIO addresses.
 pub const DYNAMIC_ALIAS_OFFSET: u64 = hyper_abi::HYPER_NATIVE_GUEST_DYNAMIC_ALIAS_OFFSET;
@@ -45,8 +47,10 @@ pub struct SharedMemory {
     pub guest_base: u64,
 }
 
-/// One independently authorized backend context. Dynamic windows describe an
+/// One independently authorized backend context. Dynamic windows describe a
 /// fixed affine DMA address domain, not admitted RAM or a preallocated guest.
+/// Client zero may be a control-only owner: its mailbox and scratch mapping
+/// need no storage or network notification device.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct IoClient {
     pub id: u32,
@@ -229,7 +233,9 @@ impl IoDevices<'_> {
             let shared_end = end(shared.base, shared.size)?;
             end(shared.guest_base, shared.size)?;
             if client.id > 127
-                || (client.notification.is_none() && client.network_notification.is_none())
+                || (client.id != 0
+                    && client.notification.is_none()
+                    && client.network_notification.is_none())
                 || overlaps(shared.base, shared_end, boot.memory_base, own_end)
                 || boot
                     .initramfs

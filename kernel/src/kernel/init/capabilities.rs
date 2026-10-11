@@ -15,20 +15,12 @@ use super::Error;
 use super::bootstrap::{self, BootProcess};
 
 #[cfg(not(feature = "kernel-self-test"))]
-const CORE_HANDLE_COUNT: usize = 12;
-#[cfg(feature = "kernel-self-test")]
 const CORE_HANDLE_COUNT: usize = 11;
+#[cfg(feature = "kernel-self-test")]
+const CORE_HANDLE_COUNT: usize = 10;
 
 const HAS_VM_AUTHORITY: bool = crate::hal::vm::userspace_vm_lifecycle_available();
 const HAS_DEVICE_AUTHORITY: bool = crate::kernel::device::assigned::available();
-// The loader receives this exact directory, not a root from which to search
-// other architectures. Applications inherit or narrow the same authority.
-#[cfg(target_arch = "aarch64")]
-const LIBRARY_DIRECTORY: &str = "/lib/aarch64-hyper-hyper";
-#[cfg(target_arch = "riscv64")]
-const LIBRARY_DIRECTORY: &str = "/lib/riscv64-hyper-hyper";
-#[cfg(target_arch = "x86_64")]
-const LIBRARY_DIRECTORY: &str = "/lib/x86_64-hyper-hyper";
 pub(super) const HANDLE_COUNT: usize =
     CORE_HANDLE_COUNT + HAS_VM_AUTHORITY as usize + HAS_DEVICE_AUTHORITY as usize;
 
@@ -37,7 +29,6 @@ const CORE_PURPOSES: [u32; CORE_HANDLE_COUNT] = [
     purpose(hyper::abi::native::HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_TASK_GROUP),
     purpose(hyper::abi::native::HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_TASK_FACTORY),
     purpose(hyper::abi::native::HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_ROOT_DIRECTORY),
-    purpose(hyper::abi::native::HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_DYNAMIC_LIBRARY_DIRECTORY),
     purpose(hyper::abi::native::HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_TASK_INSPECTOR),
     purpose(hyper::abi::native::HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_OBJECT_INSPECTOR),
     purpose(hyper::abi::native::HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_MEMORY_INSPECTOR),
@@ -118,21 +109,11 @@ fn prepare_handles(
             .union(Rights::CREATE_TASK_GROUP),
     )?);
     let root = crate::kernel::vfs::root_directory(domain).map_err(Error::RootDirectory)?;
-    handles[4] = Some(prepare_handle(
-        ObjectPublication::try_new(
-            root.open_directory(LIBRARY_DIRECTORY, domain)
-                .map_err(Error::RootDirectory)?,
-        )
-        .map_err(Error::Object)?,
-        Rights::DUPLICATE
-            .union(Rights::TRANSFER)
-            .union(Rights::INSPECT)
-            .union(Rights::READ)
-            .union(Rights::EXECUTE),
-    )?);
     handles[3] = Some(prepare_handle(
         ObjectPublication::try_new(root).map_err(Error::Object)?,
         Rights::WRITE
+            .union(Rights::PROTECT)
+            .union(Rights::MANAGE_NAMESPACE)
             .union(Rights::SET_ATTRIBUTES)
             .union(Rights::LOCK_FILE)
             .union(Rights::DUPLICATE)
@@ -141,7 +122,7 @@ fn prepare_handles(
             .union(Rights::READ)
             .union(Rights::EXECUTE),
     )?);
-    handles[5] = Some(prepare_handle(
+    handles[4] = Some(prepare_handle(
         ObjectPublication::try_new(TaskInspector::try_system(domain).map_err(Error::Inspection)?)
             .map_err(Error::Object)?,
         Rights::DUPLICATE
@@ -149,7 +130,7 @@ fn prepare_handles(
             .union(Rights::INSPECT)
             .union(Rights::DERIVE),
     )?);
-    handles[6] = Some(prepare_handle(
+    handles[5] = Some(prepare_handle(
         ObjectPublication::try_new(ObjectInspector::try_system(domain).map_err(Error::Inspection)?)
             .map_err(Error::Object)?,
         Rights::DUPLICATE
@@ -158,14 +139,14 @@ fn prepare_handles(
             .union(Rights::INSPECT_DETAILS)
             .union(Rights::DERIVE),
     )?);
-    handles[7] = Some(prepare_handle(
+    handles[6] = Some(prepare_handle(
         ObjectPublication::try_new(MemoryInspector::try_system(domain).map_err(Error::Inspection)?)
             .map_err(Error::Object)?,
         Rights::DUPLICATE
             .union(Rights::TRANSFER)
             .union(Rights::INSPECT),
     )?);
-    handles[8] = Some(prepare_handle(
+    handles[7] = Some(prepare_handle(
         ObjectPublication::try_new(CpuInspector::try_system(domain).map_err(Error::Inspection)?)
             .map_err(Error::Object)?,
         Rights::DUPLICATE
@@ -184,7 +165,7 @@ fn prepare_handles(
     }
     #[cfg(not(feature = "kernel-self-test"))]
     {
-        handles[11] = Some(prepare_handle(
+        handles[10] = Some(prepare_handle(
             crate::kernel::device::console::SystemConsole::try_publication(domain)
                 .map_err(Error::ConsoleObject)?,
             Rights::DUPLICATE
@@ -218,7 +199,7 @@ fn prepare_handles(
         .ok_or(Error::MemoryObject(
             crate::kernel::mm::user_space::MemoryObjectError::AllocationSize,
         ))?;
-    handles[10] = Some(prepare_handle(
+    handles[9] = Some(prepare_handle(
         ObjectPublication::try_new(
             VmarObject::try_existing(address_space.clone(), token, domain)
                 .map_err(Error::MemoryObject)?,
@@ -239,7 +220,7 @@ fn prepare_handles(
             return Err(Error::Handle(error));
         }
     };
-    handles[9] = Some(root_vmar);
+    handles[8] = Some(root_vmar);
     Ok(())
 }
 

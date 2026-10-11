@@ -14,7 +14,7 @@ fn shared_transitive_dependencies_are_listed_once_and_cycles_terminate() -> io::
     files.add("liba.so", &["libshared.so"])?;
     files.add("libb.so", &["libshared.so"])?;
     files.add("libshared.so", &["liba.so"])?;
-    let graph = inspect(&root, Some(&files.0), false)?;
+    let graph = inspect(&root, Some(&files.0), false, None)?;
     assert!(!graph.failed());
     assert_eq!(graph.objects.len(), 4);
     let mut text = Vec::new();
@@ -35,7 +35,7 @@ fn missing_library_reports_failure_but_does_not_hide_its_siblings() -> io::Resul
     let files = Directory::new()?;
     let root = files.add("libroot.so", &["libmissing.so", "libpresent.so"])?;
     files.add("libpresent.so", &[])?;
-    let graph = inspect(&root, Some(&files.0), false)?;
+    let graph = inspect(&root, Some(&files.0), false, None)?;
     assert!(graph.failed());
     assert_eq!(graph.objects.len(), 3);
     assert!(matches!(graph.objects[1].image, Err(Failure::NotFound)));
@@ -53,10 +53,10 @@ fn direct_mode_checks_immediate_dependencies_without_opening_grandchildren() -> 
     let files = Directory::new()?;
     let root = files.add("libroot.so", &["liba.so"])?;
     files.add("liba.so", &["missing.so"])?;
-    let direct = inspect(&root, Some(&files.0), true)?;
+    let direct = inspect(&root, Some(&files.0), true, None)?;
     assert!(!direct.failed());
     assert_eq!(direct.objects.len(), 2);
-    assert!(inspect(&root, Some(&files.0), false)?.failed());
+    assert!(inspect(&root, Some(&files.0), false, None)?.failed());
     Ok(())
 }
 
@@ -69,7 +69,7 @@ fn reports_incompatible_and_malformed_libraries() -> io::Result<()> {
     foreign[7] = 0;
     fs::write(files.0.join("libabi.so"), foreign)?;
     fs::write(files.0.join("libbroken.so"), b"ordinary text")?;
-    let graph = inspect(&root, Some(&files.0), false)?;
+    let graph = inspect(&root, Some(&files.0), false, None)?;
     assert!(graph.failed());
     let mut text = Vec::new();
     output::write(&graph, false, false, &mut text)?;
@@ -97,12 +97,81 @@ fn interpreter_is_reported_once_and_missing_interpreter_is_an_error() -> io::Res
             183,
         ),
     )?;
-    let graph = inspect(&root, Some(&libraries), false)?;
+    let graph = inspect(&root, Some(&libraries), false, None)?;
     assert_eq!(graph.objects.len(), 3);
-    assert!(graph.objects[1].interpreter);
+    assert!(graph.objects[1].loader);
     assert!(!graph.failed());
     fs::remove_file(loader)?;
-    assert!(inspect(&root, Some(&libraries), false)?.failed());
+    assert!(inspect(&root, Some(&libraries), false, None)?.failed());
+    Ok(())
+}
+
+#[test]
+fn native_interpreter_uses_system_deployment_and_accepts_explicit_override() -> io::Result<()> {
+    let files = Directory::new()?;
+    let root = files.0.join("program");
+    fs::write(
+        &root,
+        elf(&[], None, Some("/lib64/ld-hyper-aarch64.so"), 183),
+    )?;
+    let graph = inspect(&root, None, false, None)?;
+    assert_eq!(
+        graph.library_directory,
+        Path::new("/system/lib/aarch64-hyper-hyper")
+    );
+    assert_eq!(
+        graph.objects[1].path,
+        Path::new("/system/lib64/ld-hyper-aarch64.so")
+    );
+    assert_eq!(
+        graph.declared_interpreter.as_deref(),
+        Some("/lib64/ld-hyper-aarch64.so")
+    );
+    let loader = files.add("selected-loader", &[])?;
+    assert!(!inspect(&root, Some(&files.0), false, Some(&loader))?.failed());
+    Ok(())
+}
+
+#[test]
+fn explicit_loader_checks_actual_file_and_preserves_declared_interpreter() -> io::Result<()> {
+    let files = Directory::new()?;
+    let loader = files.add("formal-loader", &[])?;
+    let root = files.0.join("program");
+    fs::write(&root, elf(&[], None, Some("/missing/declared-loader"), 183))?;
+    assert!(inspect(&root, Some(&files.0), false, None)?.failed());
+    let graph = inspect(&root, Some(&files.0), false, Some(&loader))?;
+    assert!(!graph.failed());
+    assert_eq!(graph.objects[1].path, fs::canonicalize(&loader)?);
+    let mut text = Vec::new();
+    output::write(&graph, false, false, &mut text)?;
+    let text = String::from_utf8_lossy(&text);
+    assert!(text.contains("declared interpreter: /missing/declared-loader"));
+    assert!(text.contains("formal-loader (loader)"));
+    fs::remove_file(loader)?;
+    assert!(inspect(&root, Some(&files.0), false, Some(&files.0.join("absent")))?.failed());
+    Ok(())
+}
+
+#[test]
+fn static_program_can_check_a_selected_loader_and_reject_wrong_architecture() -> io::Result<()> {
+    let files = Directory::new()?;
+    let root = files.0.join("static");
+    fs::write(&root, elf(&[], None, None, 183))?;
+    let loader = files.add("bootstrap-loader", &[])?;
+    let args = Ldd::try_parse_from([
+        "ldd",
+        "--loader",
+        &loader.to_string_lossy(),
+        &root.to_string_lossy(),
+    ])
+    .map_err(io::Error::other)?;
+    let mut text = Vec::new();
+    assert!(!crate::run(&args, &mut text, &mut Vec::new())?);
+    let text = String::from_utf8_lossy(&text);
+    assert!(text.contains("statically linked"));
+    assert!(text.contains("bootstrap-loader =>"));
+    fs::write(&loader, elf(&[], None, None, 243))?;
+    assert!(inspect(&root, Some(&files.0), false, Some(&loader))?.failed());
     Ok(())
 }
 
@@ -114,7 +183,7 @@ fn symlinks_resolve_to_real_files_and_dangling_links_are_reported() -> io::Resul
     let real = files.add("libactual.so.1", &[])?;
     std::os::unix::fs::symlink("libactual.so.1", files.0.join("libalias.so"))?;
     std::os::unix::fs::symlink("absent", files.0.join("libmissing.so"))?;
-    let graph = inspect(&root, Some(&files.0), false)?;
+    let graph = inspect(&root, Some(&files.0), false, None)?;
     assert!(graph.failed());
     assert_eq!(graph.objects[1].path, fs::canonicalize(real)?);
     // SONAME does not rename a DT_NEEDED lookup in the Native loader.
@@ -131,7 +200,7 @@ fn inspecting_a_symlinked_library_keeps_its_lookup_name_for_back_edges() -> io::
     files.add("libleaf.so", &["libroot.so"])?;
     let alias = files.0.join("libroot.so");
     std::os::unix::fs::symlink("libroot.so.1", &alias)?;
-    let graph = inspect(&alias, Some(&files.0), false)?;
+    let graph = inspect(&alias, Some(&files.0), false, None)?;
     assert!(!graph.failed());
     assert_eq!(graph.objects.len(), 2);
     assert_eq!(graph.objects[1].dependencies, [0]);
@@ -147,7 +216,7 @@ fn excessive_graphs_stop_at_the_native_loader_limit() -> io::Result<()> {
             &[&format!("lib{}.so", index + 1)],
         )?;
     }
-    assert!(inspect(&files.0.join("lib0.so"), Some(&files.0), false).is_err());
+    assert!(inspect(&files.0.join("lib0.so"), Some(&files.0), false, None).is_err());
     Ok(())
 }
 

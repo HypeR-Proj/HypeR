@@ -38,7 +38,7 @@ be recreated from its retained image with fresh resource and lifecycle owners.
 
 For each provisioned VM, the manager creates a child resource domain and task
 group, derives a one-shot VM creation lease, and starts an isolated
-`/svc/vm-runtime` process. The guest image is duplicated into that runtime.
+`/system/svc/vm-runtime` process. The guest image is duplicated into that runtime.
 The runtime receives only its guest image, creation lease, read-and-execute
 runtime libraries, its own process resources, and a CapabilityChannel for receiving
 authorized console clients.
@@ -105,7 +105,7 @@ caller prematurely acknowledging slots. Physical AArch64 qualification must
 stress publication/acknowledgement across CPUs, idle wakeups, full queues, and
 runtime termination during output; QEMU alone does not prove weak ordering.
 
-The shell holds only a `WAIT|WRITE` manager-connector endpoint. Each `/bin/vmm`
+The shell holds only a `WAIT|WRITE` manager-connector endpoint. Each `/system/bin/vmm`
 invocation obtains private control and capability channels. For `vmm console`,
 the manager authorizes one client, creates a ByteChannel pair, sends one end to
 the runtime's connector, and transfers the other end to the client. Neither

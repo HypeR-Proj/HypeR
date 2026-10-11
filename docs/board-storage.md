@@ -12,33 +12,51 @@ a different kernel or app ABI.
 
 ## Disk ownership
 
-The image builder creates an outer GPT with a 1 GiB FAT32 configuration volume
-and one opaque partition per configured VM. The configuration volume contains
-the boot payloads, `board.json`, `vms.json`, `volumes.json`, and guest ITBs.
-The I/O VM image lives inside `bootstrap.cpio` at the path selected by
-`io-vm.image` (default `/vm/io.itb`); it is not duplicated on `/data`.
-Business guest images remain on the configuration volume.
-QEMU loads `bootstrap.cpio` directly from the host with `-initrd`, so its
-configuration volume omits this archive. Pi 5 firmware loads the archive from
-the FAT boot/configuration partition; that required boot file remains visible
-as `/data/bootstrap.cpio` after HypeR mounts the partition.
-VM partitions contain whole virtual disks: their first byte is the guest's
-sector zero, so a guest GPT is contained within that VM's volume.
+The image builder creates exactly the outer GPT partitions declared in
+`disk.partitions`. The default deployment uses `hyper-data` (1 GiB writable
+FAT), `hyper-system` (64 MiB read-only EROFS), and an opaque Alpine disk
+(2 GiB). Partition labels and UUIDs are deployment policy, not backend names.
+The data payload includes `board.json`, `vms.json`, `partitions.json`, and guest
+ITBs. The I/O VM ITB lives only in the bootstrap archive at `io-vm.image`.
+QEMU loads this archive from the host; Pi firmware needs it on the FAT data
+partition too, where it remains visible as `/data/bootstrap.cpio`.
+Guest partitions contain whole virtual disks, including any guest partition table.
 
-The trusted Linux I/O VM alone drives the physical controller. Its bootstrap
-manifest identifies outer partitions by PARTUUID and exact sector count. It
-validates the GPT and creates a separate `dm-linear` device for every volume,
-including the HypeR configuration volume. It neither mounts filesystems nor
-recursively discovers partitions inside guest disks. LIO exposes each mapper
-through an independently authorized vhost-scsi target. Client zero owns only
-the configuration volume; other clients cannot request that target.
+Linux drives the physical controller and enumerates whole physical block devices.
+Native io-runtime reads their GPT headers and entry arrays through bounded block
+reads, verifies CRCs, UUIDs and extents, and resolves `PARTUUID=` or `PARTLABEL=`
+selectors against the actual media. Duplicate matching labels are ambiguous;
+use PARTUUID to distinguish them. One valid GPT copy permits recovery; two valid
+but conflicting copies are rejected. Discovery waits for asynchronous device
+probe within a bounded startup deadline.
+
+An image flashed onto a larger SD card keeps the GPT backup at the original
+image boundary. Discovery follows that location only from a CRC-checked primary
+header with valid metadata ranges. A stale GPT at the larger card's physical end
+is outside that declared pair and is ignored. Discovery does not resize
+partitions or rewrite GPT metadata. If the
+primary header is corrupt, only a valid backup at the physical media end can
+recover discovery: it does not scan the disk or trust a damaged header's pointer.
+
+Only the owner control mailbox (client zero) can enumerate, read raw metadata or
+bind ranges. It has a private 1 MiB scratch grant and is not a filesystem client.
+For each authorized Native or guest client, HypeR sends a disk identity, LBA range
+and read-only flag. Linux checks bounds and writable overlap and installs an
+immutable dm-linear/LIO export. It does not parse GPT, select partitions by name,
+or mount their filesystems. Guest runtimes cannot forward owner commands through
+the broker. Native filesystem workers receive only their selected block capability.
 
 HypeR's Native block initiator uses standard virtio-scsi split queues and shared
-pages. The kernel mounts the configuration volume as a real FAT filesystem at
-`/data` beneath the initramfs root. File reads access that volume; they do not
-populate a second ramfs copy. The block transport can sleep, and the filesystem
-holds a sleepable mutex rather than an IRQ-disabling lock while waiting for I/O.
-See [FAT semantics and durability](../kernel/docs/fat.md).
+pages. `io-runtime` creates an independent initiator for each declared Native
+volume and moves its activated capability to `fs-backend`. The manager applies fstab,
+detects the media and starts a separate format-worker process per mounted
+volume. The manager publishes the worker transport beneath the RAM namespace:
+`/data` is writable FAT; the default deployment mounts its read-only EROFS volume at
+`/system`. File reads access the volume through the generic kernel VFS and cache;
+they do not populate
+a second ramfs copy. Cache misses and mutations use bounded shared-memory RPC
+directly to the worker. See [filesystem services](filesystem-services.md) and
+[FAT semantics and durability](fat.md).
 
 ## Bootstrap and VM services
 
@@ -48,7 +66,9 @@ board JSON into bounded Native and Linux client manifests. Linux kernel and
 module binaries remain digest-verified appliance artifacts; HypeR contributes
 a separate configuration archive to the Linux initramfs.
 
-The shell starts independently. An explicit readiness channel gates init's
+Core console services start independently. After successful formal-environment
+startup, session starts `/system/bin/sh`; failure selects `/boot/svc/fallback-sh`.
+An explicit readiness channel gates init's
 loading of `/data/vms.json` until the configuration filesystem is mounted.
 The manager acknowledges the complete fleet configuration before attempting
 autostart, including an empty fleet or one with no autostart VMs. Init supervises
@@ -56,14 +76,20 @@ configuration admission and the manager service; guest lifecycle failures remain
 local to the manager. The I/O VM continues running under io-runtime independently.
 Guest lifecycle management remains in vm-manager and each guest's vm-runtime.
 If the optional I/O runtime cannot start, exits, closes or corrupts its readiness
-reply, or misses the 120-second deadline, init stops that provider and retains
-the Native console, shell and service supervision. An unreadable or rejected
-fleet configuration likewise leaves these services available. The manager
-continues to answer inspection requests and refuses VM creation and startup
-until configuration is available on a subsequent boot. It does not
+reply, or misses the 120-second deadline, init retains the Native console, shell
+and service supervision. A failed required mount does not deliberately terminate
+a still-live I/O provider or filesystem manager; recovery mount commands remain
+available. An unreadable or rejected fleet configuration likewise leaves these
+services available. If `/system` is usable, system init can adopt the core
+services, switch root and start the VM manager even when `/data` failed.
+That manager continues to answer inspection requests and refuses VM creation
+and startup until configuration is available on a subsequent boot. If the
+system-init handoff or root switch fails, only core and recovery services
+continue; the system graph is not launched. The VM manager does not
 silently retry provisioning or assume that an unobservable I/O VM name is free.
-Critical Native service failures still fail bootstrap. Stopping a failed
-provider does not waive the kernel's DMA retirement requirements.
+Critical failures before the startup decision select recovery when the console
+is available; critical failures after that decision remain fatal. Provider failure does not
+waive the kernel's DMA retirement requirements.
 
 The manager retains each I/O session endpoint until the runtime reports its VM
 installed, then transfers it to the I/O broker through the supervisor wait set.
@@ -92,7 +118,8 @@ Piped input, including automated tests, uses a dedicated serial backend without
 monitor multiplexing.
 
 The image builder needs `mkfs.fat` from dosfstools and `mcopy` from mtools,
-in addition to the normal build prerequisites. It searches `PATH` first,
+in addition to the normal build prerequisites. Generated EROFS volumes also
+need `mkfs.erofs`; `EROFS_MKFS` supplies an explicit tool path. It searches `PATH` first,
 then queries `brew --prefix` for each package's `bin` and `sbin` directories
 when Homebrew is available. Explicit `--mkfs` and `--mcopy` executable paths
 override automatic discovery.
@@ -113,9 +140,12 @@ Rootfs generation additionally requires e2fsprogs and squashfs-tools (Homebrew:
 `brew install e2fsprogs squashfs`). Run `make test-alpine-rootfs` for a disposable
 root-disk boot and persistence test.
 
-The build imports the matching protocol version 3 appliance from the platform's
+The build imports a protocol version 3 appliance from the platform's
 immutable GHCR reference in `scripts/io-vm.lock.json`;
 see [appliance requirements](io-vm.md#protocol-version-3-appliance-requirement).
+The new owner-only block-management feature additionally requires a matching
+appliance supplied through `IO_VM_PACKAGE` until its release is pinned. The
+current lock does not advertise that feature; version 3 alone is not sufficient.
 When importing an uncached package, the fetcher uses ORAS from `PATH` or
 automatically downloads ORAS 1.3.0 into `target/tools` for macOS/Linux on
 ARM64/x86-64. Downloads require `curl` and are checked against pinned SHA-256
@@ -123,7 +153,7 @@ digests before installation. Set `IO_VM_ORAS` to use a specific executable.
 Verified cached packages need neither ORAS nor network access.
 
 The board bootstrap contains only the I/O VM's ITB. Ordinary guest images such
-as Alpine are stored in the configuration partition and loaded through `/data`;
+as Alpine are stored in the persistent data partition and loaded through `/data`;
 they are not duplicated in the bootstrap ramfs. Standalone Native test archives
 still carry their guest fixtures.
 
@@ -132,12 +162,53 @@ still carry their guest fixtures.
 overwrite an existing image unless `BOARD_IMAGE_REPLACE=--replace` is supplied.
 Use `make board-rebuild` for an explicit full replacement, or choose a new
 output name to preserve the previous disk.
+`rpi5-sd` defaults to `boards/rpi5.json`, honors an explicitly supplied
+`BOARD_CONFIG`, and accepts a separate `RPI5_BOARD_CONFIG` override. Extra volume
+artifacts supplied through `BOARD_ARTIFACTS` also reach the Pi image builder.
 AArch64 `make run` selects this QEMU deployment profile. Build with `make` first;
 `board-run` never creates a disk or rebuilds kernel/bootstrap. Existing images
 must pass GPT validation against the selected configuration. QEMU uses the
 kernel/bootstrap from the last build while persistent files and VM images remain
 those stored on disk. See [updating existing deployments](#updating-existing-deployments)
 before refreshing packaged guest artifacts.
+
+### Native volume and placement policy
+
+Plain `make`, `make rebuild` and `make run` use `/boot` in RAM, `/system` on
+EROFS and `/data` on the persistent FAT volume after system init switches
+root. Before that transition the RAM archive itself is `/`. The root switch
+moves existing disk mounts without reopening their files or losing cached
+content. `BOARD_SYSTEM_LAYOUT=ramfs` follows the same transition but promotes
+the RAM-resident `/system` subtree into its own mount, removing the old directory
+entry without copying the files. The formal root has no compatibility aliases.
+Default output directories are `target/board/qemu/` and
+`target/board/rpi5-native/`; ramfs appends `-ramfs` to keep its artifacts separate. See [boot and system layout](boot-layout.md) for commands,
+static component selection, handoff semantics and fstab examples.
+
+`disk.partitions` owns the image layout. Each entry declares a unique `label`,
+`size-mib` (8 MiB to 16 TiB), an optional explicit `uuid`, and optional
+`filesystem`, `content`, or `image`. Without an explicit UUID the builder derives
+one deterministically from the disk UUID and label. `content: "data"` populates
+the persistent FAT payload; `content: "system"` populates the same-build system
+programs. The data partition must be at least 64 MiB. An `image` names a
+`BOARD_ARTIFACTS` input for an opaque guest disk or extra filesystem. Additional
+FAT volumes can be formatted empty; additional EROFS volumes require an image.
+
+`native.volumes` describes access, independently of image construction: each
+entry has `source` (`PARTUUID=...` or `PARTLABEL=...`) and `read-only`.
+`native.fstab` describes mount targets and options. When omitted, the builder
+selects the filesystem partitions and generates `/system` and `/data` mounts
+from their content roles. `native.layout` must match the selected Make layout.
+The ramfs layout omits the generated system partition. User labels are not
+reserved; `hyper-data` and `hyper-system` are defaults in the board files.
+
+Guest board entries use `disk: {"source": "PARTLABEL=alpine"}` with an optional
+`read-only` flag. Native clients allocate IDs from 8 down; guest clients allocate
+from 1 up. These share eight data slots; client zero is management only. The
+builder generates HypeR's `etc/hyper/storage.json`, broker admission table and
+fstab. Linux receives only client IDs and network policy, never partition
+selectors. Worker availability is checked when mounting, not by a build-time
+provider dependency graph. FAT cannot preserve arbitrary system-payload symlinks.
 
 ### Updating existing deployments
 
@@ -146,10 +217,16 @@ Build outputs have distinct lifetimes:
 | Artifact | Updated by ordinary `make` / `board-build` |
 | --- | --- |
 | Host kernel and bootstrap, including the I/O VM and its client policy | Yes |
+| `/system` executables and libraries on an existing disk | No; a changed payload requires explicit replacement |
 | `/data/vms.json`, `/data/board.json` and guest FITs on an existing disk | No |
 | Alpine's ext4 root, including `/init` and kernel modules | No |
 
-Changing a board's device policy therefore requires a matching disk deployment.
+The builder records the generated `/system` payload hashes beside the disk.
+Build and run reject a disk that no longer matches the staged system payload;
+they do not update it in place. Use `make rebuild` for a disposable deployment,
+or a new `BOARD_OUTPUT` directory to retain the previous disk.
+
+Changing a board's device policy also requires a matching disk deployment.
 For example, adding networking to Alpine changes the bootstrap client table;
 an old `/data/vms.json` that requests only a disk will be rejected by the broker.
 The launcher's GPT check validates the disk layout, not the configuration or
@@ -170,11 +247,11 @@ migration of existing guest files or VM definitions.
 
 ### Deployment and acceptance details
 
-An optional VM `disk-image` names a disk artifact. The default board profiles
+A partition's optional `image` names a disk artifact. The default board profiles
 select `alpine-rootfs`, generated from the pinned Alpine rootfs and sized to the
 volume. Custom inputs use `BOARD_ARTIFACTS="--artifact NAME=PATH"` and must
 exactly match the declared volume size, preserving any guest backup GPT.
-Without `disk-image`, the newly created VM disk is blank.
+Without `image`, an opaque guest partition starts blank.
 
 `make test-board-storage` creates an
 isolated disk under `target/board-tests/` and boots it twice. Its test-only
@@ -186,11 +263,19 @@ and no more than 24 KiB of measured use (`STACK_MAXIMUM_USED`).
 The fixture keeps its disk and logs for diagnosis and never uses `BOARD_IMAGE`
 as a scratch disk.
 
+`make test-boot-system ARCH=aarch64` uses a separate disposable disk to check
+the formal root layout, supervision handoff, nested shells and tool capabilities,
+VM lifecycle, and writable/read-only remounts. It then boots the same bootstrap
+archive without storage controllers to verify the recovery shell. This test is
+also repeated with a failed init handoff to verify recovery ownership and a
+formal shell launched from recovery. It is included in
+`sh tests/ci/run.sh board-storage`; it checks behavior, not performance.
+
 `make test-storage-failure ARCH=aarch64` verifies Native recovery with a missing
 controller, provider exit, closed or malformed readiness, the full readiness
-timeout, and an invalid provider executable. It also checks that a critical
-manager failure remains fatal and that an absent fleet file preserves a ready
-provider. These are functional checks without performance
+timeout, and an invalid provider executable. It also checks recovery after early critical-manager failure, fatal supervision
+after a critical manager exits from a ready formal environment, and provider
+survival when the fleet file is absent. These are functional checks without performance
 thresholds; they use separate bootstrap archives and no persistent board disk.
 
 The bootstrap board document selects the physical controller explicitly through
@@ -198,8 +283,8 @@ The bootstrap board document selects the physical controller explicitly through
 exactly one of `compatible` or `path` identifies its firmware node. QEMU uses
 `virtio-mmio-scsi` with `virtio,mmio`. Multiple eligible matches are rejected;
 use the full canonical FDT path when a machine exposes several controllers.
-Claiming a device never falls back to another match because one is busy. Up to
-eight business VM disks plus the configuration volume are supported per I/O VM.
+Claiming a device never falls back to another match because one is busy. Eight data clients are shared by Native volumes and business VMs: the default
+split layout leaves six guest clients, while ramfs system placement leaves seven.
 The finite fleet quota includes eight business VM allowances and one resident
 I/O VM allowance, plus manager overhead. This is an admission ceiling, not
 preallocated RAM or a guarantee that all eight guests fit the host.
@@ -289,7 +374,7 @@ The resident I/O VM has its own `io-vm` node, outside `virtual-machines`:
   "configuration": {
     "memory-bytes": 134217728,
     "vcpus": 1,
-    "bootargs": "console=ttyAMA0 rdinit=/init hyper.role=io hyper.mode=standby hyper.volumes=required",
+    "bootargs": "console=ttyAMA0 rdinit=/init hyper.role=io hyper.mode=standby",
     "affinity": [{"vcpu": 0, "cpus": [1, 3]}]
   },
   "io-device": {

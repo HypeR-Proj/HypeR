@@ -1,32 +1,10 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! File contents, metadata, snapshots, and locking.
+//! File contents, metadata, protection, and locking.
 
 use crate::ffi::ffi_native_call6;
 use crate::{CallResult, abi};
-
-/// Creates an immutable executable VMO snapshot of one file.
-///
-/// # Safety
-///
-/// `file` must remain live with read and execute authority. On `OK`, the caller
-/// assumes exclusive ownership of the VMO in `value0`.
-#[inline]
-pub unsafe fn file_create_executable_vmo(file: abi::HyperNativeHandle) -> CallResult {
-    // SAFETY: the caller establishes the borrowed file and result ownership.
-    unsafe {
-        ffi_native_call6(
-            abi::HYPER_NATIVE_SYS_FILE_CREATE_EXECUTABLE_VMO,
-            file,
-            0,
-            0,
-            0,
-            0,
-            0,
-        )
-    }
-}
 
 /// Reads one bounded range from a `File`.
 ///
@@ -221,21 +199,13 @@ pub unsafe fn file_unlock(file: abi::HyperNativeHandle) -> CallResult {
     unsafe { ffi_native_call6(abi::HYPER_NATIVE_SYS_FILE_UNLOCK, file, 0, 0, 0, 0, 0) }
 }
 
-/// Captures one immutable file-content generation.
+/// Protects file contents until the returned token and its mapping references retire.
 ///
 /// # Safety
-/// `file` must name a live readable file; the caller adopts the produced handle.
-pub unsafe fn file_create_snapshot(file: abi::HyperNativeHandle) -> CallResult {
-    // SAFETY: the caller supplies a live borrowed file and adopts the result.
-    unsafe {
-        ffi_native_call6(
-            abi::HYPER_NATIVE_SYS_FILE_CREATE_SNAPSHOT,
-            file,
-            0,
-            0,
-            0,
-            0,
-            0,
-        )
-    }
+/// `file` must remain live with PROTECT. Success transfers one process-local,
+/// nonduplicable, nontransferable `FileProtection` handle in value0; value1 is
+/// the byte size sampled after acquiring protection.
+pub unsafe fn file_protect(file: abi::HyperNativeHandle) -> CallResult {
+    // SAFETY: the caller supplies a live capability and adopts the result.
+    unsafe { ffi_native_call6(abi::HYPER_NATIVE_SYS_FILE_PROTECT, file, 0, 0, 0, 0, 0) }
 }

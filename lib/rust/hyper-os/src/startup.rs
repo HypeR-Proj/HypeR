@@ -11,10 +11,15 @@ use core::ptr::NonNull;
 use crate::console::Console;
 use crate::fs::Directory;
 use crate::handle::{
-    AnyObject, ConsoleObject, DirectoryObject, ExecutableAuthorityObject, HandleRef, ObjectType,
-    OwnedHandle, ResourceDomainObject, TaskFactoryObject, TaskGroupObject, TypedObject, VmarObject,
+    AnyObject, ConsoleObject, DirectoryObject, ExecutableAuthorityObject, FileObject, HandleRef,
+    ObjectType, OwnedHandle, ResourceDomainObject, TaskFactoryObject, TaskGroupObject, TypedObject,
+    VmarObject,
 };
 use crate::{Error, Result};
+
+/// SDK convention for a loader file explicitly delegated to a child launcher.
+/// This role is opaque to the kernel and grants no ambient path access.
+pub const CHILD_LOADER: StartupPurpose<FileObject> = StartupPurpose::new(0x8004_0003);
 
 const _: () = assert!(hyper_abi::HYPER_NATIVE_STARTUP_MAX_HANDLES <= usize::MAX as u64);
 const MAX_STARTUP_HANDLES: usize = hyper_abi::HYPER_NATIVE_STARTUP_MAX_HANDLES as usize;

@@ -19,15 +19,16 @@ Commands in this guide run from the repository root.
 - QEMU for the selected architecture; AArch64 uses `-cpu max` by default and
   requires FEAT_VHE (hardware without it is unsupported);
 - `curl`, `cpio`, `gzip`, `tar`, and SHA-256 tooling for the Linux guest assets;
-- dosfstools and mtools for the default board FAT image; e2fsprogs and
-  squashfs-tools for the Alpine root disk;
+- dosfstools and mtools for the board FAT image; erofs-utils (`mkfs.erofs`) for
+  the default read-only system volume; e2fsprogs and squashfs-tools for the
+  Alpine root disk;
 - ORAS for digest-pinned I/O appliance downloads: the importer uses `PATH` or
   downloads a checksum-pinned ORAS 1.3.0 automatically on supported hosts.
   `IO_VM_ORAS` can select an executable; verified packages are reused offline;
 - `dtc` when building the x86-64 QEMU platform description.
 
 Build the AArch64 kernel, Native SDK, and initramfs, then run the complete
-system:
+system with the default boot/system separation:
 
 ```sh
 make defconfig
@@ -58,16 +59,24 @@ the checksum-pinned AArch64 Linux inputs and, on first build, packages the guest
 FIT and root disk into the board disk. Later builds preserve that disk,
 including its VM definitions, Alpine FIT and root filesystem. Changes to
 `boards/qemu.json` or the guest `/init` do not update those existing files.
-`make run` only starts existing artifacts. `make rebuild` repacks the whole
-disk and resets its data. See
+`make run` only starts existing artifacts. A changed system executable or
+library requires a matching `/system` image; the build rejects a stale system
+payload instead of silently pairing it with a new bootstrap. `make rebuild`
+repacks the whole disk and resets its data. See
 [updating existing deployments](board-storage.md#updating-existing-deployments)
 before changing a persistent deployment.
 
-The applications do not include private kernel or SDK source paths. Native
-applications are dynamic PIEs by default and share the capability-loaded
-`libhyper.so` runtime through the in-tree AArch64 ELF interpreter. SDK consumers
-can select a self-contained
-static PIE backed by the matching `libhyper.a` with `HYPER_LINK_MODE=static`.
+The applications do not include private kernel or SDK source paths. The RAM
+archive initially supplies `/init`, `/bin`, `/svc` and the bootstrap loader.
+Stage-1 init starts storage, then transfers supervision to system init. System
+init switches to a new ramfs root, retaining that archive at `/boot` and the
+existing disk mounts at `/system` and `/data`. Ordinary programs and their
+shared libraries live on the read-only EROFS volume at `/system`.
+Ordinary applications are dynamic PIEs by default and share `libhyper.so`;
+SDK consumers can select a self-contained static PIE with
+`HYPER_LINK_MODE=static`. Both kinds of system executable use the explicitly
+delegated formal loader; only bootstrap programs use the static bootstrap
+loader. See [boot and system deployment](boot-layout.md) for the launch contract.
 Pass `INITRAMFS=/path/to/archive.cpio` to test another Native userspace image.
 
 The default AArch64 board profile retains the HypeR shell and starts a resident
@@ -78,7 +87,11 @@ the bridge and connects each guest TAP automatically; QEMU user networking
 supplies DHCP and NAT. After `vmm start alpine`, use `vmm console alpine` to
 enter the guest. Alpine starts DHCP in the background and renews its lease;
 an absent DHCP server does not block its shell. The persistent disk is
-`target/board/qemu/disk.img`; `BOARD_IMAGE` selects another board disk.
+`target/board/qemu/disk.img`; `BOARD_IMAGE` selects another board disk. To keep
+`/system` in RAM, use `BOARD_SYSTEM_LAYOUT=ramfs` for both build and run. This
+uses `target/board/qemu-ramfs/` and the same init handoff and root switch;
+`/system` is promoted from the RAM-resident subtree without copying its files;
+the old `/boot/system` entry is removed in the same transaction.
 
 For an idle-backend diagnostic without mounted Native storage, build with
 `make RUN_PROFILE=io`,
@@ -87,8 +100,8 @@ then launch with `make run RUN_PROFILE=io`. Its separate
 on both commands to select another diagnostic disk. See [I/O VM](io-vm.md).
 
 Use `make RUN_PROFILE=native` followed by `make run RUN_PROFILE=native`
-for the Native/Alpine profile without
-an I/O appliance or physical disk. Explicit `INITRAMFS=...` also defaults to
+for the all-RAM Native/Alpine profile without
+an I/O appliance or physical disk. It retains stage-1 and system init. Explicit `INITRAMFS=...` also defaults to
 that profile. RISC-V retains its existing Native run profile.
 
 Run the standalone kernel mechanism tests separately:
@@ -125,7 +138,7 @@ Useful targets:
 | `make image ARCH=<arch>` | Build the canonical ELF and delivery image |
 | `make sdk` | Assemble the AArch64 Native SDK under `target/sdk/aarch64` |
 | `make sdk-check` / `make sdk-test` | Verify SDK generation, publication, compilation, and portable runtime behavior |
-| `make native-initramfs` | Build Native `/init` through the SDK and package it as deterministic `newc` |
+| `make native-initramfs` | Package bootstrap and system programs in RAM as deterministic `newc`, with the same init handoff |
 | `make` / `make run ARCH=aarch64` | Build while preserving persistent disk contents / start existing artifacts |
 | `make rebuild` | Repack the board disk, resetting persistent contents |
 | `make test-native` | Verify the Native service graph, command execution, and managed Linux VM console attach/detach under QEMU |
@@ -154,7 +167,7 @@ SDK build products retain all debug information. Set `LLVM_STRIP` to override
 the tool path.
 
 See [Native applications](applications.md) for file tools, process monitoring,
-named VM commands, and `/etc/hyper/vms.json` configuration.
+named VM commands, and `/data/vms.json` board configuration.
 
 ## Configuration
 

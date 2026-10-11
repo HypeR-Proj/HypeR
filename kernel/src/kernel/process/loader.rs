@@ -5,7 +5,6 @@
 
 use hyper::exec::bootstrap::{Image, Machine};
 use hyper::mm::{PAGE_SIZE, UniqueFallibleArc};
-use hyper::sync::PublishedOnce;
 
 use super::{ImageError, MachineAbi, ProcessImage};
 use crate::kernel::accounting::{ResourceDomain, ResourceError};
@@ -18,46 +17,6 @@ const LOADER_BASE: u64 = 0x10_0000;
 const STACK_SIZE: u64 = 128 * 1024;
 const STACK_TOP: u64 = 0x3f_f000;
 
-struct BootstrapProgram {
-    snapshot: ExecutableSnapshot,
-    image: Image,
-    runtime_directory: crate::kernel::vfs::DirectoryObject,
-}
-static PROGRAM: PublishedOnce<BootstrapProgram> = PublishedOnce::new();
-
-/// Published once by init, before any userspace task can create children.
-/// Retaining the snapshot shares immutable code pages on every subsequent start.
-#[cfg_attr(
-    feature = "kernel-self-test",
-    allow(dead_code, reason = "Self-test images do not launch init")
-)]
-pub(crate) fn initialize_loader(domain: &ResourceDomain) -> Result<(), Error> {
-    use crate::hal::user::HostMachine;
-    let path = match crate::hal::user::host_machine() {
-        HostMachine::Aarch64 => "/lib64/userspace-loader-hyper-aarch64",
-        HostMachine::Riscv64 => "/lib64/userspace-loader-hyper-riscv64",
-        _ => return Err(Error::UnsupportedMachine),
-    };
-    let snapshot = crate::kernel::vfs::lookup(path, domain)
-        .map_err(|_| Error::Address)?
-        .ok_or(Error::Address)?
-        .into_executable()
-        .ok_or(Error::Address)?;
-    let image = Image::parse(snapshot.bytes()).map_err(Error::Elf)?;
-    validate_host_machine(image.machine)?;
-    let root = crate::kernel::vfs::root_directory(domain).map_err(|_| Error::Address)?;
-    let directory = root
-        .open_directory("/lib64", domain)
-        .map_err(|_| Error::Address)?;
-    PROGRAM
-        .publish(BootstrapProgram {
-            snapshot,
-            image,
-            runtime_directory: directory,
-        })
-        .map_err(|_| Error::Address)
-}
-
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct BootstrapLayout {
     pub(crate) stack_base: u64,
@@ -69,13 +28,6 @@ pub(crate) struct BootstrapLayout {
 #[derive(Debug)]
 pub(crate) enum Error {
     Address,
-    #[cfg_attr(
-        feature = "kernel-self-test",
-        allow(
-            dead_code,
-            reason = "Only boot loader admission constructs this failure"
-        )
-    )]
     Elf(
         #[allow(
             dead_code,
@@ -99,13 +51,6 @@ pub(crate) enum Error {
         )]
         crate::kernel::task::scheduler::Error,
     ),
-    #[cfg_attr(
-        feature = "kernel-self-test",
-        allow(
-            dead_code,
-            reason = "Only boot loader admission constructs this failure"
-        )
-    )]
     UnsupportedMachine,
 }
 
@@ -132,20 +77,16 @@ pub(crate) struct LoadedProcessImage {
     pub(crate) address_space: UniqueFallibleArc<NativeAddressSpace>,
 }
 
-/// Installs only the fixed bootstrap program and an empty guarded stack.
-/// Application ELF interpretation is deliberately absent from this boundary.
-pub(crate) fn load_native(domain: ResourceDomain) -> Result<LoadedProcessImage, Error> {
-    let program = PROGRAM.get().ok_or(Error::Address)?;
-    let limit = crate::hal::user::address_space_plan()
-        .map_err(MachineError::from)?
-        .application_limit();
-    let root = UserSlice::new(
-        UserAddress::new(PAGE_SIZE),
-        limit.checked_sub(PAGE_SIZE).ok_or(Error::Address)?,
-    )
-    .map_err(|_| Error::Address)?;
-    let address_space = NativeAddressSpace::try_new(domain, root)?;
-    match prepare_address_space(program, &address_space) {
+/// Validates and installs the caller-authorized loader snapshot and a guarded
+/// stack. Application ELF interpretation and loader selection belong to userspace.
+pub(crate) fn load_native(
+    loader: &ExecutableSnapshot,
+    domain: ResourceDomain,
+) -> Result<LoadedProcessImage, Error> {
+    let image = Image::parse(loader.bytes()).map_err(Error::Elf)?;
+    validate_host_machine(image.machine)?;
+    let address_space = create_address_space(domain)?;
+    match prepare_address_space(loader, &image, &address_space) {
         Ok(image) => Ok(LoadedProcessImage {
             image,
             address_space,
@@ -157,8 +98,29 @@ pub(crate) fn load_native(domain: ResourceDomain) -> Result<LoadedProcessImage, 
     }
 }
 
+// Constructing the unpublished address space has larger machine and accounting
+// temporaries than mapping it. Do not retain that scratch on the mapping call chain.
+#[inline(never)]
+fn create_address_space(
+    domain: ResourceDomain,
+) -> Result<UniqueFallibleArc<NativeAddressSpace>, Error> {
+    let limit = crate::hal::user::address_space_plan()
+        .map_err(MachineError::from)?
+        .application_limit();
+    let root = UserSlice::new(
+        UserAddress::new(PAGE_SIZE),
+        limit.checked_sub(PAGE_SIZE).ok_or(Error::Address)?,
+    )
+    .map_err(|_| Error::Address)?;
+    NativeAddressSpace::try_new(domain, root).map_err(Error::from)
+}
+
+// Loader parsing finishes before mapping preparation creates its transaction
+// owners. Keep those temporary lifetimes in separate kernel-stack frames.
+#[inline(never)]
 fn prepare_address_space(
-    program: &BootstrapProgram,
+    loader: &ExecutableSnapshot,
+    image: &Image,
     address_space: &NativeAddressSpace,
 ) -> Result<ProcessImage, Error> {
     let stack_base = STACK_TOP - STACK_SIZE;
@@ -170,7 +132,7 @@ fn prepare_address_space(
     let stack_vmar = address_space.reserve_initial_stack(reservation)?;
     // Every mapping installation, including executable cache maintenance, uses
     // the existing address-space transaction and CPU pinning mechanisms.
-    for segment in program.image.segments() {
+    for segment in image.segments() {
         let range = UserSlice::new(
             UserAddress::new(LOADER_BASE + segment.address),
             segment.size,
@@ -183,13 +145,12 @@ fn prepare_address_space(
         } else {
             Permissions::read_only()
         };
-        let prepared = NativeImageSegment::try_from_snapshot(
+        let bytes = segment.backing_bytes(loader.bytes()).map_err(Error::Elf)?;
+        let prepared = NativeImageSegment::try_from_bytes(
             address_space,
             range,
             permissions,
-            program.snapshot.storage().clone(),
-            segment.file_offset,
-            segment.file_size,
+            bytes,
             segment.data_offset,
         )?;
         let pin = crate::kernel::task::scheduler::preempt_disable()?;
@@ -207,19 +168,19 @@ fn prepare_address_space(
     crate::kernel::task::scheduler::preempt_enable_without_reschedule(pin)?;
     result?;
     ProcessImage::try_native(
-        machine_abi(program.image.machine),
-        UserAddress::new(LOADER_BASE + program.image.entry),
+        machine_abi(image.machine),
+        UserAddress::new(LOADER_BASE + image.entry),
         UserAddress::new(STACK_TOP),
         UserAddress::new(0),
     )
-    .map(|image| {
-        image.with_bootstrap(
+    .map(|process_image| {
+        process_image.with_bootstrap(
             stack_vmar,
             BootstrapLayout {
                 stack_base,
                 stack_size: STACK_SIZE,
                 loader_base: LOADER_BASE,
-                loader_size: program.image.size,
+                loader_size: image.size,
             },
         )
     })
@@ -233,10 +194,6 @@ fn machine_abi(machine: Machine) -> MachineAbi {
     }
 }
 
-#[cfg_attr(
-    feature = "kernel-self-test",
-    allow(dead_code, reason = "Self-test images do not launch init")
-)]
 fn validate_host_machine(machine: Machine) -> Result<(), Error> {
     use crate::hal::user::HostMachine;
     if matches!(
@@ -257,14 +214,4 @@ fn retire_failed_address_space(address_space: UniqueFallibleArc<NativeAddressSpa
         );
         drop(retained);
     }
-}
-
-/// Creates a fresh bootstrap-only directory object for each launch. Caching a
-/// publication would try to reactivate the object after an earlier loader closed
-/// its last handle. Retain the immutable location, not a userspace handle lifecycle.
-pub(crate) fn runtime_directory(
-    domain: &ResourceDomain,
-) -> Result<crate::kernel::vfs::DirectoryObject, crate::kernel::vfs::VfsError> {
-    let program = PROGRAM.get().ok_or(crate::kernel::vfs::VfsError::Missing)?;
-    program.runtime_directory.try_clone(domain)
 }

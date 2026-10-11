@@ -258,6 +258,105 @@ pub(crate) fn scan(cursor: ProcessScanCursor) -> ProcessSnapshotPage {
     ProcessSnapshotPage { entries, len, next }
 }
 
+/// One finite newest-first process scan and increasing-address mapping scan.
+///
+/// At most one Process is pinned between batches. Advancing past a range before
+/// reclaim prevents refaulting hot pages, commit conflicts and dirty pages from
+/// keeping a request alive indefinitely. Newer Processes are outside the scan.
+pub(crate) struct FilePageReclaimCursor {
+    processes: ProcessScanCursor,
+    current: Option<MappingReclaimProcess>,
+    finished: bool,
+}
+
+struct MappingReclaimProcess {
+    // Process retirement is lifecycle-driven, not delayed by this metadata
+    // pin. Never retain its address-space Arc across worker batches: doing so
+    // would delay final address-space retirement while the worker sleeps.
+    process: Process,
+    next_address: u64,
+}
+
+impl FilePageReclaimCursor {
+    pub(crate) const fn start() -> Self {
+        Self {
+            processes: ProcessScanCursor::start(),
+            current: None,
+            finished: false,
+        }
+    }
+}
+
+/// One bounded page-reclaim pass. Registry pins are acquired under the index
+/// lock; mapping replacement and TLB retirement run after releasing it. The
+/// limit bounds examined virtual pages, not just pages successfully reclaimed.
+pub(crate) fn reclaim_file_pages(
+    cursor: &mut FilePageReclaimCursor,
+    limit: usize,
+    domain: Option<crate::kernel::accounting::ResourceDomainId>,
+) -> (usize, bool) {
+    if cursor.finished || limit == 0 {
+        return (0, cursor.finished);
+    }
+    let mut examined = 0;
+    let mut reclaimed = 0;
+    for _ in 0..PAGE_CAPACITY {
+        if cursor.current.is_none() {
+            cursor.current =
+                next_reclaim_process(&mut cursor.processes).map(|process| MappingReclaimProcess {
+                    process,
+                    next_address: 0,
+                });
+            if cursor.current.is_none() {
+                cursor.finished = true;
+                break;
+            }
+        }
+        let current = match cursor.current.as_mut() {
+            Some(current) => current,
+            None => break,
+        };
+        if domain.is_some_and(|id| !current.process.resource_domain().charges_domain(id)) {
+            cursor.current = None;
+            continue;
+        }
+        let Ok(space) = current.process.address_space_owner() else {
+            cursor.current = None;
+            continue;
+        };
+        let Some(range) = space.next_file_reclaim_range(current.next_address, limit - examined)
+        else {
+            cursor.current = None;
+            continue;
+        };
+        current.next_address = range.end().get();
+        examined += (range.length() / hyper::mm::PAGE_SIZE) as usize;
+        // A conflicting map/unmap or pinned write skips this range in the
+        // finite pass; retrying it here could starve every remaining process.
+        reclaimed += space.reclaim_file_range(range).unwrap_or(0);
+        if examined >= limit {
+            break;
+        }
+    }
+    (reclaimed, cursor.finished)
+}
+
+fn next_reclaim_process(cursor: &mut ProcessScanCursor) -> Option<Process> {
+    DIRECTORY.with(|directory| {
+        let mut entry = directory.head.as_deref();
+        while let Some(current) = entry {
+            if current.sequence < cursor.before_sequence {
+                cursor.before_sequence = current.sequence;
+                if let Some(inner) = current.process.upgrade() {
+                    return Some(Process { inner });
+                }
+            }
+            entry = current.next.as_deref();
+        }
+        None
+    })
+}
+
 fn has_older_live(mut entry: Option<&Entry>, sequence: u64) -> bool {
     while let Some(current) = entry {
         if current.sequence < sequence && current.process.is_alive() {

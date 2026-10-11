@@ -120,9 +120,10 @@ pub(crate) fn draining_for_test() -> bool {
 extern "C" fn worker_entry(_: usize) {
     let mut draining = false;
     let mut demand = None;
+    let mut mapped_cursor = crate::kernel::process::FilePageReclaimCursor::start();
     loop {
         WORK.begin_batch();
-        let more = service_batch(&mut draining, &mut demand);
+        let more = service_batch(&mut draining, &mut demand, &mut mapped_cursor);
         match WORK.finish_batch(more) {
             WorkDisposition::Continue => {
                 if let Err(error) = scheduler::cond_resched() {
@@ -137,6 +138,10 @@ extern "C" fn worker_entry(_: usize) {
                         "HypeR: I/O reclaim wait failed: {error:?}"
                     ));
                 }
+                // A new external prompt may justify another finite sweep. Do
+                // not restart while batching: hot refaults must not prevent a
+                // pressure request from reaching its end.
+                mapped_cursor = crate::kernel::process::FilePageReclaimCursor::start();
             }
         }
     }
@@ -145,9 +150,15 @@ extern "C" fn worker_entry(_: usize) {
 struct Demand {
     request: request_state::Request<Target>,
     cursor: super::ReclaimCursor,
+    mapped_cursor: crate::kernel::process::FilePageReclaimCursor,
+    cache_finished: bool,
 }
 
-fn service_batch(draining: &mut bool, demand: &mut Option<Demand>) -> bool {
+fn service_batch(
+    draining: &mut bool,
+    demand: &mut Option<Demand>,
+    mapped_cursor: &mut crate::kernel::process::FilePageReclaimCursor,
+) -> bool {
     let Some(cache) = crate::kernel::vfs::file_cache() else {
         return false;
     };
@@ -183,12 +194,20 @@ fn service_batch(draining: &mut bool, demand: &mut Option<Demand>) -> bool {
         if detached != 0 || retired_records != 0 {
             return true;
         }
+        let (_, finished) =
+            crate::kernel::process::reclaim_file_pages(mapped_cursor, RECLAIM_BATCH, None);
+        if !finished {
+            return true;
+        }
         let target = MINIMUM_SLOTS;
         if target < usage.capacity {
             let _ = cache.maintain_capacity(target);
         }
         return false;
     }
+    // Release any Process pin and restart from the newest process when the
+    // next pressure episode begins.
+    *mapped_cursor = crate::kernel::process::FilePageReclaimCursor::start();
     if usage.admission_paused {
         return false;
     }
@@ -228,6 +247,8 @@ fn service_demand(
         *demand = Some(Demand {
             request: pending,
             cursor: super::ReclaimCursor::new(),
+            mapped_cursor: crate::kernel::process::FilePageReclaimCursor::start(),
+            cache_finished: false,
         });
     }
     let Some(active) = demand.as_mut() else {
@@ -238,14 +259,28 @@ fn service_demand(
         *demand = None;
         return true;
     }
-    let scanned = cache.reclaim_scan(&mut active.cursor, RECLAIM_BATCH, |page| {
-        match pending.target {
-            Target::PhysicalOrder(_) => true,
-            Target::Domain(domain) => page.owner().charges_domain(domain),
-        }
-    });
-    if scanned.finished || physical_target_ready(pending.target) {
-        if scanned.finished {
+    if !active.cache_finished {
+        let scanned = cache.reclaim_scan(&mut active.cursor, RECLAIM_BATCH, |page| {
+            match pending.target {
+                Target::PhysicalOrder(_) => true,
+                Target::Domain(domain) => page.owner().charges_domain(domain),
+            }
+        });
+        active.cache_finished = scanned.finished;
+    }
+    let domain = match pending.target {
+        Target::Domain(id) => Some(id),
+        _ => None,
+    };
+    let finished = active.cache_finished
+        && crate::kernel::process::reclaim_file_pages(
+            &mut active.mapped_cursor,
+            RECLAIM_BATCH,
+            domain,
+        )
+        .1;
+    if finished || physical_target_ready(pending.target) {
+        if finished {
             // Dead weak headers and magazine-held objects can prevent buddy
             // coalescing even after all eligible file pages were detached.
             let domain = match pending.target {

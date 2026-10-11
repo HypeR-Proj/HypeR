@@ -23,23 +23,20 @@ impl MemoryServices for DeferredProcessServices<'_> {
         crate::kernel::mm::user_space::create_vmo(self.process, size)
     }
 
-    fn create_file_executable_vmo(
-        &self,
-        value: HandleValue,
-    ) -> Result<(HandleValue, u64), crate::kernel::mm::user_space::MemoryServiceError> {
-        crate::kernel::mm::user_space::create_file_executable_vmo(self.process, value)
-    }
-    fn create_file_snapshot(
-        &self,
-        value: HandleValue,
-    ) -> Result<(HandleValue, u64), crate::kernel::mm::user_space::MemoryServiceError> {
-        crate::kernel::mm::user_space::create_file_snapshot(self.process, value)
-    }
     fn create_vmo_snapshot(
         &self,
         value: HandleValue,
     ) -> Result<(HandleValue, u64), crate::kernel::mm::user_space::MemoryServiceError> {
         crate::kernel::mm::user_space::create_vmo_snapshot(self.process, value)
+    }
+    fn map_file(
+        &self,
+        vmar: HandleValue,
+        file: HandleValue,
+        protection: HandleValue,
+        request: crate::kernel::mm::user_space::PrivateMappingRequest,
+    ) -> Result<(), crate::kernel::mm::user_space::MemoryServiceError> {
+        crate::kernel::mm::user_space::map_file(self.process, vmar, file, protection, request)
     }
     fn map_private(
         &self,

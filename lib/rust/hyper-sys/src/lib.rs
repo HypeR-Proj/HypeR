@@ -40,14 +40,14 @@ pub use fs::{
     directory_get_metadata, directory_get_self_metadata, directory_link, directory_open_directory,
     directory_open_directory_nofollow, directory_open_file, directory_open_file_with_options,
     directory_read, directory_read_link, directory_remove, directory_remove_if, directory_rename,
-    directory_scope_create, directory_set_metadata, directory_symlink, file_create_executable_vmo,
-    file_create_snapshot, file_get_info, file_get_metadata, file_lock, file_read_at, file_resize,
-    file_set_metadata, file_sync, file_unlock, file_write_at,
+    directory_scope_create, directory_set_metadata, directory_symlink, file_get_info,
+    file_get_metadata, file_lock, file_protect, file_read_at, file_resize, file_set_metadata,
+    file_sync, file_unlock, file_write_at, filesystem_mount_ramfs, filesystem_switch_root,
 };
 pub use guest_io::{
-    guest_mailbox_create, guest_mailbox_receive, guest_mailbox_send, guest_mapping_create,
-    guest_mapping_release, guest_notification_control, guest_notification_create,
-    native_block_activate, native_block_create, native_block_mount,
+    filesystem_mount, filesystem_unmount, guest_mailbox_create, guest_mailbox_receive,
+    guest_mailbox_send, guest_mapping_create, guest_mapping_release, guest_notification_control,
+    guest_notification_create, native_block_activate, native_block_create, native_block_transfer,
 };
 pub use handle::{
     handle_close, handle_duplicate, handle_get_info, handle_replace, object_get_basic_info,
@@ -65,8 +65,9 @@ pub use ipc::{
     capability_channel_receive, capability_channel_try_send,
 };
 pub use memory::{
-    vmar_allocate, vmar_destroy, vmar_map, vmar_map_private, vmar_protect, vmar_unmap, vmo_create,
-    vmo_create_contiguous, vmo_create_snapshot, vmo_get_dma_extent, vmo_read, vmo_write,
+    vmar_allocate, vmar_destroy, vmar_map, vmar_map_file, vmar_map_private, vmar_protect,
+    vmar_unmap, vmo_create, vmo_create_contiguous, vmo_create_snapshot, vmo_get_dma_extent,
+    vmo_read, vmo_write,
 };
 pub use startup::{AuxiliaryEntry, RawStartup, startup_find_handle};
 pub use system::{abi_query, clock_get_monotonic, clock_get_realtime, system_config};

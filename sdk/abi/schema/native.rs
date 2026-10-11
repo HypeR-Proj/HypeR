@@ -652,11 +652,26 @@ pub const OBJECT_KINDS: &[ObjectKind] = &[
         name: "guest_mapping",
         transfer: TransferClass::RendezvousOnly,
     },
+    ObjectKind {
+        value: 34,
+        name: "file_protection",
+        transfer: TransferClass::Forbidden,
+    },
 ];
+
+pub const FILE_PROTECTION_RIGHTS: u64 = RIGHT_MAP | RIGHT_INSPECT;
 
 pub const GUEST_MEMORY_RIGHTS: u64 = RIGHT_TRANSFER | RIGHT_DUPLICATE | RIGHT_MAP | RIGHT_INSPECT;
 
 pub const RIGHTS: &[Right] = &[
+    Right {
+        bit: 35,
+        name: "protect",
+    },
+    Right {
+        bit: 34,
+        name: "manage_namespace",
+    },
     Right {
         bit: 33,
         name: "inspect_details",
@@ -825,6 +840,8 @@ pub const RIGHT_BIND_WAIT: u64 = 1 << 30;
 pub const RIGHT_SET_ATTRIBUTES: u64 = 1 << 31;
 pub const RIGHT_LOCK_FILE: u64 = 1 << 32;
 pub const RIGHT_INSPECT_DETAILS: u64 = 1 << 33;
+pub const RIGHT_MANAGE_NAMESPACE: u64 = 1 << 34;
+pub const RIGHT_PROTECT: u64 = 1 << 35;
 
 pub const EVENT_RIGHTS: u64 =
     RIGHT_DUPLICATE | RIGHT_TRANSFER | RIGHT_WAIT | RIGHT_INSPECT | RIGHT_SIGNAL;
@@ -838,7 +855,8 @@ pub const DIRECTORY_RIGHTS: u64 = RIGHT_DUPLICATE
     | RIGHT_WRITE
     | RIGHT_EXECUTE
     | RIGHT_SET_ATTRIBUTES
-    | RIGHT_LOCK_FILE;
+    | RIGHT_LOCK_FILE
+    | RIGHT_PROTECT;
 pub const FILE_RIGHTS: u64 = DIRECTORY_RIGHTS;
 pub const VMO_WRITABLE_RIGHTS: u64 =
     RIGHT_DUPLICATE | RIGHT_TRANSFER | RIGHT_INSPECT | RIGHT_READ | RIGHT_WRITE | RIGHT_MAP;
@@ -1021,6 +1039,26 @@ const DIRECTORY_ENTRY_NAME_CAPACITY: u32 = 256;
 const DIRECTORY_ENTRY_RECORD_SIZE: u16 = 24 + DIRECTORY_ENTRY_NAME_CAPACITY as u16;
 
 pub const CONSTANTS: &[AbiConstant] = &[
+    AbiConstant {
+        name: "filesystem_switch_root_max_moves",
+        value: 16,
+    },
+    AbiConstant {
+        name: "native_block_transfer_bytes",
+        value: 524288,
+    },
+    AbiConstant {
+        name: "native_block_batch_max",
+        value: 4,
+    },
+    AbiConstant {
+        name: "native_block_batch_record_bytes",
+        value: 16,
+    },
+    AbiConstant {
+        name: "native_block_transfer_frame_bytes",
+        value: 524352,
+    },
     AbiConstant {
         name: "object_detail_empty",
         value: 0,
@@ -1620,7 +1658,7 @@ pub const CONSTANTS: &[AbiConstant] = &[
     },
     AbiConstant {
         name: "capability_channel_max_handles",
-        value: 16,
+        value: 64,
     },
     AbiConstant {
         name: "capability_disposition_move",
@@ -2711,6 +2749,72 @@ const RESOURCE_LIMITS_FIELDS: &[Field] = &[
 
 pub const RECORDS: &[Record] = &[
     Record {
+        name: "filesystem_root_switch",
+        fields: &[
+            Field {
+                name: "new_root",
+                kind: FieldKind::U64,
+                offset: 0,
+            },
+            Field {
+                name: "new_root_length",
+                kind: FieldKind::U64,
+                offset: 8,
+            },
+            Field {
+                name: "put_old",
+                kind: FieldKind::U64,
+                offset: 16,
+            },
+            Field {
+                name: "put_old_length",
+                kind: FieldKind::U64,
+                offset: 24,
+            },
+            Field {
+                name: "moves",
+                kind: FieldKind::U64,
+                offset: 32,
+            },
+            Field {
+                name: "move_count",
+                kind: FieldKind::U64,
+                offset: 40,
+            },
+        ],
+        minimum_size: 48,
+        size: 48,
+        alignment: 8,
+    },
+    Record {
+        name: "filesystem_mount_move",
+        fields: &[
+            Field {
+                name: "source",
+                kind: FieldKind::U64,
+                offset: 0,
+            },
+            Field {
+                name: "source_length",
+                kind: FieldKind::U64,
+                offset: 8,
+            },
+            Field {
+                name: "target",
+                kind: FieldKind::U64,
+                offset: 16,
+            },
+            Field {
+                name: "target_length",
+                kind: FieldKind::U64,
+                offset: 24,
+            },
+        ],
+        minimum_size: 32,
+        size: 32,
+        alignment: 8,
+    },
+    Record {
         name: "object_details",
         fields: OBJECT_DETAILS_FIELDS,
         minimum_size: 88,
@@ -3251,48 +3355,38 @@ pub const RECORDS: &[Record] = &[
                 offset: 16,
             },
             Field {
-                name: "executable_size",
+                name: "root_vmar",
                 kind: FieldKind::U64,
                 offset: 24,
             },
             Field {
-                name: "root_vmar",
+                name: "stack_vmar",
                 kind: FieldKind::U64,
                 offset: 32,
             },
             Field {
-                name: "stack_vmar",
+                name: "stack_base",
                 kind: FieldKind::U64,
                 offset: 40,
             },
             Field {
-                name: "stack_base",
+                name: "stack_size",
                 kind: FieldKind::U64,
                 offset: 48,
             },
             Field {
-                name: "stack_size",
+                name: "loader_base",
                 kind: FieldKind::U64,
                 offset: 56,
             },
             Field {
-                name: "loader_base",
+                name: "loader_size",
                 kind: FieldKind::U64,
                 offset: 64,
             },
-            Field {
-                name: "loader_size",
-                kind: FieldKind::U64,
-                offset: 72,
-            },
-            Field {
-                name: "runtime_directory",
-                kind: FieldKind::U64,
-                offset: 80,
-            },
         ],
-        minimum_size: 88,
-        size: 88,
+        minimum_size: 72,
+        size: 72,
         alignment: 8,
     },
     Record {
@@ -4264,28 +4358,6 @@ const VMO_CREATE_RESULTS: &[ResultValue] = &[ResultValue {
     }),
 }];
 
-const FILE_CREATE_EXECUTABLE_VMO_ARGUMENTS: &[Argument] = &[Argument {
-    name: "file",
-    kind: ValueKind::Handle,
-    handle: Some(HandleArgument {
-        object: ObjectConstraint::Kind("file"),
-        required_rights: RIGHT_READ | RIGHT_EXECUTE,
-        disposition: HandleDisposition::Borrow,
-    }),
-    memory: None,
-}];
-const FILE_CREATE_EXECUTABLE_VMO_RESULTS: &[ResultValue] = &[
-    ResultValue {
-        name: "vmo",
-        kind: ValueKind::Handle,
-        handle: Some(ProducedHandle {
-            object: ProducedObject::Kind("vmo"),
-            rights: ProducedRights::Fixed(VMO_EXECUTABLE_RIGHTS),
-        }),
-    },
-    scalar_result("byte_size", ValueKind::ByteCount),
-];
-
 const SNAPSHOT_VMO_RESULTS: &[ResultValue] = &[
     ResultValue {
         name: "vmo",
@@ -4574,7 +4646,21 @@ const PROCESS_BUILDER_CREATE_ARGUMENTS: &[Argument] = &[
         kind: ValueKind::Handle,
         handle: Some(HandleArgument {
             object: ObjectConstraint::Kind("file"),
-            required_rights: RIGHT_EXECUTE,
+            required_rights: RIGHT_READ
+                | RIGHT_EXECUTE
+                | RIGHT_PROTECT
+                | RIGHT_DUPLICATE
+                | RIGHT_TRANSFER,
+            disposition: HandleDisposition::Borrow,
+        }),
+        memory: None,
+    },
+    Argument {
+        name: "loader",
+        kind: ValueKind::Handle,
+        handle: Some(HandleArgument {
+            object: ObjectConstraint::Kind("file"),
+            required_rights: RIGHT_READ | RIGHT_EXECUTE,
             disposition: HandleDisposition::Borrow,
         }),
         memory: None,
@@ -6089,7 +6175,7 @@ pub const SYSCALLS: &[Syscall] = &[
         feature: FeatureGate::Core,
         arguments: PROCESS_BUILDER_CREATE_ARGUMENTS,
         results: PROCESS_BUILDER_CREATE_RESULTS,
-        blocking: BlockingClass::Never,
+        blocking: BlockingClass::MayBlock,
         cancellation: CancellationClass::None,
         restart: RestartClass::Never,
         completion: CompletionClass::Returns,
@@ -6402,20 +6488,6 @@ pub const SYSCALLS: &[Syscall] = &[
         restart: RestartClass::Never,
         completion: CompletionClass::Returns,
         audit: AuditClass::Object,
-        flags: FlagPolicy::None,
-        failure_results: &[],
-    },
-    Syscall {
-        number: 46,
-        name: "file_create_executable_vmo",
-        feature: FeatureGate::Core,
-        arguments: FILE_CREATE_EXECUTABLE_VMO_ARGUMENTS,
-        results: FILE_CREATE_EXECUTABLE_VMO_RESULTS,
-        blocking: BlockingClass::MayBlock,
-        cancellation: CancellationClass::None,
-        restart: RestartClass::Never,
-        completion: CompletionClass::Returns,
-        audit: AuditClass::Capability,
         flags: FlagPolicy::None,
         failure_results: &[],
     },
@@ -7228,7 +7300,7 @@ pub const SYSCALLS: &[Syscall] = &[
                 object: ProducedObject::Kind("directory"),
                 rights: ProducedRights::ExactRequested {
                     argument: "rights",
-                    allowed_rights: DIRECTORY_RIGHTS,
+                    allowed_rights: DIRECTORY_RIGHTS | RIGHT_MANAGE_NAMESPACE,
                     authority_source: Some("root"),
                 },
             }),
@@ -8086,20 +8158,6 @@ pub const SYSCALLS: &[Syscall] = &[
         failure_results: &[],
     },
     Syscall {
-        number: 115,
-        name: "file_create_snapshot",
-        feature: FeatureGate::Core,
-        arguments: &[file_argument(RIGHT_READ)],
-        results: SNAPSHOT_VMO_RESULTS,
-        blocking: BlockingClass::MayBlock,
-        cancellation: CancellationClass::None,
-        restart: RestartClass::Never,
-        completion: CompletionClass::Returns,
-        audit: AuditClass::Capability,
-        flags: FlagPolicy::None,
-        failure_results: &[],
-    },
-    Syscall {
         number: 116,
         name: "vmar_map_private",
         feature: FeatureGate::Core,
@@ -8795,7 +8853,12 @@ pub const SYSCALLS: &[Syscall] = &[
             handle: Some(ProducedHandle {
                 object: ProducedObject::Kind("native_block"),
                 rights: ProducedRights::Fixed(
-                    RIGHT_WRITE | RIGHT_MAP | RIGHT_TRANSFER | RIGHT_INSPECT | RIGHT_WAIT,
+                    RIGHT_READ
+                        | RIGHT_WRITE
+                        | RIGHT_MAP
+                        | RIGHT_TRANSFER
+                        | RIGHT_INSPECT
+                        | RIGHT_WAIT,
                 ),
             }),
         }],
@@ -8824,11 +8887,18 @@ pub const SYSCALLS: &[Syscall] = &[
             },
             scalar_argument("readonly", ValueKind::U32),
         ],
-        results: &[ResultValue {
-            name: "sectors",
-            kind: ValueKind::U64,
-            handle: None,
-        }],
+        results: &[
+            ResultValue {
+                name: "sectors",
+                kind: ValueKind::U64,
+                handle: None,
+            },
+            ResultValue {
+                name: "readonly",
+                kind: ValueKind::U32,
+                handle: None,
+            },
+        ],
         blocking: BlockingClass::MayBlock,
         cancellation: CancellationClass::Explicit,
         restart: RestartClass::Never,
@@ -8839,15 +8909,25 @@ pub const SYSCALLS: &[Syscall] = &[
     },
     Syscall {
         number: 137,
-        name: "native_block_mount",
+        name: "filesystem_mount",
         feature: FeatureGate::Core,
         arguments: &[
             Argument {
-                name: "block",
+                name: "channel",
                 kind: ValueKind::Handle,
                 handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("native_block"),
-                    required_rights: RIGHT_MAP,
+                    object: ObjectConstraint::Kind("byte_channel"),
+                    required_rights: RIGHT_READ | RIGHT_WRITE | RIGHT_WAIT,
+                    disposition: HandleDisposition::Borrow,
+                }),
+                memory: None,
+            },
+            Argument {
+                name: "buffer",
+                kind: ValueKind::Handle,
+                handle: Some(HandleArgument {
+                    object: ObjectConstraint::Kind("vmo"),
+                    required_rights: RIGHT_READ | RIGHT_WRITE | RIGHT_MAP,
                     disposition: HandleDisposition::Borrow,
                 }),
                 memory: None,
@@ -8878,6 +8958,7 @@ pub const SYSCALLS: &[Syscall] = &[
                 }),
             },
             scalar_argument("path_length", ValueKind::ByteCount),
+            scalar_argument("read_only", ValueKind::U64),
         ],
         results: &[],
         blocking: BlockingClass::MayBlock,
@@ -9355,6 +9436,235 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
+    Syscall {
+        number: 151,
+        name: "filesystem_unmount",
+        feature: FeatureGate::Core,
+        arguments: &[
+            Argument {
+                name: "directory",
+                kind: ValueKind::Handle,
+                handle: Some(HandleArgument {
+                    object: ObjectConstraint::Kind("directory"),
+                    required_rights: RIGHT_WRITE | RIGHT_EXECUTE,
+                    disposition: HandleDisposition::Borrow,
+                }),
+                memory: None,
+            },
+            Argument {
+                name: "path",
+                kind: ValueKind::UserAddress,
+                handle: None,
+                memory: Some(UserMemory {
+                    direction: MemoryDirection::Read,
+                    length: MemoryLength::Bytes {
+                        argument: "path_length",
+                        maximum_bytes: 4096,
+                    },
+                    record: None,
+                    handles: None,
+                    validation_order: 0,
+                }),
+            },
+            scalar_argument("path_length", ValueKind::ByteCount),
+        ],
+        results: &[],
+        blocking: BlockingClass::MayBlock,
+        cancellation: CancellationClass::Explicit,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
+        number: 152,
+        name: "filesystem_mount_ramfs",
+        feature: FeatureGate::Core,
+        arguments: &[
+            Argument {
+                name: "directory",
+                kind: ValueKind::Handle,
+                handle: Some(HandleArgument {
+                    object: ObjectConstraint::Kind("directory"),
+                    required_rights: RIGHT_MANAGE_NAMESPACE | RIGHT_WRITE | RIGHT_EXECUTE,
+                    disposition: HandleDisposition::Borrow,
+                }),
+                memory: None,
+            },
+            Argument {
+                name: "path",
+                kind: ValueKind::UserAddress,
+                handle: None,
+                memory: Some(UserMemory {
+                    direction: MemoryDirection::Read,
+                    length: MemoryLength::Bytes {
+                        argument: "path_length",
+                        maximum_bytes: 4096,
+                    },
+                    record: None,
+                    handles: None,
+                    validation_order: 0,
+                }),
+            },
+            scalar_argument("path_length", ValueKind::ByteCount),
+        ],
+        results: &[],
+        blocking: BlockingClass::MayBlock,
+        cancellation: CancellationClass::Explicit,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
+        number: 154,
+        name: "filesystem_switch_root",
+        feature: FeatureGate::Core,
+        arguments: &[
+            Argument {
+                name: "directory",
+                kind: ValueKind::Handle,
+                handle: Some(HandleArgument {
+                    object: ObjectConstraint::Kind("directory"),
+                    required_rights: RIGHT_MANAGE_NAMESPACE | RIGHT_WRITE | RIGHT_EXECUTE,
+                    disposition: HandleDisposition::Borrow,
+                }),
+                memory: None,
+            },
+            Argument {
+                name: "request",
+                kind: ValueKind::UserAddress,
+                handle: None,
+                memory: Some(UserMemory {
+                    direction: MemoryDirection::Read,
+                    length: MemoryLength::FixedBytes { bytes: 48 },
+                    record: Some("filesystem_root_switch"),
+                    handles: None,
+                    validation_order: 0,
+                }),
+            },
+        ],
+        results: &[],
+        blocking: BlockingClass::MayBlock,
+        cancellation: CancellationClass::Explicit,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
+        number: 155,
+        name: "file_protect",
+        feature: FeatureGate::Core,
+        arguments: &[file_argument(RIGHT_PROTECT)],
+        results: &[
+            ResultValue {
+                name: "protection",
+                kind: ValueKind::Handle,
+                handle: Some(ProducedHandle {
+                    object: ProducedObject::Kind("file_protection"),
+                    rights: ProducedRights::Fixed(FILE_PROTECTION_RIGHTS),
+                }),
+            },
+            scalar_result("byte_size", ValueKind::ByteCount),
+        ],
+        blocking: BlockingClass::MayBlock,
+        cancellation: CancellationClass::None,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
+        number: 156,
+        name: "vmar_map_file",
+        feature: FeatureGate::Core,
+        arguments: &[
+            vmar_argument(RIGHT_MAP),
+            file_argument(RIGHT_READ),
+            Argument {
+                name: "protection",
+                kind: ValueKind::Handle,
+                handle: Some(HandleArgument {
+                    object: ObjectConstraint::Kind("file_protection"),
+                    required_rights: RIGHT_MAP,
+                    disposition: HandleDisposition::Borrow,
+                }),
+                memory: None,
+            },
+            Argument {
+                name: "mapping",
+                kind: ValueKind::UserAddress,
+                handle: None,
+                memory: Some(UserMemory {
+                    direction: MemoryDirection::Read,
+                    length: MemoryLength::Bytes {
+                        argument: "mapping_size",
+                        maximum_bytes: EXTENSIBLE_RECORD_MAX_BYTES,
+                    },
+                    record: Some("private_mapping"),
+                    handles: None,
+                    validation_order: 0,
+                }),
+            },
+            scalar_argument("mapping_size", ValueKind::ByteCount),
+        ],
+        results: &[],
+        blocking: BlockingClass::MayBlock,
+        cancellation: CancellationClass::None,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
+        number: 496,
+        name: "native_block_transfer",
+        feature: FeatureGate::Core,
+        arguments: &[
+            Argument {
+                name: "block",
+                kind: ValueKind::Handle,
+                handle: Some(HandleArgument {
+                    object: ObjectConstraint::Kind("native_block"),
+                    required_rights: 0,
+                    disposition: HandleDisposition::Borrow,
+                }),
+                memory: None,
+            },
+            scalar_argument("operation", ValueKind::U32),
+            scalar_argument("first_sector", ValueKind::U64),
+            Argument {
+                name: "buffer",
+                kind: ValueKind::UserAddress,
+                handle: None,
+                memory: Some(UserMemory {
+                    direction: MemoryDirection::ReadWrite,
+                    length: MemoryLength::Bytes {
+                        argument: "length",
+                        maximum_bytes: 524352,
+                    },
+                    record: None,
+                    handles: None,
+                    validation_order: 0,
+                }),
+            },
+            scalar_argument("length", ValueKind::ByteCount),
+        ],
+        results: &[],
+        blocking: BlockingClass::MayBlock,
+        cancellation: CancellationClass::Explicit,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
 ];
 
 pub const NATIVE_ABI: AbiSchema = AbiSchema {
@@ -9379,18 +9689,22 @@ pub const SEMANTIC_RULES: &[&str] = &[
     "system_config queries a public scalar system property by u64 key. PAGE_SIZE (1) returns the Native mapping granule in bytes, immutable for the lifetime of a process. Unknown keys return NOT_SUPPORTED. Unused argument registers must be zero. Success returns the value in value0 and zero in value1. This query requires no inspector capability and does not expose privileged observations.",
     "vmar_allocate(parent, address, size, options) uses address as the low end. Options zero treats nonzero address as a hint, choosing the nearest fitting free interval with lower-base tie breaking; address zero selects the lowest free interval. VMAR_ALLOCATE_EXACT requires the exact address, including zero. Unknown flags are invalid. Size is nonzero, addresses and size page aligned, and intervals must not overflow. Success returns child in value0 and actual base in value1. Selection and reservation commit atomically within parent authority. No fitting free interval returns NO_MEMORY.",
     "system_config key SYSTEM_CONFIG_APPLICATION_ADDRESS_LIMIT returns the HAL application-exclusive address limit in value0 and zero in value1. It describes profile geometry, not VMAR authority. The kernel grants ROOT_VMAR from one page to that limit.",
-    "Every Native process, including init, enters the installed userspace-loader for its host architecture. The kernel maps only its restricted ET_DYN bootstrap ELF and an empty guarded stack; the first argument register holds a ByteChannel handle. Its queued message contains loader_startup, handle_count startup_handle records, then data_size opaque bytes. size is 88; flags permits only loader_startup_reply. Executable is a read/map/execute immutable VMO with the exact file length. root_vmar and stack_vmar identify child-owned mapping authority; stack_base and stack_size describe mapped usable stack bytes with an unmapped guard at each end. loader_base and loader_size describe the bootstrap image. runtime_directory is a bootstrap-only read/execute Directory scoped to /lib64. No argv, environment, auxv, application ELF parsing or relocation belongs to this kernel entry contract. The SDK closes bootstrap-only handles and retires the bootstrap image and stack before application entry. Closing a VMAR handle alone does not unmap or destroy its reservation.",
+    "Every Native process enters a caller-selected loader. Process-builder create derives the executable File into the child using explicit READ|EXECUTE|PROTECT|DUPLICATE|TRANSFER authority, and borrows the loader with READ|EXECUTE. The target is not frozen by builder creation. The kernel takes only a temporary stable loader image while preparing its restricted bootstrap mappings. Seal validates and maps only the loader's restricted Native ET_DYN bootstrap image and an empty guarded stack; the first argument register holds a ByteChannel handle. Only initial boot selects a loader by pathname: /lib/userspace-loader-hyper-<architecture> launches /init from the ramdisk root. The queued message contains loader_startup, handle_count startup_handle records, then data_size opaque bytes. size is 72; flags permits only loader_startup_reply. Executable is an ordinary File with READ|EXECUTE|PROTECT. The user loader acquires content protection before querying size or parsing ELF. root_vmar and stack_vmar identify child-owned mapping authority; stack_base and stack_size describe mapped usable stack bytes with an unmapped guard at each end. loader_base and loader_size describe the loader mappings. Library directories are ordinary explicitly supplied startup capabilities; the kernel neither selects nor opens them. No argv, environment, auxv, application ELF parsing or relocation belongs to this kernel entry contract. The selected runtime owns bootstrap-handle closure and mapping retirement. Closing a VMAR handle alone does not unmap or destroy its reservation.",
     "Virtual CPU set_affinity borrows a VirtualCpu with WRITE and accepts the same nonempty little-endian u64 CPU-mask word array as process-builder affinity. Bits above the kernel CPU limit are rejected; the mask must contain a schedulable CPU. The current assignment is retained when allowed; otherwise the scheduler selects an allowed registered CPU and safely migrates the saved context. This is explicit affinity enforcement, not load balancing. OK means the update or required handoff was accepted; migration may complete before or after return. An overlapping incompatible handoff or CPU-local wait returns busy. VM stop or guest power operations may supersede the request. Stopping, detached, and reaped endpoints reject new affinity updates. VirtualCpu info extends its 24-byte prefix with host_cpu and migration_target at offsets 24 and 28, one scheduler placement observation rather than running state or a completion token. Value 0xffffffff means unavailable assignment or no pending migration; older kernels return only the original prefix.",
     "Guest mapping creation borrows backend VirtualMachine WRITE and GuestMemory MAP, populates the full stable grant, and returns an owned mapping handle plus a backend-VM-local non-reused token. The backend IPA envelope must contain all sparse aliases: alias = 64 GiB + host physical address, with host addresses below 256 GiB. Unadmitted envelope holes have no RAM or page bitmap entries. The kernel constructs immutable frontend-ordered, coalesced physical extents; neither Native policy nor Linux may replace their addresses. Backend notification write64 0x28 admits one token exactly once to that unique notification route; read64 0x30/0x38/0x40/0x48 return frontend base, total bytes, status, extent count. Write64 0x50 selects an extent index; read64 0x58/0x60/0x68/0x70 return alias, frontend-relative offset, byte length, and query status. Rejection clears the old reply. Extents cover the entire frontend range without holes or overlapping physical pages. After draining vhost and releasing all page pins, only that backend route may write64 the token at 0x20 to certify quiescence. Mapping release accepts never-admitted or quiescent tokens, withdraws lookup, clears leaves, waits for every CPU translation acknowledgement, then releases backing. Closing a mapping handle alone quarantines its pages until backend VM retirement. Notification control operation 3 permanently disconnects both routes, only when no admitted mapping remains; a disconnected route never affects an address or IRQ reused by a subsequent connection.",
-    "Native block creation dedicates one fully resident 1048576-byte guest-memory grant permanently to one kernel virtio-scsi initiator; repeated creation from that grant fails. The backend VM must retain the matching mapping until execution and physical DMA are quiescent. Six standard split queues (control, event, and four request queues) have size 8, descriptor offsets n*4096, available offsets n*4096+256, and used offsets n*4096+512, relative to guest_base. Userspace negotiates VERSION_1 with the backend before activation. Activation enables notifications and issues READ CAPACITY(16), accepting only 512-byte sectors; capacity is never supplied by userspace. MAP on the block is exclusive filesystem mount authority; directory WRITE|EXECUTE is additionally required. Mounting retains an independent block owner after its setup handle closes. Reads use bounded batches across the four request queues; writes and flushes remain ordered. Requests use shared queues and blocking kernel notifications, not per-request userspace RPC. Unretired request failures permanently disconnect the initiator and never recycle its buffer. PEER_CLOSED reports disconnection. The physical pages remain retained by backend mappings until VM/DMA retirement; notification closure alone never proves DMA quiescence.",
+    "Native block creation dedicates one fully resident 1048576-byte guest-memory grant permanently to one kernel virtio-scsi initiator; repeated creation from that grant fails. The backend VM must retain the matching mapping until execution and physical DMA are quiescent. Six standard split queues (control, event, and four request queues) have size 8, descriptor offsets n*4096, available offsets n*4096+256, and used offsets n*4096+512, relative to guest_base. Userspace negotiates VERSION_1 with the backend before activation. Activation enables notifications and issues READ CAPACITY(16), accepting only 512-byte sectors; capacity is never supplied by userspace. The block capability remains the data-plane owner across filesystem worker handoff; a clean unmount returns the same activated object rather than creating or activating a replacement. Reads use bounded batches across the four request queues; writes and flushes remain ordered. Requests use shared queues and blocking kernel notifications, not per-request userspace RPC. Unretired request failures permanently disconnect the initiator and never recycle its buffer. PEER_CLOSED reports disconnection. The physical pages remain retained by backend mappings until VM/DMA retirement; notification closure alone never proves DMA quiescence.",
+    "filesystem_mount borrows a READ|WRITE|WAIT ByteChannel, a READ|WRITE|MAP shared VMO and a WRITE|EXECUTE Directory. The kernel retains the transport and buffer, validates the worker root, and publishes a fresh mount and filesystem identity at the capability-relative path. The VMO must satisfy the published filesystem protocol capacity and pinning contract. read_only is exactly zero or one; read-only mounts reject mutating protocol operations in the kernel independently of worker policy. Media discovery, format selection and exclusive NativeBlock ownership belong to the userspace filesystem manager and format worker, not this syscall.",
+    "filesystem_mount_ramfs and filesystem_switch_root require MANAGE_NAMESPACE|WRITE|EXECUTE on the live namespace-root Directory anchor. Ordinary directory opens never confer MANAGE_NAMESPACE; only explicit capability duplication, delegation or root-anchor scope creation preserves it. Ramfs mount does not create or configure block filesystems. switch_root copies its request, at most 16 mount moves and every bounded UTF-8 path before namespace mutation; zero moves requires a null moves pointer. new_root and move sources resolve in the old namespace, while put_old and move targets resolve inside new_root. The root and all requested moves publish atomically. Existing non-anchor Directory and File capabilities retain their opened locations; existing root anchors follow the published root. A rejected transaction preserves all mount edges and the current root. Paths are at most 4096 bytes, nonempty and contain no NUL bytes. Layout, boot stages and the choice of put_old are userspace policy.",
+    "filesystem_unmount requires Directory WRITE|EXECUTE and an exact mounted-root path. The namespace root cannot be detached. Live File, Directory, cwd, path-resolution or nested-mount uses return busy. Admission closes before synchronous backend flush and namespace publication; no mount-table spinlock is held across backend IPC. A failed flush or concurrent topology change leaves the mount attached. Successful detach permanently retires its transport health and content identity, so retained snapshots or speculative cache work cannot revive the old mount. Userspace then stops and joins the worker before reusing the returned NativeBlock; the syscall itself does not terminate processes or release backend DMA mappings.",
     "VM power control requires WRITE authority. virtual_machine_get_power_request returns a non-consuming snapshot of one pending request, or would_block when none exists. Request IDs identify one completion and stale IDs are rejected. Operations are CPU_ON (1), CPU_OFF (2), SYSTEM_OFF (3), and SYSTEM_RESET (4); accept is strictly 0 or 1. Reserved output is zero. POWER_REQUEST signals pending work, and VCPU_TERMINATED prompts inspection of per-vCPU terminal state. virtual_machine_open_vcpu returns a control handle for an already configured vCPU; it does not change the immutable topology. The runtime owns lifecycle policy; no guest request is forwarded to host firmware. Guest suspend operations remain unsupported.",
-    "Immutable VMO snapshots grant READ and MAP but never WRITE. vmo_create_snapshot coherently copies its source and reports Busy while writable mappings or hardware writers exist. File snapshots capture one content generation; returned byte_size is its exact file length, while backing is page rounded. Private mappings require source READ|MAP and VMAR MAP: source_offset is page aligned, data_offset is less than one page, source_length bytes starting at source_offset+data_offset initialize destination data_offset; all other destination bytes are zero. Writable private views never permit EXECUTE. Executable private views additionally require an executable source VMO and source EXECUTE rights; sanitized pages are sealed and instruction-published before mapping, with no writable alias. Copy-on-write mode shares immutable full pages until first write; eager mode allocates all private pages before publication. Private writes, including kernel copyout and atomic waits, cannot change the source or another private view. Ordinary writable/shared VMOs and exclusive hardware leases keep their stable backing contract. Snapshot bytes and old page versions remain owned through acknowledged translation retirement.",
+    "PROTECT grants authority to acquire content protection, not READ, WRITE or EXECUTE. Directory/file derivation can only attenuate this right. file_protect returns a process-local nonduplicable, nontransferable FileProtection with MAP|INSPECT and the size observed under protection. Protection rejects writes and resize through every alias but does not freeze names or other metadata. Closing the token releases its reference; protected file mappings retain separate references until unmap or owner-process teardown. After all owner threads stop and its handles close, teardown detaches protected sources without allocation. External VMAR owners can retain the dead address space and its charged pages, but not protection or permission to refill from the file. vmar_map_file requires File READ, additionally EXECUTE for executable mappings, FileProtection MAP for that same canonical file, and MAP on a VMAR of the calling process. It uses private_mapping range/zero-fill semantics and accepts only COPY_ON_WRITE mode; EAGER is reserved for memory-VMO private mappings. Clean file-backed pages may be retired after translation invalidation and faulted back from the protected file; private modified pages cannot be discarded without another backing store. File snapshot VMOs are not exported to userspace. Explicit mapping and user-buffer copy syscalls report allocation, quota or I/O failures. Hardware refaults have no syscall result; when bounded reclaim/refill retries fail, the kernel terminates the Process as an unhandled page fault. Reclaim is best effort and page-table withdrawal may require temporary transaction resources before releasing pages.",
+    "Immutable VMO snapshots grant READ and MAP but never WRITE. vmo_create_snapshot coherently copies its source and reports Busy while writable mappings or hardware writers exist. Private mappings require source READ|MAP and VMAR MAP: source_offset is page aligned, data_offset is less than one page, source_length bytes starting at source_offset+data_offset initialize destination data_offset; all other destination bytes are zero. Writable private views never permit EXECUTE. Executable private views additionally require an executable source VMO and source EXECUTE rights; sanitized pages are sealed and instruction-published before mapping, with no writable alias. Copy-on-write mode shares immutable full pages until first write; eager mode allocates all private pages before publication. Private writes, including kernel copyout and atomic waits, cannot change the source or another private view. Ordinary writable/shared VMOs and exclusive hardware leases keep their stable backing contract. Snapshot bytes and old page versions remain owned through acknowledged translation retirement.",
     "VM platform inspection borrows an INSPECT creation lease without consuming it. Metadata describes the selected local platform: counter_frequency_hz is the actual guest counter frequency, and riscv_isa is a guaranteed subset across all admitted CPUs, not a complete host ISA listing. Other architectures return a zero RISC-V mask. The guarantee remains valid across local CPU migration; cross-machine migration is not implied.",
     "WaitSets are process-local, non-transferable objects with capacity 1..1024. BIND_WAIT authorizes add/rearm/remove, WAIT authorizes consumption. Add requires source WAIT and reserves one event slot; WaitSet and CapabilityChannel sources are unsupported. Registration IDs are globally non-reused. Bind/rearm observe signal levels and sequence under the source lock; one-shot publication does not allocate. Rearm is busy until successful event consumption. Wait returns one exact 24-byte record (registration ID, signal bits, sequence), using an absolute monotonic deadline. Copyout failure restores the event unless removal or closure cancelled it. Source handle close does not cancel object-lifetime subscriptions; final set handle close detaches registrations and wakes consumers. Future CapabilityChannel subscriptions require ownership-epoch invalidation.",
     "ByteChannel duplicate authority permits shared endpoint ownership; peer_closed is published only when the last active endpoint handle closes. Internal operation pins, including WaitSet subscriptions, do not retain active endpoint authority.",
     "process_get_current_id returns the calling Process KOID for observation only. It creates no handle or operational authority and is not a PID-to-handle lookup.",
     "KOIDs encode a nonzero 32-bit slot in bits 0..31 and a 32-bit generation in bits 32..63. Full KOIDs never repeat within a boot. A slot remains unique until final payload destruction, after which reuse advances its generation; generation exhaustion permanently retires the slot. Full KOIDs are required for durable correlation. A language runtime with a 32-bit process ID surface may expose the KOID slot, accepting reuse after object destruction. Neither form grants authority or permits identifier-to-handle conversion; KOIDs do not encode creation order.",
-    "Ramfs storage and all current VFS operations remain kernel-owned. Open File and Directory objects pin their nodes after unlink. Directory WRITE permits namespace mutation; File WRITE permits content mutation. directory_create_file exclusively creates a regular file and publishes its requested handle atomically with the new name. Mode accepts permission bits 0777. directory_remove options 0 removes a non-directory entry without following the final symlink; 1 removes an empty directory. file_write_at options 0 uses offset, 1 atomically appends (offset must be zero); returns actual bytes and end offset. Transfers may complete short. file_resize zero-fills extension. Directory cookies are monotonic, never reused, and enumeration is weakly consistent across mutations. Executable snapshots remain immutable across writes.",
+    "Ramfs storage and all current VFS operations remain kernel-owned. Open File and Directory objects pin their nodes after unlink. Directory WRITE permits namespace mutation; File WRITE permits content mutation. directory_create_file exclusively creates a regular file and publishes its requested handle atomically with the new name. Mode accepts permission bits 0777. directory_remove options 0 removes a non-directory entry without following the final symlink; 1 removes an empty directory. file_write_at options 0 uses offset, 1 atomically appends (offset must be zero); returns actual bytes and end offset. Transfers may complete short. file_resize zero-fills extension. Directory cookies are monotonic, never reused, and enumeration is weakly consistent across mutations. Active file protections reject content changes through every File alias.",
     "Thread creation prepares a dormant thread in the calling Process and returns duplicate, wait, inspect, start and request_stop authority. Entry, 16-byte-aligned stack, TLS and an opaque first argument define its initial context. Affinity pointer/count zero together inherit the calling Thread current allowed CPU set; otherwise they name one to four little-endian u64 bitmap words. An explicit mask must be nonempty, fit supported CPU indices and include at least one schedulable CPU. The child remains dormant until start, with affinity already applied. The caller retains stack/TLS ownership through the thread terminated signal. Start publishes runnable execution; request_stop abandons execution without language destructors. Closing the last handle to a dormant thread cancels it; running threads continue independently of handle ownership. Existing thread_exit terminates only the caller, while process_exit stops every thread.",
     "Atomic wait/wake currently operate on aligned writable u32 words in the calling Process. Wait checks the value and publishes its generation atomically with respect to wake; mismatch returns ok, and spurious wakes are allowed. Wait uses an absolute monotonic nanosecond deadline, with UINT64_MAX meaning infinite; timeout returns timed_out and cancellation returns cancelled. Wake returns the number of registrations actually notified, bounded by count. Wake does not replace the caller's release operation or the waiter's acquire predicate check. Keys include the non-reused mapping identity and virtual address; aliases and other Processes have separate wait domains. Keep the mapping live while waiting: unmap/protect does not move an existing wait to a replacement mapping. Pinned backing survives concurrent unmap until admitted accesses finish; process stop cancels outstanding waits.",
     "Thread sleep accepts an absolute monotonic nanosecond deadline and returns ok when it expires, including an already elapsed deadline. UINT64_MAX sleeps until cancellation. It parks the current thread through scheduler timeout arbitration rather than polling or yielding.",
@@ -9415,7 +9729,7 @@ pub const SEMANTIC_RULES: &[&str] = &[
     "Capability disposition move consumes its source only on ok and requires transfer. Capability disposition duplicate retains its source and requires transfer plus duplicate. Unknown operations, repeated source handles, kind mismatches, and rights violations reject the complete transaction.",
     "Capability-channel try_send returns peer_closed when no peer remains; otherwise it returns would_block only when no receiver is queued. It FIFO-matches the oldest fully published receiver. A size, kind, rights, operation, or copy mismatch rejects that transaction for both participants without scanning later receivers.",
     "Capability-channel timeout, cancellation, and peer close can win only before a receiver is matched. Once matched, sender completion or rejection owns the transaction through commit, including races with the deadline, cancellation, or close; both participants observe the same committed outcome.",
-    "Process-builder create borrows its authority handles and retains kernel object references independently of caller handles. Builders are mutable only before seal. Every successful mutator applies completely; every failure leaves the builder unchanged. Seal is irreversible and prepares only the bootstrap process image. Start requires a sealed builder, consumes it atomically, and returns a supervisor Process plus a READ/WAIT startup ByteChannel. It commits child publication, not successful application loading. Syscall failure preserves the builder; asynchronous bootstrap failure does not restore it. The SDK waits for its loader result protocol and stops failed children before returning a committed launch error.",
+    "Process-builder create borrows its authority handles, retains the target File identity for an attenuated child grant, and captures a kernel-only stable copy of the selected bootstrap loader. Closing or replacing either source handle does not change the captured identities. The target File contents may change until the userspace loader acquires PROTECT; builder creation does not freeze them. Failure before builder publication releases these owners without consuming either input File. Builders are mutable only before seal. Every successful mutator applies completely; every failure leaves the builder unchanged. Seal is irreversible, prepares only the bootstrap process image and releases the temporary loader copy. Start requires a sealed builder, consumes it atomically, and returns a supervisor Process plus a READ/WAIT startup ByteChannel. It commits child publication, not successful application loading. Syscall failure preserves the builder; asynchronous bootstrap failure does not restore it. The SDK waits for its loader result protocol and stops failed children before returning a committed launch error.",
     "A process-builder name is nonempty UTF-8 without embedded NUL bytes. set_data replaces bounded opaque bytes, up to process_startup_data_max_bytes, without kernel interpretation. Arguments, environment, their limits and the loader result protocol are SDK policy. Boot init receives an empty payload.",
     "Process-builder set_name, set_data and set_affinity replace their prior values. Affinity is a nonempty little-endian array of u64 CPU-mask words. Bits above process_affinity_max_cpus and bits which cannot designate an allowed CPU are rejected.",
     "Process-builder add_handle requires a nonzero purpose unique within the builder, an expected nonzero exact object kind, and either exact granted rights or capability_disposition_same_rights. Move consumes the source only when the mutator returns ok; duplicate retains it and additionally requires duplicate. Failure preserves both builder and source.",
