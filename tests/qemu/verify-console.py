@@ -9,7 +9,7 @@ import re
 import sys
 
 from session import Session, native_command
-from guest_console import append_console_output
+from guest_console import GUEST_LOG, append_console_output
 
 
 def console_lines(*lines):
@@ -17,6 +17,61 @@ def console_lines(*lines):
     kernel_record = rb'<[0-7]>\[[ ]*[0-9]+\.[0-9]+\] HypeR: [^\n]*\n'
     boundary = rb'\n(?:' + kernel_record + rb')*'
     return rb'(?m)^' + boundary.join(re.escape(line) for line in lines)
+
+
+def guest_console_identity_command(aarch64):
+    uart = 'serial@9000000' if aarch64 else 'soc/serial@10000000'
+    virtio = 'virtio_mmio@a002000' if aarch64 else 'soc/virtio_mmio@10001000'
+    tree = '/sys/firmware/devicetree/base/'
+    return (
+        "echo CONSOLE_ID_BEGIN; printf 'cmdline:'; cat /proc/cmdline; "
+        "printf 'tty:'; tty; printf 'kernel:'; cat /sys/class/tty/console/active; "
+        f"printf 'uart:'; tr -d '\\000' < {tree}{uart}/compatible; echo; "
+        f"printf 'virtio:'; tr -d '\\000' < {tree}{virtio}/compatible; echo; "
+        "for d in /sys/bus/virtio/devices/*; do "
+        "printf 'virtio-device:'; cat \"$d/device\"; done; echo CONSOLE_ID_END\n"
+    ).encode()
+
+
+def verify_guest_console_identity(output, *, aarch64, expected_transport=None):
+    """Check the actual tty and printk route independently of configured intent."""
+    # Linux boot work may finish while the shell prints these records. Preserve
+    # raw diagnostics in Session's log but remove complete printk lines here.
+    output = GUEST_LOG.sub(b'', output)
+    # The echoed command can wrap onto a line beginning with a field name.
+    # Parse only records emitted between complete marker lines, never the echo.
+    blocks = re.findall(
+        rb'(?ms)^CONSOLE_ID_BEGIN\n(.*?)^CONSOLE_ID_END\n', output)
+    if len(blocks) != 1:
+        raise AssertionError(f'guest console identity lacks unique marker block: {output!r}')
+    output = blocks[0]
+    fields = {}
+    for name in (b'cmdline', b'tty', b'kernel', b'uart', b'virtio'):
+        values = re.findall(rb'(?m)^' + name + rb':([^\n]*)$', output)
+        if len(values) != 1:
+            raise AssertionError(f'guest console identity lacks unique {name!r}: {output!r}')
+        fields[name] = values[0]
+    transport = b'uart'
+    for argument in fields[b'cmdline'].split():
+        if argument.startswith(b'hyper.console='):
+            transport = argument.partition(b'=')[2]
+    if transport not in (b'uart', b'virtio'):
+        raise AssertionError(f'invalid guest console transport: {transport!r}')
+    if expected_transport is not None and transport != expected_transport.encode():
+        raise AssertionError(f'expected {expected_transport} console, got {transport!r}')
+    uart_tty = b'ttyAMA0' if aarch64 else b'ttyS0'
+    expected_tty = b'hvc0' if transport == b'virtio' else uart_tty
+    if fields[b'tty'] != b'/dev/' + expected_tty:
+        raise AssertionError(f'shell tty does not match transport: {fields!r}')
+    consoles = fields[b'kernel'].split()
+    if uart_tty not in consoles or b'hvc0' in consoles:
+        raise AssertionError(f'kernel diagnostics must remain on the UART: {fields!r}')
+    expected_uart = b'arm,sbsa-uart' if aarch64 else b'ns16550a'
+    if fields[b'uart'] != expected_uart or fields[b'virtio'] != b'virtio,mmio':
+        raise AssertionError(f'guest device-tree console identity mismatch: {fields!r}')
+    devices = re.findall(rb'(?m)^virtio-device:(0x[0-9a-fA-F]+)$', output)
+    if not any(int(device, 16) == 3 for device in devices):
+        raise AssertionError(f'virtio console device ID 3 was not discovered: {output!r}')
 
 
 def main():
@@ -119,6 +174,30 @@ def main():
             send(b'vmm console alpine\n')
             await_text(rb'Connected to alpine\.', timeout=30)
             await_text(rb'~ # ', timeout=60)
+            aarch64 = 'aarch64' in os.path.basename(qemu)
+            uart_tty = 'ttyAMA0' if aarch64 else 'ttyS0'
+            # The first hvc prompt can overtake boot diagnostics still draining
+            # through the UART. Flush that stream before strict terminal checks.
+            # Keep emergency printk visible for the diagnostic-path check below.
+            send(("PS1=''; dmesg -n 1; printf '\\nCONSOLE_UART_DRAINED\\n' "
+                  f"> /dev/{uart_tty}; read -r console_ack\n").encode())
+            await_text(rb'\nCONSOLE_UART_DRAINED\n', timeout=120)
+            send(b"\nPS1='~ # '; printf '\\nCONSOLE_READY\\n'\n")
+            await_text(rb'\nCONSOLE_READY\n~ # ')
+            send(guest_console_identity_command(aarch64))
+            output = await_text(rb'\nCONSOLE_ID_END\n~ # ')
+            verify_guest_console_identity(
+                output, aarch64=aarch64,
+                expected_transport=os.environ.get('HYPER_TEST_GUEST_CONSOLE', 'virtio'))
+            # Kernel log emission uses the diagnostic UART even while the
+            # interactive tty is hvc0. This also checks that UART service stays
+            # live after the virtio driver has initialized both queues.
+            send(b"PS1=''; printf '<0>HYPER_UART_LOG_PATH\\n' > /dev/kmsg; read -r console_ack\n")
+            await_text(rb'\[[ ]*[0-9]+\.[0-9]+\] HYPER_UART_LOG_PATH\n')
+            # Keep the hvc prompt silent until the UART record is complete;
+            # the two independent streams can otherwise interleave mid-record.
+            send(b"\nPS1='~ # '; printf '\\nCONSOLE_LOG_VERIFIED\\n'\n")
+            await_text(rb'\nCONSOLE_LOG_VERIFIED\n~ # ')
             # Each character must wake the sleeping runtime and echo without
             # a following key or periodic collection timeout to rescue it.
             for index in range(12):
@@ -126,6 +205,23 @@ def main():
                 typed(f'echo {token}')
                 await_text(rb'\n' + token.encode() + rb'\n~ # ')
                 pump(0.2)
+            # Span several transport messages and compare every byte in order.
+            # This is a correctness check, not a throughput requirement for CI.
+            send(b"i=0; while [ $i -lt 256 ]; do "
+                 b"printf 'CONSOLE-%03d-abcdefghijklmnopqrstuvwxyz\\n' $i; "
+                 b"i=$((i+1)); done\n")
+            expected = b''.join(
+                f'CONSOLE-{index:03d}-abcdefghijklmnopqrstuvwxyz\n'.encode()
+                for index in range(256))
+            await_text(rb'\n' + re.escape(expected) + rb'~ # ', timeout=120)
+            # A continuously busy TX queue must still consume input readiness.
+            # Without polling between service batches, Ctrl-C can starve forever.
+            send(b'yes CONSOLE_BUSY\n')
+            await_text(rb'\nCONSOLE_BUSY\n')
+            send(b'\x03')
+            await_text(rb'~ # ', timeout=30)
+            send(b'echo GUEST_AFTER_BUSY\n')
+            await_text(rb'\nGUEST_AFTER_BUSY\n~ # ')
             pump(3)
             typed('echo GUEST_AFTER_IDLE')
             await_text(rb'\nGUEST_AFTER_IDLE\n~ # ')

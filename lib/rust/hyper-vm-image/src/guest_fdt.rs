@@ -6,6 +6,9 @@
 pub mod io;
 mod riscv64;
 
+/// Fixed line speed of the `AArch64` reference platform's SBSA Generic UART.
+pub const UART_BAUD: u32 = 115_200;
+
 const FDT_MAGIC: u32 = 0xd00d_feed;
 const FDT_BEGIN_NODE: u32 = 1;
 const FDT_END_NODE: u32 = 2;
@@ -14,8 +17,6 @@ const FDT_END: u32 = 9;
 const HEADER_SIZE: usize = 40;
 const RESERVATION_SIZE: usize = 16;
 const GIC_PHANDLE: u32 = 0xffff_0001;
-const UART_CLOCK_PHANDLE: u32 = 0xffff_0002;
-const APB_CLOCK_PHANDLE: u32 = 0xffff_0003;
 const GIC_DISTRIBUTOR_BASE: u64 =
     hyper_abi::HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_GIC_DISTRIBUTOR_BASE;
 const GIC_DISTRIBUTOR_SIZE: u64 =
@@ -176,7 +177,7 @@ pub fn build_aarch64_linux_with_io(
 
     builder.begin_node("chosen")?;
     builder.property_string("bootargs", boot.boot_arguments)?;
-    builder.property_string("stdout-path", "/pl011@9000000")?;
+    builder.property_string("stdout-path", "/serial@9000000")?;
     if let Some((start, end)) = boot.initramfs {
         builder.property_u64("linux,initrd-start", start)?;
         builder.property_u64("linux,initrd-end", end)?;
@@ -184,7 +185,7 @@ pub fn build_aarch64_linux_with_io(
     builder.end_node()?;
 
     builder.begin_node("aliases")?;
-    builder.property_string("serial0", "/pl011@9000000")?;
+    builder.property_string("serial0", "/serial@9000000")?;
     builder.end_node()?;
 
     let mut node_name = [0u8; 32];
@@ -285,28 +286,26 @@ pub fn build_aarch64_linux_with_io(
     )?;
     builder.end_node()?;
 
-    fixed_clock(&mut builder, "clock-uart", UART_CLOCK_PHANDLE)?;
-    fixed_clock(&mut builder, "clock-apb", APB_CLOCK_PHANDLE)?;
-    builder.begin_node("pl011@9000000")?;
-    builder.property_string_list("compatible", &["arm,pl011", "arm,primecell"])?;
+    builder.begin_node("serial@9000000")?;
+    builder.property_string("compatible", "arm,sbsa-uart")?;
     builder.property_u64_pair("reg", UART_BASE, UART_SIZE)?;
     builder.property_cells("interrupts", &[0, UART_SPI, 4])?;
-    builder.property_cells("clocks", &[UART_CLOCK_PHANDLE, APB_CLOCK_PHANDLE])?;
-    builder.property_string_list("clock-names", &["uartclk", "apb_pclk"])?;
+    builder.property_u32("current-speed", UART_BAUD)?;
     builder.end_node()?;
 
     devices.append(&mut builder, boot)?;
+
+    // The diagnostic UART remains stdout-path; normal terminal I/O uses this
+    // independently serviced virtio console after the guest driver is ready.
+    builder.begin_node("virtio_mmio@a002000")?;
+    builder.property_string("compatible", "virtio,mmio")?;
+    builder.property_u64_pair("reg", 0x0a00_2000, 0x1000)?;
+    builder.property_cells("interrupts", &[0, 18, 4])?;
+    builder.property_empty("dma-coherent")?;
+    builder.end_node()?;
+
     builder.end_node()?;
     builder.finish(output)
-}
-
-fn fixed_clock(builder: &mut Builder<'_>, name: &str, phandle: u32) -> Result<(), Error> {
-    builder.begin_node(name)?;
-    builder.property_string("compatible", "fixed-clock")?;
-    builder.property_u32("#clock-cells", 0)?;
-    builder.property_u32("clock-frequency", 24_000_000)?;
-    builder.property_u32("phandle", phandle)?;
-    builder.end_node()
 }
 
 struct Builder<'storage> {

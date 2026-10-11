@@ -211,7 +211,8 @@ same static/dynamic std, process, thread, filesystem, shell and userspace Linux
 VM contracts on one and four harts. A separate `make test-vm-smoke ARCH=riscv64`
 init fixture validates Native VM lifecycle, timer/serial WFI wakeups and
 retirement independently of Linux loading.
-Linux acceptance explicitly attaches `/system/bin/vmm` to the buffered guest serial port, exercises guest-console RX, and detaches
+Linux acceptance explicitly attaches `/system/bin/vmm` to the guest terminal,
+exercises guest-console RX, and detaches
 through the local Ctrl-] menu. Both Native
 integration suites also verify named VM isolation and repeated runtime crashes
 with guest-memory reclamation. x86-64 has a build and image contract only.

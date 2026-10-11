@@ -18,8 +18,10 @@ pub(super) fn prepare() -> Result<VirtualDeviceSet, Error> {
 }
 pub(super) fn supports_userspace_mmio(profile: u32, base: u64, length: u64) -> bool {
     profile == HYPER_NATIVE_VIRTUAL_PLATFORM_RISCV64_REFERENCE as u32
-        && base == HYPER_NATIVE_VIRTUAL_PLATFORM_RISCV64_REFERENCE_UART_BASE
-        && length == HYPER_NATIVE_VIRTUAL_PLATFORM_RISCV64_REFERENCE_UART_SIZE
+        && ((base == HYPER_NATIVE_VIRTUAL_PLATFORM_RISCV64_REFERENCE_UART_BASE
+            && length == HYPER_NATIVE_VIRTUAL_PLATFORM_RISCV64_REFERENCE_UART_SIZE)
+            || (base == HYPER_NATIVE_VIRTUAL_PLATFORM_RISCV64_REFERENCE_USER_MMIO_BASE
+                && length == HYPER_NATIVE_VIRTUAL_PLATFORM_RISCV64_REFERENCE_USER_MMIO_SIZE))
 }
 pub(super) fn supports_configuration(profile: u32, memory_base: u64, memory_size: u64) -> bool {
     profile == hyper::abi::native::HYPER_NATIVE_VIRTUAL_PLATFORM_RISCV64_REFERENCE as u32

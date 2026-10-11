@@ -45,7 +45,7 @@
       "configuration": {
         "memory-bytes": 268435456,
         "vcpus": 2,
-        "bootargs": "console=ttyAMA0 earlycon=pl011,mmio32,0x09000000 rdinit=/init loglevel=7 hyper.root=/dev/sda"
+        "bootargs": "console=ttyAMA0 earlycon rdinit=/init hyper.console=virtio loglevel=7 hyper.root=/dev/sda"
       },
       "network": {
         "network": "default",
@@ -63,7 +63,7 @@
     "configuration": {
       "memory-bytes": 134217728,
       "vcpus": 1,
-      "bootargs": "console=ttyAMA0 earlycon=pl011,mmio32,0x09000000 rdinit=/init loglevel=4 hyper.role=io hyper.mode=standby"
+      "bootargs": "console=ttyAMA0 earlycon rdinit=/init hyper.console=virtio loglevel=4 hyper.role=io hyper.mode=standby"
     },
     "io-device": {
       "profile": "bcm2712-sdhci",

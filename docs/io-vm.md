@@ -706,8 +706,16 @@ its mapping ownership and enters the backend shutdown/quarantine path.
 
 ### Forwarded appliance logs
 
+Shipped deployments set `hyper.console=virtio`: the appliance init connects its
+standard input, output and error to `/dev/hvc0`. Its Linux kernel command line
+keeps `console=ttyAMA0 earlycon`, so early boot, kernel diagnostics and panic
+output continue through the SBSA UART. Both devices are serviced by the Native
+userspace console worker. `hyper.console=uart`, or an omitted selector, retains
+UART userspace output for custom deployments. A requested but missing hvc0 is
+a startup error rather than a silent fallback.
+
 The Native I/O runtime prefixes each forwarded guest console line with
-`HypeR IO VM:`, including lines split across serial reads. Native runtime messages
+`HypeR IO VM:`, including lines split across console reads. Native runtime messages
 retain their own service name. Prefixing does not buffer a whole line or alter
 its bytes; a partial line remains visible, so output from other services can
 still interleave before the guest emits its next newline.

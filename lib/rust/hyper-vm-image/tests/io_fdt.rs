@@ -5,7 +5,7 @@ extern crate std;
 #[path = "pci_fdt.rs"]
 mod pci;
 use super::{DmaRange, IoDevices, MmioDevice, SharedMemory};
-use crate::guest_fdt::{Aarch64LinuxBoot, Error, build_aarch64_linux_with_io};
+use crate::guest_fdt::{Aarch64LinuxBoot, Error, UART_BAUD, build_aarch64_linux_with_io};
 use std::{collections::BTreeMap, string::String, vec::Vec};
 
 const MIB: u64 = 1024 * 1024;
@@ -135,6 +135,60 @@ fn properties(bytes: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, &'static str> {
         }
     }
     Err("missing end")
+}
+
+#[test]
+fn guest_console_advertises_only_the_fixed_sbsa_uart_binding() -> Result<(), &'static str> {
+    for gic_version in [2, 3] {
+        for devices in [IoDevices::empty(), devices()] {
+            let mut boot = boot();
+            boot.gic_version = gic_version;
+            boot.boot_arguments = "console=ttyAMA0 earlycon";
+            let mut structure = [0; 8192];
+            let mut strings = [0; 2048];
+            let mut output = [0; 12288];
+            let size = build_aarch64_linux_with_io(
+                boot,
+                devices,
+                &mut structure,
+                &mut strings,
+                &mut output,
+            )
+            .map_err(|_| "build")?;
+            let values = properties(&output[..size])?;
+            let value = |key: &str| values.get(key).map(Vec::as_slice).ok_or("property");
+            assert_eq!(value("/chosen/stdout-path")?, b"/serial@9000000\0");
+            assert_eq!(value("/aliases/serial0")?, value("/chosen/stdout-path")?);
+            assert_eq!(value("/serial@9000000/compatible")?, b"arm,sbsa-uart\0");
+            assert_eq!(
+                value("/serial@9000000/current-speed")?,
+                UART_BAUD.to_be_bytes()
+            );
+            assert_eq!(
+                value("/serial@9000000/reg")?,
+                [0x0900_0000_u64.to_be_bytes(), 0x1000_u64.to_be_bytes()].concat()
+            );
+            assert_eq!(
+                value("/serial@9000000/interrupts")?,
+                [
+                    0_u32.to_be_bytes(),
+                    1_u32.to_be_bytes(),
+                    4_u32.to_be_bytes()
+                ]
+                .concat()
+            );
+            assert_eq!(
+                values
+                    .keys()
+                    .filter(|key| key.starts_with("/serial@9000000/"))
+                    .count(),
+                4
+            );
+            assert!(values.keys().all(|key| !key.starts_with("/clock-")));
+            assert!(!values.keys().any(|key| key.starts_with("/pl011@")));
+        }
+    }
+    Ok(())
 }
 
 #[test]
@@ -782,7 +836,12 @@ fn sdhci_preserves_admitted_windows_and_upstream_dependency_cells() -> Result<()
                 .map(Vec::as_slice)
                 .ok_or("missing SD property")
         };
-        assert!(!props.keys().any(|key| key.ends_with("/dma-coherent")));
+        // The physical SD controller and its ancestors must remain
+        // non-coherent. A sibling CPU-backed virtio console is coherent.
+        assert!(!props.keys().any(|key| {
+            key == "/dma-coherent"
+                || (key.starts_with("/io-bus/") && key.ends_with("/dma-coherent"))
+        }));
         assert_eq!(
             get("/io-bus/mmc@b000000/reg")?,
             [sd.host.base, sd.host.size, sd.config.base, sd.config.size]

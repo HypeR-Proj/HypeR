@@ -6,7 +6,7 @@ use hyper_os::memory::WritableVmo;
 use hyper_os::startup::{self, Startup};
 use hyper_os::vm::{self, VirtualCpuTermination};
 use hyper_vm_smoke::{BOOT_SENTINELS, RAM_BASE, RAM_BYTES};
-use hyper_vm_support::serial::Port;
+use hyper_vm_support::console::{Input, Port};
 use std::collections::VecDeque;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -78,8 +78,15 @@ impl Guest {
             },
         )
         .map_err(|error| format!("create pending VM mode {mode}: {:?}", error.error()))?;
-        vm::set_memory(pending.as_handle_ref(), memory.as_handle_ref())
-            .map_err(|error| format!("set guest memory: {error:?}"))?;
+        let shared_memory = vm::create_guest_memory(memory.as_handle_ref()).map_err(show)?;
+        vm::map_guest_memory(
+            pending.as_handle_ref(),
+            shared_memory.as_handle_ref(),
+            0,
+            0,
+            RAM_BYTES,
+        )
+        .map_err(|error| format!("set guest memory: {error:?}"))?;
         vm::set_bootstrap(
             pending.as_handle_ref(),
             vm::VirtualCpuBootstrap {
@@ -109,6 +116,10 @@ impl Guest {
             machine.clone(),
             vec![vcpu.clone()],
             vm::PlatformProfile::Riscv64Reference,
+            shared_memory,
+            RAM_BASE,
+            RAM_BYTES,
+            Input::Uart,
         )
         .map_err(show)?;
         // Let the route worker inspect the installed but dormant VM first.
@@ -135,7 +146,7 @@ impl Guest {
                     "guest marker: expected {expected:#x}, got {actual:#x}"
                 ));
             }
-            let mut buffer = [0; hyper_vm_support::serial::MESSAGE_BYTES];
+            let mut buffer = [0; hyper_vm_support::console::MESSAGE_BYTES];
             let count = self
                 .output
                 .try_read(&mut buffer)
@@ -212,6 +223,7 @@ fn lease(
 }
 
 fn suite(startup: &mut Startup<'_>) -> Result<()> {
+    super::guest_memory::suite()?;
     println!("VM-SMOKE: administrative-stop START");
     {
         let authority = lease(startup)?;

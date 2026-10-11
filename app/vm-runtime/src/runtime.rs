@@ -107,7 +107,6 @@ pub(super) fn run(
             architecture: platform_info.architecture,
             platform_profile: profile,
         },
-        io_session.is_some(),
     )?;
     hyper_vm_policy::affinity::apply(&config.affinity, plan.vcpu_count(), |index, words| {
         let cpu = vcpus
@@ -134,7 +133,7 @@ pub(super) fn run(
     );
     publish_status(control, vm_contract::InstanceStatus::Installed)?;
     let (machine, mut devices) = if let Some(session) = io_session {
-        let grant = shared_memory.as_ref().ok_or(Error::InvalidControl)?;
+        let grant = &shared_memory;
         let (machine, devices) = io_devices::bind(
             session,
             machine,
@@ -148,8 +147,19 @@ pub(super) fn run(
         (machine, None)
     };
     let machine = std::sync::Arc::new(machine);
-    let output = hyper_vm_support::serial::Port::start(machine.clone(), vcpus.clone(), profile)
-        .map_err(Error::OperatingSystem)?;
+    let input =
+        hyper_vm_support::console::Input::from_boot_arguments(image.boot_arguments.as_str())
+            .map_err(Error::OperatingSystem)?;
+    let output = hyper_vm_support::console::Port::start(
+        machine.clone(),
+        vcpus.clone(),
+        profile,
+        shared_memory,
+        plan.memory_base(),
+        plan.memory_size(),
+        input,
+    )
+    .map_err(Error::OperatingSystem)?;
     let mut console = hyper_vm_runtime::console::Console::new(connection, output);
     #[cfg(feature = "test-power-crash")]
     crate::power_crash::at("dormant");
@@ -178,42 +188,34 @@ pub(super) fn publish_status(
 }
 
 struct InstalledGuest {
-    shared_memory: Option<hyper_os::OwnedHandle<hyper_os::handle::GuestMemoryObject>>,
+    shared_memory: hyper_os::OwnedHandle<hyper_os::handle::GuestMemoryObject>,
     machine: hyper_os::OwnedHandle<hyper_os::handle::VirtualMachineObject>,
     vcpus: Vec<std::sync::Arc<hyper_os::OwnedHandle<hyper_os::handle::VirtualCpuObject>>>,
 }
 
 /// Builds an installed, dormant guest and retains handles for every vCPU.
 ///
-/// I/O guests use a stable memory grant that can later be shared with the
-/// backend. The returned vCPU handles also support stop/retirement observation;
+/// Every guest uses a stable memory grant for its userspace console backend.
+/// I/O guests can also share the same grant with the Linux backend. The returned vCPU handles also support stop/retirement observation;
 /// opening secondary handles here does not start those CPUs.
 fn install_guest(
     lease: hyper_os::OwnedHandle<hyper_os::handle::VirtualMachineCreationLeaseObject>,
     memory: &WritableVmo,
     plan: &linux::BootPlan,
     configuration: hyper_os::vm::Configuration,
-    with_io: bool,
 ) -> Result<InstalledGuest, Error> {
     let pending = hyper_os::vm::create(lease, configuration)
         .map_err(|failure| Error::OperatingSystem(failure.error()))?;
-    let shared_memory = if with_io {
-        let grant = hyper_os::vm::create_guest_memory(memory.as_handle_ref())
-            .map_err(Error::OperatingSystem)?;
-        hyper_os::vm::map_guest_memory(
-            pending.as_handle_ref(),
-            grant.as_handle_ref(),
-            0,
-            0,
-            plan.memory_size(),
-        )
+    let shared_memory = hyper_os::vm::create_guest_memory(memory.as_handle_ref())
         .map_err(Error::OperatingSystem)?;
-        Some(grant)
-    } else {
-        hyper_os::vm::set_memory(pending.as_handle_ref(), memory.as_handle_ref())
-            .map_err(Error::OperatingSystem)?;
-        None
-    };
+    hyper_os::vm::map_guest_memory(
+        pending.as_handle_ref(),
+        shared_memory.as_handle_ref(),
+        0,
+        0,
+        plan.memory_size(),
+    )
+    .map_err(Error::OperatingSystem)?;
     hyper_os::vm::set_bootstrap(
         pending.as_handle_ref(),
         hyper_os::vm::VirtualCpuBootstrap {

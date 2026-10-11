@@ -374,7 +374,7 @@ The resident I/O VM has its own `io-vm` node, outside `virtual-machines`:
   "configuration": {
     "memory-bytes": 134217728,
     "vcpus": 1,
-    "bootargs": "console=ttyAMA0 rdinit=/init hyper.role=io hyper.mode=standby",
+    "bootargs": "console=ttyAMA0 earlycon rdinit=/init hyper.console=virtio hyper.role=io hyper.mode=standby",
     "affinity": [{"vcpu": 0, "cpus": [1, 3]}]
   },
   "io-device": {

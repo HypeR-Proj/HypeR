@@ -363,7 +363,7 @@ fn run(
 }
 
 fn drain(guest: &mut InstalledGuest, guest_log: &mut GuestLog) -> Result<()> {
-    let mut bytes = [0; hyper_vm_support::serial::MESSAGE_BYTES];
+    let mut bytes = [0; hyper_vm_support::console::MESSAGE_BYTES];
     let mut output = io::stdout().lock();
     for _ in 0..16 {
         let length = guest.output.try_read(&mut bytes).map_err(show)?;

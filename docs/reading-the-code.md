@@ -124,7 +124,7 @@ flowchart TB
    runtime process. Start with the manager when investigating admission errors.
 2. [vm-runtime `run`](../app/vm-runtime/src/runtime.rs) validates the image, prepares
    guest memory, creates a pending VM, attaches memory and bootstrap information,
-   then seals and installs it. It starts the shared userspace UART worker before
+   then seals and installs it. It starts the shared userspace console worker before
    starting the boot vCPU.
    [vm-support](../lib/vm-support/src/lib.rs) contains shared loading/device
    mechanisms; [SDK VM bindings](../lib/rust/hyper-os/src/vm.rs) expose the Native
@@ -675,9 +675,11 @@ Guest console — attachment has its own lifetime:
 
 ```mermaid
 flowchart LR
-    vmm["vmm console"] <-->|Attach / detach| runtime["vm-runtime<br/>Serial channel"]
-    runtime <--> model["Guest UART model"]
-    class vmm,runtime,model app
+    vmm["vmm console"] <-->|Attach / detach| runtime["vm-runtime<br/>Bounded console channel"]
+    runtime <--> worker["Console worker"]
+    worker <--> uart["Guest UART<br/>Kernel diagnostics"]
+    worker <--> virtio["Virtio console<br/>Buffered terminal"]
+    class vmm,runtime,worker,uart,virtio app
     classDef app fill:#eff6ff,stroke:#2563eb,color:#172554
     classDef core fill:#f0fdfa,stroke:#0f766e,color:#134e4a
 ```
@@ -698,17 +700,28 @@ is [console-output](../bootstrap/stage1/console-output/src/main.rs).
 For guest attachment, read [vmm console](../app/vmm/src/console.rs),
 [vm-runtime console](../app/vm-runtime/src/console.rs) and
 [console waits](../app/vm-runtime/src/console_wait.rs), then the
-[userspace UART dispatcher](../lib/vm-support/src/serial/worker.rs) and
-[virtual PL011 model](../lib/vm-support/src/serial/pl011.rs). The kernel supplies
-[deferred MMIO routes](../kernel/src/kernel/vm/user_mmio.rs) and GIC/PLIC interrupt
-mechanisms. The same dispatcher runs in `io-runtime` for the appliance console.
+[userspace console worker](../lib/vm-support/src/console/worker.rs). It owns the
+[UART register models](../lib/vm-support/src/serial.rs) and the
+[virtio-console model](../lib/vm-support/src/virtio_console.rs). UART carries
+guest kernel diagnostics; `hyper.console=virtio` selects `hvc0` for the packaged
+guest shell, while `hyper.console=uart` explicitly selects the diagnostic path.
+Shipped configurations select virtio; omission retains UART. The runtime and [guest init](../kernel/tools/guest/init)
+read the same selection so input reaches the shell's tty.
+
+The kernel supplies [deferred MMIO routes](../kernel/src/kernel/vm/user_mmio.rs),
+[bounded GuestMemory copies](../kernel/src/kernel/vm/guest_memory.rs) and GIC/PLIC
+interrupt mechanisms. The virtio worker validates guest-owned descriptors and
+uses aligned atomic index accesses to publish completed buffers. The same
+worker runs in `io-runtime` for the appliance console; it does not delegate
+console device emulation to the Linux I/O backend.
 A guest that stops consuming input must not make the control/detach path
 unreachable. Keep output, input backpressure and attachment lifetime separate
 when changing the relay.
 
 **Tests to start with:** [vmm console tests](../app/vmm/tests/console.rs),
 [runtime console tests](../app/vm-runtime/tests/console.rs),
-[virtual UART tests](../lib/vm-support/tests/pl011.rs) and
+[virtual UART tests](../lib/vm-support/tests/sbsa_uart.rs),
+[virtio-console tests](../lib/vm-support/tests/virtio_console.rs) and
 [console integration](../tests/qemu/verify-console.py).
 
 ## 14. From configuration to a running service or disk image

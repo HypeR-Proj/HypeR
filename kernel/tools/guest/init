@@ -12,15 +12,24 @@ if [ "${1:-}" != root-mounted ]; then
     /bin/busybox mount -t devtmpfs devtmpfs /dev
 fi
 
+# Kernel diagnostics remain on the UART named by console=. The independent
+# shell transport can use virtio without registering a second printk console.
+console_transport=uart
+read -r cmdline < /proc/cmdline
+for argument in $cmdline; do
+    case "$argument" in
+        hyper.root=*) root_device=${argument#hyper.root=} ;;
+        hyper.console=*) console_transport=${argument#hyper.console=} ;;
+    esac
+done
+case "$console_transport" in
+    uart|virtio) ;;
+    *) echo "HypeR guest: unsupported console transport: $console_transport" >&2; exit 1 ;;
+esac
+
 # Board guests explicitly request a persistent root; standalone fixtures keep
 # the same complete Alpine userspace in RAM without requiring an I/O VM.
 if [ "${1:-}" != root-mounted ]; then
-    read -r cmdline < /proc/cmdline
-    for argument in $cmdline; do
-        case "$argument" in
-            hyper.root=*) root_device=${argument#hyper.root=} ;;
-        esac
-    done
     if [ -n "${root_device:-}" ]; then
         for module in virtio_mmio virtio_scsi sd_mod ext4; do
             /bin/busybox modprobe "$module" || exit 1
@@ -56,14 +65,35 @@ for net in /sys/class/net/*; do
         </dev/null >"/var/log/udhcpc-$interface.log" 2>&1 &
 done
 
+# Select a concrete tty for the interactive shell: /dev/console cannot become
+# its controlling terminal. A requested virtio console must be present; silently
+# reverting to the UART would conceal a broken device or an invalid benchmark.
+if [ "$console_transport" = virtio ]; then
+    if ! /bin/busybox modprobe virtio_console; then
+        echo "HypeR guest: cannot load virtio console driver" >&2
+        exit 1
+    fi
+    attempts=0
+    while [ ! -c /dev/hvc0 ] && [ "$attempts" -lt 10 ]; do
+        /bin/busybox sleep 1
+        attempts=$((attempts + 1))
+    done
+    if [ ! -c /dev/hvc0 ]; then
+        echo "HypeR guest: requested virtio console is unavailable" >&2
+        exit 1
+    fi
+    console=hvc0
+    exec </dev/hvc0 >/dev/hvc0 2>&1
+else
+    read -r consoles < /sys/class/tty/console/active
+    console=${consoles##* }
+fi
+
 echo "HypeR guest: /init reached"
 echo "HypeR guest: Linux userspace is running"
 
 # BusyBox init owns PID 1, reaps children, respawns the shell and handles the
-# signals sent by ordinary poweroff/reboot. Select the actual tty because
-# /dev/console cannot become the shell's controlling terminal.
-read -r consoles < /sys/class/tty/console/active
-console=${consoles##* }
+# signals sent by ordinary poweroff/reboot.
 cd "$HOME" || exit 1
 cat > /etc/inittab <<EOF
 $console::respawn:/bin/sh -c 'cd /root && exec /bin/sh -i'

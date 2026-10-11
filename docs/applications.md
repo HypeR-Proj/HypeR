@@ -235,7 +235,7 @@ The VM file contains definitions, not service capabilities:
       "configuration": {
         "vcpus": 2,
         "memory-bytes": 268435456,
-        "bootargs": "console=ttyAMA0 rdinit=/init loglevel=7 hyper.root=/dev/sda"
+        "bootargs": "console=ttyAMA0 earlycon rdinit=/init hyper.console=virtio loglevel=7 hyper.root=/dev/sda"
       },
       "disk": { "client": 1, "volume": "alpine" },
       "network": { "client": 1, "network": "default", "mac": "02:48:59:00:00:01" }

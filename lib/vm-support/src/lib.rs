@@ -5,10 +5,12 @@
 //! Process supervision, console sessions and crash fixtures belong to consumers.
 
 pub mod block_protocol;
+pub mod console;
 pub mod image_io;
 pub mod io_backend;
 pub mod io_protocol;
 pub mod profile;
+pub mod virtio_console;
 pub mod virtio_mmio;
 pub mod virtio_net;
 

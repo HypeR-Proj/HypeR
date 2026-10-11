@@ -96,8 +96,15 @@ from this staged set, just like the other services.
 See [Native component builds](../mk/README.md) for the shared Make templates,
 feature variants, library collection and SDK component cache.
 
-Guest PL011 and NS16550 models live in `vm-support/src/serial`, shared by the
-business and I/O VM runtimes. The UART worker consumes deferred device requests
-through the installed SDK and uses bounded ByteChannels for byte transport.
-Physical host UART drivers and guest interrupt-controller mechanisms remain in
-the kernel. See [VM lifecycle and console ownership](../kernel/docs/vm-bundle.md).
+The business and I/O VM runtimes share `hyper_vm_support::console::Port`. Its worker
+in [`vm-support/src/console`](vm-support/src/console.rs) owns both the diagnostic
+UART and a buffered virtio terminal, with bounded ByteChannels to the runtime.
+SBSA UART and NS16550 register models live in `vm-support/src/serial`; the modern
+single-port virtio device and split queues live in `vm-support/src/virtio_console`.
+The worker consumes generic deferred MMIO requests and accesses guest RAM through
+checked `GuestMemory` copies. No console device model runs in the Linux I/O backend.
+
+The kernel retains physical host UART drivers, generic device routes, guest-memory
+capability enforcement and GIC/PLIC interrupt mechanisms. See
+[VM lifecycle and console ownership](../kernel/docs/vm-bundle.md) for queue
+ownership, terminal selection, backpressure and teardown.

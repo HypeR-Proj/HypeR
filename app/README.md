@@ -124,8 +124,8 @@ resources.
 
 Each `vmm` invocation receives private control and capability channels. The
 manager supports multiple clients and reports exhausted connection capacity.
-A runtime owns its read-only shared serial ring, WaitSet subscriptions and
-bounded output retention. Only one client may attach to a VM's console, while
+A runtime owns its console worker, bounded ByteChannel, WaitSet subscriptions
+and output retention. Only one client may attach to a VM's console, while
 other clients can still issue lifecycle requests. Guest output does not bypass
 the runtime to reach the physical Console.
 
@@ -242,12 +242,13 @@ capability follows the live namespace.
 | `/system/svc/init-system` | [init](init/) | Validate the combined service graph, atomically adopt existing core supervisors, switch the root namespace, then start system services and continue whole-system supervision. Retain core supervision if root switching fails. Used with both disk-backed and RAM-resident system files. |
 | `/system/svc/vm-runtime` | [vm-runtime](vm-runtime/) | Construct and run one managed guest: load its image, configure vCPUs and virtual devices, connect I/O backends, serve its console and control requests, and retire resources on termination. Started by the VM manager for each VM start. |
 
-Guest UART emulation is shared userspace code in
-[`lib/vm-support/src/serial`](../lib/vm-support/src/serial.rs). Each runtime owns
-an independent UART worker and a bounded duplex ByteChannel. The kernel only
-publishes deferred device requests and updates guest interrupt levels. This lets
-the I/O appliance service UART accesses while its supervisor waits on storage;
-console attachment and boot-log formatting remain runtime policy.
+Guest console emulation is shared userspace code in
+[`lib/vm-support/src/console`](../lib/vm-support/src/console.rs). Each runtime owns
+an independent worker for the diagnostic UART and buffered virtio terminal,
+connected through a bounded duplex ByteChannel. The kernel publishes deferred
+device requests, provides checked guest-memory copies and updates guest interrupt
+levels. This lets the I/O appliance service its console while its supervisor
+waits on storage; attachment and boot-log formatting remain runtime policy.
 
 The resident Linux I/O VM runs physical device drivers. `io-runtime` is the
 Native service that manages that VM; `vm-runtime` manages an individual business
@@ -286,7 +287,7 @@ available in bootfs even when `/system` cannot mount. See
 
 [vmm](vmm/) is the shell client for the VM manager. It lists definitions and
 observed VMs, reports state and memory backing, starts/stops/restarts managed
-guests, changes vCPU affinity and attaches to a guest's serial console.
+guests, changes vCPU affinity and attaches to a guest's console.
 
 ```text
 vmm list
@@ -531,7 +532,7 @@ metadata requires INSPECT, which its image capability deliberately lacks.
 
 Native SDK calls remain where their semantics are required:
 
-- VM construction, guest VMO writes, virtual serial and VM lifecycle;
+- VM construction, guest-memory copies, device MMIO completion and VM lifecycle;
 - capability transfer, resource domains, scoped process construction and
   inspection (`ps`, `handle`, `free`, `top`);
 - console/session channel relays and multi-object waits, including the shell's

@@ -13,7 +13,7 @@ use hyper_vm_image::guest_fdt;
 use hyper_vm_image::guest_fdt::io::{DmaRange, IoDevices, MmioDevice, SharedMemory};
 use hyper_vm_support::io_backend::{Backend, Completion};
 use hyper_vm_support::io_guest::Image;
-use hyper_vm_support::serial::Port;
+use hyper_vm_support::console::Port;
 use std::io::{self, Read, Write};
 use std::num::NonZeroU64;
 use std::process::ExitCode;
@@ -72,7 +72,7 @@ struct Guest {
 }
 impl Guest {
     fn drain(&mut self) -> Result<()> {
-        let mut bytes = [0; hyper_vm_support::serial::MESSAGE_BYTES];
+        let mut bytes = [0; hyper_vm_support::console::MESSAGE_BYTES];
         for _ in 0..16 {
             let length = self.output.try_read(&mut bytes).map_err(show)?;
             if length == 0 {

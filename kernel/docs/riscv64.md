@@ -73,12 +73,31 @@ backend can add virtual IMSIC state behind that RISC-V implementation.
 The immutable `Riscv64Reference` ABI profile uses RAM at `0x80000000`, an
 NS16550A UART at `0x10000000` (4 KiB window, IRQ 10, 3.6864 MHz clock), and a
 PLIC at `0x0c000000` (4 MiB window, sources 1–31, supervisor context 1).
-The ABI profile supplies the boot-data geometry. The shared userspace UART
+The ABI profile supplies the boot-data geometry. The shared userspace console
 worker owns the NS16550 receive FIFOs and uses an absolute monotonic wait deadline
 for receive timeout; no UART model or timer callback remains in the kernel.
 MMIO traps detach the vCPU before publishing a bounded device request. The
 legacy SBI console call uses a distinct firmware-console request on the same
 userspace route. Stop cancels pending work before vCPU storage is retired.
+
+The guest UART is a byte-stream implementation, not a physical serial link.
+It provides FIFO triggers, sticky receive-overrun status, receive timeouts,
+transmit-empty interrupts, and data/modem loopback. Host-accepted transmission
+completes immediately; THRE and TEMT therefore read as empty. Line-control and
+divisor settings determine receive-timeout timing, but do not truncate the byte
+stream or synthesize parity, framing, or break waveforms. External modem inputs
+are fixed as ready, with delta status derived from modem loopback. OUT2 is a
+modem output, not a PC board-specific interrupt gate. These limits also apply
+when the virtio console carries the interactive shell.
+
+The guest device tree also exposes a modern single-port virtio console at
+`0x10001000` (4 KiB window, PLIC source 1). The same userspace worker owns its
+two split queues and validates guest memory through bounded `GuestMemory`
+operations. It requires no Linux I/O backend. `console=ttyS0` keeps kernel and
+panic messages on NS16550; `hyper.console=virtio` selects `/dev/hvc0` for the
+packaged guest shell and its input. Shipped configurations select virtio. Omitting the selector, or specifying
+`hyper.console=uart`, retains the UART terminal. See the
+[guest terminal contract](vm-bundle.md#buffered-guest-terminal).
 
 Guest traps capture VS state and current VS/VU privilege before entering Rust.
 Returning exits carry a linear stopped proof which must detach the matching
@@ -96,7 +115,7 @@ clock rate. The guest contract excludes nested virtualization.
 
 `hyper-vm-image` validates the Linux Image header and the complete memory
 footprint, including BSS, before `vm-runtime` copies payloads into a RAM VMO.
-The SDK builds the CPU, interrupt-controller, UART and boot-data FDT nodes.
+The SDK builds the CPU, interrupt-controller, UART, virtio-console and boot-data FDT nodes.
 Kernel boot policy does not parse Linux images or create a default VM.
 
 ## Runtime validation

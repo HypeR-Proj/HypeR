@@ -17,6 +17,61 @@ spec.loader.exec_module(console)
 
 
 class ConsoleTests(unittest.TestCase):
+    @staticmethod
+    def identity(*, transport='virtio', tty='hvc0', consoles='ttyAMA0',
+                 uart='arm,sbsa-uart', device='0x0003'):
+        return (f'CONSOLE_ID_BEGIN\n'
+                f'cmdline:console={consoles.split()[0]} earlycon hyper.console={transport}\n'
+                f'tty:/dev/{tty}\nkernel:{consoles}\nuart:{uart}\n'
+                f'virtio:virtio,mmio\nvirtio-device:{device}\nCONSOLE_ID_END\n').encode()
+
+    def test_guest_virtio_tty_keeps_printk_on_the_architecture_uart(self):
+        console.verify_guest_console_identity(self.identity(), aarch64=True,
+                                              expected_transport='virtio')
+        console.verify_guest_console_identity(
+            self.identity(consoles='ttyS0', uart='ns16550a'), aarch64=False,
+            expected_transport='virtio')
+        # The explicit UART mode remains useful for local A/B measurements.
+        console.verify_guest_console_identity(
+            self.identity(transport='uart', tty='ttyAMA0'), aarch64=True,
+            expected_transport='uart')
+
+    def test_guest_console_identity_rejects_fallback_and_duplicate_printk(self):
+        for output in (
+            self.identity(tty='ttyAMA0'),
+            self.identity(consoles='ttyAMA0 hvc0'),
+            self.identity(consoles='hvc0'),
+            self.identity(uart='arm,pl011'),
+            self.identity(device='0x0001'),
+            self.identity(transport='unknown'),
+            self.identity().replace(b'tty:/dev/hvc0\n', b''),
+            self.identity().replace(b'tty:/dev/hvc0\n', b'tty:/dev/hvc0\ntty:/dev/hvc0\n'),
+            self.identity().replace(b'CONSOLE_ID_BEGIN\n', b''),
+            self.identity().replace(b'CONSOLE_ID_END\n', b''),
+            self.identity() * 2,
+        ):
+            with self.subTest(output=output), self.assertRaises(AssertionError):
+                console.verify_guest_console_identity(output, aarch64=True)
+        with self.assertRaises(AssertionError):
+            console.verify_guest_console_identity(
+                self.identity(transport='uart', tty='ttyAMA0'), aarch64=True,
+                expected_transport='virtio')
+
+    def test_guest_identity_ignores_wrapped_command_echo_outside_markers(self):
+        echo = console.guest_console_identity_command(True).replace(
+            b"printf 'virtio:'", b"printf '\nvirtio:'")
+        output = b'\x1b[6n' + echo + self.identity() + b'~ # '
+        console.verify_guest_console_identity(output, aarch64=True,
+                                              expected_transport='virtio')
+        # Fields outside the marker block do not describe this identity sample.
+        console.verify_guest_console_identity(
+            self.identity() + b'tty:/dev/ttyAMA0\n', aarch64=True)
+
+    def test_guest_identity_tolerates_a_linux_record_interrupting_output(self):
+        output = self.identity().replace(
+            b'tty:/dev/hvc0', b'tty:/dev/[ 17.230001] random: crng init done\nhvc0')
+        console.verify_guest_console_identity(output, aarch64=True)
+
     def test_guest_echo_cli_reassembles_printk_but_rejects_panics(self):
         command = [sys.executable, '-B', str(Path(__file__).with_name('guest_console.py')),
                    '--filter-guest-logs']

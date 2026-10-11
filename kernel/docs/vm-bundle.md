@@ -59,8 +59,10 @@ and teardown. It retains an independent reference to the guest-memory backing
 through stage-2 invalidation, so process or handle teardown cannot free pages
 still reachable by hardware. Attaching the VMO acquires an exclusive hardware
 write lease: it fails if a Native writable mapping or direct access is active,
-and later direct access, snapshots, or writable mappings stay closed until
-acknowledged VM retirement. Read-only Native mappings may coexist.
+and later ordinary VMO access, snapshots, or writable mappings stay closed until
+acknowledged VM retirement. Read-only Native mappings may coexist. Userspace
+device backends access live guest RAM through the separate, bounded
+`GuestMemory` copy operations described below.
 
 Stage-2 demand pages are initially read/write and execute-never. A final guest
 instruction fault publishes that page's instruction bytes and then promotes
@@ -71,11 +73,14 @@ page because executable-range metadata is not yet part of the VM ABI; sparse
 pages retain the demand-promotion path.
 
 A userspace-created VM has no implicit route to the physical host Console.
-`hyper-vm-support::serial::Port` starts one independently scheduled device worker
+`hyper_vm_support::console::Port` starts one independently scheduled device worker
 inside the owning runtime. Both `vm-runtime` and `io-runtime` use this shared
-implementation. The worker owns the PL011 or NS16550 register/FIFO model and
-exchanges bounded ByteChannel messages with the runtime. The kernel no longer
-contains a guest UART model or a VirtualSerial object.
+implementation. The worker owns the diagnostic UART and a single-port virtio
+console, and exchanges bounded ByteChannel messages with the runtime. UART
+register models live in `lib/vm-support/src/serial`; the virtio model lives in
+`lib/vm-support/src/virtio_console`. Neither device depends on the Linux I/O
+backend. The kernel contains generic MMIO, guest-memory and interrupt mechanisms,
+not a guest UART or virtio-console model.
 
 The installed VM admits immutable MMIO ranges before first vCPU start. Each
 route has a nonzero cookie and an optional private Event. A trapped access is
@@ -91,24 +96,41 @@ its Event before inspecting every vCPU's durable request slot. Publication
 signals after making the slot visible; completion never clears that Event.
 A VM rejects reusing one Event for another route. Event-routed requests are
 excluded from the old shared vCPU MMIO signal and unfiltered query, so an I/O
-controller worker cannot steal a UART request or spin on its readiness.
+controller worker cannot steal a console request or spin on its readiness.
 The same SDK `DeviceDoorbell` supports other userspace MMIO device models.
 
-The UART worker retains at most 64 KiB of pending output plus the bounded
-ByteChannel transport. Saturation holds subsequent guest requests pending until
-space becomes available; it does not silently discard guest bytes. Input is
-bounded as well, with FIFO capacity and NS16550 receive timeout modeled by the
-worker. Absolute monotonic wait deadlines service receive timeouts without
-periodic polling. Interrupt-level updates require the VM's WRITE management
-capability and reject private or out-of-range interrupt sources. The kernel
-retains GIC/PLIC state and wakeup mechanisms, not UART interrupt policy.
+The device worker reuses persistent WaitSet subscriptions for both routes,
+ByteChannel and VM lifetime. After replying, it drains immediately available
+requests for at most 16 scans, stopping at the first empty scan or the output
+flush deadline. It does not spin waiting for the guest's next access. Each
+register request completes through its userspace device model. A virtio queue
+notification completes before the worker copies queue payloads, so that MMIO
+write does not wait for terminal output to drain.
+
+The console worker retains at most 64 KiB of pending output plus the UART FIFO,
+bounded descriptor state and ByteChannel transport. Saturation holds
+unserviceable UART writes pending and stops consuming virtio TX buffers until
+space becomes available; it does not silently discard guest bytes. SBSA status,
+receive and interrupt registers remain accessible while TX is full. Virtio
+register access, including reset and interrupt acknowledgment, also remains live.
+Output is batched in messages of up to 4 KiB, with a flush deadline 2 ms after
+the first buffered byte so prompts without a newline are also delivered. Transport
+backpressure waits for writability instead of repeatedly retrying an expired
+flush deadline. Input is bounded as well, with FIFO capacity and UART receive
+timeout modeled by the worker. Absolute monotonic wait deadlines service receive
+timeouts without periodic polling. Interrupt-level updates require the VM's
+WRITE management capability and reject private or out-of-range interrupt sources.
+The kernel retains GIC/PLIC state and wakeup mechanisms, not UART interrupt policy.
 
 `vm-runtime` uses a persistent WaitSet for output, control, vCPU termination,
 and actionable client channel states. It owns a bounded 64 KiB retention queue
-for console attachment, independently of the device worker. A full or absent
-client does not block output collection or VM lifecycle control. `io-runtime`
-formats the appliance output as boot logs. Its separate UART worker can service
-console register accesses while the I/O supervisor performs storage operations.
+for console attachment, independently of the device worker. Without an attached
+client it retains a rolling history of the most recent output. With a client,
+it reserves room for a complete transport message before collecting more bytes;
+a full retention queue applies backpressure rather than dropping attached
+output. Control, detach and VM lifecycle events remain serviceable. `io-runtime`
+formats the appliance output as boot logs. Its separate console worker services
+guest devices while the I/O supervisor performs storage operations.
 
 The shell holds only a `WAIT|WRITE` manager-connector endpoint. Each `/system/bin/vmm`
 invocation obtains private control and capability channels. For `vmm console`,
@@ -120,8 +142,9 @@ attachment policy; Ctrl-] detaches without stopping the VM.
 The device worker retains its VM and vCPU handle owners through teardown.
 Closing its runtime ByteChannel wakes a blocked worker and requests VM stop;
 an unavailable device service must never leave a guest indefinitely waiting on
-MMIO. Stop cancels pending requests and stale completions fail. No userspace
-pointer, UART FIFO, or registered output VMO is retained by the kernel.
+MMIO. Stop cancels pending requests and stale completions fail. The worker
+retains its guest-memory capability until it leaves. No userspace pointer or
+device FIFO is retained by the kernel.
 
 The manager validates each runtime's monotonic lifecycle records and records
 its terminal outcome in that VM's lifecycle state. Loss of either control peer or
@@ -133,7 +156,83 @@ monotonic clock, passes it directly to the same multi-object wait, and forces
 the runtime Process when the deadline expires. It does not approximate time
 with polling, scheduler yields, or unrelated inspection authority.
 
-## Serial validation
+### AArch64 guest UART
+
+The guest device tree describes an `arm,sbsa-uart` at `0x09000000`, with INTID 33
+and `current-speed = 115200`. Linux uses its existing `ttyAMA0` driver and
+`earlycon` discovers the device through `/chosen/stdout-path`. The physical
+host UART is independent of this guest device.
+
+The model implements the [Arm Generic UART profile](https://documentation-service.arm.com/static/5fae4f00ca04df4095c1c988)
+(Appendix B) and its [Linux device-tree binding](https://www.kernel.org/doc/Documentation/devicetree/bindings/serial/arm%2Csbsa-uart.yaml).
+It has separate 32-byte RX/TX FIFOs, fixed 8N1 framing, always-enabled TX/RX,
+and fixed FIFO interrupt thresholds of four bytes. It exposes DR, RSR/ECR, FR,
+IMSC, RIS, MIS and ICR. It does not advertise PL011 compatibility or PrimeCell
+identity, programmable baud/framing, DMA, modem signals, hardware flow control
+or IrDA. Reserved registers read as zero and ignore writes.
+
+FIFO transitions latch RX/TX interrupts; ICR acknowledges individual sources
+and IMSC enables their delivery. With RTIM enabled, RX timeout fires after 32
+bit periods without new input while the FIFO is nonempty. Disabling RTIM clears
+the timeout and stops its timer; enabling it restarts timing for pending data.
+Draining the FIFO clears the timeout; reading only part of it does not acknowledge
+a pending timeout. Receive overrun status and error-interrupt acknowledgment are
+independent.
+
+This is a virtual byte stream, not a wire-timing simulation. TX drains into the
+bounded output queue as space becomes available; it is not throttled to 115200
+baud. That fixed baud value determines the receive timeout. A full TX FIFO
+reports TXFF and clearing space updates TX status and interrupts. One worker
+serializes all vCPU requests for this UART.
+
+### Buffered guest terminal
+
+Each reference guest also has a modern virtio-mmio console (device ID 3), with
+one receive queue and one transmit queue. Both split queues allow up to 128
+descriptors. The device advertises `VIRTIO_F_VERSION_1`; it does not advertise
+multiport control, console-size negotiation, emergency writes, indirect
+descriptors, packed rings, or event-index notification suppression.
+
+| Guest platform | MMIO window | Interrupt |
+| --- | --- | --- |
+| AArch64 reference | `0x0a002000`, 4 KiB | GIC INTID 50 |
+| RISC-V reference | `0x10001000`, 4 KiB | PLIC source 1 |
+
+The device tree keeps the UART as `stdout-path`. Linux `console=ttyAMA0`
+(AArch64) or `console=ttyS0` (RISC-V) therefore keeps kernel and panic messages
+on the diagnostic UART. The packaged guest init separately chooses its shell
+terminal: `hyper.console=virtio` requests `/dev/hvc0`; `hyper.console=uart`
+selects the UART explicitly. Shipped board and test configurations select virtio;
+UART remains the fallback when the argument is absent.
+The Native runtime reads the same argument to route keyboard input to the
+selected device. Output from both devices reaches the same console attachment.
+An unavailable requested virtio driver or tty fails guest userspace startup
+explicitly. Adding `console=hvc0` is unnecessary and would change the kernel's
+printk-console selection.
+
+The worker validates queue size, alignment, bounds and non-overlap before
+activation. It copies and validates each descriptor chain into bounded private
+state, rejects unnegotiated features and invalid directions, and prevents payloads
+from aliasing either queue's metadata. Partial TX chains remain outstanding until
+their bytes enter the bounded output queue. Used entries precede publication of
+the used index; notification suppression is checked after that publication.
+Malformed queue state sets `DEVICE_NEEDS_RESET`, reports a configuration
+interrupt, and stops queue access until device reset. One worker serializes
+queue access, MMIO and reset.
+
+`GuestMemory` READ and WRITE rights independently authorize live RAM copies;
+neither operation requires MAP. `guest_memory_read` and `guest_memory_write`
+validate grant-relative ranges and transfer at most 64 KiB per call. Backing
+ownership and copy admission survive Native user faults and handle closure.
+Naturally aligned 1/2/4/8-byte guest ranges use single-copy-atomic accesses,
+regardless of the Native buffer's alignment. Larger copies are not atomic
+snapshots and must be validated by their consumer. Reads provide acquire
+ordering; writes provide release ordering and a full memory-ordering fence before
+later notifications or index loads. This lets the userspace model publish
+split-ring indices without borrowing guest memory as Rust slices. Memory
+dedicated to the kernel NativeBlock initiator rejects these backend copies.
+
+## Console validation
 
 `make test-native` covers console attachment, output, and detachment.
 `make test-runtime-crash` builds the explicit `test-runtime-crash` fixture and
@@ -145,10 +244,40 @@ A second short boot reverses the definition order and repeats the isolation
 check. After stopping the survivor in the first boot, five fresh VM/runtime
 cycles with the default 1 GiB QEMU RAM check teardown and continued allocation
 against an idle memory baseline.
-Kernel self-tests verify invalid registration, hostile cursor values, full-ring
-behavior, exclusive assignment, last-handle output closure, and release of
-pinned and committed pages only after the final device owner drops. Host tests
-exercise cursor wrap and exhaustion.
+Kernel host tests verify detached MMIO publication, stale or wrong-kind
+completion rejection, independent vCPU requests and cancellation on close.
+A Loom test exercises clear-before-scan notification ordering with two vCPUs.
+Userspace UART host tests cover FIFO ordering and saturation, interrupt
+acknowledgment, receive timeout, overrun and register access boundaries.
+Virtio-console host tests cover feature negotiation, queue geometry, descriptor
+validation, partial TX, RX backpressure, reset, memory failures, notification
+suppression, and 16-bit ring-index wrap. Guest init tests check explicit tty
+selection and errors when a requested virtio console is absent.
+`make test-console` checks paced guest input and exact multi-message output;
+`make test-io-vm` exercises the same console worker in the I/O appliance path.
+
+The local-only [console benchmark](../../tests/performance/guest-console.py)
+compares both devices in one guest and checks every payload byte:
+
+```sh
+python3 -B tests/performance/guest-console.py \
+  --image kernel/target/aarch64-unknown-none/kernel/hyper.img \
+  --initramfs target/app/aarch64/initramfs.cpio \
+  --output target/console-benchmark
+```
+
+Build the archive with the shipped `hyper.console=virtio` configuration first.
+The benchmark drains boot diagnostics, alternates transport order, and records
+artifact hashes, raw output and timings. It measures command submission through
+complete receipt, including input, scheduling and terminal relay overhead.
+It is intentionally excluded from CI and rejects CI environments.
+
+An exploratory macOS ARM64 run with QEMU 11.1.2, multithreaded TCG, four host
+vCPUs and 1 GiB RAM measured a 32 KiB output median of 31.97 seconds through
+SBSA UART versus 1.10 seconds through hvc0 across three samples per device
+(about 29 times faster). A separate 256 KiB hvc0 transfer completed in 1.57
+seconds with exact payload verification. These are development-environment
+observations, not hardware throughput guarantees or acceptance thresholds.
 
 Physical AArch64 qualification still needs concurrent guest output/runtime
 consumption under migration, forced runtime termination, and repeated VM

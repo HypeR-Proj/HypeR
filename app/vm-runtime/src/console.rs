@@ -22,34 +22,35 @@ use readiness::Subscription;
 
 const RETAIN_BYTES: usize = 64 * 1024;
 const BATCH: usize = hyper_os::channel::MAX_MESSAGE_BYTES;
+const OUTPUT_MESSAGE_BYTES: usize = hyper_vm_support::console::MESSAGE_BYTES;
 
 pub struct Console {
     connection: CapabilityChannel,
-    output: hyper_vm_support::serial::Port,
+    output: hyper_vm_support::console::Port,
     client: Option<OwnedHandle<ByteChannelObject>>,
-    serial_wait: Subscription,
+    device_wait: Subscription,
     client_wait: Subscription,
-    serial_closed: bool,
+    device_closed: bool,
     client_output_closed: bool,
     retained: VecDeque<u8>,
     input: VecDeque<u8>,
 }
 
 impl Console {
-    /// Retires the independent UART worker after the supervision loop ends.
+    /// Retires the independent console worker after the supervision loop ends.
     pub fn finish(self) -> Result<()> {
         self.output.join()
     }
 
     #[must_use]
-    pub fn new(connection: CapabilityChannel, output: hyper_vm_support::serial::Port) -> Self {
+    pub fn new(connection: CapabilityChannel, output: hyper_vm_support::console::Port) -> Self {
         Self {
             connection,
             output,
             client: None,
-            serial_wait: Subscription::new(),
+            device_wait: Subscription::new(),
             client_wait: Subscription::new(),
-            serial_closed: false,
+            device_closed: false,
             client_output_closed: false,
             retained: VecDeque::with_capacity(RETAIN_BYTES),
             input: VecDeque::with_capacity(BATCH),
@@ -83,20 +84,23 @@ impl Console {
     /// Keep persistent subscriptions only for work the next service pass can
     /// perform. Full guest input must not spin on a readable client channel.
     pub fn prepare_wait(&mut self, waits: &WaitSet) -> Result<()> {
-        if self.serial_closed {
-            self.serial_wait.remove(waits)?;
+        if self.device_closed {
+            self.device_wait.remove(waits)?;
         } else {
-            let mut signals = ObjectSignals::<ByteChannelObject>::READABLE
-                .union(ObjectSignals::<ByteChannelObject>::PEER_CLOSED);
+            let mut signals = ObjectSignals::<ByteChannelObject>::PEER_CLOSED;
+            let readable = self.can_collect();
+            if readable {
+                signals = signals.union(ObjectSignals::<ByteChannelObject>::READABLE);
+            }
             let input_pending = !self.input.is_empty();
             if input_pending {
                 signals = signals.union(ObjectSignals::<ByteChannelObject>::WRITABLE);
             }
-            self.serial_wait.update(
+            self.device_wait.update(
                 waits,
                 self.output.as_handle_ref(),
                 signals,
-                u8::from(input_pending),
+                u8::from(input_pending) | (u8::from(readable) << 1),
             )?;
         }
         let readable = self.input.is_empty();
@@ -124,27 +128,26 @@ impl Console {
     }
 
     pub fn observe(&mut self, registration: RegistrationId, signals: u64) {
-        if self.serial_wait.consume(registration)
+        if self.device_wait.consume(registration)
             && ObjectSignals::<ByteChannelObject>::PEER_CLOSED.is_present_in(signals)
         {
-            self.serial_closed = true;
+            self.device_closed = true;
             self.input.clear();
         }
         self.client_wait.consume(registration);
     }
 
-    /// Bounded nonblocking work after readiness. A full client channel never blocks
-    /// collection or VM lifecycle control; only successfully sent bytes drain.
+    /// Bounded nonblocking work after readiness. A full client channel applies
+    /// output backpressure without blocking VM lifecycle control; only
+    /// successfully sent bytes drain.
     pub fn service(&mut self) -> Result<()> {
         let mut bytes = [0; BATCH];
-        // Bound the work even if the guest continuously produces output.
-        for _ in 0..8 {
-            let count = self.output.try_read(&mut bytes)?;
-            retain(&mut self.retained, &bytes[..count]);
-            if count < BATCH {
-                break;
-            }
-        }
+        collect_output(
+            &mut self.retained,
+            &mut bytes,
+            self.client.is_some() && !self.client_output_closed,
+            |bytes| self.output.try_read(bytes),
+        )?;
         if !self.client_output_closed
             && let Some(client) = &self.client
         {
@@ -198,6 +201,42 @@ impl Console {
         }
         Ok(())
     }
+
+    fn can_collect(&self) -> bool {
+        can_collect_output(
+            self.retained.len(),
+            self.client.is_some() && !self.client_output_closed,
+        )
+    }
+}
+
+fn can_collect_output(retained_bytes: usize, live_client: bool) -> bool {
+    // An unattached console retains a rolling history. Once attached,
+    // terminal output is lossless: reserve a complete message before
+    // receive and let pressure reach the guest if the reader falls behind.
+    !live_client || retained_bytes <= RETAIN_BYTES - OUTPUT_MESSAGE_BYTES
+}
+
+fn collect_output(
+    retained: &mut VecDeque<u8>,
+    bytes: &mut [u8; BATCH],
+    live_client: bool,
+    mut read: impl FnMut(&mut [u8]) -> Result<usize>,
+) -> Result<()> {
+    // Bound the work even if the guest continuously produces output.
+    for _ in 0..8 {
+        if !can_collect_output(retained.len(), live_client) {
+            break;
+        }
+        let count = read(&mut bytes[..OUTPUT_MESSAGE_BYTES])?;
+        retain(retained, &bytes[..count]);
+        // ByteChannel messages are framed: a short message does not mean
+        // the next message is unavailable. Drain up to the service budget.
+        if count == 0 {
+            break;
+        }
+    }
+    Ok(())
 }
 
 fn retain(queue: &mut VecDeque<u8>, bytes: &[u8]) {

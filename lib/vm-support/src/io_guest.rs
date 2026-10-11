@@ -3,7 +3,7 @@
 
 //! Shared image preparation and installation for physical-I/O deployments.
 
-use crate::serial::Port;
+use crate::console::Port;
 use hyper_os::device;
 use hyper_os::handle::{VirtualCpuObject, VirtualMachineObject};
 use hyper_os::memory::WritableVmo;
@@ -296,6 +296,11 @@ pub fn install_mapped(
         machine.clone(),
         cpus.clone(),
         vm::PlatformProfile::Aarch64Reference,
+        own.duplicate(hyper_os::handle::Rights::READ.union(hyper_os::handle::Rights::WRITE))
+            .map_err(show)?,
+        RAM_BASE,
+        image.plan.memory_size(),
+        crate::console::Input::from_boot_arguments(&image.arguments).map_err(show)?,
     )
     .map_err(show)?;
     Ok(InstalledGuest {

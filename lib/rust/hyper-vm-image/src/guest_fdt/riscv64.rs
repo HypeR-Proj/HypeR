@@ -122,6 +122,14 @@ pub(super) fn build(
         HYPER_NATIVE_VIRTUAL_PLATFORM_RISCV64_REFERENCE_UART_INTERRUPT as u32,
     )?;
     builder.end_node()?;
+
+    builder.begin_node("virtio_mmio@10001000")?;
+    builder.property_string("compatible", "virtio,mmio")?;
+    builder.property_u64_pair("reg", 0x1000_1000, 0x1000)?;
+    builder.property_u32("interrupt-parent", PLIC)?;
+    builder.property_u32("interrupts", 1)?;
+    builder.property_empty("dma-coherent")?;
+    builder.end_node()?;
     builder.end_node()?;
     builder.end_node()?;
     builder.finish(output)

@@ -31,6 +31,7 @@ fn deadline() -> Result<u64> {
         .map_err(show)
 }
 fn suite(startup: &Startup<'_>) -> Result<()> {
+    super::guest_memory::suite()?;
     shared_retirement(startup)?;
     super::io::suite(startup)?;
     for cancel in [false, true] {

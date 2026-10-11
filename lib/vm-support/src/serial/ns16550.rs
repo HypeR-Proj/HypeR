@@ -80,10 +80,11 @@ impl Ns16550 {
         }
         self.receive(byte, now)
     }
-    fn restart_timeout(&mut self, now: u64) {
-        self.timeout_pending = false;
+    fn schedule_timeout(&mut self, now: u64) {
         self.deadline = None;
-        if !self.fifo() || self.len == 0 || self.uart_clock == 0 {
+        // Once latched, a receiver timeout is cleared by RBR consumption or
+        // FIFO reset, not by another character or line-control programming.
+        if self.timeout_pending || !self.fifo() || self.len == 0 || self.uart_clock == 0 {
             return;
         }
         let divisor = u64::from(u16::from_le_bytes(self.divisor)).max(1);
@@ -117,13 +118,14 @@ impl Ns16550 {
         self.deadline
     }
     pub fn receive(&mut self, byte: u8, now: u64) -> bool {
+        self.advance(now);
         if !self.can_receive() {
             self.overrun = true;
             return false;
         }
         self.rx[(self.head + self.len) % 16] = byte;
         self.len += 1;
-        self.restart_timeout(now);
+        self.schedule_timeout(now);
         true
     }
     fn interrupt_id(&self) -> u8 {
@@ -167,7 +169,8 @@ impl Ns16550 {
                     self.len -= 1;
                     b
                 };
-                self.restart_timeout(now);
+                self.timeout_pending = false;
+                self.schedule_timeout(now);
                 byte
             }
             1 if self.lcr & 0x80 != 0 => self.divisor[1],
@@ -200,7 +203,7 @@ impl Ns16550 {
         match register {
             0 if self.lcr & 0x80 != 0 => {
                 self.divisor[0] = value;
-                self.restart_timeout(now);
+                self.schedule_timeout(now);
             }
             0 => {
                 self.tx_pending = self.ier & 2 != 0;
@@ -212,7 +215,7 @@ impl Ns16550 {
             }
             1 if self.lcr & 0x80 != 0 => {
                 self.divisor[1] = value;
-                self.restart_timeout(now);
+                self.schedule_timeout(now);
             }
             1 => {
                 let was = self.ier & 2 != 0;
@@ -220,17 +223,28 @@ impl Ns16550 {
                 self.tx_pending = self.ier & 2 != 0 && (!was || self.tx_pending);
             }
             2 => {
-                let reset = (self.fcr ^ value) & 1 != 0 || value & 2 != 0;
-                self.fcr = value & 0xc1;
+                let mode_changed = (self.fcr ^ value) & 1 != 0;
+                // The remaining FCR bits are only active with FIFO enable set.
+                let reset = mode_changed || value & 3 == 3;
+                self.fcr = if value & 1 != 0 { value & 0xc1 } else { 0 };
                 if reset {
                     self.head = 0;
                     self.len = 0;
+                    self.timeout_pending = false;
+                    self.deadline = None;
                 }
-                self.restart_timeout(now);
+                if mode_changed {
+                    // Switching FIFO mode empties TX and re-arms its interrupt
+                    // even if an earlier IIR read consumed the empty indication.
+                    self.tx_pending = self.ier & 2 != 0;
+                }
             }
             3 => {
+                let format_changed = (self.lcr ^ value) & 0x3f != 0;
                 self.lcr = value;
-                self.restart_timeout(now);
+                if format_changed {
+                    self.schedule_timeout(now);
+                }
             }
             4 => {
                 let old = self.modem();
