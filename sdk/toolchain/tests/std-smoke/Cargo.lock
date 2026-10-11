@@ -218,6 +218,14 @@ dependencies = [
 ]
 
 [[patch.unused]]
+name = "hyper-block"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "hyper-erofs"
+version = "0.0.0"
+
+[[patch.unused]]
 name = "hyper-fatfs"
 version = "0.0.0"
 

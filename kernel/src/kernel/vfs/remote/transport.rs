@@ -35,7 +35,7 @@ impl Health {
             Ok(())
         }
     }
-    fn fail(&self) {
+    pub(super) fn fail(&self) {
         self.failed.store(true, Ordering::Release);
     }
 }
@@ -45,12 +45,14 @@ pub(in crate::kernel::vfs) struct Transport {
     _mapping: WritableMappingLease<KernelPageBackend, DomainAccount>,
     domain: ResourceDomain,
     sequence: u64,
+    read_only: bool,
 }
 impl Transport {
     pub(crate) fn prepare(
         process: &Process,
         channel: HandleValue,
         buffer: HandleValue,
+        read_only: bool,
     ) -> Result<Self, super::Error> {
         let channel = process
             .resolve_handle::<ByteChannel>(
@@ -88,6 +90,7 @@ impl Transport {
             _mapping: mapping,
             domain: process.resource_domain(),
             sequence: 0,
+            read_only,
         })
     }
     fn call(
@@ -100,6 +103,19 @@ impl Transport {
         times: [Option<Timestamp>; 2],
     ) -> Result<Response, Error> {
         self.health.check()?;
+        if self.read_only
+            && matches!(
+                operation,
+                Operation::Write
+                    | Operation::Create
+                    | Operation::Remove
+                    | Operation::Rename
+                    | Operation::Resize
+                    | Operation::SetMetadata
+            )
+        {
+            return Err(Error::ReadOnly);
+        }
         let result = self.exchange(operation, path, target, offset, length, times);
         if result.as_ref().err().is_some_and(|error| error.terminal()) {
             self.health.fail();
@@ -135,11 +151,16 @@ impl Transport {
         request
             .encode(message.bytes_mut())
             .ok_or(Error::InvalidInput)?;
+        // Object waits consume absolute nanoseconds, not hardware counter ticks.
+        // Prepare a finite deadline before transferring the shared range.
+        let deadline_nanoseconds = crate::kernel::time::monotonic_nanoseconds()
+            .map_err(|_| Error::Closed)?
+            .checked_add(60_000_000_000)
+            .filter(|deadline| *deadline != hyper::abi::native::HYPER_NATIVE_DEADLINE_INFINITE)
+            .ok_or(Error::Closed)?;
         let channel = self.health.channel.object();
         let reservation = channel.prepare_write(&message).map_err(|_| Error::Closed)?;
         reservation.publish(message);
-        let deadline =
-            crate::kernel::time::deadline_after(60_000_000_000).map_err(|_| Error::Closed)?;
         loop {
             match channel.peek() {
                 Ok(info) => {
@@ -158,7 +179,7 @@ impl Transport {
                 source,
                 &self.domain,
                 ByteChannel::READABLE.union(ByteChannel::PEER_CLOSED).bits(),
-                deadline,
+                deadline_nanoseconds,
                 // Publication transfers the shared range to the worker. An
                 // app's stop request cannot retire a mount used by other apps.
                 // Drain this bounded transaction; the user runner handles stop
@@ -191,6 +212,28 @@ impl Transport {
         }
         *entry = response.entry;
         Ok(present != 0)
+    }
+    pub(super) fn read_link(&mut self, path: &str, output: &mut [u8]) -> Result<usize, Error> {
+        if output.len() > protocol::PATH_BYTES {
+            return Err(Error::InvalidInput);
+        }
+        let response = self.call(
+            Operation::ReadLink,
+            path,
+            "",
+            0,
+            output.len() as u64,
+            [None; 2],
+        )?;
+        let actual = usize::try_from(response.result?).map_err(|_| Error::Corrupt)?;
+        if actual > output.len() {
+            self.health.fail();
+            return Err(Error::Corrupt);
+        }
+        self.buffer
+            .read_exposed(0, &mut output[..actual])
+            .map_err(|_| Error::Io)?;
+        Ok(actual)
     }
     pub(super) fn read_at(
         &mut self,

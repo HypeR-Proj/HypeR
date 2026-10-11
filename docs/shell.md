@@ -5,9 +5,38 @@ SPDX-License-Identifier: Apache-2.0
 
 # Shell and text filtering
 
-The Native shell searches `/bin` for bare command names and resolves relative
-paths from its current directory. Use `help` for builtins and `APP --help` for
-application options.
+The formal shell is `app/shell`, installed as `/system/bin/sh`. It retains the
+interactive editing, command launch, pipeline and redirection features described
+below. It is not a Bash-compatible shell.
+
+`bootstrap/stage1/fallback-sh` is a separate, statically linked recovery service,
+installed as `/svc/fallback-sh` in the initial ramdisk and retained at
+`/boot/svc/fallback-sh` after root switch. It has no clap dependency, command-line
+options, history, pipelines or file redirection. Its builtins are `cd`, `pwd`,
+`help` and `exit`; bounded line editing and quoted executable arguments remain.
+It can launch recovery tools or explicitly selected system programs when those
+are accessible. The `svc` directories are never searched for bare command names.
+
+Session waits for init's one-shot startup decision before launching either
+shell. A successful initialization selects the formal shell. Startup failure,
+a closed decision channel or a 180-second decision timeout selects the fallback
+shell. Failure to load the formal shell or an abnormal shell exit also enters
+recovery. Clean exit restarts the selected shell on the same transport.
+
+Both shells open `mount` and `umount` through their fixed boot image environment;
+other bare commands, including `sh`, resolve under `/system/bin`. Explicit paths
+resolve from the live namespace or current directory. In the
+[default deployment](boot-layout.md), there is no root-level `/bin` alias.
+Launching a boot tool does not open the system library directory, so storage
+failure cannot prevent static recovery commands. Use `help` for builtins and
+`APP --help` for application options.
+
+After repairing storage from recovery, run `/system/bin/sh` to enter the formal
+shell; `exit` returns to the recovery shell. Launching that exact trusted path
+also works from another formal shell. It receives the bootstrap environment,
+diagnostic authority and available filesystem/VM client connectors with rights
+to delegate them to its own tools. Ordinary commands, including copies of these
+tools at other paths, receive only their existing command-specific grants.
 
 ## Editing and history
 
@@ -25,7 +54,7 @@ sensitive command out of history, though it is still echoed to the terminal.
 ## Pipelines and files
 
 ```sh
-ls -1 /bin | grep '^c'
+ls -1 /system/bin | grep '^c'
 cat /data/vms.json | grep -n image
 echo first > /notes
 echo second >> /notes

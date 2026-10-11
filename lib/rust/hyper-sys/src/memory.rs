@@ -291,3 +291,35 @@ pub unsafe fn vmo_get_dma_extent(
         )
     }
 }
+
+/// Maps a protected file range privately into a VMAR of the current process.
+///
+/// Only `COPY_ON_WRITE` mode is supported. The mapping retains an independent
+/// protection reference while allowing clean resident pages to be reclaimed.
+///
+/// # Safety
+/// The File requires READ, plus EXECUTE for executable mappings. The live
+/// protection token must cover that same file; it and the VMAR require MAP.
+/// `mapping` must remain readable
+/// for `mapping_size` bytes; the caller owns the destination address range.
+pub unsafe fn vmar_map_file(
+    vmar: abi::HyperNativeHandle,
+    file: abi::HyperNativeHandle,
+    protection: abi::HyperNativeHandle,
+    mapping: *const abi::HyperNativePrivateMapping,
+    mapping_size: usize,
+) -> abi::HyperNativeStatus {
+    // SAFETY: the caller retains all capabilities and the request record.
+    unsafe {
+        ffi_native_call6(
+            abi::HYPER_NATIVE_SYS_VMAR_MAP_FILE,
+            vmar,
+            file,
+            protection,
+            mapping as u64,
+            mapping_size as u64,
+            0,
+        )
+        .status
+    }
+}

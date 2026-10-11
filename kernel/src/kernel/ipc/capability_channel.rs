@@ -10,6 +10,7 @@
 //! capability batch.
 
 use alloc::boxed::Box;
+use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use hyper::mm::{FallibleArc, WeakFallibleArc, try_box};
@@ -116,11 +117,9 @@ pub(crate) struct CapabilitySlotContract {
 }
 
 /// Fully validated receive shape published to potential senders.
-#[derive(Clone, Copy)]
 pub(crate) struct CapabilityReceiveContract {
     byte_capacity: usize,
-    slots: [CapabilitySlotContract; MAX_HANDLES],
-    slot_count: usize,
+    slots: Vec<CapabilitySlotContract>,
 }
 
 impl CapabilityReceiveContract {
@@ -137,28 +136,31 @@ impl CapabilityReceiveContract {
                 required_handles: slots.len(),
             });
         }
-        let mut owned = [CapabilitySlotContract {
-            rights: Rights::NONE,
-            expected_kind: None,
-        }; MAX_HANDLES];
-        owned[..slots.len()].copy_from_slice(slots);
+        let mut owned = Vec::new();
+        owned
+            .try_reserve_exact(slots.len())
+            .map_err(|_| CapabilityChannelError::Allocation)?;
+        owned.extend_from_slice(slots);
         Ok(Self {
             byte_capacity,
             slots: owned,
-            slot_count: slots.len(),
         })
     }
 
     pub(crate) fn slots(&self) -> &[CapabilitySlotContract] {
-        &self.slots[..self.slot_count]
+        &self.slots
     }
 
-    pub(crate) const fn slot_count(self) -> usize {
-        self.slot_count
+    pub(crate) fn slot_count(&self) -> usize {
+        self.slots.len()
     }
 
-    fn accepts(self, byte_count: usize, handle_count: usize) -> Result<(), CapabilityChannelError> {
-        if byte_count > self.byte_capacity || handle_count > self.slot_count {
+    fn accepts(
+        &self,
+        byte_count: usize,
+        handle_count: usize,
+    ) -> Result<(), CapabilityChannelError> {
+        if byte_count > self.byte_capacity || handle_count > self.slots.len() {
             Err(CapabilityChannelError::BufferTooSmall {
                 required_bytes: byte_count,
                 required_handles: handle_count,
@@ -665,6 +667,11 @@ impl PreparedCapabilityReceive {
     ) -> Result<Self, CapabilityChannelError> {
         let bytes = FallibleArc::<ReceiveRegistration>::allocation_size()
             .checked_add(core::mem::size_of::<ReceiverNode>())
+            .and_then(|bytes| {
+                bytes.checked_add(
+                    contract.slots.capacity() * core::mem::size_of::<CapabilitySlotContract>(),
+                )
+            })
             .and_then(|bytes| u64::try_from(bytes).ok())
             .ok_or(CapabilityChannelError::AllocationSize)?;
         let charge = domain

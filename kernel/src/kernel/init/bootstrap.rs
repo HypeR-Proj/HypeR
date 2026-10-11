@@ -3,8 +3,6 @@
 
 //! Fallible construction of one dormant boot Process.
 
-use hyper::fs::NodeKind;
-
 use crate::kernel::accounting::ResourceDomain;
 use crate::kernel::capability::{HandleValue, PreparedHandle};
 use crate::kernel::process::{
@@ -15,7 +13,7 @@ use super::Error;
 
 pub(super) struct BootProcess {
     pub(super) process: Process,
-    executable: crate::kernel::vfs::ExecutableSnapshot,
+    executable: PreparedHandle,
 }
 
 // Image loading and authority installation are consecutive boot phases. Their
@@ -27,17 +25,23 @@ pub(super) fn prepare(
     group: &TaskGroup,
     domain: &ResourceDomain,
 ) -> Result<BootProcess, Error> {
-    let executable = crate::kernel::vfs::lookup(path, domain)
-        .map_err(Error::FileSystem)?
-        .ok_or(Error::Missing)?;
-    if executable.kind() != NodeKind::File {
-        return Err(Error::NotRegularFile);
-    }
-    if !executable.is_executable() {
-        return Err(Error::NotExecutable);
-    }
-    let executable = executable.into_executable().ok_or(Error::NotExecutable)?;
-    let loaded = load_native(domain.clone()).map_err(Error::Image)?;
+    let root = crate::kernel::vfs::root_directory(domain).map_err(Error::RootDirectory)?;
+    let executable = root.open_file(path, domain).map_err(Error::RootDirectory)?;
+    let executable = PreparedHandle::try_from_new_object(
+        crate::kernel::object::ObjectPublication::try_new(executable).map_err(Error::Object)?,
+        crate::kernel::authority::Rights::READ
+            .union(crate::kernel::authority::Rights::EXECUTE)
+            .union(crate::kernel::authority::Rights::PROTECT),
+        crate::kernel::capability::HandleFlags::NONE,
+    )
+    .map_err(Error::Handle)?;
+    let loader = root
+        .open_file(loader_path()?, domain)
+        .map_err(Error::RootDirectory)?;
+    let loader = loader
+        .executable_snapshot(domain)
+        .map_err(Error::RootDirectory)?;
+    let loaded = load_native(&loader, domain.clone()).map_err(Error::Image)?;
     let prepared = match PreparedProcess::try_new(
         loaded.image,
         group.clone(),
@@ -68,6 +72,19 @@ pub(super) fn prepare(
         process,
         executable,
     })
+}
+
+// Only the initial process has a kernel-selected loader. Descendants supply
+// an explicit executable File capability through ProcessBuilder.
+fn loader_path() -> Result<&'static str, Error> {
+    use crate::hal::user::HostMachine;
+    match crate::hal::user::host_machine() {
+        HostMachine::Aarch64 => Ok("/lib/userspace-loader-hyper-aarch64"),
+        HostMachine::Riscv64 => Ok("/lib/userspace-loader-hyper-riscv64"),
+        _ => Err(Error::Image(
+            crate::kernel::process::LoaderError::UnsupportedMachine,
+        )),
+    }
 }
 
 pub(super) fn install_handles<const N: usize>(
@@ -129,7 +146,7 @@ fn install_bootstrap<const N: usize>(
     values: &[HandleValue; N],
 ) -> Result<u64, Error> {
     use hyper::abi::native::*;
-    let reservation = boot.process.reserve_handles::<3>()?;
+    let reservation = boot.process.reserve_handles::<2>()?;
     let extra = reservation.values();
     let root = purposes
         .iter()
@@ -143,13 +160,11 @@ fn install_bootstrap<const N: usize>(
     };
     let layout = boot.process.image().bootstrap();
     let header = HyperNativeLoaderStartup {
-        size: 88,
+        size: core::mem::size_of::<HyperNativeLoaderStartup>() as u32,
         handle_count: (N - 2) as u32,
         data_size: 0,
         flags: 0,
-        runtime_directory: extra[2].get(),
         executable: extra[0].get(),
-        executable_size: boot.executable.bytes().len() as u64,
         root_vmar: values[root].get(),
         stack_vmar: values[stack].get(),
         stack_base: layout.stack_base,
@@ -183,14 +198,7 @@ fn install_bootstrap<const N: usize>(
     drop(prepared.parent_channel);
     let published = boot
         .process
-        .publish_handles(
-            reservation,
-            [
-                prepared.executable,
-                prepared.child_channel,
-                prepared.runtime_directory,
-            ],
-        )
+        .publish_handles(reservation, [prepared.executable, prepared.child_channel])
         .map_err(|failure| Error::Process(failure.error))?;
     Ok(published[1].get())
 }

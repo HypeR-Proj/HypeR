@@ -31,26 +31,6 @@ pub(in crate::kernel::abi::native) fn sys_vmo_create(
 }
 
 #[inline(never)]
-pub(in crate::kernel::abi::native) fn sys_file_create_executable_vmo(
-    services: &impl MemoryServices,
-    arguments: &Arguments,
-) -> DeferredAction {
-    let result = if arguments[1..].iter().any(|value| *value != 0) {
-        Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)
-    } else {
-        parse_handle(arguments[0]).and_then(|file| {
-            services
-                .create_file_executable_vmo(file)
-                .map_err(status_from_memory_service_error)
-        })
-    };
-    DeferredAction::Return(match result {
-        Ok((handle, size)) => success([handle.get(), size]),
-        Err(error) => failure(error),
-    })
-}
-
-#[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_vmo_read(
     services: &impl MemoryServices,
     arguments: &Arguments,
@@ -207,24 +187,6 @@ pub(in crate::kernel::abi::native) fn sys_vmo_create_snapshot(
 }
 
 #[inline(never)]
-pub(in crate::kernel::abi::native) fn sys_file_create_snapshot(
-    services: &impl MemoryServices,
-    arguments: &Arguments,
-) -> DeferredAction {
-    let result = (|| {
-        require_zero(&arguments[1..])?;
-        let value = parse_handle(arguments[0])?;
-        services
-            .create_file_snapshot(value)
-            .map_err(status_from_memory_service_error)
-    })();
-    DeferredAction::Return(match result {
-        Ok((handle, size)) => success([handle.get(), size]),
-        Err(error) => failure(error),
-    })
-}
-
-#[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_vmar_map_private(
     services: &(impl MemoryServices + crate::kernel::abi::native::services::UserMemoryServices),
     arguments: &Arguments,
@@ -250,6 +212,38 @@ pub(in crate::kernel::abi::native) fn sys_vmar_map_private(
         };
         services
             .map_private(vmar, snapshot, request)
+            .map_err(status_from_memory_service_error)
+    })();
+    DeferredAction::Return(status_only(result))
+}
+
+#[inline(never)]
+pub(in crate::kernel::abi::native) fn sys_vmar_map_file(
+    services: &(impl MemoryServices + crate::kernel::abi::native::services::UserMemoryServices),
+    arguments: &Arguments,
+) -> DeferredAction {
+    let result = (|| {
+        require_zero(&arguments[5..])?;
+        let vmar = parse_handle(arguments[0])?;
+        let file = parse_handle(arguments[1])?;
+        let protection = parse_handle(arguments[2])?;
+        let record = crate::kernel::abi::native::wire::copy_extensible_input_record::<48>(
+            services,
+            &[0, arguments[3], arguments[4], 0, 0, 0],
+            48,
+        )?;
+        use crate::kernel::abi::native::wire::{read_record_u32, read_record_u64};
+        let request = crate::kernel::mm::user_space::PrivateMappingRequest {
+            source_offset: read_record_u64(&record, 0),
+            source_length: read_record_u64(&record, 8),
+            address: read_record_u64(&record, 16),
+            size: read_record_u64(&record, 24),
+            data_offset: read_record_u64(&record, 32),
+            permissions: read_record_u32(&record, 40),
+            mode: read_record_u32(&record, 44),
+        };
+        services
+            .map_file(vmar, file, protection, request)
             .map_err(status_from_memory_service_error)
     })();
     DeferredAction::Return(status_only(result))

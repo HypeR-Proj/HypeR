@@ -6,6 +6,16 @@
 #[path = "../../../tests/kernel/vfs_namespace/content.rs"]
 mod content;
 
+#[path = "../../../tests/kernel/vfs_namespace/protection.rs"]
+mod protection;
+
+#[path = "../../../tests/kernel/vfs_namespace/root_switch.rs"]
+mod root_switch;
+
+#[cfg(any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64))]
+#[path = "../../../tests/kernel/vfs_namespace/process_loader.rs"]
+mod process_loader;
+
 static EMPTY_ARCHIVE: &[u8] = b"07070100000001000000000000000000000000000000010000000000000000000000000000000000000000000000000000000b00000000TRAILER!!!\0\0\0\0";
 
 use super::{DirectoryObject, Error, FileObject, FileOpenOptions, MetadataUpdate, ScratchBudget};
@@ -53,7 +63,9 @@ pub(crate) fn run() -> Result<(), TestError> {
         super::instance::MountNamespace::try_new(filesystem, cache).map_err(Error::from)?;
     let root = DirectoryObject::try_root(namespace, &domain)?;
     content::run(&root, &domain, &scratch)?;
-    snapshot_cache(&root, &domain, &scratch)?;
+    protection::run(&root, &domain, &scratch)?;
+    #[cfg(any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64))]
+    process_loader::run(&root, &domain, &scratch)?;
     mounted_namespace(&root, &domain, &scratch)?;
     root.create("left", NodeKind::Directory, 0o755, &scratch)?;
     root.create("right", NodeKind::Directory, 0o755, &scratch)?;
@@ -222,6 +234,7 @@ pub(crate) fn run() -> Result<(), TestError> {
     trailing_directory_mutations(&root, &domain, &scratch)?;
     deep_directory_rename(&root, &domain, &scratch)?;
     active_handle_lock_lifetime(&root, &domain)?;
+    root_switch::run(&domain)?;
     Ok(())
 }
 
@@ -456,77 +469,6 @@ fn deep_directory_rename(
     result.and(cleanup)
 }
 
-fn snapshot_cache(
-    root: &DirectoryObject,
-    domain: &ResourceDomain,
-    scratch: &ScratchBudget,
-) -> Result<(), TestError> {
-    let file = root.create_file("snapshot", 0o666, domain, Ok::<FileObject, Error>)?;
-    file.write(Some(0), b"original")?;
-    root.link("snapshot", root, "snapshot-alias", scratch)?;
-    let alias = root.open_file("snapshot-alias", domain)?;
-    let first = file.readable_snapshot(domain)?;
-    let second = alias.readable_snapshot(domain)?;
-    let physical = |snapshot: &super::ExecutableSnapshot| {
-        snapshot
-            .storage()
-            .resident_physical_page(0)
-            .map_err(|_| TestError::Contract("snapshot physical backing"))
-    };
-    check(
-        physical(&first)? == physical(&second)?,
-        "hardlink snapshots share physical pages",
-    )?;
-    let old_weak = first.storage().downgrade();
-    file.write(Some(0), b"modified")?;
-    let changed = alias.readable_snapshot(domain)?;
-    check(
-        physical(&first)? != physical(&changed)?,
-        "write creates a new physical generation",
-    )?;
-    let mut bytes = [0u8; 8];
-    first
-        .storage()
-        .read(0, &mut bytes)
-        .map_err(|_| TestError::Contract("snapshot read"))?;
-    check(
-        &bytes == b"original",
-        "old snapshot remains immutable after file write",
-    )?;
-    drop(first);
-    drop(second);
-    check(
-        old_weak.upgrade().is_none(),
-        "weak file cache releases last detached generation",
-    )?;
-    file.resize(4)?;
-    let resized = file.readable_snapshot(domain)?;
-    check(
-        physical(&changed)? != physical(&resized)? && resized.bytes() == b"modi",
-        "resize replaces cached generation",
-    )?;
-    let _truncated = root.open_file_with_options(
-        "snapshot-alias",
-        &FileOpenOptions::new(Rights::WRITE, 4, 0o666)?,
-        domain,
-        Ok::<FileObject, Error>,
-    )?;
-    let truncated = file.readable_snapshot(domain)?;
-    check(
-        truncated.bytes().is_empty(),
-        "truncate invalidates cached generation",
-    )?;
-    let weak = truncated.storage().downgrade();
-    drop(truncated);
-    check(
-        weak.upgrade().is_none(),
-        "file cache never strongly pins unused pages",
-    )?;
-    root.remove("snapshot-alias", NodeKind::File, scratch)?;
-    root.remove("snapshot", NodeKind::File, scratch)?;
-    Ok(())
-}
-
 fn mounted_namespace(
     root: &DirectoryObject,
     domain: &ResourceDomain,
@@ -608,5 +550,28 @@ fn mounted_namespace(
         file.read(0, &mut buffer)? == 7 && &buffer == b"mounted",
         "mounted file IO",
     )?;
+    let old_mount = file.metadata()?.location.mount_id;
+    check(
+        matches!(root.unmount("data", domain), Err(Error::Busy)),
+        "open file and cwd block unmount",
+    )?;
+    drop(file);
+    drop(confined);
+    drop(cwd);
+    drop(data);
+    root.unmount("data", domain)?;
+    check(
+        root.metadata("data/covered", true, scratch).is_ok(),
+        "unmount uncovers original directory",
+    )?;
+    let archive = RamFs::from_newc(EMPTY_ARCHIVE)
+        .map_err(|error| Error::Backend(super::instance::Error::RamFs(error)))?;
+    let filesystem = super::instance::FilesystemInstance::try_from_ramfs(archive)?;
+    root.mount_filesystem("data", filesystem, domain)?;
+    check(
+        root.metadata("data", true, scratch)?.location.mount_id != old_mount,
+        "remount has a fresh mount identity",
+    )?;
+    root.unmount("data", domain)?;
     Ok(())
 }

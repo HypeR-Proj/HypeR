@@ -118,7 +118,7 @@ state_tool=$repository/scripts/sysroot-state.py
 state_inputs=$transaction/inputs.json
 capture_inputs() {
     python3 "$state_tool" inputs "$1" "$abi_source/Cargo.toml" "$abi_source/src" "$abi_source/include" "$lib_source" \
-        "$dynamic_loader_source" "$userspace_loader_source" "$rust_source" "$rust_source/../../third_party/rust-fatfs" "$repository" \
+        "$dynamic_loader_source" "$userspace_loader_source" "$lib_source/../elf-loader" "$rust_source" "$rust_source/../../third_party/rust-fatfs" "$repository" \
         "$rust_sysroot/lib/rustlib/src/rust/library" "$rust_sysroot/share/doc/rust/licenses" \
         "$rust_sysroot/share/doc/rust/COPYRIGHT-library.html"
 }
@@ -141,7 +141,7 @@ build_component() {
         --source "$component_source" --cache "$output.components/$component_name" \
         --output "$staged_output" --inputs "$state_inputs" \
         --dependency "$abi_source/include" --dependency "$staged_output/include" \
-        --dependency "$staged_output/lib" -- \
+        --dependency "$staged_output/lib" --dependency "$lib_source/../elf-loader" -- \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_C_COMPILER="$compiler" -DCMAKE_ASM_COMPILER="$compiler" \
         -DCMAKE_AR="$archiver" -DCMAKE_RANLIB="$archive_indexer" \
@@ -213,7 +213,9 @@ install_rust_crate "$rust_source/hyper-service" "$staged_output/share/hyper/rust
 install_rust_crate "$rust_source/hyper-vm-image" "$staged_output/share/hyper/rust/hyper-vm-image"
 
 install_rust_crate "$rust_source/hyper-filesystem" "$staged_output/share/hyper/rust/hyper-filesystem"
+install_rust_crate "$rust_source/hyper-block" "$staged_output/share/hyper/rust/hyper-block"
 install_rust_crate "$rust_source/hyper-fatfs" "$staged_output/share/hyper/rust/hyper-fatfs"
+install_rust_crate "$rust_source/hyper-erofs" "$staged_output/share/hyper/rust/hyper-erofs"
 install_rust_crate "$rust_source/../../third_party/rust-fatfs" "$staged_output/share/hyper/rust/rust-fatfs"
 install -m 0644 "$rust_source/../../third_party/rust-fatfs/LICENSE.txt" "$rust_source/../../third_party/rust-fatfs/PROVENANCE.md" "$staged_output/share/hyper/rust/rust-fatfs/"
 sed 's|../../../third_party/rust-fatfs|../rust-fatfs|' "$rust_source/hyper-fatfs/Cargo.toml" > "$staged_output/share/hyper/rust/hyper-fatfs/Cargo.toml"

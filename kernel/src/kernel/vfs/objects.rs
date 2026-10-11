@@ -16,7 +16,10 @@ use crate::kernel::object::{
 };
 
 use super::file_record::CachePage;
-use super::instance::{Creation, EntryName, Location, MountNamespace};
+use super::instance::{Creation, DirectoryAnchor, EntryName, Location, MountNamespace};
+
+#[path = "directory_namespace.rs"]
+mod namespace;
 use super::scratch::{ScratchBudget, ScratchString, ScratchVec};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -123,8 +126,8 @@ impl DirectoryPage {
 /// Authority to resolve paths below one namespace location.
 pub(crate) struct DirectoryObject {
     namespace: FallibleArc<MountNamespace>,
-    root: Location,
-    current: Location,
+    root: DirectoryAnchor,
+    current: DirectoryAnchor,
     _object_charge: CommittedCharge,
 }
 
@@ -214,57 +217,16 @@ fn metadata(location: &Location) -> Result<Metadata, Error> {
 }
 
 impl DirectoryObject {
-    /// Creates an independent handle lifecycle for the same directory authority.
-    /// Namespace locations remain pinned; no path lookup or authority expansion occurs.
-    pub(crate) fn try_clone(&self, sponsor: &ResourceDomain) -> Result<Self, Error> {
-        Ok(Self {
-            namespace: self.namespace.clone(),
-            root: self.root.clone(),
-            current: self.current.clone(),
-            _object_charge: reserve_object_charge::<Self>(sponsor)?,
-        })
-    }
-
     pub(crate) fn try_root(
         namespace: FallibleArc<MountNamespace>,
         sponsor: &ResourceDomain,
     ) -> Result<Self, Error> {
-        let root = namespace.root();
-        Self::try_new(namespace, root, sponsor)
-    }
-
-    pub(super) fn mount_remote(
-        &self,
-        path: &str,
-        device: super::remote::Transport,
-        sponsor: &ResourceDomain,
-    ) -> Result<(), Error> {
-        let filesystem = super::instance::FilesystemInstance::try_from_remote(device, sponsor)?;
-        self.mount_filesystem(path, filesystem, sponsor)
-    }
-
-    pub(super) fn mount_filesystem(
-        &self,
-        path: &str,
-        filesystem: FallibleArc<super::instance::FilesystemInstance>,
-        sponsor: &ResourceDomain,
-    ) -> Result<(), Error> {
-        let location = super::resolve::typed(
-            &self.namespace,
-            &self.root,
-            &self.current,
-            path,
-            NodeKind::Directory,
-            false,
-            &ScratchBudget::new(sponsor),
-        )?;
-        if location == self.namespace.root() {
-            return Err(Error::Busy);
-        }
-        self.namespace
-            .mounts
-            .attach(location, filesystem, sponsor)?;
-        Ok(())
+        Ok(Self {
+            namespace,
+            root: DirectoryAnchor::NamespaceRoot,
+            current: DirectoryAnchor::NamespaceRoot,
+            _object_charge: reserve_object_charge::<Self>(sponsor)?,
+        })
     }
 
     pub(crate) fn open_file(
@@ -323,7 +285,7 @@ impl DirectoryObject {
             },
             epoch,
             |node, attributes| {
-                let location = Location::new(parent.mount().clone(), node);
+                let location = Location::new(parent.mount().clone(), node)?;
                 publish(FileObject::try_new_admitted(
                     location,
                     self.namespace.cache(),
@@ -463,7 +425,7 @@ impl DirectoryObject {
         if !core::ptr::eq(&*root.namespace, &*start.namespace) {
             return Err(Error::CrossDevice);
         }
-        super::resolve::resolve(
+        let resolved = super::resolve::resolve(
             &root.namespace,
             &root.current,
             &start.current,
@@ -475,7 +437,11 @@ impl DirectoryObject {
         Ok(Self {
             namespace: root.namespace.clone(),
             root: root.current.clone(),
-            current: start.current.clone(),
+            current: if root.current.follows_root() {
+                start.current.clone()
+            } else {
+                DirectoryAnchor::Fixed(resolved.existing()?.clone())
+            },
             _object_charge: reserve_object_charge::<Self>(sponsor)?,
         })
     }
@@ -504,7 +470,7 @@ impl DirectoryObject {
         metadata(self.resolve(path, follow, false, scratch)?.existing()?)
     }
     pub(crate) fn self_metadata(&self) -> Result<Metadata, Error> {
-        metadata(&self.current)
+        metadata(&self.current.location(&self.namespace.mounts.snapshot()))
     }
     pub(crate) fn set_metadata(
         &self,
@@ -704,7 +670,7 @@ impl DirectoryObject {
                 resolved.epoch,
                 |node, attributes| {
                     publish(FileObject::try_new_admitted(
-                        Location::new(parent.mount().clone(), node),
+                        Location::new(parent.mount().clone(), node)?,
                         self.namespace.cache(),
                         sponsor,
                         attributes,
@@ -720,9 +686,10 @@ impl DirectoryObject {
         // return this large array through nested Result temporaries.
         page.len = 0;
         page.next_cookie = 0;
+        let current = self.current.location(&self.namespace.mounts.snapshot());
         let mut cursor = cookie;
         while page.len < DIRECTORY_PAGE_CAPACITY {
-            let Some(entry) = self.namespace.read_directory_entry(&self.current, cursor)? else {
+            let Some(entry) = self.namespace.read_directory_entry(&current, cursor)? else {
                 return Ok(());
             };
             let entry_name = core::str::from_utf8(&entry.name[..entry.length])
@@ -750,7 +717,7 @@ impl DirectoryObject {
 
         if self
             .namespace
-            .read_directory_entry(&self.current, cursor)?
+            .read_directory_entry(&current, cursor)?
             .is_some()
         {
             page.next_cookie = cursor;
@@ -759,9 +726,10 @@ impl DirectoryObject {
     }
 
     pub(crate) fn info(&self) -> Result<DirectoryInfo, Error> {
+        let current = self.current.location(&self.namespace.mounts.snapshot());
         Ok(DirectoryInfo {
-            location: location_info(&self.current),
-            mode: self.self_metadata()?.attributes.mode(),
+            location: location_info(&current),
+            mode: metadata(&current)?.attributes.mode(),
         })
     }
 
@@ -780,8 +748,8 @@ impl DirectoryObject {
         }
         Ok(Self {
             namespace,
-            current: root.clone(),
-            root,
+            current: DirectoryAnchor::Fixed(root.clone()),
+            root: DirectoryAnchor::Fixed(root),
             _object_charge: reserve_object_charge::<Self>(sponsor)?,
         })
     }
@@ -799,7 +767,9 @@ impl KernelObject for DirectoryObject {
         .union(Rights::WRITE)
         .union(Rights::EXECUTE)
         .union(Rights::SET_ATTRIBUTES)
-        .union(Rights::LOCK_FILE);
+        .union(Rights::LOCK_FILE)
+        .union(Rights::PROTECT)
+        .union(Rights::MANAGE_NAMESPACE);
     const TRANSFER_CLASS: TransferClass = TransferClass::Leaf;
 }
 
@@ -817,6 +787,16 @@ pub(crate) struct FileObject {
 }
 
 impl FileObject {
+    /// Acquire content stability independently of this open handle's lifetime.
+    /// The caller must check PROTECT authority before publishing the guard.
+    pub(crate) fn protect(&self, sponsor: &ResourceDomain) -> Result<super::FileProtection, Error> {
+        super::FileProtection::acquire(self.location.clone(), self.cache.clone(), sponsor)
+    }
+
+    pub(super) fn location(&self) -> &Location {
+        &self.location
+    }
+
     fn try_new(
         location: Location,
         cache: FallibleArc<FileDataCache<CachePage>>,
@@ -986,13 +966,6 @@ impl FileObject {
         Ok(bytes)
     }
 
-    pub(crate) fn readable_snapshot(
-        &self,
-        sponsor: &ResourceDomain,
-    ) -> Result<super::ExecutableSnapshot, Error> {
-        self.executable_snapshot(sponsor)
-    }
-
     pub(crate) fn executable_snapshot(
         &self,
         sponsor: &ResourceDomain,
@@ -1000,7 +973,7 @@ impl FileObject {
         self.location
             .mount()
             .filesystem()
-            .executable_snapshot(self.location.node(), sponsor)
+            .executable_snapshot(self.location.node(), &self.cache, sponsor)
             .map_err(Error::from)?
             .ok_or(Error::NotExecutable)
     }
@@ -1018,7 +991,8 @@ impl KernelObject for FileObject {
         .union(Rights::WRITE)
         .union(Rights::EXECUTE)
         .union(Rights::SET_ATTRIBUTES)
-        .union(Rights::LOCK_FILE);
+        .union(Rights::LOCK_FILE)
+        .union(Rights::PROTECT);
     const TRANSFER_CLASS: TransferClass = TransferClass::Leaf;
 
     fn supported_rights(&self) -> Rights {

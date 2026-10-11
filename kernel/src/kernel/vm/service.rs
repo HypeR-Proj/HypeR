@@ -32,6 +32,7 @@ pub(crate) enum Error {
     ResourceLimit,
     NoMemory,
     Fault,
+    Io,
     Internal,
 }
 
@@ -225,7 +226,8 @@ const fn classify_vmo_error(
         VmoError::Account(error) => classify_resource_error(error),
         VmoError::Allocation => Error::NoMemory,
         VmoError::Backend(error) => classify_page_error(error),
-        VmoError::Busy | VmoError::CowRequired => Error::Busy,
+        VmoError::Busy | VmoError::CowRequired | VmoError::BackingNotResident => Error::Busy,
+        VmoError::BackingIo => Error::Io,
         VmoError::InvalidRange | VmoError::SizeOverflow => Error::InvalidArgument,
     }
 }
@@ -243,6 +245,7 @@ const fn classify_address_space_error(
         AddressSpaceError::Allocation => Error::NoMemory,
         AddressSpaceError::Busy | AddressSpaceError::CowRequired => Error::Busy,
         AddressSpaceError::Backend(error) => classify_page_error(error),
+        AddressSpaceError::BackingIo => Error::Io,
         AddressSpaceError::IdentityExhausted => Error::ResourceLimit,
         AddressSpaceError::BackingNotResident
         | AddressSpaceError::EmptyRange

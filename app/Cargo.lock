@@ -132,6 +132,10 @@ name = "hyper-abi"
 version = "0.0.0"
 
 [[package]]
+name = "hyper-block"
+version = "0.0.0"
+
+[[package]]
 name = "hyper-cat"
 version = "0.0.0"
 dependencies = [
@@ -190,6 +194,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyper-erofs"
+version = "0.0.0"
+
+[[package]]
+name = "hyper-fallback-sh"
+version = "0.0.0"
+dependencies = [
+ "hyper-os",
+ "hyper-rt",
+ "hyper-service",
+ "shlex",
+]
+
+[[package]]
 name = "hyper-fatfs"
 version = "0.0.0"
 dependencies = [
@@ -217,6 +235,21 @@ dependencies = [
 name = "hyper-fs-backend"
 version = "0.0.0"
 dependencies = [
+ "hyper-block",
+ "hyper-filesystem",
+ "hyper-fs-service",
+ "hyper-os",
+ "hyper-rt",
+ "hyper-service",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hyper-fs-erofs"
+version = "0.0.0"
+dependencies = [
+ "hyper-erofs",
  "hyper-filesystem",
  "hyper-fs-service",
  "hyper-os",
@@ -271,25 +304,29 @@ dependencies = [
 name = "hyper-init"
 version = "0.0.0"
 dependencies = [
- "hyper-os",
  "hyper-rt",
- "hyper-service",
- "hyper-vm-policy",
- "hyper-vm-policy-shared",
+ "hyper-service-manager",
+]
+
+[[package]]
+name = "hyper-init-system"
+version = "0.0.0"
+dependencies = [
+ "hyper-rt",
+ "hyper-service-manager",
 ]
 
 [[package]]
 name = "hyper-io-runtime"
 version = "0.0.0"
 dependencies = [
+ "hyper-block",
  "hyper-os",
  "hyper-rt",
  "hyper-service",
  "hyper-vm-image",
  "hyper-vm-policy",
- "hyper-vm-policy-shared",
  "hyper-vm-support",
- "hyper-vm-support-shared",
  "serde",
  "serde_json",
 ]
@@ -324,6 +361,15 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "hyper-clap-shared",
+]
+
+[[package]]
+name = "hyper-mount"
+version = "0.0.0"
+dependencies = [
+ "hyper-os",
+ "hyper-rt",
+ "hyper-service",
 ]
 
 [[package]]
@@ -387,7 +433,21 @@ version = "0.0.0"
 name = "hyper-service"
 version = "0.0.0"
 dependencies = [
+ "hyper-block",
  "hyper-os",
+]
+
+[[package]]
+name = "hyper-service-manager"
+version = "0.0.0"
+dependencies = [
+ "hyper-os",
+ "hyper-rt",
+ "hyper-service",
+ "hyper-vm-policy",
+ "hyper-vm-policy-shared",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -452,6 +512,15 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "hyper-clap-shared",
+]
+
+[[package]]
+name = "hyper-umount"
+version = "0.0.0"
+dependencies = [
+ "hyper-os",
+ "hyper-rt",
+ "hyper-service",
 ]
 
 [[package]]

@@ -51,6 +51,8 @@ fn generated_bit_constants_preserve_schema_bit_positions() {
         ("SET_ATTRIBUTES", 31),
         ("LOCK_FILE", 32),
         ("INSPECT_DETAILS", 33),
+        ("MANAGE_NAMESPACE", 34),
+        ("PROTECT", 35),
     ] {
         assert!(
             generated
@@ -66,7 +68,7 @@ fn generated_bit_constants_preserve_schema_bit_positions() {
     assert!(
         generated
             .rust
-            .contains("HYPER_NATIVE_RIGHTS_MASK: u64 = 0x3ffffffff;")
+            .contains("HYPER_NATIVE_RIGHTS_MASK: u64 = 0xfffffffff;")
     );
     assert!(
         generated
@@ -81,7 +83,7 @@ fn generated_bit_constants_preserve_schema_bit_positions() {
     assert!(
         generated
             .c
-            .contains("HYPER_NATIVE_RIGHTS_MASK UINT64_C(0x3ffffffff)")
+            .contains("HYPER_NATIVE_RIGHTS_MASK UINT64_C(0xfffffffff)")
     );
 }
 
@@ -791,6 +793,7 @@ fn object_transfer_classes_match_the_audited_contract() {
         ("guest_notification", TransferClass::RendezvousOnly),
         ("native_block", TransferClass::RendezvousOnly),
         ("guest_mapping", TransferClass::RendezvousOnly),
+        ("file_protection", TransferClass::Forbidden),
     ];
     assert_eq!(schema::OBJECT_KINDS.len(), expected.len());
     for (kind, expected) in schema::OBJECT_KINDS.iter().zip(expected) {

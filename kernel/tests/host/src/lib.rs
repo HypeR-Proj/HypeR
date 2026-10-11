@@ -39,6 +39,13 @@ mod riscv_devices;
 mod riscv_translation_id_policy;
 
 #[cfg(test)]
+#[path = "cases/riscv_user_contract.rs"]
+mod riscv_user_contract;
+#[cfg(test)]
+#[path = "../../../hal/src/arch/riscv64/user_contract.rs"]
+mod riscv_user_contract_model;
+
+#[cfg(test)]
 #[path = "cases/sharded_lock.rs"]
 mod sharded_lock;
 

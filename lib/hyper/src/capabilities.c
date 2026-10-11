@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <hyper/startup.h>
+#include <hyper/launch.h>
 #include <hyper/syscall.h>
 
 /* These process-lifetime owners isolate language-runtime use from handles
@@ -15,6 +16,7 @@ static const uint32_t purposes[] = {
 	HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_RESOURCE_DOMAIN,
 	HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_DYNAMIC_LIBRARY_DIRECTORY,
 	UINT32_C(0x80040002), /* child library directory */
+	HYPER_LAUNCH_CHILD_LOADER,
 	UINT32_C(0x80030001),
 	UINT32_C(0x80030002),
 	UINT32_C(0x80030003),

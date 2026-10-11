@@ -65,14 +65,14 @@ def boot(args, mode):
         try:
             if args.require_userspace_device:
                 await_text(rb'DEVICE-TEST: worker prepared\n')
-            boot = await_text(rb'HypeR io-runtime: configuration volume: [0-9]+ sectors\n')
+            boot = await_text(rb'HypeR io-runtime: ready; Native volumes mounted\n')
             if b'HypeR IO VM: ' not in boot:
                 raise RuntimeError('forwarded I/O VM log prefix missing')
-            child.stdin.write(f'/bin/storage-probe {mode}\n'.encode())
+            child.stdin.write(f'/system/bin/storage-probe {mode}\n'.encode())
             child.stdin.flush()
             await_text(b'BOARD-STORAGE: ' + mode.encode() + b' PASS\n', timeout=600)
             await_text(rb'hyper-sh\$ ')
-            child.stdin.write(b'cp /etc/hyper/vms.json /data/copied-vms.json\n')
+            child.stdin.write(b'cp /boot/etc/hyper/vms.json /data/copied-vms.json\n')
             child.stdin.flush()
             copied = await_text(rb'hyper-sh\$ ')
             if b'sh: command failed' in copied or b'cp:' in copied:

@@ -61,8 +61,23 @@ impl crate::kernel::abi::native::GuestIoServices for DeferredProcessServices<'_>
         buffer: HandleValue,
         directory: HandleValue,
         path: UserSlice,
+        read_only: bool,
     ) -> Result<(), crate::kernel::vfs::VfsServiceError> {
-        crate::kernel::vfs::service::mount_remote(self.process, channel, buffer, directory, path)
+        crate::kernel::vfs::service::mount_remote(
+            self.process,
+            channel,
+            buffer,
+            directory,
+            path,
+            read_only,
+        )
+    }
+    fn unmount_filesystem(
+        &self,
+        directory: HandleValue,
+        path: UserSlice,
+    ) -> Result<(), crate::kernel::vfs::VfsServiceError> {
+        crate::kernel::vfs::service::unmount(self.process, directory, path)
     }
 
     fn create_guest_mailbox(

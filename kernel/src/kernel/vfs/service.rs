@@ -103,7 +103,22 @@ pub(crate) fn file_info(
     file.object().info().map_err(Into::into)
 }
 
-fn copy_path(process: &Process, path: UserSlice) -> Result<ScratchString, ServiceError> {
+/// Publish one process-local protection token. Object publication checks that
+/// the process still admits handles; a concurrent exit rolls preparation back.
+pub(crate) fn protect_file(
+    process: &Process,
+    file: HandleValue,
+) -> Result<(HandleValue, u64), ServiceError> {
+    let file = process.resolve_handle::<FileObject>(file, Rights::PROTECT)?;
+    let domain = process.resource_domain();
+    let protection = file.object().protect(&domain)?;
+    let size = protection.size();
+    let object = super::FileProtectionObject::try_new(protection, &domain)?;
+    let handle = process.create_object(object, Rights::MAP.union(Rights::INSPECT))?;
+    Ok((handle, size))
+}
+
+pub(crate) fn copy_path(process: &Process, path: UserSlice) -> Result<ScratchString, ServiceError> {
     let length = usize::try_from(path.length()).map_err(|_| ServiceError::InvalidInput)?;
     if length == 0 || length > MAX_PATH_BYTES {
         return Err(ServiceError::InvalidInput);
@@ -307,9 +322,12 @@ pub(crate) fn directory_scope_create(
     start: HandleValue,
     rights: Rights,
 ) -> Result<HandleValue, ServiceError> {
-    let required = super::rights_contract::directory_rights_for_directory(rights.bits())
-        .and_then(Rights::from_bits)
-        .ok_or(ServiceError::InvalidInput)?;
+    let required = super::rights_contract::directory_rights_for_directory(
+        rights.bits() & !Rights::MANAGE_NAMESPACE.bits(),
+    )
+    .and_then(Rights::from_bits)
+    .ok_or(ServiceError::InvalidInput)?
+    .union(rights.intersection(Rights::MANAGE_NAMESPACE));
     let root = process.resolve_handle::<DirectoryObject>(root, required)?;
     let start = process.resolve_handle::<DirectoryObject>(start, required)?;
     let scope = DirectoryObject::scope(root.object(), start.object(), &process.resource_domain())?;
@@ -593,14 +611,29 @@ pub(crate) fn mount_remote(
     buffer: HandleValue,
     directory: HandleValue,
     path: UserSlice,
+    read_only: bool,
 ) -> Result<(), ServiceError> {
     let path = copy_path(process, path)?;
     let directory = process
         .resolve_handle::<DirectoryObject>(directory, Rights::WRITE.union(Rights::EXECUTE))?;
-    let device = super::remote::Transport::prepare(process, channel, buffer)
+    let device = super::remote::Transport::prepare(process, channel, buffer, read_only)
         .map_err(|error| ServiceError::FileSystem(VfsError::Backend(error)))?;
     directory
         .object()
         .mount_remote(&path, device, &process.resource_domain())?;
+    Ok(())
+}
+
+pub(crate) fn unmount(
+    process: &Process,
+    directory: HandleValue,
+    path: UserSlice,
+) -> Result<(), ServiceError> {
+    let path = copy_path(process, path)?;
+    let directory = process
+        .resolve_handle::<DirectoryObject>(directory, Rights::WRITE.union(Rights::EXECUTE))?;
+    directory
+        .object()
+        .unmount(&path, &process.resource_domain())?;
     Ok(())
 }

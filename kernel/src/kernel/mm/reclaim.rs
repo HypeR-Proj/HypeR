@@ -29,6 +29,37 @@ pub(crate) fn reclaim(target: Target) -> Option<ReclaimGuard> {
     worker::reclaim(target)
 }
 
+/// Selects reclaimable denials from Native mapping preparation. The quota's
+/// denying domain may be an ancestor of the process that faults. Untyped heap
+/// allocation failures deliberately remain failures: they do not identify the
+/// contiguous order required by their scratch buffer or mapping metadata.
+pub(crate) fn user_memory_target(error: &super::user_space::MachineError) -> Option<Target> {
+    use super::user_space::{AddressSpaceError, KernelPageError, MachineError, VmoError};
+    use crate::kernel::accounting::{ResourceError, ResourceKind};
+
+    let resource = match error {
+        MachineError::Resource(error)
+        | MachineError::Logical(AddressSpaceError::Account(error))
+        | MachineError::Vmo(VmoError::Account(error)) => error,
+        MachineError::Page(hyper::mm::BuddyError::OutOfMemory)
+        | MachineError::Logical(AddressSpaceError::Backend(KernelPageError::Allocation(
+            hyper::mm::BuddyError::OutOfMemory,
+        )))
+        | MachineError::Vmo(VmoError::Backend(KernelPageError::Allocation(
+            hyper::mm::BuddyError::OutOfMemory,
+        ))) => return Some(Target::PhysicalOrder(0)),
+        _ => return None,
+    };
+    match resource {
+        ResourceError::LimitExceeded {
+            domain,
+            resource: ResourceKind::CommittedPages | ResourceKind::KernelMemoryBytes,
+            ..
+        } => Some(Target::Domain(*domain)),
+        _ => None,
+    }
+}
+
 /// Retry only a preparation whose failed attempt leaves no published effects.
 /// Every failed attempt must destroy its partial owners before returning. The
 /// request serializer is released before `operation` runs again; the separate

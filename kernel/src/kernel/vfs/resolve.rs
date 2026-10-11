@@ -3,7 +3,7 @@
 
 //! Bounded, capability-confined traversal validated against namespace epochs.
 
-use super::instance::{Location, Mount, MountNamespace};
+use super::instance::{DirectoryAnchor, Location, Mount, MountNamespace};
 use super::objects::Error;
 use super::resolve_state::{NameDescriptor, PendingComponent, PendingPath, StateError, Traversal};
 use super::scratch::{ScratchBudget, ScratchString, ScratchVec};
@@ -33,47 +33,70 @@ impl Resolved {
     }
 }
 
-pub(super) fn file(
-    namespace: &FallibleArc<MountNamespace>,
-    root: &Location,
-    value: &str,
-    budget: &ScratchBudget,
-) -> Result<Location, Error> {
-    typed(namespace, root, root, value, NodeKind::File, true, budget)
-}
 pub(super) fn typed(
     namespace: &FallibleArc<MountNamespace>,
-    root: &Location,
-    start: &Location,
+    root: &DirectoryAnchor,
+    start: &DirectoryAnchor,
     value: &str,
     kind: NodeKind,
     follow: bool,
     budget: &ScratchBudget,
 ) -> Result<Location, Error> {
     let resolved = resolve(namespace, root, start, value, follow, false, budget)?;
-    let location = resolved.existing()?;
-    if location
+    require_kind(resolved.existing()?, kind)
+}
+
+fn require_kind(location: &Location, kind: NodeKind) -> Result<Location, Error> {
+    let actual = location
         .mount()
         .filesystem()
         .attributes(location.node())?
-        .kind()
-        != kind
-    {
+        .kind();
+    if actual != kind {
         return Err(if kind == NodeKind::Directory {
             Error::NotDirectory
-        } else if location
-            .mount()
-            .filesystem()
-            .attributes(location.node())?
-            .kind()
-            == NodeKind::Directory
-        {
+        } else if actual == NodeKind::Directory {
             Error::IsDirectory
         } else {
             Error::NotRegularFile
         });
     }
     Ok(location.clone())
+}
+
+/// Resolve a transaction's paths against exactly one topology. Filesystem
+/// epochs are independently checked; the transaction revalidates publication.
+pub(super) fn typed_in_view(
+    namespace: &FallibleArc<MountNamespace>,
+    view: &super::mounts::View,
+    root: &DirectoryAnchor,
+    start: &DirectoryAnchor,
+    value: &str,
+    kind: NodeKind,
+    budget: &ScratchBudget,
+) -> Result<Location, Error> {
+    let normalized = normalize(value, budget)?;
+    let root = root.location(view);
+    let start = start.location(view);
+    let mut epochs = Epochs {
+        entries: ScratchVec::new(budget.clone()),
+    };
+    let result = walk(
+        view,
+        &root,
+        &start,
+        &normalized,
+        WalkOptions {
+            follow: false,
+            missing: false,
+        },
+        &mut epochs,
+        budget,
+    );
+    if !epochs.unchanged() || !namespace.mounts.is_current(view) {
+        return Err(Error::Busy);
+    }
+    require_kind(result?.existing()?, kind)
 }
 
 struct Epochs {
@@ -105,8 +128,8 @@ impl Epochs {
 
 pub(super) fn resolve(
     namespace: &FallibleArc<MountNamespace>,
-    root: &Location,
-    start: &Location,
+    root: &DirectoryAnchor,
+    start: &DirectoryAnchor,
     value: &str,
     follow: bool,
     missing: bool,
@@ -118,10 +141,12 @@ pub(super) fn resolve(
         let mut epochs = Epochs {
             entries: ScratchVec::new(budget.clone()),
         };
+        let root = root.location(&view);
+        let start = start.location(&view);
         let result = walk(
             &view,
-            root,
-            start,
+            &root,
+            &start,
             &normalized,
             WalkOptions { follow, missing },
             &mut epochs,
@@ -219,7 +244,7 @@ fn walk(
                     }
                     return Err(Error::Missing);
                 };
-                let candidate = view.enter(Location::new(current.mount().clone(), node));
+                let candidate = view.enter(Location::new(current.mount().clone(), node)?)?;
                 epochs.observe(candidate.mount())?;
                 let attributes = candidate
                     .mount()

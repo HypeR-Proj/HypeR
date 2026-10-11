@@ -18,8 +18,10 @@ them with the Rust toolchain selected for the application.
 | `hyper-os` | Safe capability-oriented operating-system interfaces |
 | `hyper-rt` | Rust application entry, process-heap allocator, panic termination, and exit status |
 | `hyper-service` | Shared typed startup contracts for Native system services |
+| `hyper-block` | Bounded GPT validation and PARTUUID/PARTLABEL identity selection |
 | `hyper-filesystem` | Bounded filesystem service wire protocol, metadata types and format hints |
 | `hyper-fatfs` | Userspace FAT32 engine and bounded media admission; uses the vendored MIT FAT implementation |
+| `hyper-erofs` | Read-only EROFS core-format reader for uncompressed plain and inline files |
 | `hyper-vm-image` | Bounded FIT parsing and guest boot metadata for Native VMMs |
 
 Unsafe machine interactions are confined to `hyper-sys`. Application code
@@ -44,7 +46,7 @@ owns its message payload semantics, and the SDK imposes no generic IPC wire
 envelope.
 
 The initial runtime reuses the SDK startup parser and architecture syscall
-veneer from `lib/hyper`. The startup vector comes from the userspace loader;
+veneer from `lib/hyper`. The startup vector comes from the selected userspace loader;
 the kernel only supplies a bootstrap channel, mapping capabilities and opaque
 data. The dynamic loader or static CRT initializes a private heap VMAR before
 application entry, and

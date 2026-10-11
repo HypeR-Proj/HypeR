@@ -5,15 +5,14 @@
 //! sleepable volume mutex. Live leases prevent unlink; rename updates every
 //! retained descendant path before releasing the namespace transaction.
 
+use super::MetadataUpdate;
 use super::file_record::FileRecord;
 use super::instance::{Creation, EntryName, Error};
 use super::instance::{EntrySnapshot, NodeMetadata};
 use super::scratch::{ScratchBudget, ScratchString, ScratchVec};
-use super::{ExecutableSnapshot, MetadataUpdate};
 use crate::kernel::accounting::{
     CommittedCharge, ResourceAmount, ResourceDomain, ResourceDomainId, ResourceError, ResourceKind,
 };
-use crate::kernel::mm::user_space::{DomainAccount, KernelPageBackend, SnapshotVmo};
 use crate::kernel::sync::Mutex;
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::sync::atomic::{AtomicU64, Ordering};
@@ -108,6 +107,20 @@ impl RemoteFs {
         })
     }
     #[inline(never)]
+    /// Serialize the final topology publication with directory renames. The
+    /// caller completes all allocation and backend I/O before this callback.
+    pub(super) fn with_namespace_stable<T>(
+        &self,
+        epoch: u64,
+        publish: impl FnOnce() -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        let _guard = self.state.lock().map_err(Error::Lock)?;
+        if epoch & 1 != 0 || self.epoch.load(Ordering::Acquire) != epoch {
+            return Err(Error::Busy);
+        }
+        publish()
+    }
+
     pub(super) fn pin_mount(&self, node: &FallibleArc<Node>) -> Result<MountPin, Error> {
         let mut state = self.state.lock().map_err(Error::Lock)?;
         let _paths = state.scratch_charge(&self.domain, MAX_PATH_BYTES)?;
@@ -122,6 +135,20 @@ impl RemoteFs {
     }
     pub(super) fn root(&self) -> FallibleArc<Node> {
         self.root.clone()
+    }
+    pub(super) fn unmount_with(
+        &self,
+        publish: impl FnOnce() -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        // Admission is frozen. This lock also drains read-ahead which retains
+        // only weak content identity rather than a namespace Location.
+        let mut state = self.state.lock().map_err(Error::Lock)?;
+        state.volume.sync().map_err(map)?;
+        publish()?;
+        // No fallible operation follows publication. A late speculative reader
+        // sees closed health before it can initiate a new backend transaction.
+        self.health.fail();
+        Ok(())
     }
     pub(super) fn read_status(&self) -> Result<(), Error> {
         self.health.check().map_err(map)
@@ -310,16 +337,20 @@ impl RemoteFs {
         destination: &mut [u8],
         symlink: bool,
     ) -> Result<usize, Error> {
-        if symlink {
-            return Err(Error::NotSymlink);
-        }
         let mut state = self.state.lock().map_err(Error::Lock)?;
         let _paths = state.scratch_charge(&self.domain, MAX_PATH_BYTES)?;
         let path = state.path(node)?;
-        state
-            .volume
-            .read_at(&path, offset, destination)
-            .map_err(map)
+        if symlink {
+            if state.stat(&path)?.kind != hyper_filesystem::protocol::SYMLINK {
+                return Err(Error::NotSymlink);
+            }
+            state.volume.read_link(&path, destination).map_err(map)
+        } else {
+            state
+                .volume
+                .read_at(&path, offset, destination)
+                .map_err(map)
+        }
     }
     /// Background read admission never queues behind an active filesystem RPC.
     pub(super) fn try_read(
@@ -331,13 +362,15 @@ impl RemoteFs {
         let Some(mut state) = self.state.try_lock().map_err(Error::Lock)? else {
             return Ok(None);
         };
-        // Speculation must not start quota reclaim while owning content and
-        // volume gates; demand preparation retains the bounded reclaim retry.
-        let _paths = charge(&self.domain, MAX_PATH_BYTES)?;
-        let path = state.path_for_id(record.id())?;
-        state
-            .volume
-            .read_at(&path, offset, destination)
+        let State {
+            volume, records, ..
+        } = &mut *state;
+        // The volume mutex excludes rename and record reclamation through the
+        // RPC. Borrow the charged path so speculative reads need no temporary
+        // path allocation or quota admission, and cannot trigger quota reclaim.
+        let path = records.path(record.id())?;
+        volume
+            .read_at(path, offset, destination)
             .map(Some)
             .map_err(map)
     }
@@ -392,36 +425,6 @@ impl RemoteFs {
             .volume
             .sync()
             .map_err(map)
-    }
-    #[inline(never)]
-    pub(super) fn executable(
-        &self,
-        node: &Node,
-        sponsor: &ResourceDomain,
-    ) -> Result<Option<ExecutableSnapshot>, Error> {
-        let mut state = self.state.lock().map_err(Error::Lock)?;
-        let _paths = state.scratch_charge(&self.domain, MAX_PATH_BYTES)?;
-        let path = state.path(node)?;
-        let entry = state.stat(&path)?;
-        if entry.directory() {
-            return Ok(None);
-        }
-        let size = usize::try_from(entry.size).map_err(|_| Error::InvalidSize)?;
-        let charge = state.reclaim_retry(|_| charge(sponsor, size))?;
-        let mut bytes = Vec::new();
-        crate::kernel::mm::reclaim::reserve_exact(&mut bytes, size)
-            .map_err(|_| Error::Allocation)?;
-        bytes.resize(size, 0);
-        if state.volume.read_at(&path, 0, &mut bytes).map_err(map)? != size {
-            return Err(Error::InvalidBackendResult);
-        }
-        let storage = SnapshotVmo::try_from_bytes(
-            &bytes,
-            KernelPageBackend,
-            DomainAccount::new(sponsor.clone()),
-        )
-        .map_err(|_| Error::Allocation)?;
-        Ok(Some(ExecutableSnapshot::owned(bytes, charge, storage)))
     }
     #[inline(never)]
     pub(super) fn create<R, E: From<Error>>(
@@ -749,17 +752,7 @@ impl State {
     }
 
     fn path(&self, node: &Node) -> Result<String, Error> {
-        self.path_for_id(node.id())
-    }
-    fn path_for_id(&self, id: u64) -> Result<String, Error> {
-        copy(
-            &self
-                .records
-                .iter()
-                .find(|record| record.id == id)
-                .ok_or(Error::Missing)?
-                .path,
-        )
+        copy(self.records.path(node.id())?)
     }
     fn lease(&mut self, path: String, domain: &ResourceDomain) -> Result<FallibleArc<Node>, Error> {
         self.records.retain(|record| record.content.is_alive());
@@ -856,10 +849,10 @@ fn within(path: &str, parent: &str) -> bool {
 }
 fn attributes(entry: &Entry) -> NodeAttributes {
     NodeAttributes::new(
-        if entry.directory() {
-            NodeKind::Directory
-        } else {
-            NodeKind::File
+        match entry.kind {
+            hyper_filesystem::protocol::DIRECTORY => NodeKind::Directory,
+            hyper_filesystem::protocol::SYMLINK => NodeKind::Symlink,
+            _ => NodeKind::File,
         },
         entry.mode,
         entry.size,

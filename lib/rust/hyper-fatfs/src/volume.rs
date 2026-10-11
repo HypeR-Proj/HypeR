@@ -841,6 +841,16 @@ impl<D: BlockDevice> FatVolume<D> {
         result
     }
 
+    /// Finish a clean mount generation and recover the same exclusive device.
+    /// The caller must first stop admitting filesystem operations. Destructor
+    /// cleanup cannot perform additional I/O after the explicit sync succeeds.
+    pub fn into_device(mut self) -> Result<D, Error> {
+        self.sync()?;
+        self.device.enabled.store(false, Ordering::Relaxed);
+        drop(self.fs.take());
+        self.device.device.borrow_mut().take().ok_or(Error::Closed)
+    }
+
     #[cold]
     #[inline(never)]
     fn close_failed_sync(&mut self) {

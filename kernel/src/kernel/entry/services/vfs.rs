@@ -11,6 +11,17 @@ use crate::kernel::process::UserThreadPhase;
 use crate::kernel::vfs::VfsServiceError;
 
 impl VfsServices for DeferredProcessServices<'_> {
+    fn mount_ramfs(&self, directory: HandleValue, path: UserSlice) -> Result<(), VfsServiceError> {
+        super::vfs_namespace::mount_ramfs(self.process, directory, path)
+    }
+    fn switch_root(
+        &self,
+        directory: HandleValue,
+        request: UserSlice,
+    ) -> Result<(), VfsServiceError> {
+        super::vfs_namespace::switch_root(self.process, directory, request)
+    }
+
     fn directory_scope_create(
         &self,
         root: HandleValue,
@@ -252,6 +263,9 @@ impl VfsServices for DeferredProcessServices<'_> {
         crate::kernel::vfs::read_file_at(self.process, file, offset, output)
     }
 
+    fn protect_file(&self, file: HandleValue) -> Result<(HandleValue, u64), VfsServiceError> {
+        crate::kernel::vfs::protect_file(self.process, file)
+    }
     fn file_info(
         &self,
         file: HandleValue,

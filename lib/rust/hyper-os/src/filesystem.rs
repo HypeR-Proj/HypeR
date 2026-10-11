@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Filesystem server transport registration and owned shared-buffer mappings.
+mod namespace;
+pub use namespace::{mount_ramfs, switch_root};
+
 use crate::{
     Error, Result, Status,
-    handle::{ByteChannelObject, DirectoryObject, HandleRef, OwnedHandle, VmarObject},
+    handle::{ByteChannelObject, DirectoryObject, HandleRef, OwnedHandle, VmarObject, VmoObject},
     memory::WritableVmo,
 };
 
@@ -13,20 +16,34 @@ use crate::{
 /// Both processes must implement the shared-buffer request ownership protocol.
 pub fn mount(
     channel: HandleRef<'_, ByteChannelObject>,
-    buffer: &WritableVmo,
+    buffer: HandleRef<'_, VmoObject>,
     directory: HandleRef<'_, DirectoryObject>,
     path: &str,
+    read_only: bool,
 ) -> Result<()> {
     // SAFETY: All borrowed capabilities and path bytes outlive this call.
     let result = unsafe {
         hyper_sys::filesystem_mount(
             channel.raw().get(),
-            buffer.as_handle_ref().raw().get(),
+            buffer.raw().get(),
             directory.raw().get(),
             path.as_ptr(),
             path.len(),
+            read_only,
         )
     };
+    Status::from_raw(result.status).into_result()?;
+    if result.value0 != 0 || result.value1 != 0 {
+        return Err(Error::InvalidResponse);
+    }
+    Ok(())
+}
+/// Refuse active file/directory users, synchronize, then retire one mount.
+/// No lazy or forced detach is supported; failure preserves the namespace edge.
+pub fn unmount(directory: HandleRef<'_, DirectoryObject>, path: &str) -> Result<()> {
+    // SAFETY: Capability and path are borrowed through the synchronous syscall.
+    let result =
+        unsafe { hyper_sys::filesystem_unmount(directory.raw().get(), path.as_ptr(), path.len()) };
     Status::from_raw(result.status).into_result()?;
     if result.value0 != 0 || result.value1 != 0 {
         return Err(Error::InvalidResponse);

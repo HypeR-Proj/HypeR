@@ -57,8 +57,11 @@ pub const MANAGER_CONNECTION_RIGHTS: Rights = Rights::DUPLICATE
     .union(Rights::READ)
     .union(Rights::WRITE);
 
-pub const MANAGER_RUNTIME_IMAGE_CONTRACT: StartupContract =
-    StartupContract::exact(RUNTIME_IMAGE_NAME, RUNTIME_IMAGE, Rights::EXECUTE);
+pub const MANAGER_RUNTIME_IMAGE_CONTRACT: StartupContract = StartupContract::exact(
+    RUNTIME_IMAGE_NAME,
+    RUNTIME_IMAGE,
+    crate::process::EXECUTABLE_FILE_RIGHTS.as_rights(),
+);
 pub const MANAGER_PROVISIONING_CONTRACT: StartupContract = StartupContract::exact(
     PROVISIONING_NAME,
     PROVISIONING,
@@ -134,6 +137,16 @@ pub const CLIENT_STARTUP_CONTRACTS: &[StartupContract] = &[StartupContract::exac
     MANAGER_CONNECTION,
     Rights::WAIT.union(Rights::WRITE),
 )];
+/// A shell or console manager may pass this client connector to another trusted
+/// shell. Individual vmm processes receive dedicated channels instead.
+pub const DELEGATED_CLIENT_CONNECTION_CONTRACT: StartupContract = StartupContract::exact(
+    MANAGER_CONNECTION_NAME,
+    MANAGER_CONNECTION,
+    Rights::WAIT
+        .union(Rights::WRITE)
+        .union(Rights::DUPLICATE)
+        .union(Rights::TRANSFER),
+);
 pub const VMM_STARTUP_CONTRACTS: &[StartupContract] =
     &[CLIENT_CONTROL_CONTRACT, CLIENT_CAPABILITIES_CONTRACT];
 

@@ -25,12 +25,12 @@ use hyper::abi::native::{
     HYPER_NATIVE_SYS_DIRECTORY_READ, HYPER_NATIVE_SYS_FILE_GET_INFO, HYPER_NATIVE_SYS_HANDLE_CLOSE,
     HYPER_NATIVE_SYS_HANDLE_DUPLICATE, HYPER_NATIVE_SYS_HANDLE_GET_INFO,
     HYPER_NATIVE_SYS_OBJECT_WAIT_MANY, HYPER_NATIVE_SYS_PROCESS_BUILDER_ADD_HANDLE,
-    HYPER_NATIVE_SYS_PROCESS_BUILDER_SET_AFFINITY, HYPER_NATIVE_SYS_PROCESS_BUILDER_SET_NAME,
-    HYPER_NATIVE_SYS_PROCESS_EXIT, HYPER_NATIVE_SYS_PROCESS_GET_INFO,
-    HYPER_NATIVE_SYS_THREAD_CREATE, HYPER_NATIVE_SYS_THREAD_EXIT, HYPER_NATIVE_SYS_THREAD_YIELD,
-    HyperNativeCapabilityDisposition, HyperNativeCapabilityReceiveSlot, HyperNativeDirectoryInfo,
-    HyperNativeFileInfo, HyperNativeObjectInspection, HyperNativeResourceLimits, NativeInvocation,
-    NativeResult,
+    HYPER_NATIVE_SYS_PROCESS_BUILDER_CREATE, HYPER_NATIVE_SYS_PROCESS_BUILDER_SET_AFFINITY,
+    HYPER_NATIVE_SYS_PROCESS_BUILDER_SET_NAME, HYPER_NATIVE_SYS_PROCESS_EXIT,
+    HYPER_NATIVE_SYS_PROCESS_GET_INFO, HYPER_NATIVE_SYS_THREAD_CREATE,
+    HYPER_NATIVE_SYS_THREAD_EXIT, HYPER_NATIVE_SYS_THREAD_YIELD, HyperNativeCapabilityDisposition,
+    HyperNativeCapabilityReceiveSlot, HyperNativeDirectoryInfo, HyperNativeFileInfo,
+    HyperNativeObjectInspection, HyperNativeResourceLimits, NativeInvocation, NativeResult,
 };
 
 use crate::kernel::capability::{HandleInfo, HandleValue, Rights};
@@ -67,8 +67,8 @@ use super::wire::{
     capability_receive_slot_bytes, capability_record_bytes, copy_extensible_input_record,
     copy_info_record, decode_resource_limits, encode_directory_info_fields,
     encode_file_info_fields, encode_handle_info_fields, encode_object_basic_info_fields,
-    encode_object_inspection, encode_process_info_fields, parse_builder_handle,
-    prepare_info_request,
+    encode_object_inspection, encode_process_info_fields, parse_builder_create,
+    parse_builder_handle, prepare_info_request,
 };
 
 #[cfg(feature = "kernel-self-test")]
@@ -346,6 +346,23 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
     }
 
     impl VfsServices for RejectingServices {
+        fn mount_ramfs(
+            &self,
+            _directory: HandleValue,
+            _path: UserSlice,
+        ) -> Result<(), VfsServiceError> {
+            self.calls.set(self.calls.get().saturating_add(1));
+            Err(VfsServiceError::InvalidInput)
+        }
+        fn switch_root(
+            &self,
+            _directory: HandleValue,
+            _request: UserSlice,
+        ) -> Result<(), VfsServiceError> {
+            self.calls.set(self.calls.get().saturating_add(1));
+            Err(VfsServiceError::InvalidInput)
+        }
+
         fn directory_scope_create(
             &self,
             _root: HandleValue,
@@ -553,6 +570,12 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             Err(VfsServiceError::Process(ProcessError::Allocation))
         }
 
+        fn protect_file(&self, _: HandleValue) -> Result<(HandleValue, u64), VfsServiceError> {
+            self.calls.set(self.calls.get().saturating_add(1));
+            Err(VfsServiceError::FileSystem(
+                crate::kernel::vfs::VfsError::Busy,
+            ))
+        }
         fn file_info(&self, _: HandleValue) -> Result<FileInfo, VfsServiceError> {
             self.calls.set(self.calls.get().saturating_add(1));
             Err(VfsServiceError::Process(ProcessError::Allocation))
@@ -574,24 +597,20 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             Err(MemoryServiceError::Process(ProcessError::Allocation))
         }
 
-        fn create_file_executable_vmo(
-            &self,
-            _: HandleValue,
-        ) -> Result<(HandleValue, u64), MemoryServiceError> {
-            self.calls.set(self.calls.get().saturating_add(1));
-            Err(MemoryServiceError::Process(ProcessError::Allocation))
-        }
-        fn create_file_snapshot(
-            &self,
-            _: HandleValue,
-        ) -> Result<(HandleValue, u64), MemoryServiceError> {
-            self.calls.set(self.calls.get().saturating_add(1));
-            Err(MemoryServiceError::Process(ProcessError::Allocation))
-        }
         fn create_vmo_snapshot(
             &self,
             _: HandleValue,
         ) -> Result<(HandleValue, u64), MemoryServiceError> {
+            self.calls.set(self.calls.get().saturating_add(1));
+            Err(MemoryServiceError::Process(ProcessError::Allocation))
+        }
+        fn map_file(
+            &self,
+            _: HandleValue,
+            _: HandleValue,
+            _: HandleValue,
+            _: crate::kernel::mm::user_space::PrivateMappingRequest,
+        ) -> Result<(), MemoryServiceError> {
             self.calls.set(self.calls.get().saturating_add(1));
             Err(MemoryServiceError::Process(ProcessError::Allocation))
         }
@@ -673,6 +692,7 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
     impl ProcessBuilderServices for RejectingServices {
         fn create_process_builder(
             &self,
+            _: HandleValue,
             _: HandleValue,
             _: HandleValue,
             _: HandleValue,
@@ -1409,9 +1429,16 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
     {
         return Err(SelfTestError::Clock);
     }
-    let unknown = dispatch_immediate(&services, invoke(u64::MAX, [u64::MAX; 6]));
-    if unknown.status() != HYPER_NATIVE_STATUS_NOT_SUPPORTED || unknown.values() != &[0, 0] {
-        return Err(SelfTestError::UnknownNumber);
+    // Withdrawn file snapshot and bind calls must stay unimplemented, including
+    // when an old binary supplies values that otherwise look like live handles.
+    for number in [46, 115, 153, u64::MAX] {
+        let unknown = dispatch_immediate(&services, invoke(number, [u64::MAX; 6]));
+        if unknown != failure(HYPER_NATIVE_STATUS_NOT_SUPPORTED)
+            || dispatch_deferred(&services, invoke(number, [u64::MAX; 6]))
+                != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_NOT_SUPPORTED))
+        {
+            return Err(SelfTestError::UnknownNumber);
+        }
     }
     if dispatch_deferred(
         &services,
@@ -1764,6 +1791,28 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             return Err(SelfTestError::InvalidRecordSize);
         }
     }
+    let before_namespace_calls = services.calls.get();
+    for (number, arguments) in [
+        (
+            hyper::abi::native::HYPER_NATIVE_SYS_FILESYSTEM_MOUNT_RAMFS,
+            [1_u64 << 24 | 1, 0x2000, 0, 0, 0, 0],
+        ),
+        (
+            hyper::abi::native::HYPER_NATIVE_SYS_FILESYSTEM_MOUNT_RAMFS,
+            [1_u64 << 24 | 1, 0x2000, 4097, 0, 0, 0],
+        ),
+        (
+            hyper::abi::native::HYPER_NATIVE_SYS_FILESYSTEM_SWITCH_ROOT,
+            [1_u64 << 24 | 1, 0x2000, 1, 0, 0, 0],
+        ),
+    ] {
+        if dispatch_deferred(&services, invoke(number, arguments))
+            != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+            || services.calls.get() != before_namespace_calls
+        {
+            return Err(SelfTestError::InvalidRecordSize);
+        }
+    }
     let before_private_calls = services.calls.get();
     for arguments in [
         [1_u64 << 24 | 1, 1_u64 << 24 | 2, 0x2000, 47, 0, 0],
@@ -1790,6 +1839,55 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
         {
             return Err(SelfTestError::InvalidRecordSize);
         }
+    }
+    for arguments in [
+        [
+            1_u64 << 24 | 1,
+            1_u64 << 24 | 2,
+            1_u64 << 24 | 3,
+            0x2000,
+            47,
+            0,
+        ],
+        [
+            1_u64 << 24 | 1,
+            1_u64 << 24 | 2,
+            1_u64 << 24 | 3,
+            0x2000,
+            48,
+            1,
+        ],
+        [
+            1_u64 << 24 | 1,
+            1_u64 << 24 | 2,
+            1_u64 << 24 | 3,
+            0x2000,
+            HYPER_NATIVE_EXTENSIBLE_RECORD_MAX_BYTES + 1,
+            0,
+        ],
+    ] {
+        if dispatch_deferred(
+            &services,
+            invoke(
+                hyper::abi::native::HYPER_NATIVE_SYS_VMAR_MAP_FILE,
+                arguments,
+            ),
+        ) != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+            || services.calls.get() != before_private_calls
+        {
+            return Err(SelfTestError::InvalidRecordSize);
+        }
+    }
+    if dispatch_deferred(
+        &services,
+        invoke(
+            hyper::abi::native::HYPER_NATIVE_SYS_FILE_PROTECT,
+            [1_u64 << 24 | 1, 1, 0, 0, 0, 0],
+        ),
+    ) != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+        || services.calls.get() != before_private_calls
+    {
+        return Err(SelfTestError::InvalidRecordSize);
     }
     // A future private-mapping record may grow only through a zero-filled tail.
     let private_arguments = [0, 0x5000, 56, 0, 0, 0];
@@ -2151,6 +2249,28 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
     {
         return Err(SelfTestError::ConsoleValidation);
+    }
+    let builder_authorities = [
+        1_u64 << 24 | 1,
+        1_u64 << 24 | 2,
+        1_u64 << 24 | 3,
+        1_u64 << 24 | 4,
+        1_u64 << 24 | 5,
+        0,
+    ];
+    let decoded = parse_builder_create(&builder_authorities)
+        .map_err(|_| SelfTestError::ProcessBuilderValidation)?;
+    if decoded.map(HandleValue::get) != builder_authorities[..5] {
+        return Err(SelfTestError::ProcessBuilderValidation);
+    }
+    let mut missing_loader = builder_authorities;
+    missing_loader[4] = 0;
+    if dispatch_deferred(
+        &services,
+        invoke(HYPER_NATIVE_SYS_PROCESS_BUILDER_CREATE, missing_loader),
+    ) != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_BAD_HANDLE))
+    {
+        return Err(SelfTestError::ProcessBuilderValidation);
     }
     let oversized_builder_name = dispatch_deferred(
         &services,

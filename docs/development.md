@@ -34,7 +34,7 @@ to kernel, ABI and host-tool lockfiles that ordinary builds would remove.
 The production `hyper-cargo` driver overrides source paths with installed SDK
 paths; save-time editor checks explicitly select the local configuration.
 The freestanding Rust smoke program selects `aarch64-unknown-none`;
-kernel and host projects retain their host target. The shared std source
+kernel and host projects retain their configured targets. The shared std source
 tree contains both HypeR and upstream host implementations; each project selects
 its platform through the actual target cfgs. This resolves `File::into_std()`
 and `std::os::hyper` without pretending that host code targets HypeR.
@@ -79,14 +79,15 @@ Use these repository-root commands for short feedback loops:
 
 `app-test` uses SDK source patches within the existing app workspace, an explicit
 host target, and ordinary Cargo. It does not assemble an SDK or require patched
-std; the first invocation can download missing Cargo dependencies. `APP_TEST_PACKAGE=hyper-init` selects a single package;
+std; the first invocation can download missing Cargo dependencies.
+`APP_TEST_PACKAGE=hyper-service-manager` selects the init policy and supervisor library;
 `APP_TEST_ARGS=supervision` filters its test names.
 Run it from the repository root so Native editor-target defaults are not loaded.
 `app-sdk-test` separately tests the assembled SDK contract. Production app
 manifests and builds continue to consume installed SDK sources.
 
-`make app` builds and installs ordinary system applications, including the I/O
-runtime, and the shared libraries under `lib/`. These libraries explicitly belong
+`make app` builds static programs from `bootstrap/stage1/`, including the I/O
+runtime, then ordinary system applications and shared libraries from `lib/`. These libraries explicitly belong
 to `app/Cargo.toml`; they use the same installed-SDK boundary, lints, checks and
 host tests as applications. Native consumers select the `shared/` dylib packages;
 host tests use the implementation rlibs. The Native-only delivery packages are
@@ -112,23 +113,27 @@ still own startup and capabilities, and board JSON owns storage and device
 deployment. The registry also determines which delivery dylibs to exclude from
 host test linking.
 
-Rust libraries are installed as providers under `/lib64/<arch>-hyper-hyper/`.
+Staged Rust library providers use `lib64/<arch>-hyper-hyper/`; deployment
+places the selected closure beneath `/system`.
 Packaging collects their transitive `DT_NEEDED` closure after applying executable
 overrides. Additional standalone fixtures supply `--library-dir` instead of
 manually listing Rust libraries. Runtime-loaded plugins remain explicit entries.
-The `/lib -> lib64` link and SDK bootstrap loaders are declared once as well.
+The component registry also declares loader payloads; the composer places the
+bootstrap loader at `lib64/` in the initial RAM archive and the formal loader
+in the `/system` payload's `lib64/`. The former becomes `/boot/lib64` after
+system init switches the root namespace.
 
 `NATIVE_IMAGE_PROFILE=development` is the default and preserves the existing
 apps and test programs. `NATIVE_IMAGE_PROFILE=system` includes all ordinary apps
 and runtime libraries without acceptance probes; it also avoids building those
 probes. The I/O service is included by the existing I/O/board boot profiles.
-Changing image membership does not delete applications or their capabilities.
-For AArch64, the runtime filesystem layout is:
+Both image profiles retain the same stage-1/system-init handoff. Image profile
+selection controls payload membership, not the startup architecture. For
+AArch64, formal programs use:
 
 ```text
-/lib -> lib64
-/lib64/ld-hyper-aarch64.so
-/lib64/aarch64-hyper-hyper/
+/system/lib64/ld-hyper-aarch64.so
+/system/lib64/aarch64-hyper-hyper/
     libhyper.so
     libhyper_rust_std.so
     libhyper_clap_shared.so
@@ -138,10 +143,14 @@ For AArch64, the runtime filesystem layout is:
 ```
 
 RISC-V uses `riscv64-hyper-hyper` and `ld-hyper-riscv64.so`. ELF `PT_INTERP`
-names `/lib64/ld-hyper-<arch>.so`. The initial process receives
-the architecture subdirectory as its dynamic-library Directory capability and
-passes it to children; the loader opens exact `DT_NEEDED` names relative to that
-handle, with no fallback to another architecture or an ambient search path.
+names `/lib64/ld-hyper-<arch>.so`. Launchers pass an explicit executable loader
+File and the selected `/system/lib64/<arch>-hyper-hyper` Directory capability.
+The kernel does not resolve the interpreter string or choose the library
+directory. The formal loader opens exact `DT_NEEDED` names relative to the
+delegated directory, with no fallback to another architecture or an ambient
+search path. Static system executables also use this loader; stage-1 services
+use the separate bootstrap loader. The [deployment guide](boot-layout.md)
+describes the root switch, separate boot/system environments and supervision handoff.
 This runtime directory name does not change the Rust `<arch>-unknown-hyper`
 compiler target. Architecture-specific SDK and application build staging areas
 retain their own `lib/` artifact directories for link libraries; the SDK stages
@@ -154,8 +163,9 @@ preserves unchanged output timestamps. Use a separate `NATIVE_INITRAMFS` or
 `BOARD_OUTPUT` when comparing profiles.
 
 Archive entry triples normally contain `MODE ARCHIVE_PATH SOURCE`. For a symbolic
-link use `symlink ARCHIVE_PATH RELATIVE_TARGET`; targets are canonical relative
-paths without `.` or `..` components. The packer emits a symlink with mode 0777
+link use `symlink ARCHIVE_PATH NAMESPACE_TARGET`; targets can be absolute or
+relative paths, without empty, `.` or `..` components. The packer emits a symlink
+with mode 0777
 and stores the target text, without following build-host paths. Files must be
 listed under their real directories rather than beneath an archive symlink.
 
@@ -167,7 +177,7 @@ check also runs before an incremental packaging cache hit.
 For a standalone configuration check (without image membership checks), run:
 
 ```sh
-python3 scripts/check-service-manifest.py app/init/config/services-with-vms.json
+python3 scripts/check-service-manifest.py bootstrap/stage1/init/config/services-with-vms.json
 ```
 
 This uses the source workspace and host Rust toolchain; it does not need a built
@@ -178,7 +188,9 @@ suite, also included in Native CI.
 Plain `make` (or `make all`) builds the kernel and the selected profile's ramdisk.
 The default AArch64 board profile creates a disk only if missing; subsequent
 builds preserve `/data` and guest disks while updating the host-side kernel and
-bootstrap loaded by QEMU. `make run` only starts existing artifacts and fails if
+bootstrap loaded by QEMU. A changed `/system` payload makes the preserved disk
+stale and requires explicit replacement or a fresh output directory.
+`make run` only starts existing artifacts and fails if
 any are missing; it never builds or packages them.
 
 `make rebuild` (or `make board-rebuild` for the board profile) repacks the full
@@ -199,7 +211,7 @@ same static/dynamic std, process, thread, filesystem, shell and userspace Linux
 VM contracts on one and four harts. A separate `make test-vm-smoke ARCH=riscv64`
 init fixture validates Native VM lifecycle, timer/serial WFI wakeups and
 retirement independently of Linux loading.
-Linux acceptance explicitly attaches `/bin/vmm` to the buffered guest serial port, exercises guest-console RX, and detaches
+Linux acceptance explicitly attaches `/system/bin/vmm` to the buffered guest serial port, exercises guest-console RX, and detaches
 through the local Ctrl-] menu. Both Native
 integration suites also verify named VM isolation and repeated runtime crashes
 with guest-memory reclamation. x86-64 has a build and image contract only.
@@ -241,8 +253,9 @@ exact coverage and supported runtime expectations.
 | `kernel/src/mm/`, `kernel/src/sync/`, `kernel/src/time/` | Reusable allocation, synchronization, and timing mechanisms |
 | `sdk/abi/` | Native ABI schema, generated Rust definitions, C header, and reference |
 | `lib/hyper/` | Freestanding Native C runtime and architecture syscall veneers |
-| `lib/userspace-loader/` | Native executable mapping and initial stack construction |
-| `lib/dynamic-loader/` | Native userspace ELF interpreter, relocation, and runtime loading |
+| `bootstrap/stage1/` | Static bootstrap services, recovery tools and initial executable loader |
+| `lib/elf-loader/` | Shared bounded ELF mapping and initial stack construction |
+| `lib/dynamic-loader/` | Formal static/dynamic application loading, relocation and runtime loading |
 | `lib/rust/` | Safe `no_std` Native OS binding, raw syscalls, and Rust runtime entry |
 | `sdk/toolchain/` | Clang/Cargo drivers, linker contract, and transactional SDK assembly |
 | `app/` | Native system applications built only against the assembled SDK |

@@ -28,10 +28,10 @@ pub(super) use device::{
     sys_vmo_get_dma_extent,
 };
 pub(super) use guest_io::{
-    sys_filesystem_mount, sys_guest_mailbox_create, sys_guest_mailbox_receive,
-    sys_guest_mailbox_send, sys_guest_mapping_create, sys_guest_mapping_release,
-    sys_guest_notification_control, sys_guest_notification_create, sys_native_block_activate,
-    sys_native_block_create, sys_native_block_transfer,
+    sys_filesystem_mount, sys_filesystem_unmount, sys_guest_mailbox_create,
+    sys_guest_mailbox_receive, sys_guest_mailbox_send, sys_guest_mapping_create,
+    sys_guest_mapping_release, sys_guest_notification_control, sys_guest_notification_create,
+    sys_native_block_activate, sys_native_block_create, sys_native_block_transfer,
 };
 pub(super) use handles::{
     sys_handle_close, sys_handle_duplicate, sys_handle_get_info, sys_handle_replace,
@@ -50,9 +50,9 @@ pub(super) use ipc::{
     sys_capability_channel_create, sys_capability_channel_receive, sys_capability_channel_try_send,
 };
 pub(super) use memory::{
-    sys_file_create_executable_vmo, sys_file_create_snapshot, sys_vmar_allocate, sys_vmar_destroy,
-    sys_vmar_map, sys_vmar_map_private, sys_vmar_protect, sys_vmar_unmap, sys_vmo_create,
-    sys_vmo_create_contiguous, sys_vmo_create_snapshot, sys_vmo_read, sys_vmo_write,
+    sys_vmar_allocate, sys_vmar_destroy, sys_vmar_map, sys_vmar_map_file, sys_vmar_map_private,
+    sys_vmar_protect, sys_vmar_unmap, sys_vmo_create, sys_vmo_create_contiguous,
+    sys_vmo_create_snapshot, sys_vmo_read, sys_vmo_write,
 };
 pub(super) use object::{
     sys_event_create, sys_event_signal, sys_object_wait_many, sys_object_wait_one,
@@ -81,8 +81,9 @@ pub(super) use vfs::{
     sys_directory_open_file, sys_directory_open_file_with_options, sys_directory_read,
     sys_directory_read_link, sys_directory_remove, sys_directory_remove_if, sys_directory_rename,
     sys_directory_scope_create, sys_directory_set_metadata, sys_directory_symlink,
-    sys_file_get_info, sys_file_get_metadata, sys_file_lock, sys_file_read_at, sys_file_resize,
-    sys_file_set_metadata, sys_file_sync, sys_file_unlock, sys_file_write_at,
+    sys_file_get_info, sys_file_get_metadata, sys_file_lock, sys_file_protect, sys_file_read_at,
+    sys_file_resize, sys_file_set_metadata, sys_file_sync, sys_file_unlock, sys_file_write_at,
+    sys_filesystem_mount_ramfs, sys_filesystem_switch_root,
 };
 pub(super) use vm::{
     sys_guest_memory_create, sys_pending_virtual_machine_abort,

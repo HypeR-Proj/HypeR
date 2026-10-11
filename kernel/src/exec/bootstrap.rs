@@ -35,6 +35,26 @@ pub struct Segment {
     pub executable: bool,
 }
 
+impl Segment {
+    /// Returns the aligned file extent needed to construct this LOAD mapping.
+    /// The leading `data_offset` bytes are backing padding, not segment data;
+    /// the mapper zeroes them and copies exactly `file_size` bytes after them.
+    /// A pure BSS segment needs no file backing, even at a nonzero page offset.
+    pub fn backing_bytes<'a>(&self, image: &'a [u8]) -> Result<&'a [u8], Error> {
+        if self.file_size == 0 {
+            return Ok(&[]);
+        }
+        let start = usize::try_from(self.file_offset).map_err(|_| Error::Segment)?;
+        let length = self
+            .file_size
+            .checked_add(self.data_offset)
+            .ok_or(Error::Segment)?;
+        let length = usize::try_from(length).map_err(|_| Error::Segment)?;
+        let end = start.checked_add(length).ok_or(Error::Segment)?;
+        image.get(start..end).ok_or(Error::Segment)
+    }
+}
+
 pub struct Image {
     pub machine: Machine,
     pub entry: u64,
@@ -85,8 +105,10 @@ impl Image {
             let ph = (offset + index * 56) as usize;
             match word(bytes, ph, 4)? {
                 1 => {}
-                // Read-only metadata does not affect kernel startup.
-                0 | 4 | 6 => continue,
+                // Dynamic tags and RELRO describe work owned by the loader,
+                // not additional kernel mappings or relocations. PT_INTERP
+                // and PT_TLS remain unsupported at this bootstrap boundary.
+                0 | 2 | 4 | 6 | 0x6474_e552 => continue,
                 0x7000_0003 if machine == Machine::Riscv64 => continue, // PT_RISCV_ATTRIBUTES
                 0x6474_e551 if word(bytes, ph + 4, 4)? & 1 == 0 => continue,
                 _ => return Err(Error::Segment),

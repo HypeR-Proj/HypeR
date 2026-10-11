@@ -85,7 +85,7 @@ pub unsafe fn process_get_info(
     }
 }
 
-/// Creates a mutable process builder from four borrowed authorities.
+/// Creates a mutable process builder from five borrowed authorities.
 ///
 /// # Safety
 ///
@@ -98,6 +98,7 @@ pub unsafe fn process_builder_create(
     group: abi::HyperNativeHandle,
     domain: abi::HyperNativeHandle,
     executable: abi::HyperNativeHandle,
+    loader: abi::HyperNativeHandle,
 ) -> CallResult {
     // SAFETY: the caller establishes all borrowed authority and result-owner
     // contracts.
@@ -108,7 +109,7 @@ pub unsafe fn process_builder_create(
             group,
             domain,
             executable,
-            0,
+            loader,
             0,
         )
     }

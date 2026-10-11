@@ -9,6 +9,7 @@
 //! opaque HAL capabilities.
 
 use super::registers;
+use hyper::hal::user::UserFaultKind;
 
 const MINIMUM_ADDRESS_BITS: u8 = 32;
 const MAXIMUM_ADDRESS_BITS: u8 = 48;
@@ -248,15 +249,48 @@ impl UserPagePermissions {
     }
 }
 
-/// Whether a lower-EL fault can be retried after resolving private write backing.
-/// Cache-maintenance faults and stage-1 table walks are not user stores.
-pub(super) const fn is_user_write_page_fault(syndrome: u64) -> bool {
+/// Classifies a captured EL0 fault without accessing machine or mapping state.
+///
+/// Missing translations may be backed by pageable files. Only a *write*
+/// permission fault may instead need a private COW page; read/execute permission
+/// failures and access-flag faults cannot be repaired by the file pager. The
+/// kernel must still validate mapping permissions and require progress before
+/// retrying any page-fault candidate returned here.
+pub(super) const fn fault_kind(syndrome: u64) -> UserFaultKind {
     let class = (syndrome >> registers::ESR_EC_SHIFT) & registers::ESR_EC_MASK;
     let status = syndrome & registers::ESR_ABORT_FSC_MASK;
-    let excluded = registers::ESR_DATA_ABORT_S1PTW | (1 << 8) | (1 << 10);
-    class == registers::ESR_EC_DATA_ABORT_LOWER
-        && syndrome & registers::ESR_DATA_ABORT_WNR != 0
-        && syndrome & excluded == 0
-        && status >= registers::ESR_ABORT_PERMISSION_FAULT_LEVEL0
-        && status <= registers::ESR_ABORT_PERMISSION_FAULT_LEVEL3
+    let translation = status >= registers::ESR_ABORT_TRANSLATION_FAULT_LEVEL0
+        && status <= registers::ESR_ABORT_TRANSLATION_FAULT_LEVEL3;
+    let permission = status >= registers::ESR_ABORT_PERMISSION_FAULT_LEVEL0
+        && status <= registers::ESR_ABORT_PERMISSION_FAULT_LEVEL3;
+    let excluded =
+        registers::ESR_DATA_ABORT_S1PTW | registers::ESR_DATA_ABORT_CM | registers::ESR_ABORT_FNV;
+    // Table walks and cache maintenance are not ordinary user memory accesses;
+    // FnV also makes the recorded virtual address unusable for paging.
+    if syndrome & excluded == 0 {
+        if class == registers::ESR_EC_INSTRUCTION_ABORT_LOWER && translation {
+            return UserFaultKind::ExecutePageFault;
+        }
+        if class == registers::ESR_EC_DATA_ABORT_LOWER {
+            let write = syndrome & registers::ESR_DATA_ABORT_WNR != 0;
+            if write && (translation || permission) {
+                return UserFaultKind::WritePageFault;
+            }
+            if !write && translation {
+                return UserFaultKind::ReadPageFault;
+            }
+        }
+    }
+    match class {
+        registers::ESR_EC_INSTRUCTION_ABORT_LOWER => UserFaultKind::InstructionAbort,
+        registers::ESR_EC_DATA_ABORT_LOWER => UserFaultKind::DataAbort,
+        registers::ESR_EC_PC_ALIGNMENT | registers::ESR_EC_SP_ALIGNMENT => UserFaultKind::Alignment,
+        registers::ESR_EC_SYSTEM_REGISTER => UserFaultKind::SystemAccess,
+        registers::ESR_EC_BREAKPOINT_LOWER
+        | registers::ESR_EC_SOFTWARE_STEP_LOWER
+        | registers::ESR_EC_WATCHPOINT_LOWER
+        | registers::ESR_EC_BRK64 => UserFaultKind::Breakpoint,
+        registers::ESR_EC_UNKNOWN => UserFaultKind::IllegalInstruction,
+        _ => UserFaultKind::OtherSynchronous,
+    }
 }

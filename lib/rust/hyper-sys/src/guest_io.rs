@@ -175,6 +175,7 @@ pub unsafe fn filesystem_mount(
     directory: u64,
     path: *const u8,
     length: usize,
+    read_only: bool,
 ) -> CallResult {
     // SAFETY: Caller retains all capabilities and path bytes for the call.
     unsafe {
@@ -185,6 +186,23 @@ pub unsafe fn filesystem_mount(
             directory,
             path as u64,
             length as u64,
+            u64::from(read_only),
+        )
+    }
+}
+/// Detaches an idle mount after its filesystem durability fence succeeds.
+/// # Safety
+/// The directory capability and readable path remain valid through the call.
+pub unsafe fn filesystem_unmount(directory: u64, path: *const u8, length: usize) -> CallResult {
+    // SAFETY: Caller owns the capability and path for the duration of this call.
+    unsafe {
+        ffi_native_call6(
+            abi::HYPER_NATIVE_SYS_FILESYSTEM_UNMOUNT,
+            directory,
+            path as u64,
+            length as u64,
+            0,
+            0,
             0,
         )
     }

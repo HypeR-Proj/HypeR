@@ -11,7 +11,7 @@ fn generated_rust_layouts_are_compiler_checked() {
         8
     );
     assert_eq!(generated::HYPER_NATIVE_SYS_HANDLE_CLOSE, 1);
-    assert_eq!(generated::HYPER_NATIVE_RIGHTS_MASK, 0x3_ffff_ffff);
+    assert_eq!(generated::HYPER_NATIVE_RIGHTS_MASK, 0xf_ffff_ffff);
     assert_eq!(generated::HYPER_NATIVE_SIGNAL_EVENT_SIGNALED, 1);
     assert_eq!(generated::HYPER_NATIVE_DEADLINE_INFINITE, u64::MAX);
     assert_eq!(generated::HYPER_NATIVE_HANDLE_INFO_MIN_SIZE, 16);
@@ -86,7 +86,7 @@ fn generated_rust_layouts_are_compiler_checked() {
     assert_eq!(generated::HYPER_NATIVE_ELF_ABI_VERSION, 0);
     assert_eq!(
         core::mem::size_of::<generated::HyperNativeLoaderStartup>(),
-        88
+        72
     );
     assert_eq!(
         generated::HYPER_NATIVE_PROCESS_STARTUP_DATA_MAX_BYTES,
@@ -131,7 +131,7 @@ fn generated_rust_layouts_are_compiler_checked() {
     );
     assert_eq!(generated::HYPER_NATIVE_FILE_MAX_READ_BYTES, 2 * 1024 * 1024);
     assert_eq!(generated::HYPER_NATIVE_VMO_MAX_TRANSFER_BYTES, 64 * 1024);
-    assert_eq!(generated::HYPER_NATIVE_CAPABILITY_CHANNEL_MAX_HANDLES, 16);
+    assert_eq!(generated::HYPER_NATIVE_CAPABILITY_CHANNEL_MAX_HANDLES, 64);
     assert_eq!(generated::HYPER_NATIVE_CONSOLE_MAX_TRANSFER_BYTES, 4 * 1024);
     assert_eq!(generated::HYPER_NATIVE_SYS_CONSOLE_READ, 15);
     assert_eq!(generated::HYPER_NATIVE_SYS_CONSOLE_WRITE, 16);
@@ -140,6 +140,10 @@ fn generated_rust_layouts_are_compiler_checked() {
     assert_eq!(generated::HYPER_NATIVE_SYS_CAPABILITY_CHANNEL_CREATE, 19);
     assert_eq!(generated::HYPER_NATIVE_SYS_CAPABILITY_CHANNEL_TRY_SEND, 20);
     assert_eq!(generated::HYPER_NATIVE_SYS_CAPABILITY_CHANNEL_RECEIVE, 21);
+    assert_eq!(
+        core::mem::offset_of!(generated::HyperNativeLoaderStartup, loader_size),
+        64
+    );
     assert_eq!(generated::HYPER_NATIVE_SYS_PROCESS_BUILDER_CREATE, 22);
     assert_eq!(generated::HYPER_NATIVE_SYS_PROCESS_BUILDER_SET_NAME, 23);
     assert_eq!(generated::HYPER_NATIVE_SYS_PROCESS_BUILDER_SET_DATA, 24);

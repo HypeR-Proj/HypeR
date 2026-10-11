@@ -7,56 +7,116 @@ SPDX-License-Identifier: Apache-2.0
 
 The kernel owns namespace traversal, capability checks, file identities,
 `flock`, content revisions and the clean page cache. Media parsers run in Native
-processes. The initial block-backed implementation is FAT32; the protocol and
-worker lifecycle are independent of that format. Ramfs remains in the kernel.
+processes. The block-backed implementations are FAT32 and read-only core EROFS;
+the protocol and worker lifecycle are independent of either format. Ramfs remains
+in the kernel.
 
 ## Startup and authority
 
-Init creates an attachment channel between `io-runtime` and `/svc/fs-backend`.
-After the configuration-volume client is activated, `io-runtime` moves its
-exclusive `NativeBlock` capability, activated sector count/read-only policy and
-readiness writer to `fs-backend`. The
-manager reads a bounded boot sector, recognizes plausible filesystem geometry,
-and selects a build-controlled executable. Disk bytes cannot select executable
-paths. The manager starts `/svc/fs-fat` only for a FAT candidate; that worker
-performs the authoritative media validation before publishing a mount.
-Unsupported or corrupt media leaves storage unavailable and Native recovery
-services running.
+Init creates an attachment channel between io-runtime and the resident
+fs-backend manager. io-runtime enumerates physical disks through the I/O VM's
+owner-only block-management channel, validates GPT and resolves the partition
+selectors in `etc/hyper/storage.json`. It binds each selected range and access
+policy to an independent I/O client, then transfers exclusive `NativeBlock`
+capabilities, partition UUIDs and labels, sector counts and read-only policies
+to fs-backend. BEGIN transfers the readiness writer; FINISH starts the initial
+fstab mounts. No raw writable alias remains in io-runtime after a volume moves
+to the filesystem manager.
 
-Partition discovery belongs to the Linux I/O VM's validated GPT and `dm-linear`
-volume setup. The Native block capability describes one logical volume starting
-at sector zero. Format probing does not scan an entire disk or interpret an MBR
-as filesystem contents. FAT's informational type label is not authoritative.
+The Linux I/O VM validates HypeR's selected ranges and creates their `dm-linear`
+exports; it does not parse GPT or choose partitions. A Native block capability
+addresses its authorized partition starting at sector zero. The filesystem
+manager probes a bounded prefix for FAT geometry or EROFS
+magic, then loads the corresponding known worker executable. Disk bytes select
+a format, never an executable path; FAT's informational type label is not an
+authoritative format test.
 
-The manager opens the mount directory and gives the worker a root capability
-scoped to that directory, together with an explicit dynamic-library directory.
-The worker receives no task factory, device authority or arbitrary writable root.
-It gets a bounded child resource domain, its exclusive block capability, a
-readiness writer, and a parent-lifetime channel. It links the common
-`hyper-fs-service` library; FAT-specific code implements only media operations.
-The manager retains the child process and task group. It is not in the data path.
-Task-group retirement can cancel a currently executing worker operation; shared
-and block buffers still follow their bounded transaction-drain and retirement
-rules before ownership can be released.
+The manager reads `etc/fstab` and optional `etc/hyper/filesystem.json` through
+its fixed `process.environment-directory`. They appear under `/boot` after
+handoff; mount targets resolve through the separate live namespace root.
+The fstab selects authorized partitions by `PARTLABEL=` or `PARTUUID=`,
+mountpoints, access modes and startup order.
+The JSON selects `worker_directories` (default `[{"environment":"svc"}]`),
+bounded to 16 KiB and eight normalized paths. `environment` entries are relative
+to the fixed boot directory and use its static loader; `namespace` entries are
+absolute paths in the live namespace and use the system loader and libraries. Only a missing executable permits trying the next directory;
+access or I/O failures stop the search. Missing workers fail at runtime, without
+making the format registry depend on which implementations were packaged.
+See [boot and system deployment](boot-layout.md) for the default boot/system layout,
+fstab syntax and the same startup flow with RAM-resident system files.
 
-The worker mounts `.` within its scoped directory using `filesystem_mount`.
-The mount operation validates the channel, shared memory and covered directory
-without calling back into the worker. Readiness is sent only after publication.
-`io-runtime` continues its console and power event loop while waiting for this
-readiness signal. There is no additional raw writable block alias retained by
-it or the manager after the capability moves to the worker.
+The manager gives each worker its exclusive volume, bounded resource domain,
+parent-lifetime channel and transport rendezvous. It retains the child process
+and task group. Workers receive no task factory, device authority or mount-root
+capability. A worker validates its root and offers a byte-channel endpoint and
+shared VMO; the manager publishes that transport at the configured mountpoint.
+The common `hyper-fs-service` library owns this handshake and ordered RPC.
+Format adapters implement media operations. The manager is outside the file
+read/write path, and io-runtime continues forwarding console and power events
+while waiting for the initial mount result.
+
+`fs-fat` implements writable FAT32. `fs-erofs` implements read-only,
+uncompressed core EROFS, including compact/extended inodes, plain and inline
+data, directories and symlinks. It validates a present superblock CRC32C and
+rejects compression, xattrs, external devices and unsupported inode layouts.
+Its [reader documentation](../lib/rust/hyper-erofs/README.md) gives bounds and
+supported block sizes. Recognition alone is not a promise that a worker can
+read every extension of that filesystem format.
+
+`mount` and `umount` send administrative requests to fs-backend using a scoped
+control capability. Init delegates that capability to session and the shell;
+the shell attenuates it to WAIT|WRITE only for the exact mount/umount executable
+paths in `/bin`, `/boot/bin`, or `/system/bin`. Ordinary commands receive neither
+mount control nor raw volume handles. A copied tool at a different path does
+not gain administration authority.
+
+Graceful unmount refuses active VFS Locations, including open files,
+directory/cwd capabilities, active lookups, or a covered location held by a child
+mount. Protected file mappings retain their backing node and also keep the
+mount busy until the mappings retire. The kernel freezes new admission, synchronizes under the backend mutex, atomically removes
+the mount edge, and invalidates health before allowing late speculative reads.
+Failure keeps the mount edge and thaws admission. On success, the manager tells
+the worker to close its transport/mapping and return its original block owner.
+Read-only mounts also reject mutations at the kernel transport gate, independently
+of worker behavior. No forced/lazy unmount or raw-block reactivation bypass is
+provided. A missing worker leaves the block in the manager so the mount can be
+retried after making the worker available. A running worker failure loses that
+reusable ownership; reopening requires a new backend connection rather than
+assuming interrupted I/O has retired.
+
+A configured VM can keep `/data` busy even while stopped: vm-manager retains
+the registered guest image's file capability. `vmm delete alpine` releases a
+stopped Alpine definition and its image handle; it does not delete the image or
+configuration files. Stopping the VM alone does not release that registration.
+
+The recovery shell can repair mount state after initial readiness fails. If
+`/system` remains available, init can still hand off supervision despite a
+data-volume failure. When `/system` is unavailable and init retains stage-1
+supervision, repairing mounts does not retry that handoff or start the system
+graph; another complete startup attempt requires the next boot.
+
+After adopting core supervision, system init performs a separate namespace
+root switch. Existing remote mounts keep their identities, worker transports,
+open files and cached content while their mount edges move to the new root.
+Ramfs-backed `/system` is bound without copying its files. These generic VFS
+operations require `MANAGE_NAMESPACE`, retained by the active init; the shell's
+filesystem-manager control channel does not grant it. If the root switch fails
+after supervision transfer, system init keeps supervising the core services
+on the old root and does not launch the system graph.
 
 ## Request and shared-memory contract
 
 `hyper-filesystem` defines explicit little-endian messages for stat, directory
 entry enumeration, positioned reads and writes, create, remove, rename, resize,
-sync and timestamps. It contains no FAT attributes or on-disk structures. Paths
-are bounded UTF-8 relative paths without dot, parent or empty components.
+sync, timestamps and reading symbolic-link targets. It contains no FAT attributes
+or on-disk structures. Paths are bounded UTF-8 relative paths without dot, parent
+or empty components.
 Directory enumeration returns ordinary children; format adapters exclude
 on-disk `.` and `..` entries before indexing results. The
-current protocol intentionally supports canonical path identities rather than
-hard links or symbolic links; a filesystem needing these semantics must extend
-the generic identity contract before claiming support.
+protocol preserves symlinks as namespace objects and returns their stored target
+bytes. The common VFS performs bounded resolution, including absolute and parent
+components. Canonical paths remain the content identity contract; distinct
+on-disk hard-link paths do not yet share a kernel content identity.
 
 Each mount owns one ordered `ByteChannel` and one resident 512 KiB writable VMO.
 The kernel serializes requests under a sleepable mount mutex. Metadata travels
@@ -87,9 +147,11 @@ flight-retirement rules therefore continue to apply to the userspace engine.
 
 The worker waits for both requests and parent-channel closure. Parent death
 closes the worker service after any already executing bounded block operation
-returns; worker death closes the service immediately as its handles retire.
+returns; worker exit closes the service as its handles retire. The Process
+`TERMINATED` signal reports stopped execution and can precede this handle cleanup;
+the `Retired` phase reports completed resource teardown.
 The kernel checks local endpoint health even before satisfying a cache hit, so
-cached bytes cannot hide a dead worker. Restarting a process does not reconnect
+cached bytes cannot hide a closed service. Restarting a process does not reconnect
 an old mount: recovery needs a fresh mount generation. A hot cache hit needs no
 server round trip and does not take the mount transaction mutex.
 
@@ -109,6 +171,24 @@ from the same or another process can hit them. After all live and cached owners
 disappear, a new open receives a fresh incarnation. Quota and pressure reclaim
 release pages and expired registry records without making filesystem IPC calls.
 
+Executable and shared-library loads use ordinary File capabilities and explicit
+`PROTECT` content protection. A protection token pins file identity and length,
+not a whole-file snapshot or a resident copy. Selected mapped ranges can be
+reloaded through the same page cache after clean mapping pages are reclaimed.
+While a protected mapping still depends on the file, writes and truncation
+through any alias fail with `Busy`. Mapping retirement releases its protection;
+process exit also detaches file sources after threads quiesce and handles close,
+even if an escaped VMAR keeps the dead address space allocated. Such retained
+pages remain charged to the requester and cannot be refilled. File handle
+transfer does not transfer an active protection grant.
+
+Clean mapping reclamation still needs temporary transaction metadata and page
+tables, charged to the requesting process's domain. At a hard quota without
+headroom it can fail, so pressure handling is best effort rather than a promise
+that every clean mapped page can always be evicted. The kernel does not borrow
+filesystem or global sponsor quota to make the request succeed. Detaching file
+sources during process exit does not depend on allocating replacement roots.
+
 Writes, resizes and truncating opens advance the common content revision before
 calling the worker. Even a failed mutation may have changed media, so old cache
 entries become unreachable. The per-file gate also excludes concurrent fills.
@@ -126,8 +206,9 @@ identity cannot become visible through a recreated file.
 It cannot recursively predict more work. This worker is separate from memory
 reclamation, so a backend waiting for memory cannot deadlock the reclaim path.
 
-Implementation entry points: [manager](../app/fs-backend/src/main.rs),
-[common worker](../lib/fs-service/src/lib.rs), [FAT worker](../app/fs-fat/src/main.rs),
+Implementation entry points: [manager](../bootstrap/stage1/fs-backend/src/main.rs),
+[common worker](../lib/fs-service/src/lib.rs), [FAT worker](../bootstrap/stage1/fs-fat/src/main.rs),
+[EROFS worker](../bootstrap/stage1/fs-erofs/src/main.rs),
 [wire protocol](../lib/rust/hyper-filesystem/src/protocol.rs),
 [kernel adapter](../kernel/src/kernel/vfs/remote.rs), and
 [transport](../kernel/src/kernel/vfs/remote/transport.rs).
@@ -137,13 +218,19 @@ for format details and memory policy.
 ## Validation
 
 `make test-filesystem-failure` starts real Native filesystem workers with a
-controlled test volume. It checks close/reopen cache reuse, worker death after
+controlled test volume. It checks delayed replies without prematurely retiring
+the mount, close/reopen cache reuse, worker death after
 cache fill, manager-owner channel closure, worker death during a pending read,
 stopping one requesting process while another keeps using the mount, and
 rejecting overflowing writes derived from worker-controlled file lengths before
 publishing any write request. The
 fixture is selected by an explicit Cargo feature and is never packaged in the
 normal system or development profile.
+
+CI runs this fixture with a 54 MHz counter, matching the Pi 5 frequency, so
+counter ticks cannot accidentally pass as the absolute nanosecond deadlines
+required by object waits. The delayed-reply case waits past five seconds of
+monotonic time and withholds a reply to exercise the blocking path.
 
 `make test-board-storage` exercises the actual FAT worker and Linux block
 backend: file and directory operations, aliases and shared identities, writes,

@@ -84,7 +84,7 @@ make rpi5-bringup ARCH=aarch64
 override for a verified v2 package. Old custom-TF-A v1 packages are not accepted.
 
 This builds the same architecture-wide kernel/application binaries and a
-Native-only initramfs using `app/init/config/services-console-only.json`.
+Native-only initramfs using `bootstrap/stage1/init/config/services-console-only.json`.
 It validates every external package checksum, then creates
 `target/board/rpi5-native/disk.img` from `boards/rpi5-native.json`. The image has
 a 64 MiB FAT32 GPT boot partition; no Linux I/O VM, Alpine download or VM disk
@@ -269,7 +269,8 @@ firmware boot chain and HypeR shell. It registers the board's `io-vm.name` (defa
 vm-manager/vm-runtime without io-runtime, device assignment or a /data mount.
 Use `vmm start io`, `vmm status io` and
 `vmm console io`. Manual startup preserves the Native shell if guest
-bring-up fails; inspect `dmesg` for the terminal vCPU syndrome and address.
+bring-up fails; capture the serial log for the terminal vCPU syndrome and address.
+The Native recovery shell does not currently provide a `dmesg` command.
 The guest reports `bring-up ready; no devices assigned, storage service disabled`.
 It waits under VM supervision; it does not provide an interactive Linux shell
 or claim backend readiness. Stop/restart use the normal VMM commands.
@@ -283,8 +284,9 @@ but cannot validate the board's device drivers.
 ## SD-card backend qualification
 
 `boards/rpi5.json` selects the physical BCM2712 SDIO1 controller by firmware
-path and contains a 1 GiB FAT configuration partition plus a 2 GiB Alpine ext4 root
-partition, matching the QEMU guest layout. Alpine uses the minimal rootfs and
+path. The default split layout contains a 64 MiB read-only EROFS system
+partition, a 1 GiB FAT configuration partition and a 2 GiB Alpine ext4 root
+partition, matching the QEMU deployment layout. Alpine uses the minimal rootfs and
 remains stopped until `vmm start alpine`. Its FIT lives at `/data/vm/alpine.itb`,
 not in the Native initramfs. Its root disk is exported separately through
 dm-linear and vhost-scsi; use `vmm console alpine` after starting it.
@@ -303,15 +305,23 @@ existing partitions and data.
 The build itself only writes this generated image, never the physical card.
 
 Native io-runtime claims the SDIO1 dependency graph and supplies a guest DT;
-Linux drives SDHCI, GPIO and pinctrl. The appliance selects the configuration
-partition by PARTUUID and maps it through dm-linear as `hyper-config`.
-Linux exports that block device through LIO/vhost-scsi. HypeR mounts its FAT
-filesystem at `/data`; Linux must not mount the same filesystem concurrently.
-The boot files remain ordinary firmware-readable FAT files in this volume.
+Linux drives SDHCI, GPIO and pinctrl. HypeR io-runtime reads and validates the physical disk GPT, selects the
+`hyper-data` partition using the board policy, and authorizes its exact range.
+The appliance creates a client-scoped dm-linear mapping without parsing GPT.
+Linux exports the Native block volumes through LIO/vhost-scsi. Native fs-backend
+applies fstab and starts separate workers to mount EROFS at `/system` and FAT at
+`/data`; Linux must not mount those filesystems concurrently.
+The boot files remain ordinary firmware-readable files in the configuration
+FAT volume.
 
-Expected readiness is `configuration volume mounted at /data`. Check
-`vmm status io`, `ls /data`, and a small file write/read after it appears.
-The configuration mount and directory reads have passed on Pi 5 D0.
+Expected storage readiness is `HypeR io-runtime: ready; Native volumes mounted`,
+after fs-backend reports each successful mount. System init then adopts core
+supervision and switches roots before launching VM management. Check `mount`,
+`vmm status io`, `ls /data`, and a small file write/read. `BOARD_SYSTEM_LAYOUT=ramfs`
+keeps system programs in RAM with the same handoff and root switch; see
+[boot layout](../../docs/boot-layout.md). Earlier configuration-volume mounting
+and directory reads passed on Pi 5 D0; those results do not qualify the new
+split deployment or root switch on hardware.
 
 The 2026-09-22 hardware run also verified a 256 MiB, two-vCPU Alpine guest
 with a 128 MiB resident I/O VM: both CPUs online, three CPU 1 off/on cycles,
@@ -399,8 +409,9 @@ trusted I/O VM, not DMA isolation.
 
 If init reports storage readiness failure, first inspect the earlier kernel
 log for `PCI function handoff unavailable` and inspect the forwarded I/O VM
-messages. The Native shell remains available for `dmesg` even if `/data` cannot
-be mounted. A link failure records the root-port
+messages in the captured serial output. The recovery shell and `mount` remain
+available even if storage cannot be mounted; ordinary `/system/bin` tools need
+a mounted system volume or an all-RAM deployment. A link failure records the root-port
 MMIO address, PCIe status, bus numbers and control register before any endpoint
 access. This distinguishes an inactive PCIe link from rejected bus-number
 programming; neither diagnostic refers to the Ethernet cable or DHCP.

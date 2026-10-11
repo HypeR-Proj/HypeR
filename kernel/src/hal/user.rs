@@ -123,13 +123,22 @@ impl UserRunBinding {
     }
 }
 
-/// Architecture-neutral classification of a contained EL0 fault.
+/// Architecture-neutral classification of a contained native-user fault.
+///
+/// Page-fault variants identify accesses which may need demand paging or COW,
+/// not permission to resume unconditionally. The kernel must validate logical
+/// mapping access and resolve backing or publication before retrying. Some
+/// architectures cannot distinguish missing pages from permission failures.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UserFaultKind {
     InstructionAbort,
     DataAbort,
     /// A write translation/permission fault with a valid fault address.
     WritePageFault,
+    /// A read page-fault candidate with a valid fault address.
+    ReadPageFault,
+    /// An instruction page-fault candidate with a valid fault address.
+    ExecutePageFault,
     Alignment,
     IllegalInstruction,
     SystemAccess,

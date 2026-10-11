@@ -196,7 +196,10 @@ pub(in crate::kernel::abi::native) fn sys_filesystem_mount(
     arguments: &Arguments,
 ) -> DeferredAction {
     let result = (|| {
-        require_zero(&arguments[5..])?;
+        require_zero(&arguments[6..])?;
+        if arguments[5] > 1 {
+            return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
+        }
         if arguments[4] == 0 || arguments[4] > 4096 {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
         }
@@ -208,7 +211,27 @@ pub(in crate::kernel::abi::native) fn sys_filesystem_mount(
                 parse_handle(arguments[1])?,
                 parse_handle(arguments[2])?,
                 path,
+                arguments[5] != 0,
             )
+            .map_err(crate::kernel::abi::native::status::status_from_vfs_service_error)
+    })();
+    DeferredAction::Return(status_only(result))
+}
+
+#[inline(never)]
+pub(in crate::kernel::abi::native) fn sys_filesystem_unmount(
+    services: &impl GuestIoServices,
+    arguments: &Arguments,
+) -> DeferredAction {
+    let result = (|| {
+        require_zero(&arguments[3..])?;
+        if arguments[2] == 0 || arguments[2] > 4096 {
+            return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
+        }
+        let path = UserSlice::new(UserAddress::new(arguments[1]), arguments[2])
+            .map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
+        services
+            .unmount_filesystem(parse_handle(arguments[0])?, path)
             .map_err(crate::kernel::abi::native::status::status_from_vfs_service_error)
     })();
     DeferredAction::Return(status_only(result))

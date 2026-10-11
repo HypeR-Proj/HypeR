@@ -76,23 +76,23 @@ pub(crate) use objects::{GuestMemoryBacking, MemoryObjectError, VmarObject, VmoO
 pub(crate) use service::{ServiceError as MemoryServiceError, permissions as abi_permissions};
 #[cfg(not(test))]
 pub(crate) use service::{
-    allocate_vmar, create_contiguous_vmo, create_file_executable_vmo, create_vmo,
-    destroy as destroy_vmar, map_vmo, protect, read_vmo, unmap, write_vmo,
+    allocate_vmar, create_contiguous_vmo, create_vmo, destroy as destroy_vmar, map_vmo, protect,
+    read_vmo, unmap, write_vmo,
 };
 
 #[cfg(not(test))]
 pub(crate) use machine::service_local_rpc;
 pub(crate) use vmo::{
-    ExecutableProvenance, ExecutableVmo, PrivateMappingMode, SnapshotVmo, VmoError,
-    WeakSnapshotVmo, WritableVmo,
+    ExecutableProvenance, ExecutableVmo, PrivateMappingMode, SnapshotVmo, VmoError, WritableVmo,
 };
 
 #[cfg(not(test))]
-pub(crate) use service::{
-    PrivateMappingRequest, create_file_snapshot, create_vmo_snapshot, map_private,
-};
+pub(crate) use service::{PrivateMappingRequest, create_vmo_snapshot, map_file, map_private};
 
 #[cfg(test)]
 pub(crate) use address_space::CommittedMappingChange;
 #[cfg(test)]
 pub(crate) use contract::{PageBackend, UserAddressWindow};
+
+#[cfg(test)]
+pub(crate) use vmo::FilePageSource;

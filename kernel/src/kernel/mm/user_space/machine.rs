@@ -49,14 +49,12 @@ pub(crate) enum Error {
     Hal(crate::hal::user::AddressSpaceError),
     Identifier(crate::kernel::mm::translation_id::Error),
     Logical(LogicalAddressSpaceError),
-    #[expect(dead_code, reason = "error payload is retained for Debug diagnostics")]
     Page(hyper::mm::BuddyError),
     Residency(ResidencyError),
     Resource(ResourceError),
     SizeOverflow,
     Transport,
     Unsupported,
-    #[expect(dead_code, reason = "error payload is retained for Debug diagnostics")]
     Vmo(VmoError<KernelPageError, ResourceError>),
 }
 
@@ -80,7 +78,10 @@ impl Error {
         matches!(
             self,
             Self::Logical(
-                LogicalError::Busy | LogicalError::StaleTransaction | LogicalError::CowRequired
+                LogicalError::Busy
+                    | LogicalError::StaleTransaction
+                    | LogicalError::CowRequired
+                    | LogicalError::BackingNotResident
             ) | Self::Residency(ResidencyError::Busy | ResidencyError::StaleEpoch)
         )
     }
@@ -248,8 +249,8 @@ pub(crate) struct NativeAddressSpace {
     _owner_charge: CommittedCharge,
 }
 
-/// Unpublished image storage. Relocations materialize private pages before
-/// publication; untouched pages retain the immutable file generation.
+/// Unpublished, independently owned loader segments. No installed segment
+/// retains the temporary whole-file parser snapshot.
 pub(crate) struct NativeImageSegment {
     range: UserSlice,
     permissions: Permissions,
@@ -285,24 +286,35 @@ impl NativeImageSegment {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn try_from_snapshot(
+    pub(crate) fn try_from_bytes(
         address_space: &NativeAddressSpace,
         range: UserSlice,
         permissions: Permissions,
-        source: super::SnapshotVmo<KernelPageBackend, DomainAccount>,
-        source_offset: u64,
-        source_length: u64,
+        bytes: &[u8],
         data_offset: u64,
     ) -> Result<Self, Error> {
         if !permissions.is_valid() || permissions == Permissions::NONE {
             return Err(Error::Unsupported);
         }
+        // Copy only this LOAD segment. The source parser buffer can be released
+        // immediately after all segments have been installed.
+        let file_bytes = if bytes.is_empty() {
+            0
+        } else {
+            (bytes.len() as u64)
+                .checked_sub(data_offset)
+                .ok_or(Error::Unsupported)?
+        };
+        let source = super::SnapshotVmo::try_from_bytes(
+            bytes,
+            KernelPageBackend,
+            address_space.account.clone(),
+        )?;
         let view = super::vmo::PrivateViewBuilder::try_new(
             source,
             range.length(),
-            source_offset,
-            source_length,
+            0,
+            file_bytes,
             data_offset,
             super::PrivateMappingMode::CopyOnWrite,
             KernelPageBackend,
@@ -442,6 +454,7 @@ impl NativeAddressSpace {
     /// The immutable old mapping set keeps shared pages alive through every
     /// active-root replacement and inactive-resident invalidation acknowledgement.
     pub(crate) fn resolve_private_write(&self, destination: UserSlice) -> Result<(), Error> {
+        self.populate_file_range(destination)?;
         if let Some(prepared) = self.logical.prepare_private_write(destination)? {
             self.prepare_change(prepared)?.commit()?;
         }
@@ -451,20 +464,76 @@ impl NativeAddressSpace {
     /// Resolves only an admitted private mapping, including a stale fault after
     /// a sibling Thread has already materialized that page. Ordinary protection
     /// violations must never be converted into an endless instruction retry.
-    pub(crate) fn resolve_write_fault(&self, address: UserAddress) -> Result<bool, Error> {
+    pub(crate) fn resolve_write_fault(
+        &self,
+        address: UserAddress,
+        observed_epoch: u64,
+    ) -> Result<bool, Error> {
         if !self.logical.is_private_write(address) {
             return Ok(false);
         }
         let page = UserAddress::new(address.get() / PAGE_SIZE * PAGE_SIZE);
         self.resolve_private_write(UserSlice::new(page, PAGE_SIZE)?)?;
-        Ok(true)
+        Ok(self.logical.mapping_epoch() != observed_epoch)
+    }
+
+    /// Only stable file identity and range metadata survive clean-page eviction.
+    pub(crate) fn populate_file_range(&self, range: UserSlice) -> Result<(), Error> {
+        if let Some(prepared) = self.logical.prepare_file_population(range)? {
+            self.prepare_change(prepared)?.commit()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn resolve_file_fault(
+        &self,
+        address: UserAddress,
+        access: Access,
+        observed_epoch: u64,
+    ) -> Result<bool, Error> {
+        if !self.logical.is_file_access(address, access) {
+            return Ok(false);
+        }
+        let page = UserAddress::new(address.get() / PAGE_SIZE * PAGE_SIZE);
+        let range = UserSlice::new(page, PAGE_SIZE)?;
+        self.populate_file_range(range)?;
+        if access == Access::Write {
+            self.resolve_private_write(range)?;
+        }
+        Ok(self.logical.mapping_epoch() != observed_epoch)
+    }
+
+    pub(crate) fn next_file_reclaim_range(
+        &self,
+        after_address: u64,
+        limit: usize,
+    ) -> Option<UserSlice> {
+        self.logical.next_file_reclaim_range(after_address, limit)
+    }
+
+    /// A successful replacement acknowledges every resident CPU before old
+    /// physical pages are dropped. Dirty/COW pages are excluded by the logical
+    /// plan, and a concurrent write or unmap invalidates that plan's epoch.
+    pub(crate) fn reclaim_file_range(&self, range: UserSlice) -> Result<usize, Error> {
+        let Some((prepared, count)) = self.logical.prepare_file_reclaim(range)? else {
+            return Ok(0);
+        };
+        self.prepare_change(prepared)?.commit()?;
+        Ok(count)
+    }
+
+    /// Only the owning process may call this, after all its threads and active
+    /// handles have retired. No allocation/quota headroom is needed to release
+    /// content protection, even while foreign VMAR references retain this owner.
+    pub(crate) fn retire_file_sources(&self) {
+        self.logical.retire_file_sources();
     }
 
     /// Copies kernel-owned bytes through the logical user-address contract.
     pub(crate) fn copy_to_user(&self, destination: UserSlice, source: &[u8]) -> Result<(), Error> {
         match self.logical.copy_to_user(destination, source) {
             Ok(()) => Ok(()),
-            Err(LogicalError::CowRequired) => {
+            Err(LogicalError::CowRequired | LogicalError::BackingNotResident) => {
                 self.resolve_private_write(destination)?;
                 self.logical
                     .copy_to_user(destination, source)
@@ -480,8 +549,16 @@ impl NativeAddressSpace {
         source: UserSlice,
         destination: &mut [u8],
     ) -> Result<(), Error> {
-        self.logical.copy_from_user(source, destination)?;
-        Ok(())
+        match self.logical.copy_from_user(source, destination) {
+            Ok(()) => Ok(()),
+            Err(LogicalError::BackingNotResident) => {
+                self.populate_file_range(source)?;
+                self.logical
+                    .copy_from_user(source, destination)
+                    .map_err(Error::Logical)
+            }
+            Err(error) => Err(Error::Logical(error)),
+        }
     }
 
     pub(crate) fn pin_atomic_u32(
@@ -490,7 +567,7 @@ impl NativeAddressSpace {
     ) -> Result<NativePinnedAtomicWord, Error> {
         match self.logical.pin_atomic_u32(address) {
             Ok(pin) => Ok(pin),
-            Err(LogicalError::CowRequired) => {
+            Err(LogicalError::CowRequired | LogicalError::BackingNotResident) => {
                 self.resolve_private_write(UserSlice::new(address, 4)?)?;
                 self.logical.pin_atomic_u32(address).map_err(Error::Logical)
             }
@@ -505,7 +582,7 @@ impl NativeAddressSpace {
     ) -> Result<UserWriteReservation, Error> {
         let plan = match owner.logical.prepare_user_write(destination) {
             Ok(plan) => plan,
-            Err(LogicalError::CowRequired) => {
+            Err(LogicalError::CowRequired | LogicalError::BackingNotResident) => {
                 owner.resolve_private_write(destination)?;
                 owner.logical.prepare_user_write(destination)?
             }
@@ -521,6 +598,12 @@ impl NativeAddressSpace {
         &'a self,
         logical: LogicalPrepared<'a>,
     ) -> Result<PreparedNativeChange<'a>, Error> {
+        let pin =
+            crate::kernel::task::scheduler::preempt_disable().map_err(|_| Error::Transport)?;
+        let published = logical.publish_file_instructions(&pin);
+        crate::kernel::task::scheduler::preempt_enable_without_reschedule(pin)
+            .map_err(|_| Error::Transport)?;
+        published?;
         let count = logical.snapshots().count();
         let bytes = count
             .checked_mul(size_of::<(
@@ -544,7 +627,7 @@ impl NativeAddressSpace {
         for snapshot in logical.snapshots() {
             let pages = logical.resident_pages(snapshot.token)?;
             leaf_count = leaf_count
-                .checked_add(pages.pages().len())
+                .checked_add(pages.pages().iter().flatten().count())
                 .ok_or(Error::SizeOverflow)?;
             mappings.push((snapshot, pages));
         }
@@ -556,6 +639,9 @@ impl NativeAddressSpace {
             |visit| {
                 for (snapshot, pages) in &mappings {
                     for (index, physical) in pages.pages().iter().copied().enumerate() {
+                        let Some(physical) = physical else {
+                            continue;
+                        };
                         let offset = (index as u64) * PAGE_SIZE;
                         visit(crate::hal::user::MappingPage {
                             address: snapshot.range.base().get() + offset,
@@ -812,6 +898,12 @@ pub(crate) struct ActiveNativeAddressSpace<'owner> {
 }
 
 impl<'owner> ActiveNativeAddressSpace<'owner> {
+    /// Epoch admitted on this CPU before entering userspace. A later shootdown
+    /// may advance it; a fault from this root can then legitimately be stale.
+    pub(crate) fn mapping_epoch(&self) -> u64 {
+        ACTIVE_EPOCH[self.cpu].load(Ordering::Acquire)
+    }
+
     pub(crate) fn run_user<'context>(
         mut self,
         context: &'context mut crate::hal::user::UserContext,
@@ -1140,81 +1232,6 @@ pub(crate) fn service_local_rpc(
 unsafe impl hyper::hal::user::UserTranslationOwner for NativeAddressSpace {}
 
 #[cfg(feature = "kernel-self-test")]
-#[allow(
-    dead_code,
-    reason = "shared self-test entry; hardware coverage is architecture-dependent"
-)]
-pub(crate) fn prepare_native_entry_self_test(
-    domain: ResourceDomain,
-    range: UserSlice,
-    code_range: UserSlice,
-    stack_range: UserSlice,
-    code: &[u8],
-    pin: &(impl PinnedExecution + 'static),
-) -> Result<UniqueFallibleArc<NativeAddressSpace>, Error> {
-    if code.is_empty() || code.len() > PAGE_SIZE as usize {
-        return Err(Error::SizeOverflow);
-    }
-    let native = NativeAddressSpace::try_new(domain, range)?;
-    let source = WritableVmo::try_new(PAGE_SIZE, KernelPageBackend, native.account.clone())?;
-    source.write(0, code)?;
-    let executable = source
-        .try_executable_snapshot(&super::ExecutableProvenance::for_kernel_self_test(), pin)?;
-    let logical = native.logical();
-    let code_change = logical.prepare_map_executable(
-        logical.root_vmar(),
-        code_range,
-        executable,
-        0,
-        Permissions::read_execute(),
-        Permissions::read_execute(),
-    )?;
-    native.prepare_change(code_change)?.commit()?;
-
-    let stack = WritableVmo::try_new(PAGE_SIZE, KernelPageBackend, native.account.clone())?;
-    stack
-        .populate(0, PAGE_SIZE)
-        .map_err(|failure| Error::Vmo(failure.cause))?;
-    let stack_change = logical.prepare_map_writable(
-        logical.root_vmar(),
-        stack_range,
-        stack,
-        0,
-        Permissions::read_write(),
-        Permissions::read_write(),
-    )?;
-    native.prepare_change(stack_change)?.commit()?;
-    Ok(native)
-}
-
+mod self_test;
 #[cfg(feature = "kernel-self-test")]
-#[allow(
-    dead_code,
-    reason = "shared self-test entry; hardware coverage is architecture-dependent"
-)]
-pub(crate) fn run_dormant_self_test() -> Result<(), Error> {
-    let domain =
-        ResourceDomain::try_new_root(crate::kernel::accounting::ResourceLimits::UNLIMITED)?;
-    let range = UserSlice::new(UserAddress::new(0x30_0000), PAGE_SIZE)?;
-    let native = NativeAddressSpace::try_new(domain, range)?;
-    let vmo = WritableVmo::try_new(PAGE_SIZE, KernelPageBackend, native.account.clone())?;
-    vmo.populate(0, PAGE_SIZE)
-        .map_err(|error| Error::Vmo(error.cause))?;
-    let logical = native.logical();
-    let prepared = logical.prepare_map_writable(
-        logical.root_vmar(),
-        range,
-        vmo,
-        0,
-        Permissions::read_write(),
-        Permissions::read_write(),
-    )?;
-    native.prepare_change(prepared)?.commit()?;
-    match NativeAddressSpace::retire_unpublished(native) {
-        Ok(()) => Ok(()),
-        Err(failure) => {
-            let (error, _owner) = failure.into_parts();
-            Err(error)
-        }
-    }
-}
+pub(crate) use self_test::{prepare_native_entry_self_test, run_dormant_self_test};

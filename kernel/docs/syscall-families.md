@@ -72,8 +72,10 @@ safe.
 ## Reserved executable conversion
 
 `ExecutableAuthority` and `CREATE_EXECUTABLE` are reserved foundations, not an
-available Native issuance/conversion API. The current callable path derives an
-executable VMO from a file using `file_create_executable_vmo`. Converting arbitrary
+available Native issuance/conversion API. The callable file path uses
+`file_protect` and `vmar_map_file`: File READ|EXECUTE plus active content
+protection authorizes executable mappings, without exposing a snapshot VMO.
+Converting arbitrary
 writable bytes requires a separately issued authority, immutable snapshot and
 architecture instruction-publication proof. Do not expose it implicitly through
 ordinary VMO write/map rights. There is no current app consumer that justifies

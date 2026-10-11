@@ -3,6 +3,19 @@
 
 pub mod cli;
 
+/// Keep paths on one terminal line without escaping printable Unicode.
+pub fn escape_path(path: &str) -> String {
+    let mut text = String::new();
+    for character in path.chars() {
+        if character.is_control() || character == '\\' {
+            text.extend(character.escape_default());
+        } else {
+            text.push(character);
+        }
+    }
+    text
+}
+
 pub fn readable_size(size: u64) -> String {
     let mut divisor = 1_u64;
     let mut unit = "B";

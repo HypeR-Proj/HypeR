@@ -158,16 +158,13 @@ fn prepare_bootstrap(
     let stack_vmar = next();
     let executable = next();
     let channel = next();
-    let runtime_directory = next();
     let layout = build.child().process().image().bootstrap();
     let header = HyperNativeLoaderStartup {
-        size: 88,
+        size: core::mem::size_of::<HyperNativeLoaderStartup>() as u32,
         handle_count: count as u32,
         data_size: build.data().len() as u32,
         flags: hyper::abi::native::HYPER_NATIVE_LOADER_STARTUP_REPLY as u32,
-        runtime_directory,
         executable,
-        executable_size: build.executable().bytes().len() as u64,
         root_vmar,
         stack_vmar,
         stack_base: layout.stack_base,
@@ -215,7 +212,7 @@ impl PreparedChildProcessStart {
         build: SealedProcessBuild,
     ) -> Result<Self, StartPreparationFailure<ChildProcessStartError>> {
         let child = build.child().process().clone();
-        let startup_count = match build.startup_capabilities().len().checked_add(5) {
+        let startup_count = match build.startup_capabilities().len().checked_add(4) {
             Some(count) => count,
             None => {
                 return Err(start_failure(
@@ -456,8 +453,6 @@ impl PreparedChildProcessStart {
         };
         self.prepared_startup_handles.push(bootstrap.executable);
         self.prepared_startup_handles.push(bootstrap.child_channel);
-        self.prepared_startup_handles
-            .push(bootstrap.runtime_directory);
         self.prepared_startup_handles.reverse();
         publish_unpublished_startup_handles(&mut self);
 

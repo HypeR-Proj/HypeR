@@ -18,6 +18,7 @@ use std::process::ExitCode;
 
 struct Entry {
     name: String,
+    path: PathBuf,
     metadata: Metadata,
 }
 
@@ -33,12 +34,14 @@ fn list(path: &Path, args: &Ls, output: &mut impl Write) -> io::Result<()> {
             }
             entries.push(Entry {
                 name,
+                path: entry.path(),
                 metadata: fs::symlink_metadata(entry.path())?,
             });
         }
     } else {
         entries.push(Entry {
             name: path.to_string_lossy().into_owned(),
+            path: path.to_path_buf(),
             metadata,
         });
     }
@@ -80,13 +83,7 @@ fn list(path: &Path, args: &Ls, output: &mut impl Write) -> io::Result<()> {
     for (entry, _) in entries {
         let directory = entry.metadata.is_dir();
         let symlink = entry.metadata.file_type().is_symlink();
-        let name: String = entry.name.chars().flat_map(char::escape_default).collect();
-        // Preserve printable Unicode, escaping only control characters and backslashes.
-        let name = if entry.name.chars().all(|c| !c.is_control() && c != '\\') {
-            entry.name
-        } else {
-            name
-        };
+        let name = hyper_ls::escape_path(&entry.name);
         let suffix = if directory {
             "/"
         } else if symlink {
@@ -97,6 +94,14 @@ fn list(path: &Path, args: &Ls, output: &mut impl Write) -> io::Result<()> {
         if args.names_only {
             writeln!(output, "{name}{suffix}")?;
         } else {
+            // Read the link itself: relative and dangling targets must not be
+            // resolved against the listing's working directory.
+            let target = if symlink {
+                let target = fs::read_link(&entry.path)?;
+                format!(" -> {}", hyper_ls::escape_path(&target.to_string_lossy()))
+            } else {
+                String::new()
+            };
             let size = if directory {
                 "-".into()
             } else if args.bytes {
@@ -106,7 +111,7 @@ fn list(path: &Path, args: &Ls, output: &mut impl Write) -> io::Result<()> {
             };
             writeln!(
                 output,
-                "{} {:>14}  {name}{suffix}",
+                "{} {:>14}  {name}{suffix}{target}",
                 hyper_ls::mode_text(entry.metadata.mode(), directory, symlink),
                 size
             )?;

@@ -19,7 +19,12 @@ pub fn run(args: &cli::Ldd, output: &mut impl Write, errors: &mut impl Write) ->
             writeln!(output)?;
         }
         writeln!(output, "{}:", output::escaped(&path.to_string_lossy()))?;
-        match graph::inspect(path, args.library_dir.as_deref(), args.direct) {
+        match graph::inspect(
+            path,
+            args.library_dir.as_deref(),
+            args.direct,
+            args.loader.as_deref(),
+        ) {
             Ok(graph) => {
                 failed |= graph.failed();
                 output::write(&graph, args.tree, args.verbose, output)?;

@@ -544,7 +544,10 @@ U-mode trap vector and full integer/FP state capture. x86-64 currently rejects
 native-user entry as unsupported. Process lifetime, handles, rights, syscall
 numbers, bootstrap ELF admission, residency, and resource accounting remain in
 the kernel. Application ELF parsing, stack encoding and relocation belong to
-`lib/userspace-loader`, `lib/dynamic-loader` and the SDK runtime. The kernel
+`bootstrap/stage1/userspace-loader`, `lib/elf-loader`, `lib/dynamic-loader` and
+the SDK runtime. Descendant process builders explicitly select a loader File;
+only initial `/init` uses the kernel's `/lib/userspace-loader-hyper-<arch>` lookup.
+The kernel
 publishes a bootstrap Thread before ordinary ELF loading; SDK spawn waits for
 the userspace startup result. The scheduler-owned `UserExecution` strongly
 retains its Process, native address space, and per-Thread machine context.
@@ -572,9 +575,10 @@ repeated direct Native syscall return, register-result validation, deferred-call
 unwind and re-entry, contained fault unwind, join, and retirement on VHE QEMU
 CPUs. The production path mounts the firmware initramfs during bootstrap,
 schedules the `native-init` kernel worker, and retires bootstrap execution.
-That worker validates and maps `/init`, publishes its Process and initial
-UserThread, and then exits. Runtime file operations may sleep, so loading
-requires this ordinary scheduler context. Physical-hardware qualification
+That worker snapshots `/init`, validates and maps the selected bootstrap
+loader, publishes its Process and initial UserThread, and then exits. The
+userspace loader validates and maps the application. Runtime file operations
+may sleep, so loading requires this ordinary scheduler context. Physical-hardware qualification
 remains necessary for guarantees that QEMU cannot establish.
 
 The kernel exposes one Native ABI. Linux currently participates as the trusted
@@ -641,9 +645,11 @@ The concrete startup order is boot-critical CPU power, memory/allocator,
 immutable initramfs publication, debug and scheduler, host IRQ/crash/time,
 one-shot SMP admission, stage-1 address-space sealing, platform drivers,
 complete VM initialization, and scheduling of the Native init worker. The
-worker admits the userspace loader, snapshots `/init`, and publishes its
-bootstrap process after interrupt-masked bootstrap has exited. The userspace
-loader then maps init and its interpreter.
+worker admits the userspace loader, opens `/init`, and publishes its
+bootstrap process after interrupt-masked bootstrap has exited. The in-tree
+stage-1 loader then maps static init; it rejects an application interpreter.
+Later process builders explicitly select a loader capability. Formal system
+programs use the separate dynamic loader, which also accepts static programs.
 Kernel self-test images run standalone mechanism tests, report completion and retire the
 bootstrap execution. Linux integration boots Native init and uses userspace VMM
 tools; kernel self-tests need only an empty ramfs archive. Sealing takes the

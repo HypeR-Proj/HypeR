@@ -13,7 +13,7 @@ pub enum Sort {
 }
 
 #[derive(Debug, Parser)]
-#[command(about = "List files with permission modes and readable sizes")]
+#[command(about = "List files with permission modes, readable sizes and symlink targets")]
 pub struct Ls {
     /// List directory operands themselves instead of their contents.
     #[arg(short = 'd', long)]

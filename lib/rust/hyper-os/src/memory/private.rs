@@ -4,7 +4,8 @@
 //! Private address-space mappings with explicit copy policy.
 
 use super::{PAGE_SIZE, SnapshotVmo};
-use crate::handle::{HandleRef, OwnedHandle, VmarObject};
+use crate::fs::{File, FileProtection};
+use crate::handle::{AnyObject, FileProtectionObject, HandleRef, OwnedHandle, VmarObject};
 use crate::{Error, Result, Status};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -51,94 +52,164 @@ impl SnapshotVmo {
         address: u64,
         options: PrivateMappingOptions,
     ) -> Result<PrivateMapping> {
-        let data_end = options
-            .data_offset
-            .checked_add(options.source_length)
-            .ok_or(Error::OffsetOverflow)?;
-        if address == 0
-            || !address.is_multiple_of(PAGE_SIZE)
-            || options.size == 0
-            || !options.size.is_multiple_of(PAGE_SIZE)
-            || !options.source_offset.is_multiple_of(PAGE_SIZE)
-            || options.data_offset >= PAGE_SIZE
-            || data_end > options.size
-            || (options.source_length != 0
-                && options
-                    .source_offset
-                    .checked_add(data_end)
-                    .ok_or(Error::OffsetOverflow)?
-                    > self.byte_size())
-            || address.checked_add(options.size).is_none()
-        {
-            return Err(Error::InvalidMemoryRange);
-        }
-        let base = usize::try_from(address).map_err(|_| Error::InvalidMemoryRange)?;
-        let size = usize::try_from(options.size).map_err(|_| Error::InvalidMemoryRange)?;
-        if size > isize::MAX as usize {
-            return Err(Error::InvalidMemoryRange);
-        }
-        // SAFETY: the caller supplies an unused current-process range.
-        let result = unsafe {
-            hyper_sys::vmar_allocate(
-                parent.raw().get(),
+        // SAFETY: the caller owns the destination range and all input owners
+        // remain borrowed throughout preparation and mapping publication.
+        unsafe {
+            map_source(
+                self.as_handle_ref().erase(),
+                self.byte_size(),
+                None,
+                parent,
                 address,
-                options.size,
-                hyper_abi::HYPER_NATIVE_VMAR_ALLOCATE_EXACT,
+                options,
             )
-        };
-        Status::from_raw(result.status).into_result()?;
-        // SAFETY: vmar_allocate's successful result transfers a VMAR handle,
-        // so no fallible kind query is needed after reserving the child region.
-        // Adoption still rejects zero and aliases of the live input handles.
-        let region = unsafe {
-            crate::handle::adopt_produced_handle_excluding::<VmarObject>(
-                result.value0,
-                &[parent.raw(), self.as_handle_ref().raw()],
-            )?
-        };
-        let mut mapping = PrivateMapping {
-            region: Some(region),
-            address: base,
-            size,
-            writable: options.writable,
-            mapped: false,
-        };
-        let permissions = hyper_abi::HYPER_NATIVE_VMAR_PERMISSION_READ
-            | if options.writable {
-                hyper_abi::HYPER_NATIVE_VMAR_PERMISSION_WRITE
-            } else {
-                0
-            };
-        let record = hyper_abi::HyperNativePrivateMapping {
-            source_offset: options.source_offset,
-            source_length: options.source_length,
+        }
+    }
+}
+
+impl FileProtection {
+    /// Maps protected file bytes privately. Clean pages can be reclaimed and
+    /// faulted back; modified COW pages remain private to this process.
+    ///
+    /// The File needs READ, and this guard must belong to that same file.
+    /// Only `CopyOnWrite` is supported for file-backed mappings. The kernel
+    /// retains protection independently until unmap or owner-process teardown.
+    /// Creating the mapping can report allocation or quota errors. A later
+    /// hardware fault that cannot be refilled after bounded reclaim retries
+    /// terminates the process; it cannot return an error from a memory access.
+    ///
+    /// # Safety
+    /// `parent` must belong to the calling process. The caller owns the unused
+    /// destination range and must not independently unmap, remap, protect or
+    /// expose aliases for the returned mapping's lifetime.
+    pub unsafe fn map_private_at(
+        &self,
+        file: &File,
+        parent: HandleRef<'_, VmarObject>,
+        address: u64,
+        options: PrivateMappingOptions,
+    ) -> Result<PrivateMapping> {
+        if options.mode != PrivateMappingMode::CopyOnWrite {
+            return Err(Error::InvalidMemoryRange);
+        }
+        // SAFETY: the caller owns the range; File, token and VMAR stay borrowed.
+        unsafe {
+            map_source(
+                file.as_handle_ref().erase(),
+                self.byte_size(),
+                Some(self.as_handle_ref()),
+                parent,
+                address,
+                options,
+            )
+        }
+    }
+}
+
+unsafe fn map_source(
+    source: HandleRef<'_, AnyObject>,
+    byte_size: u64,
+    protection: Option<HandleRef<'_, FileProtectionObject>>,
+    parent: HandleRef<'_, VmarObject>,
+    address: u64,
+    options: PrivateMappingOptions,
+) -> Result<PrivateMapping> {
+    let data_end = options
+        .data_offset
+        .checked_add(options.source_length)
+        .ok_or(Error::OffsetOverflow)?;
+    if address == 0
+        || !address.is_multiple_of(PAGE_SIZE)
+        || options.size == 0
+        || !options.size.is_multiple_of(PAGE_SIZE)
+        || !options.source_offset.is_multiple_of(PAGE_SIZE)
+        || options.data_offset >= PAGE_SIZE
+        || data_end > options.size
+        || (options.source_length != 0
+            && options
+                .source_offset
+                .checked_add(data_end)
+                .ok_or(Error::OffsetOverflow)?
+                > byte_size)
+        || address.checked_add(options.size).is_none()
+    {
+        return Err(Error::InvalidMemoryRange);
+    }
+    let base = usize::try_from(address).map_err(|_| Error::InvalidMemoryRange)?;
+    let size = usize::try_from(options.size).map_err(|_| Error::InvalidMemoryRange)?;
+    if size > isize::MAX as usize {
+        return Err(Error::InvalidMemoryRange);
+    }
+    // SAFETY: the caller supplies an unused current-process range.
+    let result = unsafe {
+        hyper_sys::vmar_allocate(
+            parent.raw().get(),
             address,
-            size: options.size,
-            data_offset: options.data_offset,
-            permissions: permissions as u32,
-            mode: match options.mode {
-                PrivateMappingMode::CopyOnWrite => {
-                    hyper_abi::HYPER_NATIVE_PRIVATE_MAPPING_COPY_ON_WRITE as u32
-                }
-                PrivateMappingMode::Eager => hyper_abi::HYPER_NATIVE_PRIVATE_MAPPING_EAGER as u32,
-            },
+            options.size,
+            hyper_abi::HYPER_NATIVE_VMAR_ALLOCATE_EXACT,
+        )
+    };
+    Status::from_raw(result.status).into_result()?;
+    // SAFETY: vmar_allocate's successful result transfers a VMAR handle,
+    // so no fallible kind query is needed after reserving the child region.
+    // Adoption still rejects zero and aliases of the live input handles.
+    let region = unsafe {
+        crate::handle::adopt_produced_handle_excluding::<VmarObject>(
+            result.value0,
+            &[parent.raw(), source.raw()],
+        )?
+    };
+    let mut mapping = PrivateMapping {
+        region: Some(region),
+        address: base,
+        size,
+        writable: options.writable,
+        mapped: false,
+    };
+    let permissions = hyper_abi::HYPER_NATIVE_VMAR_PERMISSION_READ
+        | if options.writable {
+            hyper_abi::HYPER_NATIVE_VMAR_PERMISSION_WRITE
+        } else {
+            0
         };
-        let Some(region) = mapping.region.as_ref() else {
-            return Err(Error::InvalidResponse);
-        };
-        // SAFETY: the private region, immutable source, and request are live.
-        Status::from_raw(unsafe {
-            hyper_sys::vmar_map_private(
+    let record = hyper_abi::HyperNativePrivateMapping {
+        source_offset: options.source_offset,
+        source_length: options.source_length,
+        address,
+        size: options.size,
+        data_offset: options.data_offset,
+        permissions: permissions as u32,
+        mode: match options.mode {
+            PrivateMappingMode::CopyOnWrite => {
+                hyper_abi::HYPER_NATIVE_PRIVATE_MAPPING_COPY_ON_WRITE as u32
+            }
+            PrivateMappingMode::Eager => hyper_abi::HYPER_NATIVE_PRIVATE_MAPPING_EAGER as u32,
+        },
+    };
+    let Some(region) = mapping.region.as_ref() else {
+        return Err(Error::InvalidResponse);
+    };
+    // SAFETY: the private region, immutable source, and request are live.
+    Status::from_raw(unsafe {
+        match protection {
+            Some(protection) => hyper_sys::vmar_map_file(
                 region.as_handle_ref().raw().get(),
-                self.as_handle_ref().raw().get(),
+                source.raw().get(),
+                protection.raw().get(),
                 &record,
                 core::mem::size_of_val(&record),
-            )
-        })
-        .into_result()?;
-        mapping.mapped = true;
-        Ok(mapping)
-    }
+            ),
+            None => hyper_sys::vmar_map_private(
+                region.as_handle_ref().raw().get(),
+                source.raw().get(),
+                &record,
+                core::mem::size_of_val(&record),
+            ),
+        }
+    })
+    .into_result()?;
+    mapping.mapped = true;
+    Ok(mapping)
 }
 
 impl PrivateMapping {

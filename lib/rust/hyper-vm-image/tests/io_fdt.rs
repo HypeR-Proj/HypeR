@@ -274,6 +274,39 @@ fn client(id: u32, memory: u64, dynamic: bool) -> super::IoClient {
 }
 
 #[test]
+fn owner_control_channel_does_not_require_a_data_notification() -> Result<(), &'static str> {
+    let mut owner = client(0, 0x4400_0000, false);
+    owner.notification = None;
+    let tree = build(IoDevices {
+        clients: &[owner],
+        ..IoDevices::empty()
+    })
+    .map_err(|_| "control-only owner")?;
+    let values = properties(&tree)?;
+    assert_eq!(
+        values
+            .get("/guest-mailbox@a000000/hyper,client-id")
+            .ok_or("owner mailbox id")?,
+        &0_u32.to_be_bytes()
+    );
+    assert!(values.contains_key("/hyper-guest-memory@0/memory-region"));
+    assert!(
+        values
+            .keys()
+            .all(|key| !key.starts_with("/guest-notification@"))
+    );
+    owner.id = 1;
+    assert_eq!(
+        build(IoDevices {
+            clients: &[owner],
+            ..IoDevices::empty()
+        }),
+        Err(Error::InvalidInput)
+    );
+    Ok(())
+}
+
+#[test]
 fn clients_have_distinct_phandles_and_context_ids() -> Result<(), &'static str> {
     let clients = [client(0, 0x4400_0000, false), client(3, 0x4800_0000, false)];
     let tree = build(IoDevices {

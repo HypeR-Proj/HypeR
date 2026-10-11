@@ -5,7 +5,7 @@
 pub use crate::affinity::Affinity;
 use serde::{Deserialize, Serialize};
 
-pub const CONFIG_PATH: &str = "/etc/hyper/vms.json";
+pub const CONFIG_PATH: &str = "/boot/etc/hyper/vms.json";
 pub const MAX_DEFINITIONS: usize = 8;
 pub const MAX_MESSAGE_BYTES: usize = 16 * 1024;
 pub const MAX_CONFIG_BYTES: u64 = 64 * 1024;

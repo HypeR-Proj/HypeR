@@ -17,7 +17,7 @@
         "kernel/Cargo.toml",
         "sdk/abi/Cargo.toml",
         "lib/rust/Cargo.toml",
-        // This workspace also owns the application libraries in lib/.
+        // Also owns bootstrap/stage1 programs and application libraries in lib/.
         "app/Cargo.toml",
         "sdk/toolchain/tests/rust-smoke/Cargo.toml",
         "sdk/toolchain/tests/std-smoke/Cargo.toml",

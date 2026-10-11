@@ -1066,7 +1066,7 @@ impl Process {
         Ok(())
     }
 
-    /// Retries copyout/materialization after releasing its complete prepared
+    /// Retries copies/materialization after releasing its complete prepared
     /// transaction. Thread and Process stop cancel contention without CPU pins.
     pub(super) fn retry_user_memory<T>(
         &self,
@@ -1095,9 +1095,10 @@ impl Process {
         source: UserSlice,
         destination: &mut [u8],
     ) -> Result<(), ProcessError> {
-        let address_space = self.address_space_owner()?;
-        address_space.copy_from_user(source, destination)?;
-        Ok(())
+        // Eviction may win between file population and the resident copy.
+        // Retrying only overwrites our private buffer, without a user-visible
+        // side effect; the ordinary retry boundary still checks cancellation.
+        self.retry_user_memory(|address_space| address_space.copy_from_user(source, destination))
     }
 
     /// Pins one exact output range across a capability publication transaction.
@@ -1166,6 +1167,15 @@ impl Process {
             return Ok(ProcessRetirementStep::InProgress);
         }
 
+        // A transferred VMAR can keep the address-space owner alive after the
+        // process exits. It must not keep this process's content protections
+        // alive: withdraw file sources after every thread has stopped, before
+        // waiting for external references to permit final retirement. This
+        // does not allocate or depend on quota headroom for a new page table.
+        let mapping_owner = self.inner.state.with(|state| state.address_space.clone());
+        if let Some(address_space) = mapping_owner {
+            address_space.retire_file_sources();
+        }
         let address_space = self.inner.state.with(|state| {
             if !state.handles_retired {
                 process_invariant_violation();

@@ -68,6 +68,13 @@ impl Records {
         self.unexamined.iter_mut().chain(self.examined.iter_mut())
     }
 
+    pub(super) fn path(&self, id: u64) -> Result<&str, Error> {
+        self.iter()
+            .find(|record| record.id == id)
+            .map(|record| record.path.as_str())
+            .ok_or(Error::Missing)
+    }
+
     pub(super) fn retain(&mut self, mut keep: impl FnMut(&Record) -> bool) {
         self.len -= self.unexamined.retain(&mut keep);
         self.len -= self.examined.retain(&mut keep);

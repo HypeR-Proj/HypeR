@@ -14,6 +14,7 @@ pub const REQUEST_BYTES: usize = HEADER_BYTES + PATH_BYTES * 2;
 pub const RESPONSE_BYTES: usize = 1152;
 pub const FILE: u32 = 1;
 pub const DIRECTORY: u32 = 2;
+pub const SYMLINK: u32 = 3;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u64)]
@@ -28,6 +29,7 @@ pub enum Operation {
     Resize,
     Sync,
     SetMetadata,
+    ReadLink,
 }
 impl Operation {
     pub fn decode(value: u64) -> Option<Self> {
@@ -42,6 +44,7 @@ impl Operation {
             8 => Self::Resize,
             9 => Self::Sync,
             10 => Self::SetMetadata,
+            11 => Self::ReadLink,
             _ => return None,
         })
     }
@@ -191,7 +194,7 @@ impl Response {
         let name = self.entry.name.get(..self.entry.name_len)?;
         if self.sequence == 0
             || !valid_name(name)
-            || !matches!(self.entry.kind, FILE | DIRECTORY)
+            || !matches!(self.entry.kind, FILE | DIRECTORY | SYMLINK)
             || self.entry.mode & !0o777 != 0
             || !valid_result(self.operation, self.result)
         {
@@ -232,7 +235,8 @@ impl Response {
         let length = usize::try_from(get(input, 56)?).ok()?;
         let kind = u32::try_from(get(input, 32)?).ok()?;
         let mode = u32::try_from(get(input, 40)?).ok()?;
-        if length > NAME_BYTES || !matches!(kind, FILE | DIRECTORY) || mode & !0o777 != 0 {
+        if length > NAME_BYTES || !matches!(kind, FILE | DIRECTORY | SYMLINK) || mode & !0o777 != 0
+        {
             return None;
         }
         let mut entry = Entry::empty();
@@ -261,6 +265,7 @@ fn valid_result(operation: Operation, result: Result<u64, Error>) -> bool {
     };
     match operation {
         Operation::Read | Operation::Write => value <= DATA_BYTES as u64,
+        Operation::ReadLink => value <= PATH_BYTES as u64,
         Operation::Entry => value <= 1,
         _ => value == 0,
     }

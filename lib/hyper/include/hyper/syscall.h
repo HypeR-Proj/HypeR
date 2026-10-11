@@ -128,13 +128,24 @@ hyper_call_result_t hyper_virtual_machine_get_info(hyper_native_handle_t machine
 hyper_call_result_t hyper_virtual_cpu_get_info(hyper_native_handle_t vcpu,
 					       hyper_native_virtual_cpu_info_t *info);
 hyper_call_result_t hyper_vmo_create(uint64_t size);
+/** Acquire PROTECT; value0 is a process-local token and value1 the stable size.
+ * Closing the token releases its reference. Existing mappings hold independent
+ * references until unmap or process teardown. This operation retains no pages.
+ */
+hyper_call_result_t hyper_file_protect(hyper_native_handle_t file);
+/** Privately map protected File bytes into the caller's own VMAR.
+ * Requires File READ (also EXECUTE for executable mappings), MAP on both VMAR
+ * and a matching protection token, and COPY_ON_WRITE mode in the request.
+ */
+hyper_native_status_t hyper_vmar_map_file(hyper_native_handle_t vmar, hyper_native_handle_t file,
+					  hyper_native_handle_t protection,
+					  const hyper_native_private_mapping_t *mapping,
+					  size_t mapping_size);
 hyper_call_result_t hyper_vmo_create_snapshot(hyper_native_handle_t vmo);
-hyper_call_result_t hyper_file_create_snapshot(hyper_native_handle_t file);
 hyper_native_status_t hyper_vmar_map_private(hyper_native_handle_t vmar,
 					     hyper_native_handle_t snapshot,
 					     const hyper_native_private_mapping_t *mapping,
 					     size_t mapping_size);
-hyper_call_result_t hyper_file_create_executable_vmo(hyper_native_handle_t file);
 hyper_native_status_t hyper_vmo_read(hyper_native_handle_t vmo, uint64_t offset, void *output,
 				     size_t byte_count);
 hyper_native_status_t hyper_vmo_write(hyper_native_handle_t vmo, uint64_t offset, const void *input,
@@ -154,10 +165,12 @@ hyper_native_status_t hyper_vmar_destroy(hyper_native_handle_t vmar);
 hyper_call_result_t hyper_process_builder_create(hyper_native_handle_t factory,
 						 hyper_native_handle_t group,
 						 hyper_native_handle_t domain,
-						 hyper_native_handle_t executable);
+						 hyper_native_handle_t executable,
+						 hyper_native_handle_t loader);
 hyper_native_status_t hyper_process_builder_set_name(hyper_native_handle_t builder,
 						     const void *name, size_t name_size);
-hyper_native_status_t hyper_process_builder_set_data(hyper_native_handle_t builder, const void *data, size_t size);
+hyper_native_status_t hyper_process_builder_set_data(hyper_native_handle_t builder,
+						     const void *data, size_t size);
 hyper_native_status_t hyper_process_builder_set_affinity(hyper_native_handle_t builder,
 							 const uint64_t *words, size_t word_count);
 hyper_native_status_t hyper_process_builder_add_handle(hyper_native_handle_t builder,
@@ -181,9 +194,9 @@ hyper_call_result_t hyper_task_inspector_scan_threads(hyper_native_handle_t insp
 /* Requires INSPECT | INSPECT_DETAILS. process == 0 selects a global KOID;
  * otherwise target is a full process-local handle. cursor starts at zero. */
 hyper_call_result_t hyper_object_inspector_read_details(hyper_native_handle_t inspector,
-						      uint64_t process, uint64_t target,
-						      uint64_t cursor,
-						      hyper_native_object_details_t *record);
+							uint64_t process, uint64_t target,
+							uint64_t cursor,
+							hyper_native_object_details_t *record);
 hyper_call_result_t hyper_object_inspector_scan_objects(hyper_native_handle_t inspector,
 							uint64_t cursor,
 							hyper_native_object_inspection_t *records,
@@ -227,6 +240,14 @@ hyper_native_status_t hyper_thread_sleep(uint64_t deadline);
 hyper_native_status_t hyper_thread_yield(void);
 _Noreturn void hyper_thread_exit(int64_t status);
 _Noreturn void hyper_process_exit(int64_t status);
+
+/* Namespace topology requires MANAGE_NAMESPACE | WRITE | EXECUTE on a live
+ * root Directory anchor. All borrowed request memory remains valid until return. */
+hyper_call_result_t hyper_filesystem_mount_ramfs(hyper_native_handle_t directory, const void *path,
+						 size_t path_length);
+hyper_call_result_t
+hyper_filesystem_switch_root(hyper_native_handle_t directory,
+			     const hyper_native_filesystem_root_switch_t *request);
 
 hyper_call_result_t hyper_directory_scope_create(hyper_native_handle_t root,
 						 hyper_native_handle_t start, uint64_t rights);

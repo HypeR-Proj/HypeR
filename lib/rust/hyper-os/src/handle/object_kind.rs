@@ -243,6 +243,12 @@ object_types!(
         "guest-mapping",
         "guest address-space mapping"
     ),
+    (
+        FileProtectionObject,
+        HYPER_NATIVE_OBJECT_FILE_PROTECTION,
+        "file-protection",
+        "process-local content protection"
+    ),
 );
 
 impl ObjectKind {

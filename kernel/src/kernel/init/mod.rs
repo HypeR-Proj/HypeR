@@ -18,16 +18,12 @@ pub(crate) enum Error {
     RootDirectory(crate::kernel::vfs::VfsError),
     #[cfg(not(feature = "kernel-self-test"))]
     ConsoleObject(crate::kernel::device::console::ObjectError),
-    FileSystem(crate::kernel::vfs::LookupError),
     Handle(HandleError),
     Image(crate::kernel::process::LoaderError),
     Inspection(crate::kernel::inspect::Error),
     IncompleteThreadPublication,
-    Missing,
     Scheduler(scheduler::Error),
     MemoryObject(crate::kernel::mm::user_space::MemoryObjectError),
-    NotExecutable,
-    NotRegularFile,
     Object(crate::kernel::object::ObjectCreationError),
     Process(ProcessError),
     Resource(ResourceError),
@@ -53,18 +49,14 @@ impl core::fmt::Debug for Error {
             Self::ConsoleObject(error) => {
                 formatter.debug_tuple("ConsoleObject").field(error).finish()
             }
-            Self::FileSystem(error) => formatter.debug_tuple("FileSystem").field(error).finish(),
             Self::Handle(error) => formatter.debug_tuple("Handle").field(error).finish(),
             Self::Image(error) => formatter.debug_tuple("Image").field(error).finish(),
             Self::Inspection(error) => formatter.debug_tuple("Inspection").field(error).finish(),
             Self::IncompleteThreadPublication => formatter.write_str("IncompleteThreadPublication"),
             Self::Scheduler(error) => formatter.debug_tuple("Scheduler").field(error).finish(),
-            Self::Missing => formatter.write_str("Missing"),
             Self::MemoryObject(error) => {
                 formatter.debug_tuple("MemoryObject").field(error).finish()
             }
-            Self::NotExecutable => formatter.write_str("NotExecutable"),
-            Self::NotRegularFile => formatter.write_str("NotRegularFile"),
             Self::Object(error) => formatter.debug_tuple("Object").field(error).finish(),
             Self::Process(error) => formatter.debug_tuple("Process").field(error).finish(),
             Self::Resource(error) => formatter.debug_tuple("Resource").field(error).finish(),
@@ -122,7 +114,6 @@ extern "C" fn start_worker(_: usize) {
 fn prepare_and_start() -> Result<Infallible, Error> {
     let domain = ResourceDomain::try_new_root(ResourceLimits::UNLIMITED)?;
     let group = TaskGroup::try_new(&domain)?;
-    crate::kernel::process::initialize_loader(&domain).map_err(Error::Image)?;
     let init = bootstrap::prepare(INIT_PATH, "init", &group, &domain)?;
 
     let channel = capabilities::install(&init, &group, &domain)?;

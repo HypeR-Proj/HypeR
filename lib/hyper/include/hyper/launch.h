@@ -16,6 +16,9 @@ typedef struct {
 	/* uint32_t offsets[argument_count + environment_count], then strings. */
 } hyper_launch_data_t;
 
+/* SDK startup role for an explicitly delegated child loader File. */
+#define HYPER_LAUNCH_CHILD_LOADER UINT32_C(0x80040003)
+
 #define HYPER_LAUNCH_MAX_ARGUMENTS 64
 #define HYPER_LAUNCH_MAX_ENVIRONMENT 64
 #define HYPER_LAUNCH_MAX_STRING_BYTES 4096

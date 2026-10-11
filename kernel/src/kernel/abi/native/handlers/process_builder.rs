@@ -23,9 +23,9 @@ pub(in crate::kernel::abi::native) fn sys_process_builder_create(
     arguments: &Arguments,
 ) -> DeferredAction {
     let result =
-        parse_builder_create(arguments).and_then(|[factory, group, domain, executable]| {
+        parse_builder_create(arguments).and_then(|[factory, group, domain, executable, loader]| {
             services
-                .create_process_builder(factory, group, domain, executable)
+                .create_process_builder(factory, group, domain, executable, loader)
                 .map_err(status_from_process_builder_service_error)
         });
     DeferredAction::Return(handle_result(result))

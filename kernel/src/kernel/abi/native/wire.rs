@@ -353,12 +353,13 @@ pub(super) fn capability_record_bytes<Record>(record_count: u64) -> Result<u64, 
 
 pub(super) fn parse_builder_create(
     arguments: &Arguments,
-) -> Result<[HandleValue; 4], HyperNativeStatus> {
+) -> Result<[HandleValue; 5], HyperNativeStatus> {
     Ok([
         parse_handle(arguments[0])?,
         parse_handle(arguments[1])?,
         parse_handle(arguments[2])?,
         parse_handle(arguments[3])?,
+        parse_handle(arguments[4])?,
     ])
 }
 

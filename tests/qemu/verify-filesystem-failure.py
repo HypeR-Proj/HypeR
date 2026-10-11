@@ -20,11 +20,14 @@ def main():
                 b'kernel panic', b'HypeR crash monitor')
     with Session(native_command(args.qemu, args.image, args.initramfs),
                  args.log, failures=failures) as session:
+        session.await_text(rb'FS-FAILURE: delayed-reply PASS\n', timeout=120)
         session.await_text(rb'FS-FAILURE: /fs-worker-stop PASS\n', timeout=120)
         session.await_text(rb'FS-FAILURE: /fs-owner-loss PASS\n')
         session.await_text(rb'FS-FAILURE: pending-stop PASS\n')
         session.await_text(rb'FS-FAILURE: caller-stop PASS\n')
         session.await_text(rb'FS-FAILURE: write-overflow PASS\n')
+        session.await_text(rb'FS-FAILURE: protected-file-cache PASS\n')
+        session.await_text(rb'FS-FAILURE: protection-exit PASS\n')
         session.await_text(rb'FS-FAILURE: PASS\n')
     print(f'Filesystem failure isolation passed: {args.log}')
 

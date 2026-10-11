@@ -52,14 +52,17 @@ or automatic physical-device passthrough.
 
 `make run` on AArch64 uses the QEMU board configuration, keeps the HypeR shell,
 and starts `/svc/io-runtime` from the generated service manifest. Init explicitly delegates the physical-device
-capability only to this service and charges its VM to the bounded VM fleet.
+capability only to this service and charges its VM to an independent, bounded
+I/O resource domain. Its startup does not require the business VM manager.
 The service owns the VM, assigned physical controllers and control mailboxes. Guest power-off,
 control failure or runtime exit initiates VM retirement; failed physical reset
 continues to use the kernel's existing quarantine semantics. There is no
 automatic restart of an uncertain device owner.
 
-The board profile prepares dm-linear volumes and mounts HypeR's configuration
-volume at `/data` before init provisions the configured business VMs. Business
+Native io-runtime discovers GPT partitions and asks the Linux backend to bind
+their authorized ranges. Filesystem workers mount persistent data at `/data`
+and, in the default split layout, the system image at `/system` before init
+provisions the configured business VMs. Business
 VMs are started only when their configuration requests autostart or through
 `vmm start`. `make run RUN_PROFILE=io` retains the explicit standby diagnostic
 profile: it boots a resident backend without mounting Native storage or
@@ -70,7 +73,8 @@ and preserves existing disks. `make run` validates the disk's GPT against the
 selected board configuration, then launches the existing kernel, ramdisk and
 disk. `BOARD_IMAGE` selects another board disk. The diagnostic `RUN_PROFILE=io` instead creates
 `target/app/aarch64/io-disk.img`; `IO_VM_DISK` overrides that diagnostic disk.
-`RUN_PROFILE=native` selects the previous boot profile. `IO_VM_PACKAGE` can override the downloaded
+`RUN_PROFILE=native` selects an all-RAM Native/Alpine deployment with the same
+stage-1 and system-init handoff and no I/O appliance. `IO_VM_PACKAGE` can override the downloaded
 package with a complete, locally qualified boot generation. The importer also
 accepts `IO_VM_REFERENCE` for an explicit digest and `IO_VM_ORAS` for ORAS.
 
@@ -112,7 +116,7 @@ Each entry in [io-vm.lock.json](../scripts/io-vm.lock.json) pins its platform's
 immutable reference, source revision and successful qualification/publication
 runs. Platform metadata identifies the build profile; it does not certify Pi
 hardware operation. The development image with the combined SDIO1/RP1
-deployment passed a physical Pi 5 smoke test before publication. The published
+deployment passed a physical Pi 5 smoke test before publication. A published
 Pi 5 pin was then used for the 2026-10-06 physical storage and guest TCP
 [performance survey](../README.md#exploratory-pi-5-io-measurements). This is basic
 functional/reference evidence, not full stress, durability and DMA retirement
@@ -121,7 +125,8 @@ Final boot images follow the [image release contract](image-distribution.md).
 The import command also accepts `IO_VM_REFERENCE` explicitly. The qualified QEMU
 fixture consumes the imported generation. Without an override, the ordinary
 AArch64 `make` build also selects the committed protocol version 3 lock.
-No local appliance checkout or package override is required. `make run` starts the artifacts from the
+The committed package must also provide the owner block-management extension
+required by the board bootstrap (see below). `make run` starts the artifacts from the
 last build and does not fetch or rebuild the appliance.
 
 The I/O VM repository owns the pinned upstream LTS version and builds each
@@ -137,17 +142,35 @@ wholesale into a VM: that would advertise resources the VM does not own.
 
 ## Board-managed clients
 
-`make board-run BOARD=qemu` uses the board-generated client table. Client zero
-is HypeR's configuration volume, mounted by the kernel at `/data`; init waits
-for an explicit readiness record before opening `/data/vms.json`. This is also
-the default AArch64 `make run` profile.
+`make board-run BOARD=qemu` uses the board-generated client policy. Client zero
+is an owner-only physical block management channel, with a private metadata-read
+scratch pool. HypeR io-runtime enumerates disks, validates GPT, resolves selectors
+from `etc/hyper/storage.json`, and binds immutable ranges to data clients.
+Linux validates range bounds/read-only access/writable overlap before creating
+its dm-linear/LIO exports. Linux never interprets partition labels or GPT.
+
+Native data clients use IDs from 8 down; guest clients use IDs from 1 up, sharing
+eight slots. Each Native data client has its own shared-memory pool and
+mailbox/notification routes. io-runtime activates the connection and moves its
+exclusive block capability plus discovered partition UUID/label to fs-backend.
+The manager applies fstab and selects separate format workers for `/data` and
+`/system`. Init waits for explicit filesystem readiness before reading the fleet.
+Native clients are absent from the business broker's admission table.
+
+Owner block commands are additive protocol-v3 operations 11–14 (`BLOCK_HELLO`,
+`BLOCK_ENUMERATE`, `BLOCK_READ`, `BLOCK_BIND`). The handshake requires all three
+management feature bits. The guest decoder excludes these operations; ordinary
+queue and network protocols are unchanged. An older appliance without this
+feature cannot run the new board bootstrap and fails readiness cleanly. The
+committed appliance pin supplies this extension; no local package override is
+needed for the default board deployment.
 
 A VM definition may include `"disk": {"client": 1, "volume": "alpine"}` and/or
 `"network": {"client": 1, "network": "default", "mac": "02:48:59:00:00:01"}`.
 Both devices use the same client ID. The manager creates one capability session
 for the runtime; the I/O runtime checks its complete device policy against
 `/etc/hyper/io-clients.conf`, generated from the same board JSON as the Linux
-client, volume and network tables. Duplicate active bindings are refused.
+client and network tables. Duplicate active bindings are refused.
 The board source assigns client IDs when it generates the runtime definitions;
 see [the QEMU board](../boards/qemu.json) for the source format.
 `vmm create NAME --config FILE` reads disk/network assignments and runtime settings from
@@ -158,9 +181,10 @@ vhost queue allocations; shared business-guest pages are additional mappings,
 not allocator memory for Linux. The isolated two-VM fixture below retains its
 64 MiB per-VM layout.
 
-The fleet has a finite allowance for eight business VMs plus the resident I/O
-VM and manager overhead. Physical memory admission remains fallible; the quota
-does not reserve backing RAM in advance.
+The business fleet has a finite allowance for eight VMs and manager overhead;
+the resident I/O VM remains in the core-services domain outside that fleet. Board I/O client slots can
+further limit that fleet when extra Native volumes are configured. Physical
+memory admission remains fallible; quotas do not reserve backing RAM in advance.
 
 The I/O runtime owns one control mailbox per client and a separate notification
 capability for each configured device. The
@@ -172,7 +196,7 @@ shared pages. Neither Native service relays individual I/O requests or packets.
 Normal guest RAM remains noncontiguous. A single guest-memory grant is mapped
 into the frontend and admitted into the I/O VM using an immutable, token-scoped
 extent table. Dynamic aliases use the fixed physical-address translation;
-static I/O RAM and the configuration client's ranges are excluded from that
+static I/O RAM and all Native shared pools are excluded from that
 translation to avoid ambiguous DMA reverse mappings.
 
 Closing a runtime session revokes its connection: disable new notifications,
@@ -262,9 +286,10 @@ or Linux can fall back to software. `VHOST_NET_F_VIRTIO_NET_HDR` stays clear in
 this mode. TAP's `TUNSETOFFLOAD` flags remain zero: those describe packets sent
 *to* the guest, whose receive path still requires ordinary MTU-sized frames.
 
-The pinned QEMU and Pi 5 appliances support these optional TX offloads. Ordinary
-builds import their immutable upstream OCI digests from `scripts/io-vm.lock.json`;
-no local appliance override is required. The pinned Linux build also orders vhost
+The pinned QEMU and Pi 5 appliances support these optional TX offloads. They
+are imported by immutable upstream OCI digest from `scripts/io-vm.lock.json`.
+TX offloads themselves need no local override; the new owner block-management
+feature has the separate appliance requirement described below. The pinned Linux build also orders vhost
 work-node reuse before concurrent requeue, preventing pending work from being
 lost. Older backends and guests may still negotiate VERSION_1 and MAC alone.
 
@@ -318,8 +343,9 @@ Direct queue consumption requires Linux to access queue metadata, responses,
 and every guest data buffer referenced by descriptors. The trusted deployment
 currently grants the entire RAM VMO of each business VM with an I/O-backed disk
 or network device. Both devices share one grant and Linux mapping.
-The Native configuration-volume client
-uses a dedicated 1 MiB shared I/O pool. Bridge protocol version 3 retains six storage
+Each Native volume client uses a dedicated 1 MiB shared I/O pool, including
+separate pools for the default configuration and system volumes.
+Bridge protocol version 3 retains six storage
 split queues: control, event, and four request queues. The Native client submits
 up to four 128 KiB reads before issuing one combined notification. Each request
 queue owns its descriptor chain and data buffer until completion. Writes and
@@ -348,7 +374,7 @@ resident footprint still depends on image loading and guest accesses.
 
 The resident I/O VM has a separate allocation policy: its own 128 MiB RAM is
 allocated eagerly as one physically contiguous VMO for the current physical
-device DMA layout. The Native configuration client also eagerly allocates its
+device DMA layout. Each Native volume client also eagerly allocates its
 1 MiB pool. Imported business-guest pages are shared data, not free RAM that
 Linux can use for its own allocator or vhost metadata.
 
@@ -393,11 +419,11 @@ cancellation/reset handling.
   exhaustive census of dynamically imported device mappings or a system-wide
   exclusive-memory accounting value.
 
-For the resident I/O VM, 128 MiB RAM plus the 1 MiB configuration-client pool
-produces 129 MiB (135,266,304 bytes). A disk-backed 256 MiB Alpine guest can
-report the full 256 MiB even when idle, because backend admission populated
-its RAM. Neither observation measures Linux `MemAvailable`. Shared backing
-must not be added across owners as if each mapping were another allocation.
+For the default resident I/O VM, 128 MiB RAM plus the 1 MiB management pool
+and two 1 MiB Native data pools account for 131 MiB (137,363,456 bytes) of
+backing. The ramfs system layout needs only the data volume pool plus management,
+for 130 MiB (136,314,880 bytes). A disk-backed 256 MiB Alpine guest can therefore
+require roughly 387 MiB of combined VM backing before Native and kernel overhead.
 
 Virtio-scsi permits multiple request queues but does not require one per guest
 CPU. The guest driver chooses how many to use within the advertised limit of
@@ -442,7 +468,7 @@ derived page owner retires. This is an explicit alternative to sparse VMOs,
 not implicit DMA authority: device assignment, DMA address translation, and
 quiescence still require their own ownership and validation.
 
-Static imports, including the configuration client's pool and the legacy test
+Static imports, including the owner and Native clients' pools and the legacy test
 fixture, appear as Linux memory and reserved-memory nodes without `no-map` or
 `reusable`. Linux creates `struct page` metadata but cannot allocate those pages.
 Dynamic business clients instead advertise an aperture, without declaring it
@@ -519,7 +545,7 @@ when changing device policy or guest startup files.
   `PEER_CLOSED`. Inspect preceding io-runtime diagnostics for the cause. A
   `rejected client ... does not match the board I/O policy` message means the
   requested volume, network or MAC differs from the bootstrap policy. Compare
-  `/data/vms.json` with `/etc/hyper/io-clients.conf`; an existing disk can still
+  `/data/vms.json` with `/boot/etc/hyper/io-clients.conf`; an existing disk can still
   contain a storage-only VM definition after a network-enabled bootstrap rebuild.
 - Alpine reaches its shell but has no address: check `ip addr`, `ip route` and
   `/var/log/udhcpc-eth0.log`. The appliance's `network default ready on eth0`
@@ -618,7 +644,8 @@ make test-io-vm ARCH=aarch64 \
 The fixture constructs identical FIT payloads from the same appliance. Separate
 JSON configurations supply `hyper.role=io` and `hyper.role=business`; the runtime
 adds HypeR-owned device trees.
-It boots `hyper-io-smoke` as a privileged Native `/init`; it does not replace
+It boots the independent static `tests/native/io-smoke` fixture as a privileged
+Native `/init`; it does not replace
 the normal init/service configuration. Each guest has 64 MiB of ordinary RAM;
 the I/O VM additionally maps the business VM's RAM as reserved shared pages.
 The reset case unbinds and rebinds the business virtio-scsi driver between two
@@ -688,6 +715,6 @@ still interleave before the guest emits its next newline.
 An appliance message such as `HypeR I/O [naa.5001405000000001]` identifies its
 LIO/vhost-scsi target. This NAA-format world-wide name binds the vhost endpoint
 to its storage target; it is not a VM ID, memory address, or disk capacity.
-The appliance currently constructs target names from the configured volume
-ordinal (the first volume uses the suffix `000000001`). These locally generated
+The appliance constructs target names from the authorized client ID (client
+one uses the suffix `000000001`; client zero has no storage target). These locally generated
 names do not assert a globally assigned hardware identity.

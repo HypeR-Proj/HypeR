@@ -5,6 +5,8 @@
 
 mod directory;
 mod file;
+mod namespace;
+pub use namespace::{filesystem_mount_ramfs, filesystem_switch_root};
 
 pub use directory::{
     directory_canonicalize, directory_create_directory, directory_create_file, directory_get_info,
@@ -14,6 +16,6 @@ pub use directory::{
     directory_scope_create, directory_set_metadata, directory_symlink,
 };
 pub use file::{
-    file_create_executable_vmo, file_create_snapshot, file_get_info, file_get_metadata, file_lock,
-    file_read_at, file_resize, file_set_metadata, file_sync, file_unlock, file_write_at,
+    file_get_info, file_get_metadata, file_lock, file_protect, file_read_at, file_resize,
+    file_set_metadata, file_sync, file_unlock, file_write_at,
 };

@@ -3,6 +3,8 @@
 
 //! Native-user execution session and synchronous-call policy entry.
 
+mod fault;
+
 use core::ptr::NonNull;
 
 use hyper::abi::native::{NativeInvocation, NativeResult};
@@ -243,6 +245,7 @@ fn run_session(
             Ok(active) => active,
             Err(error) => fail_run("failed to activate native-user address space", error),
         };
+        let observed_epoch = active_address.mapping_epoch();
         let binding = active_run.binding();
         // SAFETY: The scheduler pin, admitted generation, and active address
         // root uniquely own the stopped context until its return capability is
@@ -299,14 +302,14 @@ fn run_session(
                 }
             }
             crate::hal::user::UserExit::Fault { fault, completion } => {
-                let resolution = if !stop_requested && fault.kind() == UserFaultKind::WritePageFault
-                {
-                    execution_owner
-                        .address_space()
-                        .resolve_write_fault(UserAddress::new(fault.address()))
-                } else {
-                    Ok(false)
-                };
+                let address = UserAddress::new(fault.address());
+                let resolution = fault::resolve(
+                    &session.thread,
+                    execution_owner.address_space(),
+                    address,
+                    fault.kind(),
+                    observed_epoch,
+                );
                 let retry_conflict = resolution
                     .as_ref()
                     .is_err_and(|error| error.is_mapping_conflict());
@@ -451,8 +454,10 @@ fn finish_pin(pin: crate::kernel::task::scheduler::UserRunGuard) {
 
 fn fault_reason(fault: UserFault) -> TerminalReason {
     let class = match fault.kind() {
-        UserFaultKind::InstructionAbort => 1,
-        UserFaultKind::DataAbort | UserFaultKind::WritePageFault => 2,
+        UserFaultKind::InstructionAbort | UserFaultKind::ExecutePageFault => 1,
+        UserFaultKind::DataAbort | UserFaultKind::WritePageFault | UserFaultKind::ReadPageFault => {
+            2
+        }
         UserFaultKind::Alignment => 3,
         UserFaultKind::IllegalInstruction => 4,
         UserFaultKind::SystemAccess => 5,

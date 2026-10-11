@@ -219,15 +219,26 @@ pub struct ProcessBuilder {
 }
 
 impl ProcessBuilder {
-    /// Creates an empty builder from independently checked authorities.
+    /// Creates a builder with explicit executable and loader authorities.
+    /// The target needs `READ|EXECUTE|PROTECT|DUPLICATE|TRANSFER`; the loader
+    /// needs `READ|EXECUTE`. The child receives a reduced ordinary File and
+    /// acquires content protection itself. Builder creation does not freeze
+    /// target bytes; only the restricted loader uses a temporary kernel copy.
     pub fn create(
         factory: HandleRef<'_, TaskFactoryObject>,
         group: HandleRef<'_, TaskGroupObject>,
         domain: HandleRef<'_, ResourceDomainObject>,
         executable: HandleRef<'_, FileObject>,
+        loader: HandleRef<'_, FileObject>,
     ) -> Result<Self> {
-        let live_inputs = [factory.raw(), group.raw(), domain.raw(), executable.raw()];
-        let result = raw_ops::create(factory, group, domain, executable);
+        let live_inputs = [
+            factory.raw(),
+            group.raw(),
+            domain.raw(),
+            executable.raw(),
+            loader.raw(),
+        ];
+        let result = raw_ops::create(factory, group, domain, executable, loader);
         Status::from_raw(result.status).into_result()?;
         // SAFETY: successful create publishes one new builder owner unless a
         // malformed output aliases a retained input borrow.
@@ -657,6 +668,7 @@ mod raw_ops {
         group: HandleRef<'_, TaskGroupObject>,
         domain: HandleRef<'_, ResourceDomainObject>,
         executable: HandleRef<'_, FileObject>,
+        loader: HandleRef<'_, FileObject>,
     ) -> hyper_sys::CallResult {
         // SAFETY: all typed borrows remain live for this non-retaining call.
         unsafe {
@@ -665,6 +677,7 @@ mod raw_ops {
                 group.raw().get(),
                 domain.raw().get(),
                 executable.raw().get(),
+                loader.raw().get(),
             )
         }
     }
@@ -816,6 +829,7 @@ mod raw_ops {
         _group: HandleRef<'_, TaskGroupObject>,
         _domain: HandleRef<'_, ResourceDomainObject>,
         _executable: HandleRef<'_, FileObject>,
+        _loader: HandleRef<'_, FileObject>,
     ) -> hyper_sys::CallResult {
         hyper_sys::CallResult {
             status: hyper_abi::HYPER_NATIVE_STATUS_OK,
@@ -948,6 +962,7 @@ mod tests {
             factory.as_handle_ref(),
             group.as_handle_ref(),
             domain.as_handle_ref(),
+            executable.as_handle_ref(),
             executable.as_handle_ref(),
         )
     }

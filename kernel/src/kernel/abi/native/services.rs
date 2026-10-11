@@ -330,6 +330,15 @@ pub(in crate::kernel) trait GuestIoServices: UserMemoryServices {
         _buffer: HandleValue,
         _directory: HandleValue,
         _path: UserSlice,
+        _read_only: bool,
+    ) -> Result<(), crate::kernel::vfs::VfsServiceError> {
+        Err(crate::kernel::vfs::VfsServiceError::InvalidInput)
+    }
+
+    fn unmount_filesystem(
+        &self,
+        _directory: HandleValue,
+        _path: UserSlice,
     ) -> Result<(), crate::kernel::vfs::VfsServiceError> {
         Err(crate::kernel::vfs::VfsServiceError::InvalidInput)
     }
@@ -597,6 +606,13 @@ pub(in crate::kernel) trait ConsoleServices {
 }
 
 pub(in crate::kernel) trait VfsServices: UserMemoryServices {
+    fn mount_ramfs(&self, directory: HandleValue, path: UserSlice) -> Result<(), VfsServiceError>;
+    fn switch_root(
+        &self,
+        directory: HandleValue,
+        request: UserSlice,
+    ) -> Result<(), VfsServiceError>;
+
     fn directory_scope_create(
         &self,
         root: HandleValue,
@@ -740,6 +756,7 @@ pub(in crate::kernel) trait VfsServices: UserMemoryServices {
         offset: u64,
         output: Option<UserSlice>,
     ) -> Result<(u64, u64), VfsServiceError>;
+    fn protect_file(&self, file: HandleValue) -> Result<(HandleValue, u64), VfsServiceError>;
     fn file_info(&self, file: HandleValue) -> Result<FileInfo, VfsServiceError>;
     fn directory_info(&self, directory: HandleValue) -> Result<DirectoryInfo, VfsServiceError>;
 }
@@ -747,18 +764,17 @@ pub(in crate::kernel) trait VfsServices: UserMemoryServices {
 pub(in crate::kernel) trait MemoryServices {
     fn create_contiguous_vmo(&self, size: u64) -> Result<HandleValue, MemoryServiceError>;
     fn create_vmo(&self, size: u64) -> Result<HandleValue, MemoryServiceError>;
-    fn create_file_executable_vmo(
-        &self,
-        file: HandleValue,
-    ) -> Result<(HandleValue, u64), MemoryServiceError>;
-    fn create_file_snapshot(
-        &self,
-        file: HandleValue,
-    ) -> Result<(HandleValue, u64), MemoryServiceError>;
     fn create_vmo_snapshot(
         &self,
         vmo: HandleValue,
     ) -> Result<(HandleValue, u64), MemoryServiceError>;
+    fn map_file(
+        &self,
+        vmar: HandleValue,
+        file: HandleValue,
+        protection: HandleValue,
+        request: crate::kernel::mm::user_space::PrivateMappingRequest,
+    ) -> Result<(), MemoryServiceError>;
     fn map_private(
         &self,
         vmar: HandleValue,
@@ -817,6 +833,7 @@ pub(in crate::kernel) trait ProcessBuilderServices {
         group: HandleValue,
         domain: HandleValue,
         executable: HandleValue,
+        loader: HandleValue,
     ) -> Result<HandleValue, ProcessBuilderServiceError>;
     fn set_process_builder_name(
         &self,

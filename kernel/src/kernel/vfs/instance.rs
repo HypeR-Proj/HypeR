@@ -17,7 +17,7 @@ use crate::kernel::accounting::{
 use crate::kernel::io_cache::{self, FileDataCache, FileIdentity, NodeIdentity, ReadError};
 
 use super::ExecutableSnapshot;
-use super::file_data::FileContent;
+use super::file_data::{ContentGuard, FileContent};
 use super::file_record::{CachePage, FileRecord};
 use super::scratch::{ScratchBudget, ScratchString, ScratchVec};
 
@@ -183,13 +183,13 @@ impl NodeLease {
             NodeBackend::Remote(node) => &node.locks,
         }
     }
-    fn content(&self) -> &FileContent {
+    pub(super) fn content(&self) -> &FileContent {
         match &self.0 {
             NodeBackend::RamFs(node) => &node.content,
             NodeBackend::Remote(node) => &node.record.content,
         }
     }
-    fn ramfs(&self) -> Result<&FallibleArc<super::ramfs::Node>, Error> {
+    pub(super) fn ramfs(&self) -> Result<&FallibleArc<super::ramfs::Node>, Error> {
         match &self.0 {
             NodeBackend::RamFs(node) => Ok(node),
             _ => Err(Error::InvalidBackendResult),
@@ -236,6 +236,27 @@ impl FilesystemInstance {
         .map_err(Error::from)
     }
 
+    pub(super) fn try_empty_ramfs(sponsor: &ResourceDomain) -> Result<FallibleArc<Self>, Error> {
+        let charge = allocation_charge::<Self>(sponsor)?;
+        FallibleArc::try_new(Self {
+            _charge: Some(charge),
+            id: FilesystemId(allocate_identifier(&NEXT_FILESYSTEM_ID)?),
+            backend: Backend::RamFs(super::ramfs::Ramfs::empty(sponsor.clone())?),
+        })
+        .map_err(Error::from)
+    }
+
+    pub(super) fn is_ramfs(&self) -> bool {
+        matches!(self.backend, Backend::RamFs(_))
+    }
+
+    pub(super) fn ramfs(&self) -> Result<&super::ramfs::Ramfs, Error> {
+        match &self.backend {
+            Backend::RamFs(fs) => Ok(fs),
+            Backend::Remote(_) => Err(Error::Unsupported),
+        }
+    }
+
     pub(super) fn try_from_remote(
         device: super::remote::Transport,
         sponsor: &ResourceDomain,
@@ -249,6 +270,17 @@ impl FilesystemInstance {
         })
         .map_err(Error::from)
     }
+    pub(super) fn with_namespace_stable<T>(
+        &self,
+        epoch: u64,
+        publish: impl FnOnce() -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        match &self.backend {
+            Backend::RamFs(fs) => fs.with_namespace_stable(epoch, publish),
+            Backend::Remote(fs) => fs.with_namespace_stable(epoch, publish),
+        }
+    }
+
     pub(super) fn pin_mount(&self, node: &NodeLease) -> Result<MountPin, Error> {
         match &self.backend {
             Backend::RamFs(fs) => fs
@@ -322,7 +354,7 @@ impl FilesystemInstance {
 
     /// Check backend health without reading metadata or file contents. Cached
     /// bytes and lengths must not hide a latched volume failure.
-    fn read_status(&self) -> Result<(), Error> {
+    pub(super) fn read_status(&self) -> Result<(), Error> {
         match &self.backend {
             Backend::RamFs(_) => Ok(()),
             Backend::Remote(fs) => fs.read_status(),
@@ -350,6 +382,17 @@ impl FilesystemInstance {
     ) -> Result<(usize, Option<ReadObservation>), Error> {
         let mut content = node.content().lock()?;
         self.read_status()?;
+        self.read_file_locked(node, cache, offset, destination, &mut content)
+    }
+
+    fn read_file_locked(
+        &self,
+        node: &NodeLease,
+        cache: &FileDataCache<CachePage>,
+        offset: u64,
+        destination: &mut [u8],
+        content: &mut ContentGuard<'_>,
+    ) -> Result<(usize, Option<ReadObservation>), Error> {
         match self.read_cache_policy() {
             ReadCachePolicy::Direct => self
                 .read_backend_at(node, offset, destination)
@@ -488,13 +531,27 @@ impl FilesystemInstance {
     pub(crate) fn executable_snapshot(
         &self,
         node: &NodeLease,
+        cache: &FileDataCache<CachePage>,
         sponsor: &ResourceDomain,
     ) -> Result<Option<ExecutableSnapshot>, Error> {
-        let _content = node.content().lock()?;
+        let mut content = node.content().lock()?;
         self.read_status()?;
         match &self.backend {
             Backend::RamFs(fs) => fs.executable(node.ramfs()?, sponsor),
-            Backend::Remote(fs) => fs.executable(node.remote()?, sponsor),
+            Backend::Remote(_) => {
+                let attributes = self.attributes(node)?;
+                if attributes.kind() != hyper::fs::NodeKind::File {
+                    return Ok(None);
+                }
+                content.set_length(attributes.size());
+                // This is a temporary kernel loader transaction, charged to
+                // its requester. It is never cached or exported as a VMO.
+                ExecutableSnapshot::read(attributes.size(), sponsor, |bytes| {
+                    self.read_file_locked(node, cache, 0, bytes, &mut content)
+                        .map(|(read, _)| read)
+                })
+                .map(Some)
+            }
         }
     }
 
@@ -692,28 +749,78 @@ impl FilesystemInstance {
 
 pub(crate) struct Mount {
     _charge: Option<CommittedCharge>,
-    _pin: Option<MountPin>,
+    _source_pin: Option<MountPin>,
+    _root_owner: Option<super::ramfs::RootOwner>,
     id: MountId,
     filesystem: FallibleArc<FilesystemInstance>,
     root: NodeLease,
+    locations: super::mount_admission::Admission,
 }
 
 impl Mount {
     pub(super) fn try_new(
         filesystem: FallibleArc<FilesystemInstance>,
-        pin: Option<MountPin>,
         sponsor: Option<&ResourceDomain>,
     ) -> Result<FallibleArc<Self>, Error> {
         let charge = sponsor.map(allocation_charge::<Self>).transpose()?;
         let root = filesystem.root();
         FallibleArc::try_new(Self {
             _charge: charge,
-            _pin: pin,
+            _source_pin: None,
+            _root_owner: None,
             id: MountId(allocate_identifier(&NEXT_MOUNT_ID)?),
             filesystem,
             root,
+            locations: super::mount_admission::Admission::new(),
         })
         .map_err(Error::from)
+    }
+
+    /// Only memory-backed subtrees can be aliased: remote transport retirement
+    /// is a filesystem-wide operation and cannot be shared by two mounts.
+    pub(super) fn try_bind(
+        source: &Location,
+        sponsor: &ResourceDomain,
+    ) -> Result<FallibleArc<Self>, Error> {
+        let filesystem = source.mount().filesystem_owner();
+        if !filesystem.is_ramfs() {
+            return Err(Error::Unsupported);
+        }
+        let charge = allocation_charge::<Self>(sponsor)?;
+        let pin = filesystem.pin_mount(source.node())?;
+        let root_owner = super::ramfs::RootOwner::acquire(source.node().ramfs()?)?;
+        FallibleArc::try_new(Self {
+            _charge: Some(charge),
+            _source_pin: Some(pin),
+            _root_owner: Some(root_owner),
+            id: MountId(allocate_identifier(&NEXT_MOUNT_ID)?),
+            filesystem: filesystem.clone(),
+            root: source.node().clone(),
+            locations: super::mount_admission::Admission::new(),
+        })
+        .map_err(Error::from)
+    }
+
+    /// No existing Location may remain when freezing admission. Cloning an
+    /// existing Location increments a nonzero count, so it cannot race a
+    /// successful zero-to-frozen transition. Topology references are not users.
+    pub(super) fn freeze(&self) -> Result<(), Error> {
+        self.locations.freeze().then_some(()).ok_or(Error::Busy)
+    }
+    pub(super) fn thaw(&self) {
+        self.locations.thaw();
+    }
+    fn acquire(&self) -> Result<(), Error> {
+        self.locations.acquire().then_some(()).ok_or(Error::Busy)
+    }
+    pub(super) fn unmount_with(
+        &self,
+        publish: impl FnOnce() -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        match &self.filesystem.backend {
+            Backend::Remote(fs) => fs.unmount_with(publish),
+            Backend::RamFs(_) => publish(),
+        }
     }
 
     pub(crate) const fn id(&self) -> MountId {
@@ -733,10 +840,26 @@ impl Mount {
     }
 }
 
-#[derive(Clone)]
 pub(crate) struct Location {
     mount: FallibleArc<Mount>,
     node: NodeLease,
+}
+
+impl Clone for Location {
+    fn clone(&self) -> Self {
+        // A live source keeps the count nonzero, excluding freeze. Unlike new
+        // admission this cannot observe a frozen mount in a valid execution.
+        self.mount.locations.retain();
+        Self {
+            mount: self.mount.clone(),
+            node: self.node.clone(),
+        }
+    }
+}
+impl Drop for Location {
+    fn drop(&mut self) {
+        self.mount.locations.release();
+    }
 }
 
 impl PartialEq for Location {
@@ -748,8 +871,9 @@ impl PartialEq for Location {
 impl Eq for Location {}
 
 impl Location {
-    pub(crate) fn new(mount: FallibleArc<Mount>, node: NodeLease) -> Self {
-        Self { mount, node }
+    pub(crate) fn new(mount: FallibleArc<Mount>, node: NodeLease) -> Result<Self, Error> {
+        mount.acquire()?;
+        Ok(Self { mount, node })
     }
 
     pub(crate) fn mount(&self) -> &FallibleArc<Mount> {
@@ -761,9 +885,27 @@ impl Location {
     }
 }
 
+/// Only the initial namespace-root capability follows root replacement. An
+/// opened directory is a fixed authority boundary even when it names `/`.
+#[derive(Clone)]
+pub(super) enum DirectoryAnchor {
+    NamespaceRoot,
+    Fixed(Location),
+}
+impl DirectoryAnchor {
+    pub(super) fn location(&self, view: &super::mounts::View) -> Location {
+        match self {
+            Self::NamespaceRoot => view.root().clone(),
+            Self::Fixed(location) => location.clone(),
+        }
+    }
+    pub(super) fn follows_root(&self) -> bool {
+        matches!(self, Self::NamespaceRoot)
+    }
+}
+
 /// Shared namespace owner with atomically published immutable mount snapshots.
 pub(crate) struct MountNamespace {
-    root: Location,
     pub(super) mounts: super::mounts::MountTable,
     cache: FallibleArc<FileDataCache<CachePage>>,
 }
@@ -773,18 +915,13 @@ impl MountNamespace {
         filesystem: FallibleArc<FilesystemInstance>,
         cache: FallibleArc<FileDataCache<CachePage>>,
     ) -> Result<FallibleArc<Self>, Error> {
-        let mount = Mount::try_new(filesystem, None, None)?;
-        let root = Location::new(mount.clone(), mount.root());
+        let mount = Mount::try_new(filesystem, None)?;
+        let root = Location::new(mount.clone(), mount.root())?;
         FallibleArc::try_new(Self {
-            root,
             cache,
-            mounts: super::mounts::MountTable::new(),
+            mounts: super::mounts::MountTable::new(root),
         })
         .map_err(Error::from)
-    }
-
-    pub(crate) fn root(&self) -> Location {
-        self.root.clone()
     }
 
     pub(super) fn cache(&self) -> FallibleArc<FileDataCache<CachePage>> {
@@ -796,13 +933,11 @@ impl MountNamespace {
     }
 
     pub(super) fn reclaim_file_records(&self, limit: usize) -> usize {
-        self.mounts
-            .reclaim_file_records(self.root.mount().filesystem(), limit)
+        self.mounts.reclaim_file_records(limit)
     }
 
     pub(super) fn reclaim_idle_records(&self, domain: Option<ResourceDomainId>) {
-        self.mounts
-            .reclaim_idle_records(self.root.mount().filesystem(), domain);
+        self.mounts.reclaim_idle_records(domain);
     }
 
     pub(super) fn read_directory_entry(

@@ -28,6 +28,7 @@ static void transport(hyper_native_status_t status)
 	const uint64_t other = UINT64_C(0x923456789abcdef0);
 	const uint64_t offset = UINT64_C(0xa3456789abcdef01);
 	const uint64_t deadline = UINT64_C(0xb456789abcdef012);
+	const uint64_t loader = UINT64_C(0xc56789abcdef0123);
 	const uint32_t options = UINT32_C(0xf1234567);
 	uint8_t bytes[17] = {0};
 	uint8_t destination[23] = {0};
@@ -35,6 +36,16 @@ static void transport(hyper_native_status_t status)
 	hyper_native_capability_receive_slot_t slots[2] = {0};
 	hyper_native_capability_disposition_t dispositions[3] = {0};
 
+	hyper_native_filesystem_root_switch_t root_switch = {0};
+	EXPECT(FILESYSTEM_MOUNT_RAMFS, handle, (uintptr_t)bytes, sizeof(bytes));
+	RESULT(hyper_filesystem_mount_ramfs(handle, bytes, sizeof(bytes)));
+	EXPECT(FILE_PROTECT, handle);
+	RESULT(hyper_file_protect(handle));
+	hyper_native_private_mapping_t mapping = {0};
+	EXPECT(VMAR_MAP_FILE, handle, other, loader, (uintptr_t)&mapping, sizeof(mapping));
+	STATUS(hyper_vmar_map_file(handle, other, loader, &mapping, sizeof(mapping)));
+	EXPECT(FILESYSTEM_SWITCH_ROOT, handle, (uintptr_t)&root_switch);
+	RESULT(hyper_filesystem_switch_root(handle, &root_switch));
 	EXPECT(SYSTEM_CONFIG, other);
 	RESULT(hyper_system_config(other));
 	EXPECT(ABI_QUERY, 0);
@@ -80,6 +91,8 @@ static void transport(hyper_native_status_t status)
 	RESULT(hyper_thread_create(handle, other, offset, deadline, NULL, 0));
 	EXPECT(THREAD_CREATE, handle, other, offset, deadline, (uintptr_t)affinity_words, 2);
 	RESULT(hyper_thread_create(handle, other, offset, deadline, affinity_words, 2));
+	EXPECT(PROCESS_BUILDER_CREATE, handle, other, offset, deadline, loader);
+	RESULT(hyper_process_builder_create(handle, other, offset, deadline, loader));
 	EXPECT(PROCESS_BUILDER_ADD_HANDLE, handle, other, options, 27, offset, 1);
 	STATUS(hyper_process_builder_add_handle(handle, other, options, 27, offset, 1));
 	EXPECT(WAIT_SET_WAIT, handle, deadline, (uintptr_t)bytes, sizeof(bytes));

@@ -21,10 +21,9 @@ use super::{ExecutableSnapshot, MetadataUpdate};
 use crate::kernel::accounting::{
     CommittedCharge, ResourceAmount, ResourceDomain, ResourceError, ResourceKind, ResourceLimits,
 };
-use crate::kernel::mm::user_space::{
-    DomainAccount, KernelPageBackend, KernelPageError, SnapshotVmo, VmoError, WeakSnapshotVmo,
-};
 use crate::kernel::sync::{Mutex, MutexGuard};
+
+pub(super) mod promotion;
 
 const STORAGE_LIMIT: u64 = 256 * 1024 * 1024;
 
@@ -57,6 +56,7 @@ struct Topology {
 pub(super) struct Node {
     id: u64,
     mount_pins: AtomicU64,
+    mount_roots: AtomicU64,
     kind: NodeKind,
     topology: SpinLock<Topology>,
     metadata: SpinLock<NodeMetadata>,
@@ -67,18 +67,12 @@ pub(super) struct Node {
     _charge: CommittedCharge,
 }
 
-/// The weak cache belongs to the exact contents protected by this mutex.
-/// Mutations discard the cache; live snapshots keep previous generations alive.
 struct NodeData {
     contents: FileData<'static, CommittedCharge>,
-    snapshot: Option<WeakSnapshotVmo<KernelPageBackend, DomainAccount>>,
 }
 impl NodeData {
     const fn new(contents: FileData<'static, CommittedCharge>) -> Self {
-        Self {
-            contents,
-            snapshot: None,
-        }
+        Self { contents }
     }
 }
 
@@ -96,7 +90,7 @@ struct Entry {
 
 /// Odd epochs describe an in-progress namespace edit. The sleeping mutation
 /// lock serializes writers; readers validate one even epoch after traversal.
-struct Mutation<'a> {
+pub(super) struct Mutation<'a> {
     _guard: MutexGuard<'a, ()>,
     epoch: &'a AtomicU64,
     committed_epoch: u64,
@@ -166,6 +160,30 @@ impl Drop for MountPin {
     }
 }
 
+/// A detached directory stays writable while a mount owns it as its root.
+/// This is distinct from pins on covered mountpoints and directory links.
+pub(super) struct RootOwner(FallibleArc<Node>);
+
+impl RootOwner {
+    pub(super) fn acquire(node: &FallibleArc<Node>) -> Result<Self, Error> {
+        node.require(NodeKind::Directory)?;
+        node.mount_roots
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                count.checked_add(1)
+            })
+            .map_err(|_| Error::IdentifierExhausted)?;
+        Ok(Self(node.clone()))
+    }
+}
+
+impl Drop for RootOwner {
+    fn drop(&mut self) {
+        if self.0.mount_roots.fetch_sub(1, Ordering::AcqRel) == 0 {
+            crate::kernel::crash::fatal(format_args!("VFS mount root owner underflow"));
+        }
+    }
+}
+
 impl Node {
     pub(super) const fn id(&self) -> u64 {
         self.id
@@ -226,6 +244,7 @@ impl Node {
     }
     fn linked(&self) -> bool {
         self.topology.with(|topology| topology.links != 0)
+            || self.mount_roots.load(Ordering::Acquire) != 0
     }
     fn modified(&self, now: Option<Timestamp>) {
         self.metadata.with(|metadata| {
@@ -239,6 +258,42 @@ impl Node {
 }
 
 impl Ramfs {
+    pub(super) fn empty(domain: ResourceDomain) -> Result<Self, Error> {
+        let budget = Budget(domain);
+        let charge = budget
+            .reserve(FallibleArc::<Node>::allocation_size())
+            .map_err(Error::Resource)?;
+        let root = FallibleArc::try_new(Node {
+            mount_pins: AtomicU64::new(0),
+            mount_roots: AtomicU64::new(0),
+            id: 0,
+            kind: NodeKind::Directory,
+            topology: SpinLock::new(Topology {
+                links: 1,
+                parent: None,
+            }),
+            metadata: SpinLock::new(NodeMetadata {
+                mode: 0o755,
+                accessed: None,
+                modified: None,
+                created: None,
+                changed: None,
+            }),
+            data: Mutex::new(NodeData::new(FileData::borrowed(&[]))),
+            children: Mutex::new(Children::new()),
+            locks: super::locks::FileLocks::new(),
+            content: super::file_data::FileContent::new(),
+            _charge: charge,
+        })?;
+        Ok(Self {
+            root,
+            next_id: AtomicU64::new(1),
+            budget,
+            mutation: Mutex::new(()),
+            epoch: AtomicU64::new(0),
+        })
+    }
+
     pub(super) fn from_archive(archive: RamFs<'static>) -> Result<Self, Error> {
         let budget = Budget(
             ResourceDomain::try_new_root(
@@ -286,6 +341,7 @@ impl Ramfs {
             );
             let node = FallibleArc::try_new(Node {
                 mount_pins: AtomicU64::new(0),
+                mount_roots: AtomicU64::new(0),
                 id: source.id().get(),
                 kind: source.kind(),
                 topology: SpinLock::new(Topology {
@@ -334,6 +390,20 @@ impl Ramfs {
             epoch: AtomicU64::new(0),
         })
     }
+    /// Serialize the final topology publication with directory renames. The
+    /// caller completes all allocation and backend I/O before this callback.
+    pub(super) fn with_namespace_stable<T>(
+        &self,
+        epoch: u64,
+        publish: impl FnOnce() -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        let _guard = self.mutation.lock().map_err(Error::Lock)?;
+        if epoch & 1 != 0 || self.epoch.load(Ordering::Acquire) != epoch {
+            return Err(Error::Busy);
+        }
+        publish()
+    }
+
     pub(super) fn pin_mount(&self, node: &FallibleArc<Node>) -> Result<MountPin, Error> {
         let _mutation = self.mutation.lock().map_err(Error::Lock)?;
         node.require(NodeKind::Directory)?;
@@ -358,7 +428,7 @@ impl Ramfs {
         let _guard = self.mutation.lock().map_err(Error::Lock)?;
         Ok(())
     }
-    fn begin(&self, expected: Option<u64>) -> Result<Mutation<'_>, Error> {
+    pub(super) fn begin(&self, expected: Option<u64>) -> Result<Mutation<'_>, Error> {
         let guard = self.mutation.lock().map_err(Error::Lock)?;
         let epoch = self.epoch();
         if expected.is_some_and(|value| value != epoch) {
@@ -489,7 +559,6 @@ impl Ramfs {
             .write(offset, input, &self.budget)
             .map_err(map_data_error)?;
         if actual != 0 {
-            data.snapshot = None;
             node.modified(crate::kernel::time::realtime());
         }
         Ok((actual, offset + actual as u64))
@@ -500,7 +569,6 @@ impl Ramfs {
         data.contents
             .resize(length, &self.budget)
             .map_err(map_data_error)?;
-        data.snapshot = None;
         node.modified(crate::kernel::time::realtime());
         drop(data);
         Ok(())
@@ -513,29 +581,9 @@ impl Ramfs {
         if node.kind != NodeKind::File {
             return Ok(None);
         }
-        let mut data = node.data.lock().map_err(Error::Lock)?;
-        let storage = match data.snapshot.as_ref().and_then(WeakSnapshotVmo::upgrade) {
-            Some(storage) => storage,
-            None => {
-                let storage = SnapshotVmo::try_from_bytes(
-                    data.contents.bytes(),
-                    KernelPageBackend,
-                    DomainAccount::new(self.budget.0.clone()),
-                )
-                .map_err(|error| match error {
-                    VmoError::Account(error) => Error::Resource(error),
-                    VmoError::Allocation | VmoError::Backend(KernelPageError::Allocation(_)) => {
-                        Error::Allocation
-                    }
-                    VmoError::Busy => Error::Busy,
-                    _ => Error::InvalidBackendResult,
-                })?;
-                data.snapshot = Some(storage.downgrade());
-                storage
-            }
-        };
+        let data = node.data.lock().map_err(Error::Lock)?;
         if let Some(archive) = data.contents.archive() {
-            return Ok(Some(ExecutableSnapshot::borrowed(archive, storage)));
+            return Ok(Some(ExecutableSnapshot::borrowed(archive)));
         }
         let charge = sponsor
             .reserve(ResourceAmount::ZERO.with(
@@ -549,8 +597,9 @@ impl Ramfs {
             .try_reserve_exact(data.contents.bytes().len())
             .map_err(|_| Error::Allocation)?;
         bytes.extend_from_slice(data.contents.bytes());
-        Ok(Some(ExecutableSnapshot::owned(bytes, charge, storage)))
+        Ok(Some(ExecutableSnapshot::owned(bytes, charge)))
     }
+
     pub(super) fn create<R, E: From<Error>>(
         &self,
         directory: &FallibleArc<Node>,
@@ -583,6 +632,7 @@ impl Ramfs {
         }
         let node = FallibleArc::try_new(Node {
             mount_pins: AtomicU64::new(0),
+            mount_roots: AtomicU64::new(0),
             id,
             kind,
             topology: SpinLock::new(Topology {

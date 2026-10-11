@@ -9,6 +9,7 @@ use crate::kernel::io_cache::ContentRevision;
 use crate::kernel::sync::{Mutex, MutexGuard};
 
 use super::instance::Error;
+use super::protection_state::ProtectionState;
 
 /// One content incarnation owns this gate, so aliases and independent opens
 /// share it. Cacheable backends keep it in a shared `FileRecord`.
@@ -19,6 +20,7 @@ use super::instance::Error;
 /// active node lease: caching a page must not prevent unlink.
 pub(super) struct FileContent {
     state: Mutex<ContentState>,
+    protections: ProtectionState,
 }
 
 struct ContentState {
@@ -28,6 +30,7 @@ struct ContentState {
 
 pub(super) struct ContentGuard<'a> {
     state: MutexGuard<'a, ContentState>,
+    protections: &'a ProtectionState,
 }
 
 impl FileContent {
@@ -37,12 +40,14 @@ impl FileContent {
                 revision: NonZeroU64::MIN,
                 known_length: None,
             }),
+            protections: ProtectionState::new(),
         }
     }
 
     pub(super) fn lock(&self) -> Result<ContentGuard<'_>, Error> {
         Ok(ContentGuard {
             state: self.state.lock().map_err(Error::Lock)?,
+            protections: &self.protections,
         })
     }
 
@@ -52,11 +57,29 @@ impl FileContent {
             .state
             .try_lock()
             .map_err(Error::Lock)?
-            .map(|state| ContentGuard { state }))
+            .map(|state| ContentGuard {
+                state,
+                protections: &self.protections,
+            }))
+    }
+
+    /// Guard retirement never waits for a content operation. A new mutation
+    /// observes the final release before changing the protected bytes.
+    pub(super) fn release_protection(&self) {
+        self.protections.release();
     }
 }
 
 impl ContentGuard<'_> {
+    /// The content mutex excludes existing writers and new protection
+    /// acquisition until this count is visible. Releases may run concurrently.
+    pub(super) fn acquire_protection(&self) -> Result<(), Error> {
+        self.protections
+            .acquire()
+            .then_some(())
+            .ok_or(Error::IdentifierExhausted)
+    }
+
     pub(super) fn known_length(&self) -> Option<u64> {
         self.state.known_length
     }
@@ -81,6 +104,9 @@ impl ContentGuard<'_> {
     /// Failed backend operations may have changed bytes or length. Retire the
     /// old revision before calling them, and reject exhaustion before mutation.
     pub(super) fn begin_mutation(&mut self) -> Result<(), Error> {
+        if !self.protections.writable() {
+            return Err(Error::Busy);
+        }
         self.state.revision = self
             .state
             .revision

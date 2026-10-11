@@ -18,7 +18,7 @@ stack or reduce an ABI batch merely to hide a large temporary.
 ## Reproducing the checks
 
 Run `make test-stack ARCH=aarch64`. This builds a dedicated initramfs in
-`target/stack-audit/aarch64`, substituting the std workload for its `/bin/ps`
+`target/stack-audit/aarch64`, substituting the std workload for its `/system/bin/ps`
 so the existing shell policy supplies thread inspection authority. The normal
 application output and production initramfs are preserved. The workload checks
 thread scan pagination, snapshot isolation, boundary/eager/COW mappings, and

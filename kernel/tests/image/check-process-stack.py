@@ -17,6 +17,12 @@ def check(disassembly):
     budgets = {
         '15PreparedProcess7try_new': 2048,
         '7Process17finish_retirement': 2048,
+        # Keep address-space construction scratch off the subsequent loader
+        # mapping/rollback call chain, and off the syscall coordinator itself.
+        '24sys_process_builder_seal': 2048,
+        '6loader11load_native': 2048,
+        '6loader20create_address_space': 6144,
+        '6loader21prepare_address_space': 2048,
         # Guest SMP previously kept two full architectural contexts plus
         # execution temporaries in nested seal/preparation frames (>13 KiB).
         '32sys_pending_virtual_machine_seal': 3072,

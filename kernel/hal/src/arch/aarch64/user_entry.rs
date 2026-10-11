@@ -13,9 +13,7 @@ use core::mem::{offset_of, size_of};
 use core::ptr::NonNull;
 
 use hyper::abi::native::{NativeInvocation, NativeResult};
-use hyper::hal::user::{
-    NativeCallAction, NativeCallService, UserFault, UserFaultKind, UserRunBinding,
-};
+use hyper::hal::user::{NativeCallAction, NativeCallService, UserFault, UserRunBinding};
 #[cfg(feature = "kernel-self-test")]
 use hyper::sync::atomic::AtomicUsize;
 use hyper::sync::atomic::{AtomicPtr, AtomicU64, Ordering};
@@ -335,7 +333,7 @@ fn stopped_exit(context: &mut UserContext) -> Result<UserExit<'_>, Error> {
             ))
         }
         registers::USER_CONTEXT_EXIT_FAULT => ExitPayload::Fault(UserFault::new(
-            fault_kind(context.machine.syndrome),
+            super::user_contract::fault_kind(context.machine.syndrome),
             context.machine.syndrome,
             context.machine.fault_address,
             context.machine.program_counter,
@@ -661,25 +659,6 @@ fn current_binding(context: &MachineContext) -> Result<UserRunBinding, Error> {
         context.run_generation,
     )
     .ok_or(Error::InvalidMachineState)
-}
-
-fn fault_kind(syndrome: u64) -> UserFaultKind {
-    if super::user_contract::is_user_write_page_fault(syndrome) {
-        return UserFaultKind::WritePageFault;
-    }
-    let class = (syndrome >> registers::ESR_EC_SHIFT) & registers::ESR_EC_MASK;
-    match class {
-        registers::ESR_EC_INSTRUCTION_ABORT_LOWER => UserFaultKind::InstructionAbort,
-        registers::ESR_EC_DATA_ABORT_LOWER => UserFaultKind::DataAbort,
-        registers::ESR_EC_PC_ALIGNMENT | registers::ESR_EC_SP_ALIGNMENT => UserFaultKind::Alignment,
-        registers::ESR_EC_SYSTEM_REGISTER => UserFaultKind::SystemAccess,
-        registers::ESR_EC_BREAKPOINT_LOWER
-        | registers::ESR_EC_SOFTWARE_STEP_LOWER
-        | registers::ESR_EC_WATCHPOINT_LOWER
-        | registers::ESR_EC_BRK64 => UserFaultKind::Breakpoint,
-        registers::ESR_EC_UNKNOWN => UserFaultKind::IllegalInstruction,
-        _ => UserFaultKind::OtherSynchronous,
-    }
 }
 
 fn read_hcr_el2() -> u64 {

@@ -20,7 +20,7 @@ references into one GitHub Pages artifact. The intended public address is
   especially when a continuation would start with a list marker such as `+`.
 - Rustdoc generates kernel, core, HAL and ABI references separately for AArch64,
   RISC-V and x86-64, using their normal QEMU configurations. It also generates
-  application, shared application library, installed SDK and ABI references for both HypeR Native targets,
+  bootstrap, application, shared application library, installed SDK and ABI references for both HypeR Native targets,
   using the actual patched Rust standard-library target configuration. Only
   HypeR-owned crates are selected, with `--no-deps`; third-party crates and the
   Rust standard library are compiled as needed but receive no generated reference
@@ -40,7 +40,7 @@ references into one GitHub Pages artifact. The intended public address is
   signatures of undocumented items, but the pipeline does not invent prose
   for them or enforce a documentation-coverage quota.
 - Doxygen publishes standard C documentation comments from the ABI headers,
-  C runtime, userspace executable loader and dynamic loader. Ordinary C comments
+  C runtime, stage-1 loader, shared ELF mapping primitives and dynamic loader. Ordinary C comments
   are not converted and undocumented functions do not receive generated
   descriptions.
 - Markdown source-code links resolve to files at the built Git revision;

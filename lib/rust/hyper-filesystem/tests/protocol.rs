@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use hyper_filesystem::{
-    driver::{Format, identify},
+    driver::{Format, PROBE_BYTES, identify},
     protocol::*,
 };
 
@@ -81,4 +81,52 @@ fn format_detection_uses_geometry_not_informational_label() {
     let mut partition = [0; 512];
     partition[510..512].copy_from_slice(&[0x55, 0xaa]);
     assert_eq!(identify(&partition), None);
+}
+
+#[test]
+fn erofs_recognition_is_independent_of_worker_availability() {
+    let mut prefix = [0; PROBE_BYTES];
+    prefix[..4].copy_from_slice(&0xe0f5_e1e2u32.to_le_bytes());
+    assert_eq!(identify(&prefix), None);
+    prefix[1024..1028].copy_from_slice(&0xe0f5_e1e2u32.to_be_bytes());
+    assert_eq!(identify(&prefix), None);
+    prefix[1024..1028].copy_from_slice(&0xe0f5_e1e2u32.to_le_bytes());
+    assert_eq!(identify(&prefix), Some(Format::Erofs));
+    assert_eq!(identify(&prefix[..1027]), None);
+    assert_eq!(Format::Erofs.worker_name(), "fs-erofs");
+}
+
+#[test]
+fn ambiguous_format_hints_do_not_select_a_worker() {
+    let mut prefix = [0; PROBE_BYTES];
+    prefix[11..13].copy_from_slice(&512u16.to_le_bytes());
+    prefix[13] = 1;
+    prefix[14..16].copy_from_slice(&32u16.to_le_bytes());
+    prefix[16] = 2;
+    prefix[32..36].copy_from_slice(&70000u32.to_le_bytes());
+    prefix[36..40].copy_from_slice(&600u32.to_le_bytes());
+    prefix[510..512].copy_from_slice(&[0x55, 0xaa]);
+    assert_eq!(identify(&prefix), Some(Format::Fat));
+    prefix[1024..1028].copy_from_slice(&0xe0f5_e1e2u32.to_le_bytes());
+    assert_eq!(identify(&prefix), None);
+}
+
+#[test]
+fn symlink_metadata_and_bounded_readlink_replies_round_trip() {
+    let mut response = Response {
+        sequence: 29,
+        operation: Operation::ReadLink,
+        result: Ok(12),
+        entry: Entry::empty(),
+    };
+    response.entry.kind = SYMLINK;
+    response.entry.size = 12;
+    let mut bytes = [0; RESPONSE_BYTES];
+    assert!(response.encode(&mut bytes).is_some());
+    let decoded = Response::decode(&bytes, 29, Operation::ReadLink);
+    assert!(decoded.is_some_and(|value| value.entry.kind == SYMLINK && value.result == Ok(12)));
+    bytes[24..32].copy_from_slice(&(PATH_BYTES as u64 + 1).to_le_bytes());
+    assert!(Response::decode(&bytes, 29, Operation::ReadLink).is_none());
+    response.result = Ok(PATH_BYTES as u64 + 1);
+    assert!(response.encode(&mut bytes).is_none());
 }

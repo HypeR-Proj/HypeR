@@ -370,3 +370,12 @@ fn pointer_ranges_overlap(
         .ok_or(KernelPageError::AddressOverflow)?;
     Ok(left < right_end && right < left_end)
 }
+
+impl super::vmo::FilePageSource for crate::kernel::vfs::FileProtection {
+    fn size(&self) -> u64 {
+        self.size()
+    }
+    fn read_at(&self, offset: u64, destination: &mut [u8]) -> Result<usize, ()> {
+        self.read_at(offset, destination).map_err(|_| ())
+    }
+}

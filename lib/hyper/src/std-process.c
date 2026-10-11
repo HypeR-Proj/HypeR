@@ -72,18 +72,21 @@ int64_t __hyper_std_process_begin(const char *program, size_t size, const char *
 	uint64_t group = hyper_runtime_capability(HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_TASK_GROUP);
 	uint64_t domain =
 		hyper_runtime_capability(HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_RESOURCE_DOMAIN);
-	if (!base || !factory || !group || !domain) {
+	uint64_t loader = hyper_runtime_capability(HYPER_LAUNCH_CHILD_LOADER);
+	if (!base || !factory || !group || !domain || !loader) {
 		status = HYPER_NATIVE_STATUS_ACCESS_DENIED;
 		goto fail;
 	}
-	hyper_call_result_t file =
-		hyper_directory_open_file(base, program, size, HYPER_NATIVE_RIGHT_EXECUTE);
+	hyper_call_result_t file = hyper_directory_open_file(
+		base, program, size,
+		HYPER_NATIVE_RIGHT_READ | HYPER_NATIVE_RIGHT_EXECUTE | HYPER_NATIVE_RIGHT_PROTECT |
+			HYPER_NATIVE_RIGHT_DUPLICATE | HYPER_NATIVE_RIGHT_TRANSFER);
 	if (file.status) {
 		status = file.status;
 		goto fail;
 	}
 	hyper_call_result_t created =
-		hyper_process_builder_create(factory, group, domain, file.value0);
+		hyper_process_builder_create(factory, group, domain, file.value0, loader);
 	(void)hyper_handle_close(file.value0);
 	if (created.status) {
 		status = created.status;
@@ -118,6 +121,7 @@ int64_t __hyper_std_process_begin(const char *program, size_t size, const char *
 	if (status)
 		goto fail;
 	const uint32_t inherited[] = {
+		HYPER_LAUNCH_CHILD_LOADER,
 		HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_ROOT_DIRECTORY,
 		HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_TASK_FACTORY,
 		HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_TASK_GROUP,
