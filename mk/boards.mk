@@ -163,6 +163,7 @@ test-board-storage: app image
 	@fixture=$$(mktemp -d "$(BOARD_TEST_OUTPUT)/run.XXXXXX") && \
 	$(MAKE) -o image -o app board-image BOARD=qemu \
 		APP_OUTPUT="$(BOARD_TEST_OUTPUT)/storage-apps" \
+		APP_FEATURES=hyper-io-runtime/storage-probe \
 		BOARD_CONFIG="$(BOARD_CONFIG)" BOARD_OUTPUT="$$fixture" \
 		BOARD_IMAGE="$$fixture/disk.img" \
 		BOARD_EXTRA_ENTRIES='0755 bin/storage-probe "$(BOARD_TEST_OUTPUT)/storage-apps/storage-probe"' && \
@@ -250,6 +251,7 @@ test-board-broker: app image fit-pack
 	python3 -B tests/qemu/verify-board-broker.py prepare --board "$$fixture/config.json" && \
 	$(MAKE) -o image -o app board-image BOARD=qemu IO_VM_PACKAGE="$$package" \
 		APP_OUTPUT="$(BOARD_TEST_OUTPUT)/broker-apps" \
+		APP_FEATURES=hyper-io-runtime/broker-test,hyper-vm-manager/broker-test,hyper-vm-runtime/broker-test \
 		BOARD_CONFIG="$$fixture/config.json" BOARD_OUTPUT="$$fixture" \
 		BOARD_IMAGE="$$fixture/disk.img" BOARD_ARTIFACTS="--artifact business=$$fixture/business.itb" && \
 	$(NATIVE_QEMU_ENV) python3 -B tests/qemu/verify-board-broker.py run \
@@ -270,6 +272,7 @@ test-userspace-device: app image
 		--board "$(CURDIR)/boards/qemu.json" --output "$$fixture" && \
 	$(MAKE) -o image -o app board-image BOARD=qemu \
 		APP_OUTPUT="$(BOARD_TEST_OUTPUT)/device-apps" \
+		APP_FEATURES=hyper-io-runtime/storage-probe,hyper-io-runtime/userspace-device-test \
 		BOARD_CONFIG="$$fixture/config.json" BOARD_OUTPUT="$$fixture" \
 		BOARD_IMAGE="$$fixture/disk.img" \
 		BOARD_EXTRA_ENTRIES='0755 bin/storage-probe "$(BOARD_TEST_OUTPUT)/device-apps/storage-probe"' && \
