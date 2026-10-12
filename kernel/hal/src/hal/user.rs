@@ -808,7 +808,7 @@ pub unsafe fn copy_to_exposed(
     }
 }
 
-/// Returns first-use restores and boundary saves for the lower-world runtime probes.
+/// Returns register-bank restores and boundary saves for lower-world runtime probes.
 #[cfg(all(
     any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64),
     feature = "kernel-self-test"

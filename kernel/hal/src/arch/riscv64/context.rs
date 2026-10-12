@@ -302,8 +302,15 @@ impl VcpuContext {
             }
             // SAFETY: The run owner has exclusive access before guest entry;
             // this short reference ends before assembly or policy can borrow it.
-            if unsafe { (&mut *context).begin_run() }.is_err() {
-                return Err(GuestRunError::State);
+            unsafe {
+                let state = &mut *context;
+                state.begin_run().map_err(|_| GuestRunError::State)?;
+                // Restore once per guest run. Keep standard illegal delegation:
+                // the supported QEMU/OpenSBI pair cannot redirect VS illegal
+                // traps to HS without retaining MPV. Native first-use trapping
+                // is unaffected. Only this qualified run path touches hardware;
+                // anchor state-machine validation remains independent of it.
+                super::fp::restore_for_run(&state.fp);
             }
             // SAFETY: RUNNING publishes the exact context to the assembly
             // anchor. A typed anchor exit destroys that publication before it
@@ -374,10 +381,6 @@ impl VcpuContext {
             return Err(GuestAnchorError::State);
         }
         self.run_state = GUEST_RUN_RUNNING;
-        // Restore once per guest run. Keep standard illegal delegation: the
-        // supported QEMU/OpenSBI pair cannot redirect VS illegal traps to HS
-        // without retaining MPV. Native first-use trapping is unaffected.
-        super::fp::restore_for_run(&self.fp);
         Ok(())
     }
 

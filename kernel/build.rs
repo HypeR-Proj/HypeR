@@ -32,6 +32,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=hal/src/arch/riscv64/boot.S");
     println!("cargo:rerun-if-changed=hal/src/arch/riscv64/trap.S");
     println!("cargo:rerun-if-changed=hal/src/arch/riscv64/context.S");
+    println!("cargo:rerun-if-changed=hal/src/arch/riscv64/fp.S");
     println!("cargo:rerun-if-changed=hal/src/arch/riscv64/guest.S");
     println!("cargo:rerun-if-changed=hal/src/arch/riscv64/user.S");
     println!("cargo:rerun-if-changed=hal/src/arch/riscv64/cache.S");
