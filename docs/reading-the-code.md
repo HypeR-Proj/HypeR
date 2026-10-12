@@ -698,14 +698,14 @@ is [console-output](../bootstrap/stage1/console-output/src/main.rs).
 For guest attachment, read [vmm console](../app/vmm/src/console.rs),
 [vm-runtime console](../app/vm-runtime/src/console.rs) and
 [console waits](../app/vm-runtime/src/console_wait.rs), then the
-[virtual PL011 model](../kernel/src/vm/aarch64/device/pl011.rs).
+[SBSA Generic UART model](../kernel/src/vm/aarch64/device/sbsa_uart.rs).
 A guest that stops consuming input must not make the control/detach path
 unreachable. Keep output, input backpressure and attachment lifetime separate
 when changing the relay.
 
 **Tests to start with:** [vmm console tests](../app/vmm/tests/console.rs),
 [runtime console tests](../app/vm-runtime/tests/console.rs),
-[virtual UART tests](../kernel/tests/host/src/cases/virtual_pl011.rs) and
+[virtual UART tests](../kernel/tests/host/src/cases/sbsa_uart.rs) and
 [console integration](../tests/qemu/verify-console.py).
 
 ## 14. From configuration to a running service or disk image

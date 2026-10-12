@@ -3,4 +3,4 @@
 
 //! `AArch64` virtual-board device models.
 
-pub mod pl011;
+pub mod sbsa_uart;

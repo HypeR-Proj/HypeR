@@ -10,6 +10,33 @@ hyper_mmio_guest_start:
     mov x22, #0x08000000
     mov x27, #0x08010000
     msr daifset, #2
+    // Fill the registered 64 KiB transport and the 32-byte SBSA TX FIFO.
+    // The Native runtime never consumes it; the MMIO rendezvous closes the
+    // final serial handle. Observe the GIC first: a UART read would itself
+    // pump TX and hide a missing close notification.
+    mov x9, #0x09000000
+    mov w10, #0x20
+    str w10, [x9, #0x38] // TX interrupt enable
+    mov w11, #0x10000
+    add w11, w11, #32
+    mov w12, #'x'
+serial_fill:
+    str w12, [x9]
+    subs w11, w11, #1
+    b.ne serial_fill
+    ldr w10, [x9, #0x18]
+    tbz w10, #5, 3f // TXFF must reflect backpressure
+    ldr w10, [x22, #0x204]
+    tbnz w10, #1, 3f // TX IRQ must be clear while full
+    mov w10, #0x5342
+    str w10, [x20, #24]
+    ldr w10, [x22, #0x204]
+    tbz w10, #1, 3f // Closing the sink must assert TX IRQ
+    ldr w10, [x9, #0x18]
+    tbz w10, #7, 3f // TXFE after close
+    str wzr, [x9, #0x38]
+    mov w10, #0x20
+    str w10, [x9, #0x44]
     bl test_dir_overflow
     mov w21, #32
 1:

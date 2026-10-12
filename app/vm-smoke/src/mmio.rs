@@ -3,9 +3,10 @@
 
 //! Hardware-detached userspace MMIO acceptance, booted as Native /init.
 
-use hyper_os::handle::VirtualCpuObject;
+use hyper_os::handle::{Rights, VirtualCpuObject};
 use hyper_os::memory::WritableVmo;
 use hyper_os::startup::{self, Startup};
+use hyper_os::virtual_serial::{self, Output};
 use hyper_os::vm::{self, MmioCompletion, MmioOperation};
 use hyper_os::wait::{ObjectSignals, WaitSet};
 use std::num::NonZeroU64;
@@ -34,6 +35,15 @@ fn suite(startup: &Startup<'_>) -> Result<()> {
     shared_retirement(startup)?;
     super::io::suite(startup)?;
     for cancel in [false, true] {
+        let serial = virtual_serial::create().map_err(show)?;
+        let output = Output::register(
+            &serial,
+            startup.borrow(startup::ROOT_VMAR).map_err(show)?,
+            0xd000_0000,
+            WritableVmo::create(virtual_serial::BUFFER_BYTES).map_err(show)?,
+        )
+        .map_err(show)?;
+        let mut serial_sink = Some((serial, output));
         let memory = WritableVmo::create_contiguous(RAM_BYTES).map_err(show)?;
         let start = core::ptr::addr_of!(hyper_mmio_guest_start);
         let end = core::ptr::addr_of!(hyper_mmio_guest_end);
@@ -67,6 +77,14 @@ fn suite(startup: &Startup<'_>) -> Result<()> {
                 architecture: vm::Architecture::Aarch64,
                 platform_profile: vm::PlatformProfile::Aarch64Reference,
             },
+        )
+        .map_err(|e| show(e.error()))?;
+        let serial = &serial_sink.as_ref().ok_or("serial sink")?.0;
+        vm::set_virtual_serial(
+            pending.as_handle_ref(),
+            serial
+                .duplicate(Rights::TRANSFER.union(Rights::ASSIGN_DEVICE))
+                .map_err(show)?,
         )
         .map_err(|e| show(e.error()))?;
         let shared = vm::create_guest_memory(memory.as_handle_ref()).map_err(show)?;
@@ -147,6 +165,16 @@ fn suite(startup: &Startup<'_>) -> Result<()> {
                     .checked_sub(MMIO_BASE)
                     .ok_or("MMIO address")?;
                 let completion = match (offset, request.width, request.operation) {
+                    (24, 4, MmioOperation::Write(0x5342)) if requests == 0 => {
+                        // The guest has filled both the output ring and UART
+                        // FIFO. Closing the last consumer must drain TX and
+                        // assert its interrupt without a further UART access.
+                        drop(serial_sink.take().ok_or("serial sink already closed")?);
+                        vm::complete_mmio(vcpu.as_handle_ref(), request.id, MmioCompletion::Write)
+                            .map_err(show)?;
+                        wait.rearm(registration).map_err(show)?;
+                        continue;
+                    }
                     (0, 4, MmioOperation::Write(0x1234)) => {
                         if vm::complete_mmio(
                             vcpu.as_handle_ref(),

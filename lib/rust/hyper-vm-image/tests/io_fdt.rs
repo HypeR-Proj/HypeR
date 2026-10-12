@@ -138,6 +138,38 @@ fn properties(bytes: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, &'static str> {
 }
 
 #[test]
+fn reference_uart_advertises_the_sbsa_interface() -> Result<(), &'static str> {
+    for devices in [IoDevices::empty(), devices()] {
+        let values = properties(&build(devices).map_err(|_| "build")?)?;
+        let value = |path| {
+            values
+                .get(path)
+                .map(Vec::as_slice)
+                .ok_or("missing property")
+        };
+        assert_eq!(value("/uart@9000000/compatible")?, b"arm,sbsa-uart\0");
+        assert_eq!(
+            value("/uart@9000000/current-speed")?,
+            115_200u32.to_be_bytes()
+        );
+        assert_eq!(
+            value("/uart@9000000/reg")?,
+            [0x0900_0000u64.to_be_bytes(), 0x1000u64.to_be_bytes()].concat()
+        );
+        assert_eq!(
+            value("/uart@9000000/interrupts")?,
+            [0u32.to_be_bytes(), 1u32.to_be_bytes(), 4u32.to_be_bytes()].concat()
+        );
+        assert_eq!(value("/aliases/serial0")?, b"/uart@9000000\0");
+        assert_eq!(value("/chosen/stdout-path")?, b"/uart@9000000\0");
+        assert!(!values.contains_key("/uart@9000000/clocks"));
+        assert!(!values.contains_key("/uart@9000000/clock-names"));
+        assert!(!values.contains_key("/pl011@9000000/compatible"));
+    }
+    Ok(())
+}
+
+#[test]
 fn physical_tree_maps_host_dma_addresses_and_retains_imported_struct_pages()
 -> Result<(), &'static str> {
     let values = properties(&build(devices()).map_err(|_| "build")?)?;
