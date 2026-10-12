@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
+use alloc::boxed::Box;
+
 use super::{Claim, Error};
 use crate::kernel::accounting::{CommittedCharge, ResourceAmount, ResourceDomain, ResourceKind};
 use crate::kernel::authority::Rights;
@@ -78,59 +80,63 @@ pub(crate) struct PhysicalDevice {
     _charge: CommittedCharge,
 }
 impl PhysicalDevice {
-    pub(crate) fn claim(index: usize, domain: &ResourceDomain) -> Result<Self, Error> {
+    pub(crate) fn claim(index: usize, domain: &ResourceDomain) -> Result<Box<Self>, Error> {
         if !crate::hal::vm::supports_guest_device_assignment() {
             return Err(Error::Unsupported);
         }
         let charge = charge::<Self>(domain)?;
         let claim = super::super::platform_bus::claim(index).ok_or(Error::BadState)?;
-        Ok(Self {
-            claim,
-            state: Lock::new(State::Claimed),
-            registrations: Lock::new([const { None }; MAX_VECTORS]),
-            contexts: core::array::from_fn(interrupts::InterruptContext::new),
-            pci: Lock::new(None),
-            readable: SignalState::new(),
-            _charge: charge,
-        })
+        Self::try_claimed(claim, charge)
     }
     pub(crate) fn claim_matching(
         profile: u32,
         identity_kind: u32,
         identity: &str,
         domain: &ResourceDomain,
-    ) -> Result<Self, super::service::MatchError> {
+    ) -> Result<Box<Self>, super::service::MatchError> {
         let charge = charge::<Self>(domain).map_err(super::service::classify)?;
         let claim = super::super::platform_bus::claim_matching(profile, identity_kind, identity)?;
-        Ok(Self {
-            claim,
-            state: Lock::new(State::Claimed),
-            registrations: Lock::new([const { None }; MAX_VECTORS]),
-            contexts: core::array::from_fn(interrupts::InterruptContext::new),
-            pci: Lock::new(None),
-            readable: SignalState::new(),
-            _charge: charge,
-        })
+        Self::try_claimed(claim, charge).map_err(|error| super::service::classify(error).into())
     }
     pub(crate) fn claim_bundle(
         entries: &[(u32, u32, u64)],
         irq_node: u32,
         domain: &ResourceDomain,
-    ) -> Result<Self, Error> {
+    ) -> Result<Box<Self>, Error> {
         if !crate::hal::vm::supports_guest_device_assignment() {
             return Err(Error::Unsupported);
         }
         let charge = charge::<Self>(domain)?;
         let claim = super::super::platform_bus::claim_bundle(entries, irq_node)?;
-        Ok(Self {
-            claim,
-            state: Lock::new(State::Claimed),
-            registrations: Lock::new([const { None }; MAX_VECTORS]),
-            contexts: core::array::from_fn(interrupts::InterruptContext::new),
-            pci: Lock::new(None),
-            readable: SignalState::new(),
-            _charge: charge,
-        })
+        Self::try_claimed(claim, charge)
+    }
+
+    /// Keep the register and interrupt arrays in their final object storage.
+    /// Both the physical claim and its charge roll back if allocation fails.
+    fn try_claimed(claim: Claim, charge: CommittedCharge) -> Result<Box<Self>, Error> {
+        let mut storage = hyper::mm::try_box_uninit::<Self>().map_err(|_| Error::Resource)?;
+        let target = storage.as_mut_ptr();
+        // SAFETY: storage uniquely owns an aligned, uninitialized Self. Every
+        // field is initialized exactly once, with no fallible operation after
+        // moving the claim. Interrupt contexts are written individually to
+        // avoid full-device and context-array temporaries on the syscall stack.
+        unsafe {
+            core::ptr::addr_of_mut!((*target).claim).write(claim);
+            core::ptr::addr_of_mut!((*target).state).write(Lock::new(State::Claimed));
+            core::ptr::addr_of_mut!((*target).registrations)
+                .write(Lock::new([const { None }; MAX_VECTORS]));
+            let contexts =
+                core::ptr::addr_of_mut!((*target).contexts).cast::<interrupts::InterruptContext>();
+            for index in 0..MAX_VECTORS {
+                contexts
+                    .add(index)
+                    .write(interrupts::InterruptContext::new(index));
+            }
+            core::ptr::addr_of_mut!((*target).pci).write(Lock::new(None));
+            core::ptr::addr_of_mut!((*target).readable).write(SignalState::new());
+            core::ptr::addr_of_mut!((*target)._charge).write(charge);
+            Ok(storage.assume_init())
+        }
     }
     fn guest_interrupt_count(&self) -> u32 {
         self.claim.hardware.interrupt_count.max(1)

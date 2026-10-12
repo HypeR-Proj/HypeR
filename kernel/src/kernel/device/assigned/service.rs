@@ -71,7 +71,8 @@ pub(crate) fn claim_matching(
                 identity,
                 &process.resource_domain(),
             )?;
-            let publication = ObjectPublication::try_new(object).map_err(|_| Error::NoMemory)?;
+            let publication =
+                ObjectPublication::try_new_boxed(object).map_err(|_| Error::NoMemory)?;
             let prepared = PreparedHandle::try_from_new_object(
                 publication,
                 Rights::TRANSFER
@@ -114,7 +115,8 @@ pub(crate) fn claim(
         || -> Result<_, Error> {
             let object = PhysicalDevice::claim(index as usize, &process.resource_domain())
                 .map_err(classify)?;
-            let publication = ObjectPublication::try_new(object).map_err(|_| Error::NoMemory)?;
+            let publication =
+                ObjectPublication::try_new_boxed(object).map_err(|_| Error::NoMemory)?;
             let prepared = PreparedHandle::try_from_new_object(
                 publication,
                 Rights::TRANSFER
@@ -251,7 +253,8 @@ pub(crate) fn claim_bundle(
             let object =
                 PhysicalDevice::claim_bundle(entries, irq_node, &process.resource_domain())
                     .map_err(classify)?;
-            let publication = ObjectPublication::try_new(object).map_err(|_| Error::NoMemory)?;
+            let publication =
+                ObjectPublication::try_new_boxed(object).map_err(|_| Error::NoMemory)?;
             PreparedHandle::try_from_new_object(
                 publication,
                 PhysicalDevice::SUPPORTED_RIGHTS,

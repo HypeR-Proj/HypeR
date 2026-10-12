@@ -620,6 +620,15 @@ impl ObjectRef {
         export_policy: ExportPolicy,
         class: ReferenceKind,
     ) -> Result<Self, ObjectCreationError> {
+        Self::try_new_boxed(try_box(payload)?, export_policy, class)
+    }
+
+    /// Adopts final payload storage without moving the object through the stack.
+    fn try_new_boxed<T: KernelObject>(
+        payload: Box<T>,
+        export_policy: ExportPolicy,
+        class: ReferenceKind,
+    ) -> Result<Self, ObjectCreationError> {
         let supported_rights = payload.supported_rights();
         let signal_source = payload.signal_source();
         if !T::SUPPORTED_RIGHTS.contains(supported_rights)
@@ -631,7 +640,7 @@ impl ObjectRef {
             // without WAIT, would make authority depend on a hidden type test.
             object_invariant_violation();
         }
-        let payload: Box<dyn ErasedKernelObject> = try_box(payload)?;
+        let payload: Box<dyn ErasedKernelObject> = payload;
         let identity = super::identity::reserve()?;
         let object = SharedObject {
             #[cfg(not(test))]
@@ -1016,6 +1025,18 @@ impl<T: UserExportableObject> ObjectPublication<T> {
     pub(crate) fn try_new(payload: T) -> Result<Self, ObjectCreationError> {
         Ok(Self {
             reference: KernelRef::from_owner(ObjectRef::try_new(
+                payload,
+                ExportPolicy::User,
+                ReferenceKind::Publication,
+            )?),
+        })
+    }
+
+    /// Adopts an object constructed in its final allocation, preserving the
+    /// payload address and charge without reallocating or moving the payload.
+    pub(crate) fn try_new_boxed(payload: Box<T>) -> Result<Self, ObjectCreationError> {
+        Ok(Self {
+            reference: KernelRef::from_owner(ObjectRef::try_new_boxed(
                 payload,
                 ExportPolicy::User,
                 ReferenceKind::Publication,

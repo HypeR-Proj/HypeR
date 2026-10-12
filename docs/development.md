@@ -221,9 +221,10 @@ Stable local equivalents live in `tests/ci/run.sh`:
 ```sh
 sh tests/ci/run.sh scripts
 sh tests/ci/run.sh quality
-sh tests/ci/run.sh native                 # all four AArch64 Native shards, serially
+sh tests/ci/run.sh native                 # all AArch64 Native shards, serially
 sh tests/ci/run.sh native-console         # one independent CI shard
 sh tests/ci/run.sh native-gicv3            # serial console + VM aggregate
+sh tests/ci/run.sh native-stack-16k        # minimum-stack Native boot on one/four CPUs
 sh tests/ci/run.sh board-storage
 sh tests/ci/run.sh io-vm
 sh tests/ci/run.sh riscv64-native

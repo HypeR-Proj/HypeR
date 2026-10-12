@@ -33,6 +33,19 @@ compiler-generated function frames are not CI budgets: inlining and compiler
 versions change their layout without necessarily changing end-to-end usage.
 No unstable compiler flags or `.stack_sizes` metadata are required.
 
+`sh tests/ci/run.sh native-stack-16k` builds a production image with 16 KiB
+kernel thread stacks and runs Native acceptance on one and four CPUs. This is
+an independent CI job requiring init/root handoff, interactive shell commands,
+static/dynamic application startup and confirmation of the actual stack size
+in the boot log. It does not enable stack-audit instrumentation or change the
+developer's `kernel/.config`.
+
+The repository `board-storage` CI suite additionally builds with 16 KiB kernel
+thread stacks, the minimum supported configuration. It exercises physical
+device claims, storage startup, system-root handoff and guest startup on that
+image. IRQ and emergency stacks retain their default capacities. This catches
+overflow in long-lived services which do not contribute retired-thread samples.
+
 ## What the evidence does and does not prove
 
 Review complete hot/error/cleanup call chains; workload coverage does not
@@ -83,6 +96,12 @@ sorting algorithm. Process rollback extracts the address-space owner from its
 existing unique allocation instead of moving the complete process state onto
 the stack. Bootstrap and child startup release encoding scratch before later
 thread and capability publication phases.
+
+Physical device payloads are initialized directly in their final heap storage,
+including their interrupt arrays. Object publication adopts that allocation
+without copying the payload through constructor return values or syscall
+frames. Allocation failure releases the physical claim and its resource charge;
+the number and accounting of the final object allocations are unchanged.
 
 `make test-stack ARCH=riscv64` runs the same workload and watermark checks.
 Both architectures use the same runtime limits rather than per-function ceilings.
