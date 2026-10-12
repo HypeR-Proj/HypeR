@@ -646,6 +646,31 @@ pub(crate) struct ActiveUserRun {
 }
 
 impl ActiveUserRun {
+    /// Cancels a published generation only with proof that MM rejected entry
+    /// before installing translation. A real machine run still needs its exit
+    /// proof and cannot use this retry path.
+    pub(crate) fn abort_before_machine_entry(
+        mut self,
+        proof: crate::kernel::mm::user_space::UnenteredNativeRun,
+    ) -> crate::kernel::task::scheduler::UserRunGuard {
+        if crate::kernel::cpu::current_index() != Some(self.identity.cpu)
+            || proof.binding() != self.binding()
+        {
+            hyper::debug::invariant_failure("process::user_thread::abort_before_entry identity");
+        }
+        self.thread.inner().control.with(|control| {
+            if control.active_run != Some(self.identity) {
+                hyper::debug::invariant_failure("process::user_thread::abort_before_entry run");
+            }
+            control.active_run = None;
+        });
+        self.armed = false;
+        match self.pin.take() {
+            Some(pin) => pin,
+            None => hyper::debug::invariant_failure("process::user_thread::abort_before_entry pin"),
+        }
+    }
+
     pub(crate) fn binding(&self) -> hyper::hal::user::UserRunBinding {
         match hyper::hal::user::UserRunBinding::new(
             self.thread.scheduler_id().map_or(0, ThreadId::get),

@@ -67,8 +67,8 @@ pub(crate) use machine::prepare_native_entry_self_test;
 pub(crate) use machine::run_dormant_self_test;
 #[cfg(not(test))]
 pub(crate) use machine::{
-    Error as MachineError, NativeAddressSpace, NativeImageSegment, NativePinnedAtomicWord,
-    StoppedNativeRun, UserWriteReservation,
+    Error as MachineError, NativeActivation, NativeAddressSpace, NativeImageSegment,
+    NativePinnedAtomicWord, StoppedNativeRun, UnenteredNativeRun, UserWriteReservation,
 };
 #[cfg(not(test))]
 pub(crate) use objects::{GuestMemoryBacking, MemoryObjectError, VmarObject, VmoObject};

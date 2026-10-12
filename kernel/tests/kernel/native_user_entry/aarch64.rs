@@ -210,6 +210,13 @@ pub(crate) fn run() -> Result<(), Error> {
         return Err(Error::Terminal);
     }
     super::fp::run(&domain, &group)?;
+    super::verify_admission_retry(
+        &domain,
+        &group,
+        &THREAD_EXIT_PROGRAM,
+        MachineAbi::Aarch64,
+        -17,
+    )?;
 
     let outcome = run_program(
         &domain,
