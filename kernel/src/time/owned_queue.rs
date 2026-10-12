@@ -1,21 +1,26 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Dynamically owned deadline queue implemented as a safe intrusive list.
+//! Preallocated timer nodes in an augmented, owned red-black tree.
 //!
-//! Every timer node owns the next node through `Option<Box<TimerNode>>`.
-//! Capacity is therefore bounded by available memory rather than a central
-//! slot array. Allocation and destruction remain separate from queue mutation,
-//! allowing callers to keep allocator activity outside their timer lock.
+//! Immutable identity orders the tree, permitting stale-safe logarithmic
+//! cancellation without a second index. Each subtree caches its earliest
+//! deadline. Allocation and destruction stay outside queue mutation.
 
 #![forbid(unsafe_code)]
 
 use alloc::boxed::Box;
 
-use super::queue::{
-    Error, QueueStats, TimerCallback, TimerEvent, TimerHandle, TimerMode, next_generation,
-};
-use crate::hal::timer::deadline_reached;
+use super::queue::{Error, QueueStats, TimerCallback, TimerEvent, TimerHandle, TimerMode};
+
+mod tree;
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct DeadlineKey {
+    time: u128,
+    sequence: u64,
+    identity: u64,
+}
 
 struct TimerNode {
     identity: u64,
@@ -28,7 +33,11 @@ struct TimerNode {
     claim_context: usize,
     recycle: Option<TimerRecycle>,
     recycle_context: usize,
-    next: Option<Box<Self>>,
+    time: u128,
+    earliest: DeadlineKey,
+    red: bool,
+    left: Option<Box<Self>>,
+    right: Option<Box<Self>>,
 }
 
 pub type TimerRecycle = fn(ReservedTimerNode, usize);
@@ -80,7 +89,15 @@ impl PendingTimer {
             claim_context: 0,
             recycle: None,
             recycle_context: 0,
-            next: None,
+            time: 0,
+            earliest: DeadlineKey {
+                time: 0,
+                sequence: 0,
+                identity: 0,
+            },
+            red: true,
+            left: None,
+            right: None,
         })
         .map(Self)
         .map_err(|_| Error::Allocation)
@@ -96,21 +113,8 @@ impl ReservedTimerNode {
     }
 
     pub fn try_new() -> Result<Self, Error> {
-        crate::mm::try_box(TimerNode {
-            identity: 0,
-            deadline: 0,
-            sequence: 0,
-            mode: TimerMode::OneShot,
-            callback: reserved_unarmed,
-            context: 0,
-            claim: None,
-            claim_context: 0,
-            recycle: None,
-            recycle_context: 0,
-            next: None,
-        })
-        .map(Self)
-        .map_err(|_| Error::Allocation)
+        PendingTimer::try_new(0, TimerMode::OneShot, reserved_unarmed, 0)
+            .map(|pending| Self(pending.0))
     }
 
     pub fn prepare(
@@ -185,19 +189,29 @@ impl Drop for ExpiredTimer {
     }
 }
 
-/// A deadline-ordered, dynamically owned intrusive list.
+/// A cached-minimum red-black tree of independently owned timer allocations.
 ///
-/// Insertions, cancellation, and rescheduling are O(n); expiry of the earliest
-/// timer is O(1). The queue uses only safe Rust: ownership links replace raw
-/// pointers, and all traversal requires an exclusive borrow of the queue.
-/// The two-phase ownership API permits a future intrusive tree or timer wheel
-/// without changing kernel allocation and lock boundaries.
+/// Insert, cancel, reset and expiry cost O(log n); the next deadline is O(1).
+/// Identity orders the tree, while subtree augmentation selects the earliest
+/// deadline. An old handle is looked up by value and never dereferenced.
+///
+/// `now` must be sampled while holding the caller's queue lock. Successive
+/// samples must advance by less than half the hardware counter range. A raw
+/// deadline is interpreted as a signed counter offset from that sample. The
+/// queue extends counter time before comparing deadlines, so an overdue timer
+/// and a timer nearly half a counter range in the future remain ordered even
+/// when their raw timestamps span more than half the counter range.
+///
+/// Every node is prepared outside the lock. Removed nodes are returned to the
+/// caller for destruction or recycling outside it; balancing never allocates.
 pub struct OwnedDeadlineQueue {
     queue_id: usize,
-    head: Option<Box<TimerNode>>,
+    root: Option<Box<TimerNode>>,
     len: usize,
     next_identity: u64,
     next_sequence: u64,
+    last_counter: Option<u64>,
+    time: u128,
     stats: QueueStats,
 }
 
@@ -205,10 +219,14 @@ impl OwnedDeadlineQueue {
     pub const fn new() -> Self {
         Self {
             queue_id: 0,
-            head: None,
+            root: None,
             len: 0,
             next_identity: 0,
             next_sequence: 0,
+            last_counter: None,
+            // Leave one complete counter era before the first observation,
+            // allowing already-expired deadlines without unsigned underflow.
+            time: 1_u128 << 64,
             stats: QueueStats {
                 active_timers: 0,
                 peak_timers: 0,
@@ -231,32 +249,29 @@ impl OwnedDeadlineQueue {
     }
 
     /// Links a preallocated timer without invoking the allocator.
-    pub fn insert(&mut self, mut pending: PendingTimer) -> TimerHandle {
-        let identity = self.take_identity();
-        pending.0.identity = identity;
-        pending.0.sequence = self.take_sequence();
-        self.insert_node(pending.0);
-        self.stats.schedules = self.stats.schedules.saturating_add(1);
-        self.refresh_active_stats();
-        TimerHandle::owned(self.queue_id, identity)
+    pub fn insert(&mut self, pending: PendingTimer, now: u64) -> TimerHandle {
+        self.insert_new(pending.0, now)
     }
 
     /// Links a preallocated reserved node without invoking the allocator.
-    pub fn insert_reserved(&mut self, pending: PendingReservedTimer) -> TimerHandle {
-        let mut node = pending.0;
+    pub fn insert_reserved(&mut self, pending: PendingReservedTimer, now: u64) -> TimerHandle {
+        self.insert_new(pending.0, now)
+    }
+
+    fn insert_new(&mut self, mut node: Box<TimerNode>, now: u64) -> TimerHandle {
+        self.observe(now);
         let identity = self.take_identity();
         node.identity = identity;
         node.sequence = self.take_sequence();
+        node.time = self.deadline_time(node.deadline, now);
         self.insert_node(node);
         self.stats.schedules = self.stats.schedules.saturating_add(1);
         self.refresh_active_stats();
         TimerHandle::owned(self.queue_id, identity)
     }
 
-    /// Unlinks a timer and returns its ownership to the caller.
-    ///
-    /// The returned allocation should be dropped after releasing the queue
-    /// lock.
+    /// Unlinks a timer and returns its allocation for destruction outside the
+    /// caller's lock. Reserved nodes require `cancel_reserved` instead.
     pub fn cancel(&mut self, handle: TimerHandle) -> Result<PendingTimer, Error> {
         let node = self.detach(handle, false)?;
         self.stats.cancellations = self.stats.cancellations.saturating_add(1);
@@ -275,23 +290,51 @@ impl OwnedDeadlineQueue {
         Ok(ReservedTimerNode(node))
     }
 
-    pub fn reschedule(&mut self, handle: TimerHandle, deadline: u64) -> Result<(), Error> {
-        let mut node = self.detach(handle, false)?;
-        node.deadline = deadline;
-        node.sequence = self.take_sequence();
-        self.insert_node(node);
+    pub fn reschedule(
+        &mut self,
+        handle: TimerHandle,
+        deadline: u64,
+        now: u64,
+    ) -> Result<(), Error> {
+        self.reset(handle, deadline, now, false)
+    }
+
+    /// Updates an armed reservation in place, retaining its callback owner and
+    /// handle identity. The caller serializes its arm generation with this
+    /// mutation under the same lock used by the expiry claim.
+    pub fn reschedule_reserved(
+        &mut self,
+        handle: TimerHandle,
+        deadline: u64,
+        now: u64,
+    ) -> Result<(), Error> {
+        self.reset(handle, deadline, now, true)
+    }
+
+    fn reset(
+        &mut self,
+        handle: TimerHandle,
+        deadline: u64,
+        now: u64,
+        reserved: bool,
+    ) -> Result<(), Error> {
+        let identity = self.validate_handle(handle, reserved)?;
+        self.observe(now);
+        let time = self.deadline_time(deadline, now);
+        let sequence = self.take_sequence();
+        tree::reset(&mut self.root, identity, deadline, time, sequence);
         self.stats.reschedules = self.stats.reschedules.saturating_add(1);
         Ok(())
     }
 
     pub fn pop_expired(&mut self, now: u64) -> Option<ExpiredTimer> {
-        let deadline = self.head.as_ref()?.deadline;
-        if !deadline_reached(now, deadline) {
+        self.observe(now);
+        let first = self.root.as_ref()?.earliest;
+        if first.time > self.time {
             return None;
         }
-        let mut node = self.head.take()?;
-        self.head = node.next.take();
-        self.len -= 1;
+        let mut node = self.remove_node(first.identity);
+        let deadline = node.deadline;
         let identity = node.identity;
         let mode = node.mode;
         let callback = node.callback;
@@ -316,11 +359,28 @@ impl OwnedDeadlineQueue {
                 (0, Some(retired))
             }
             TimerMode::Periodic { interval } => {
-                let periods = now.wrapping_sub(deadline) / interval + 1;
-                node.deadline = deadline.wrapping_add(interval.wrapping_mul(periods));
+                // Work in extended time: an overdue backlog can be older than
+                // half a raw counter era even though each observation is close.
+                let elapsed = self.time - node.time;
+                let periods = if elapsed <= u128::from(u64::MAX) {
+                    // Hardware division handles the ordinary one-counter-era
+                    // case; extended division is only needed for ancient work.
+                    u128::from(elapsed as u64 / interval) + 1
+                } else {
+                    elapsed / u128::from(interval) + 1
+                };
+                let advance = match u128::from(interval).checked_mul(periods) {
+                    Some(advance) => advance,
+                    None => queue_invariant_failure(),
+                };
+                node.time = match node.time.checked_add(advance) {
+                    Some(time) => time,
+                    None => queue_invariant_failure(),
+                };
+                node.deadline = deadline.wrapping_add(advance as u64);
                 node.sequence = self.take_sequence();
                 self.insert_node(node);
-                (periods - 1, None)
+                ((periods - 1).min(u128::from(u64::MAX)) as u64, None)
             }
         };
         self.stats.callbacks = self.stats.callbacks.saturating_add(1);
@@ -335,87 +395,116 @@ impl OwnedDeadlineQueue {
     }
 
     pub fn next_deadline(&self) -> Option<u64> {
-        self.head.as_ref().map(|node| node.deadline)
+        let first = self.root.as_ref()?.earliest;
+        // Convert the cached extended timestamp back to a hardware counter
+        // without searching the identity tree.
+        let now = self.last_counter?;
+        Some(now.wrapping_add(first.time.wrapping_sub(self.time) as u64))
+    }
+
+    /// Returns a deadline suitable for the wrapping hardware comparator.
+    ///
+    /// An ancient overdue timestamp can look future to a signed hardware
+    /// comparison. Clamp due work to the latest observation instead; delivery
+    /// still reports the original deadline through `TimerEvent`.
+    pub fn next_programming_deadline(&self) -> Option<u64> {
+        if self.root.as_ref()?.earliest.time <= self.time {
+            self.last_counter
+        } else {
+            self.next_deadline()
+        }
     }
 
     pub const fn stats(&self) -> QueueStats {
         self.stats
     }
 
-    fn detach(&mut self, handle: TimerHandle, reserved: bool) -> Result<Box<TimerNode>, Error> {
+    /// Checks ordering, red-black balance, cached minima and node count.
+    ///
+    /// This diagnostic is allocation-free and O(n); it does not belong on a
+    /// timer interrupt or ordinary queue mutation path.
+    pub fn validate_tree(&self) -> bool {
+        tree::validate(&self.root, self.len)
+    }
+
+    fn validate_handle(&self, handle: TimerHandle, reserved: bool) -> Result<u64, Error> {
         let identity = handle
             .owned_identity(self.queue_id)
             .ok_or(Error::InvalidHandle)?;
-        let mut link = &mut self.head;
-        loop {
-            let matches = link.as_ref().is_some_and(|node| node.identity == identity);
-            if matches {
-                if link
-                    .as_ref()
-                    .is_some_and(|node| node.recycle.is_some() != reserved)
-                {
-                    return Err(Error::InvalidHandle);
-                }
-                let Some(mut node) = link.take() else {
-                    return Err(Error::InvalidHandle);
-                };
-                *link = node.next.take();
-                self.len -= 1;
-                return Ok(node);
-            }
-            let Some(node) = link.as_mut() else {
-                return Err(Error::InvalidHandle);
-            };
-            link = &mut node.next;
+        let node = tree::find(&self.root, identity).ok_or(Error::InvalidHandle)?;
+        if node.recycle.is_some() != reserved {
+            return Err(Error::InvalidHandle);
         }
+        Ok(identity)
     }
 
-    fn insert_node(&mut self, mut node: Box<TimerNode>) {
-        // Own the traversed prefix temporarily. This is a safe-Rust cursor:
-        // it avoids both raw links and recursion proportional to queue length.
-        let mut remainder = self.head.take();
-        let mut reversed_prefix = None;
-        loop {
-            match remainder.take() {
-                Some(mut current) if !node_precedes(&node, &current) => {
-                    remainder = current.next.take();
-                    current.next = reversed_prefix;
-                    reversed_prefix = Some(current);
-                }
-                Some(current) => {
-                    node.next = Some(current);
-                    remainder = Some(node);
-                    break;
-                }
-                None => {
-                    remainder = Some(node);
-                    break;
-                }
-            }
-        }
-        while let Some(mut current) = reversed_prefix.take() {
-            reversed_prefix = current.next.take();
-            current.next = remainder;
-            remainder = Some(current);
-        }
-        self.head = remainder;
+    fn detach(&mut self, handle: TimerHandle, reserved: bool) -> Result<Box<TimerNode>, Error> {
+        let identity = self.validate_handle(handle, reserved)?;
+        Ok(self.remove_node(identity))
+    }
+
+    fn remove_node(&mut self, identity: u64) -> Box<TimerNode> {
+        let (root, node) = tree::remove(self.root.take(), identity);
+        self.root = root;
+        self.len -= 1;
+        node
+    }
+
+    fn insert_node(&mut self, node: Box<TimerNode>) {
+        self.root = Some(tree::insert(self.root.take(), node));
         self.len += 1;
     }
 
+    fn observe(&mut self, now: u64) {
+        if let Some(previous) = self.last_counter {
+            let delta = now.wrapping_sub(previous);
+            if delta > i64::MAX as u64 {
+                // Samples are taken under the source queue lock. Going
+                // backwards proves a caller violated its clock contract.
+                queue_invariant_failure();
+            }
+            self.time = match self.time.checked_add(u128::from(delta)) {
+                Some(time) => time,
+                None => queue_invariant_failure(),
+            };
+        }
+        self.last_counter = Some(now);
+    }
+
+    fn deadline_time(&self, deadline: u64, now: u64) -> u128 {
+        let offset = deadline.wrapping_sub(now) as i64;
+        if offset < 0 {
+            self.time - u128::from(offset.unsigned_abs())
+        } else {
+            match self.time.checked_add(offset as u128) {
+                Some(time) => time,
+                None => queue_invariant_failure(),
+            }
+        }
+    }
+
     fn take_identity(&mut self) -> u64 {
-        self.next_identity = next_generation(self.next_identity);
+        self.next_identity = next_counter(self.next_identity);
         self.next_identity
     }
 
     fn take_sequence(&mut self) -> u64 {
-        let sequence = self.next_sequence;
-        self.next_sequence = self.next_sequence.wrapping_add(1);
-        sequence
+        self.next_sequence = next_counter(self.next_sequence);
+        self.next_sequence
     }
 
     fn refresh_active_stats(&mut self) {
         self.stats.active_timers = self.len;
         self.stats.peak_timers = self.stats.peak_timers.max(self.len);
+    }
+}
+
+fn next_counter(current: u64) -> u64 {
+    match current.checked_add(1) {
+        Some(next) => next,
+        // Reusing an identity would let an ancient handle cancel a new timer;
+        // reusing a sequence would silently break equal-deadline FIFO order.
+        None => queue_invariant_failure(),
     }
 }
 
@@ -427,20 +516,6 @@ impl Default for OwnedDeadlineQueue {
     }
 }
 
-impl Drop for OwnedDeadlineQueue {
-    fn drop(&mut self) {
-        // Iterative destruction avoids recursive Box drops on a long list.
-        while let Some(mut node) = self.head.take() {
-            self.head = node.next.take();
-        }
-        self.len = 0;
-    }
-}
-
-fn node_precedes(left: &TimerNode, right: &TimerNode) -> bool {
-    if left.deadline == right.deadline {
-        left.sequence < right.sequence
-    } else {
-        (left.deadline.wrapping_sub(right.deadline) as i64) < 0
-    }
+fn queue_invariant_failure() -> ! {
+    crate::debug::invariant_failure("owned timer queue ordering or identity invariant")
 }

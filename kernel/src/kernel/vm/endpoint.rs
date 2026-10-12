@@ -18,7 +18,7 @@ pub(super) struct VcpuEndpoint {
     // Drop the timer reservation before every field reachable by its raw
     // callback context. An armed reservation fail-stops here, before endpoint
     // condition state could be destroyed underneath an in-flight callback.
-    timer: crate::kernel::time::ReservedTimer,
+    timer: crate::kernel::time::IrqCallout,
     id: u32,
     thread: PublishedOnce<ThreadId>,
     reconcile: ReconcilePublication,
@@ -70,7 +70,7 @@ enum LockedWait {
 impl VcpuEndpoint {
     pub(super) fn try_new(id: u32) -> Result<Self, crate::kernel::time::Error> {
         Ok(Self {
-            timer: crate::kernel::time::ReservedTimer::try_new()?,
+            timer: crate::kernel::time::IrqCallout::try_new()?,
             id,
             thread: PublishedOnce::new(),
             reconcile: ReconcilePublication::new(),
@@ -227,7 +227,7 @@ impl VcpuEndpoint {
     pub(super) fn arm_timer(
         &self,
         deadline: u64,
-    ) -> Result<crate::kernel::time::ArmedReservedTimer<'_>, crate::kernel::time::Error> {
+    ) -> Result<crate::kernel::time::ArmedIrqCallout<'_>, crate::kernel::time::Error> {
         self.timer.arm(
             deadline,
             notify_timer_waiter,
@@ -352,7 +352,7 @@ impl VcpuEndpoint {
             self.cancel_mmio();
             // Stop and interrupt delivery share the exact endpoint wait ticket.
             // A suspended WFI continuation is made runnable so it can unwind
-            // its EndpointPark and ArmedReservedTimer ownership normally.
+            // its EndpointPark and ArmedIrqCallout ownership normally.
             self.signal_waiter();
         }
         Ok(outcome)

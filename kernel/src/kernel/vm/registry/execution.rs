@@ -233,7 +233,7 @@ impl VmBinding {
         &self,
         vcpu: u32,
         deadline: u64,
-    ) -> Result<crate::kernel::time::ArmedReservedTimer<'_>, Error> {
+    ) -> Result<crate::kernel::time::ArmedIrqCallout<'_>, Error> {
         self.endpoint(vcpu)?
             .arm_timer(deadline)
             .map_err(|_| Error::Scheduler)
