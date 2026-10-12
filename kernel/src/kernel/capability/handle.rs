@@ -834,6 +834,28 @@ impl HandleTable {
         Ok(ResolvedWaitable { object })
     }
 
+    /// Derives only a waitable identity from a Process supervisor. Ordinary
+    /// Process duplication still requires DUPLICATE; this narrow operation
+    /// cannot copy stop authority or derive another observer from an observer.
+    pub(crate) fn derive_process_observer(
+        &self,
+        value: HandleValue,
+    ) -> Result<PreparedHandle, HandleError> {
+        self.ensure_active()?;
+        let source = self.lookup(value)?;
+        if source.object().kind() != ObjectKind::PROCESS {
+            return Err(HandleError::WrongObjectType);
+        }
+        let rights = Rights::WAIT.union(Rights::TRANSFER);
+        if !source
+            .rights
+            .contains(rights.union(Rights::REQUEST_STOP).decompose())
+        {
+            return Err(HandleError::AccessDenied);
+        }
+        source.try_duplicate(rights)
+    }
+
     /// Prepares a duplicate with rights attenuated from the source handle.
     pub(crate) fn duplicate(
         &self,

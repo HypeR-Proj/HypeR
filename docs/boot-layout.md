@@ -46,7 +46,7 @@ Source placement does not change the runtime paths below.
 /boot/lib64/                       static bootstrap userspace loader
 /boot/vm/io.itb                    pinned I/O VM image
 /system/bin/                       formal sh and ordinary Native commands
-/system/svc/                       init-system, vm-manager, vm-runtime, fs-fat
+/system/svc/                       init-system, vm-manager, vm-runtime
 /system/etc/hyper/services.json    system service graph
 /system/etc/fstab                  mounts requested by formal init
 /system/lib64/ld-hyper-<arch>.so    formal executable loader and dynamic linker
@@ -101,16 +101,15 @@ through the process root. Each system process receives the library Directory
 deployment and in RAM in ramfs deployment. Bootstrap and recovery do not need
 the formal loader.
 
-The default RAM selection includes init, console-input, console-output, session,
-fallback-sh, io-runtime, fs-backend, fs-erofs, mount and umount. It is selected
-through `APP_BOOT_COMPONENTS`, using component staged names (`session-service`
-for session), and built separately with shared-library delivery disabled.
-The console-input/output workers use the existing `no_std` runtime. The other
-Rust boot programs retain std; fallback-sh omits clap and advanced shell features. Storage startup and recovery commands do not require any
-library on `/system`. The FAT worker is still a static executable, but lives in
-`/system/svc/fs-fat` by default. It is loaded only when a later mount needs FAT.
-Add `fs-fat` to `APP_BOOT_COMPONENTS` when FAT is needed before `/system` becomes
-available. Ordinary tools are not duplicated in `/boot`.
+The default RAM selection includes init, console-raw, fallback-sh, io-runtime,
+fs-backend, fs-erofs, fs-fat, mount and umount. It is selected through
+`APP_BOOT_COMPONENTS`, using component staged names, and built separately with
+shared-library delivery disabled. Rust boot services use statically linked std; fallback-sh omits clap and advanced shell features. Storage startup and recovery commands do not require any
+library on `/system`. The static FAT worker lives in `/boot/svc/fs-fat` by default
+and is loaded on demand. Its placement does not change the mount phase: formal
+init still requests `/data` through `/system/etc/fstab`. Removing `fs-fat` from
+`APP_BOOT_COMPONENTS` places it on `/system` instead; the configured worker search
+supports either location. Ordinary tools are not duplicated in `/boot`.
 
 Original ELF build products retain debug information. Packaged copies use the
 existing debug-section stripping policy. System programs and their transitive
@@ -136,13 +135,12 @@ change the executable's runtime launch policy.
 
 Stage-1 init validates and starts core services, including the console owner,
 then waits for the filesystem manager's bootstrap mount result from the RAM
-filesystem's `/etc/fstab` (only `/system` by default). Session does not
-launch a shell or read terminal input while this startup decision is pending.
+filesystem's `/etc/fstab` (only `/system` by default). No interactive shell
+is launched while this startup decision is pending. The raw Console transport
+contains no line discipline or formal terminal dependency.
 The I/O VM starts through io-runtime independently of the business VM manager.
 Its VM creation authority belongs to core services; no business fleet domain or
-provisioning channel is needed to start or retain Native storage. Session may
-hold a VMM client connection before handoff, but that channel reserves no fleet
-resources. System init allocates the business fleet scope only when launching
+provisioning channel is needed to start or retain Native storage. System init allocates the business fleet scope only when launching
 vm-manager. It closes unused business endpoints if the manager is omitted or
 fails to launch. The default manager is noncritical, so its failure does not
 terminate the I/O VM or filesystem services.
@@ -160,12 +158,13 @@ the configured root switch, requests automatic mounts from `/system/etc/fstab`,
 then launches formal services and configures the VM fleet. A later mount failure
 is reported by formal init; it does not undo handoff or prevent unrelated Native
 services from starting. It does not restart
-the console, I/O VM or filesystem workers during these transitions. After formal
-initialization succeeds, it sends the session a one-shot decision to launch
-`/system/bin/sh`. Only stage-1 failures before handoff select the static
-`svc/fallback-sh` in the boot environment. The decision writer follows supervisor
-ownership through handoff; closing it without a reply is a session failure,
-not permission to start bootstrap recovery.
+the console, I/O VM or filesystem workers during these transitions. Formal init launches `/system/svc/session-manager`, which owns the formal
+terminal and `/system/bin/sh` session. Stage-1 init alone launches and supervises
+`svc/fallback-sh` after a pre-handoff failure. That fallback uses byte streams
+without terminal-service. There is no shared shell-selection decision channel:
+a failure after committed handoff belongs to formal init and cannot resurrect
+bootstrap recovery. The raw Console service and its log channels survive the
+handoff; background logs remain mirrored alongside interactive output.
 
 The boot `/etc/hyper/init.json` selects only the successor executable. Formal
 init reads `/system/etc/hyper/init.json`, which selects its service manifest and
@@ -204,10 +203,10 @@ on the next boot. After commit, critical-service failures follow the configured 
 does not make an arbitrary critical system service failure recoverable.
 The formal shell retains its existing features under `/system/bin/sh`. Recovery
 uses `/boot/svc/fallback-sh`, without clap, history, pipelines or redirection.
-No `svc` directory is searched for commands. Session waits for an explicit
-supervisor decision; it never selects recovery on a timer. A missing formal
-shell is retried, and shell exit restarts the selected shell. Neither path
-switches back to the bootstrap shell after handoff.
+No `svc` directory is searched for commands. Stage-1 init directly supervises
+fallback before handoff; formal init launches `session-manager` afterward.
+The manager owns the formal terminal and shell, with bounded retries after
+launch failure or rapid exit. It never switches back to the bootstrap shell.
 
 ## Runtime filesystem policy
 

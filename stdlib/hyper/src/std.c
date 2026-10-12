@@ -3,6 +3,7 @@
  */
 #include <hyper/std.h>
 #include <hyper/startup.h>
+#include <hyper/stream.h>
 #include <hyper/syscall.h>
 
 const char *__hyper_std_argument(size_t index)
@@ -25,6 +26,21 @@ int64_t __hyper_std_read(void *buffer, size_t capacity, size_t *actual)
 int64_t __hyper_std_write(uint32_t stream, const void *buffer, size_t count, size_t *actual)
 {
 	return hyper_runtime_stdio_write(stream, buffer, count, actual);
+}
+
+int __hyper_std_stdin_exact(void)
+{
+	return hyper_runtime_stdin_exact();
+}
+
+int __hyper_std_is_terminal(uint32_t stream)
+{
+	return hyper_runtime_stream_is_terminal(stream);
+}
+
+int64_t __hyper_std_flush(uint32_t stream)
+{
+	return hyper_runtime_stream_fence(stream);
 }
 
 uint64_t __hyper_std_clock(void)

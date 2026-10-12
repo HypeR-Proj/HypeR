@@ -67,9 +67,10 @@ interrupts, time and platform/VM services before publishing userspace.
 [Kernel init](../kernel/src/kernel/init/mod.rs) snapshots `/init`, maps the selected
 bootstrap loader and prepares initial capabilities. The userspace loader
 validates and maps init itself. [Bootstrap init runtime](../bootstrap/stage1/lib/service-manager/src/runtime.rs) consumes
-the service manifest and supervises services. The virtual console manager in
-[session](../bootstrap/stage1/session/src/main.rs) starts the shell after the console exists
-and can restart it after exit. A shell is not itself a boot-critical service.
+the service manifest and supervises core services. After handoff,
+[session-manager](../app/session-manager/src/main.rs) starts the formal terminal
+and shell and supervises their session group. Pre-handoff failures use the
+independent bootstrap fallback shell.
 
 The two init entry points use independent service-manager implementations.
 [Boot init](../bootstrap/stage1/init/src/main.rs) starts the core services; the
@@ -659,13 +660,14 @@ Host console — the transport survives each shell:
 ```mermaid
 flowchart LR
     uart["Physical UART"] --> receive["Kernel<br/>console input"]
-    receive --> input["console-input"]
-    input --> session["Session<br/>Virtual console owner"]
-    session -->|stdin| shell["Shell"]
-    shell -->|stdout / stderr| session
-    session --> output["console-output"]
-    output --> uart
-    class input,session,shell,output app
+    receive --> raw["console-raw"]
+    raw <--> terminal["terminal-service<br/>Line discipline"]
+    terminal <-->|stdin / stdout / stderr| shell["Shell and foreground command"]
+    manager["session-manager"] -.->|Supervision| terminal
+    manager -.->|Session group| shell
+    logs["Service log channels"] --> raw
+    raw --> uart
+    class raw,terminal,manager,logs,shell app
     class receive core
     class uart machine
     classDef app fill:#eff6ff,stroke:#2563eb,color:#172554
@@ -687,16 +689,16 @@ flowchart LR
 
 For physical input, read [PL011](../kernel/src/drivers/serial/pl011/mod.rs),
 [the kernel console device](../kernel/src/kernel/device/console.rs), then
-[console-input](../bootstrap/stage1/console-input/src/main.rs) and its
-[input handling library](../bootstrap/stage1/console-input/src/lib.rs).
-This separates UART reception/IRQ problems from stream handling problems.
+[console-raw](../bootstrap/stage1/console-raw/src/main.rs). This separates UART
+reception/IRQ problems from the request-sized byte-stream transport.
 
-[Session](../bootstrap/stage1/session/src/main.rs) owns `VirtualConsole`, its transport and
-the relay. `serve` creates fresh shell channels and invokes
-[child launch](../bootstrap/stage1/session/src/child.rs); `relay` watches the child and its
-streams. The outer lifetime survives an individual shell exit, with a delay
-protecting against a rapid restart loop. The matching physical output service
-is [console-output](../bootstrap/stage1/console-output/src/main.rs).
+[Terminal-service](../app/terminal-service/src/main.rs) owns formal input/output
+policy through the [terminal library](../lib/terminal/src/lib.rs).
+[Session-manager](../app/session-manager/src/main.rs) creates the terminal and
+shell, holds their Process supervisors, and retires their task groups on failure.
+It does not relay data. Separate log channels enter console-raw independently of
+terminal flow control. See [Native terminals](terminal.md) for the capability and
+read/flush/fence contracts.
 
 For guest attachment, read [vmm console](../app/vmm/src/console.rs),
 [vm-runtime console](../app/vm-runtime/src/console.rs) and

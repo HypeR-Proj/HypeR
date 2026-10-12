@@ -10,11 +10,12 @@ extern crate hyper_clap_shared as _;
 use clap::Parser;
 use std::io::Write;
 
-use hyper_os::handle::{ByteChannelObject, OwnedHandle};
 use hyper_os::inspect::{CpuInspector, MemoryInspector, ScanCursor, TaskInspector};
 use hyper_os::startup::{self, Startup};
-use hyper_os::wait::{ObjectSignals, WaitItem, wait_many};
+use hyper_os::stream::{ProcessInput, ReadResult};
+use hyper_os::wait::wait_many;
 use hyper_os::{Error, Status};
+use hyper_terminal::{Settings, Terminal};
 use std::process::ExitCode;
 
 use hyper_top::sampling::{SampleSet, ThreadSample, process_delta};
@@ -34,11 +35,22 @@ fn run(
     args: &hyper_top::cli::Top,
 ) -> Result<(), Box<dyn std::error::Error>> {
     hyper_os::require_core_abi()?;
-    let input = if args.batch {
+    let mut terminal = if args.batch {
         None
     } else {
-        Some(hyper_rt::process::stdin()?)
+        Terminal::take(startup)?
     };
+    if let Some(terminal) = terminal.as_mut() {
+        let mut settings = Settings::raw();
+        settings.output.lf_to_crlf = true;
+        terminal.set_settings(settings)?;
+    }
+    let mut input = if args.batch {
+        None
+    } else {
+        Some(ProcessInput::acquire()?)
+    };
+    let mut input_pending = false;
     let refresh = std::time::Duration::from_secs_f64(args.delay);
     let mut iterations = 0_u32;
     let mut output = std::io::stdout().lock();
@@ -48,9 +60,10 @@ fn run(
     let mut previous_cpu = cpu.read()?;
     let mut previous_threads = capture_threads(&tasks)?;
     loop {
-        if let Some(input) = input {
+        if let Some(input) = input.as_mut() {
             if wait_or_quit(
                 input,
+                &mut input_pending,
                 previous_cpu
                     .captured_at_ns
                     .saturating_add(refresh.as_nanos() as u64),
@@ -93,32 +106,36 @@ fn run(
     }
 }
 
-fn wait_or_quit(input: &OwnedHandle<ByteChannelObject>, deadline: u64) -> hyper_os::Result<bool> {
-    let waits = [WaitItem::new(
-        input.as_handle_ref(),
-        ObjectSignals::<ByteChannelObject>::READABLE
-            .union(ObjectSignals::<ByteChannelObject>::PEER_CLOSED),
-    )];
+fn wait_or_quit(
+    input: &mut ProcessInput,
+    pending: &mut bool,
+    deadline: u64,
+) -> hyper_os::Result<bool> {
+    if !*pending {
+        input.start_read(1, hyper_os::DEADLINE_INFINITE)?;
+        *pending = true;
+    }
     loop {
-        match wait_many(&waits, deadline) {
-            Ok(observation) => {
-                if !ObjectSignals::<ByteChannelObject>::READABLE.is_present_in(observation.observed)
-                {
-                    return Ok(true);
-                }
-                let mut bytes = [0_u8; hyper_os::channel::MAX_MESSAGE_BYTES];
-                match input.as_byte_channel().try_receive(&mut bytes) {
-                    Ok(count) => {
-                        return Ok(bytes[..count]
-                            .iter()
-                            .any(|byte| matches!(byte, b'q' | b'Q' | 3)));
-                    }
-                    Err(Error::Status(Status::WOULD_BLOCK)) => continue,
-                    Err(Error::Status(Status::PEER_CLOSED)) => return Ok(true),
-                    Err(error) => return Err(error),
-                }
+        let mut byte = [0];
+        match input.try_complete(&mut byte)? {
+            Some(ReadResult::Data(count)) => {
+                *pending = false;
+                return Ok(count != 0 && matches!(byte[0], b'q' | b'Q' | 3));
             }
+            Some(ReadResult::Eof | ReadResult::Cancelled | ReadResult::ConfigurationChanged) => {
+                *pending = false;
+                return Ok(true);
+            }
+            Some(ReadResult::TimedOut) => {
+                *pending = false;
+                return Ok(false);
+            }
+            None => {}
+        }
+        match wait_many(&[input.wait_item()], deadline) {
+            Ok(_) => {}
             Err(Error::Status(Status::TIMED_OUT)) => return Ok(false),
+            Err(Error::Status(Status::PEER_CLOSED)) => return Ok(true),
             Err(error) => return Err(error),
         }
     }

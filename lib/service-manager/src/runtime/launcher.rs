@@ -27,6 +27,23 @@ impl ServiceLauncher {
         vm_manager_index: Option<usize>,
         plan: &LaunchPlan<'_>,
     ) -> Result<OwnedHandle<ProcessObject>, LaunchError> {
+        // Each service owns an independent log writer. The raw worker keeps
+        // ingress alive across terminal/session restarts.
+        self.authorities.service_output_channel = None;
+        if service
+            .capabilities()
+            .any(|grant| grant.source() == "bootstrap.service-output-channel")
+        {
+            let (writer, reader) =
+                hyper_os::channel::create_pair().map_err(LaunchError::service_resources)?;
+            hyper_service::console::register_log(
+                self.authorities.log_connector.as_handle_ref(),
+                service.name(),
+                reader,
+            )
+            .map_err(LaunchError::service_resources)?;
+            self.authorities.service_output_channel = Some(writer);
+        }
         let executable = self
             .authorities
             .root_directory

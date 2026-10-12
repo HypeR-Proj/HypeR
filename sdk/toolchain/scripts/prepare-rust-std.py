@@ -89,3 +89,52 @@ pub mod os {
 // The fallback when none of the other gates match.''')
 
 replace("std/src/os/mod.rs", "pub mod raw;", 'pub mod raw;\n#[cfg(target_os = "hyper")]\npub mod hyper;')
+
+# Request-sized Native streams retain unread terminal input in the service. Do
+# not let Stdin's otherwise useful pipe buffer prefetch another command. Explicit
+# BufRead remains a buffering opt-in and keeps its ordinary ownership semantics.
+stdio_path = destination / "std/src/io/stdio.rs"
+stdio_text = stdio_path.read_text()
+start = stdio_text.index("impl Read for StdinLock<'_> {")
+end = stdio_text.index("impl SpecReadByte for StdinLock<'_> {", start)
+block = stdio_text[start:end]
+for old, new in [
+    ("        self.inner.read(buf)", '''        #[cfg(target_os = "hyper")]
+        if self.inner.buffer().is_empty() && crate::sys::stdio::stdin_exact() {
+            return self.inner.get_mut().read(buf);
+        }
+        self.inner.read(buf)'''),
+    ("        self.inner.read_buf(buf)", '''        #[cfg(target_os = "hyper")]
+        if self.inner.buffer().is_empty() && crate::sys::stdio::stdin_exact() {
+            return self.inner.get_mut().read_buf(buf);
+        }
+        self.inner.read_buf(buf)'''),
+    ("        self.inner.read_vectored(bufs)", '''        #[cfg(target_os = "hyper")]
+        if self.inner.buffer().is_empty() && crate::sys::stdio::stdin_exact() {
+            return self.inner.get_mut().read_vectored(bufs);
+        }
+        self.inner.read_vectored(bufs)'''),
+    ("        self.inner.read_exact(buf)", '''        #[cfg(target_os = "hyper")]
+        if crate::sys::stdio::stdin_exact() { return io::default_read_exact(self, buf); }
+        self.inner.read_exact(buf)'''),
+    ("        self.inner.read_buf_exact(cursor)", '''        #[cfg(target_os = "hyper")]
+        if crate::sys::stdio::stdin_exact() { return io::default_read_buf_exact(self, cursor); }
+        self.inner.read_buf_exact(cursor)'''),
+]:
+    if block.count(old) != 1:
+        sys.exit(f"Rust Stdin exact-read patch anchor changed: {old!r}")
+    block = block.replace(old, new)
+stdio_path.write_text(stdio_text[:start] + block + stdio_text[end:])
+replace("std/src/io/stdio.rs", "        BufReader::spec_read_byte(&mut *self.inner)", '''        #[cfg(target_os = "hyper")]
+        if crate::sys::stdio::stdin_exact() {
+            let mut byte = [0];
+            return match self.read(&mut byte) {
+                Ok(0) => None,
+                Ok(_) => Some(Ok(byte[0])),
+                Err(error) => Some(Err(error)),
+            };
+        }
+        BufReader::spec_read_byte(&mut *self.inner)''')
+replace("std/src/sys/io/mod.rs", "mod is_terminal {\n    cfg_select! {", '''mod is_terminal {
+    cfg_select! {
+        target_os = "hyper" => { mod hyper; pub use hyper::*; }''')

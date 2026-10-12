@@ -5,7 +5,8 @@ SPDX-License-Identifier: Apache-2.0
 
 # FAT32 block volumes
 
-The Native `fs-fat` worker (default path `/system/svc/fs-fat`) mounts an exclusively owned logical block volume,
+The Native `fs-fat` worker (default path `/boot/svc/fs-fat` after the root switch)
+mounts an exclusively owned logical block volume,
 not a copy of its contents in ramfs. `hyper_fatfs::block::BlockDevice` describes
 512-byte sector transfers and a durable flush. The kernel retains generic VFS
 and cache coordination; FAT media parsing runs in the worker. See

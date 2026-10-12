@@ -21,6 +21,7 @@ bench = false
 clap.workspace = true
 hyper-os.workspace = true
 hyper-rt.workspace = true
+hyper-terminal.workspace = true
 
 [lints]
 workspace = true

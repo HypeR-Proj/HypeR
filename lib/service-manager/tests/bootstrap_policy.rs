@@ -137,13 +137,7 @@ fn storage_readiness_requires_the_dedicated_moved_authority() -> Result<(), Stri
     let manifest = manifest::parse(IO_READY_SERVICE).map_err(|e| format!("{e:?}"))?;
     let plan = manifest::validate(&manifest, &BootstrapPolicy).map_err(|e| format!("{e:?}"))?;
     assert_eq!(super::io_ready_service(&plan), Ok(Some(0)));
-    for text in [
-        IO_READY_SERVICE.replace(
-            "bootstrap.io-ready-channel",
-            "bootstrap.session-output-channel",
-        ),
-        IO_READY_SERVICE.replace("io.ready", "stdio.output"),
-    ] {
+    for text in [IO_READY_SERVICE.replace("io.ready", "stdio.output")] {
         let manifest = manifest::parse(&text).map_err(|e| format!("{e:?}"))?;
         let plan = manifest::validate(&manifest, &BootstrapPolicy).map_err(|e| format!("{e:?}"))?;
         assert_eq!(

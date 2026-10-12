@@ -36,13 +36,12 @@ pub(super) struct AuthorityInventory {
     pub(super) memory_inspector: OwnedHandle<MemoryInspectorObject>,
     pub(super) cpu_inspector: OwnedHandle<CpuInspectorObject>,
     pub(super) console: OwnedHandle<ConsoleObject>,
-    pub(super) console_input_channel: Option<OwnedHandle<ByteChannelObject>>,
-    pub(super) console_output_channel: Option<OwnedHandle<ByteChannelObject>>,
-    pub(super) session_input_channel: Option<OwnedHandle<ByteChannelObject>>,
-    pub(super) service_output_channel: OwnedHandle<ByteChannelObject>,
-    pub(super) session_output_channel: Option<OwnedHandle<ByteChannelObject>>,
-    pub(super) session_startup_channel: Option<OwnedHandle<ByteChannelObject>>,
-    pub(super) session_startup_writer: Option<OwnedHandle<ByteChannelObject>>,
+    pub(super) raw_control_server: Option<OwnedHandle<CapabilityChannelObject>>,
+    pub(super) raw_controller: Option<OwnedHandle<CapabilityChannelObject>>,
+    pub(super) log_server: Option<OwnedHandle<CapabilityChannelObject>>,
+    pub(super) log_connector: OwnedHandle<CapabilityChannelObject>,
+    // Replaced for each launch; stdout/stderr of one service share one source.
+    pub(super) service_output_channel: Option<OwnedHandle<ByteChannelObject>>,
     pub(super) io_broker_server: Option<OwnedHandle<CapabilityChannelObject>>,
     pub(super) io_broker_client: Option<OwnedHandle<CapabilityChannelObject>>,
     pub(super) io_ready_channel: Option<OwnedHandle<ByteChannelObject>>,
@@ -113,7 +112,10 @@ impl AuthorityInventory {
                 if kind == ByteChannelObject::KIND.as_raw() =>
             {
                 builder.add_handle_duplicate(
-                    self.service_output_channel.as_handle_ref(),
+                    self.service_output_channel
+                        .as_ref()
+                        .ok_or(LaunchError::UnsupportedAuthority)?
+                        .as_handle_ref(),
                     purpose,
                     offer,
                 )
@@ -122,6 +124,11 @@ impl AuthorityInventory {
                 if kind == DirectoryObject::KIND.as_raw() =>
             {
                 builder.add_handle_duplicate(environment.as_handle_ref(), purpose, offer)
+            }
+            (BootstrapAuthority::BootEnvironmentDirectory, CapabilityOperation::Duplicate)
+                if kind == DirectoryObject::KIND.as_raw() =>
+            {
+                builder.add_handle_duplicate(self.boot_environment.as_handle_ref(), purpose, offer)
             }
             (BootstrapAuthority::RootDirectory, CapabilityOperation::Duplicate)
                 if kind == DirectoryObject::KIND.as_raw() =>
@@ -206,7 +213,9 @@ impl AuthorityInventory {
                 return self.move_channel_into_builder(authority, builder, purpose, rights);
             }
             (
-                authority @ (BootstrapAuthority::IoBrokerServer
+                authority @ (BootstrapAuthority::ConsoleControlServer
+                | BootstrapAuthority::ConsoleLogServer
+                | BootstrapAuthority::IoBrokerServer
                 | BootstrapAuthority::IoBrokerClient
                 | BootstrapAuthority::FilesystemAttach
                 | BootstrapAuthority::FilesystemProvider
@@ -214,6 +223,8 @@ impl AuthorityInventory {
                 CapabilityOperation::Move,
             ) if kind == CapabilityChannelObject::KIND.as_raw() => {
                 let slot = match authority {
+                    BootstrapAuthority::ConsoleControlServer => &mut self.raw_control_server,
+                    BootstrapAuthority::ConsoleLogServer => &mut self.log_server,
                     BootstrapAuthority::IoBrokerServer => &mut self.io_broker_server,
                     BootstrapAuthority::IoBrokerClient => &mut self.io_broker_client,
                     BootstrapAuthority::FilesystemAttach => &mut self.filesystem_attach,
@@ -231,6 +242,23 @@ impl AuthorityInventory {
                         *slot = Some(handle);
                         LaunchError::service_resources(error)
                     });
+            }
+            (BootstrapAuthority::ConsoleController, CapabilityOperation::Duplicate)
+                if kind == CapabilityChannelObject::KIND.as_raw() =>
+            {
+                builder.add_handle_duplicate(
+                    self.raw_controller
+                        .as_ref()
+                        .ok_or(LaunchError::UnsupportedAuthority)?
+                        .as_handle_ref(),
+                    purpose,
+                    offer,
+                )
+            }
+            (BootstrapAuthority::ConsoleLogConnector, CapabilityOperation::Duplicate)
+                if kind == CapabilityChannelObject::KIND.as_raw() =>
+            {
+                builder.add_handle_duplicate(self.log_connector.as_handle_ref(), purpose, offer)
             }
             (BootstrapAuthority::FilesystemControlClient, CapabilityOperation::Duplicate)
                 if kind == CapabilityChannelObject::KIND.as_raw() =>
@@ -281,11 +309,6 @@ impl AuthorityInventory {
         rights: Rights,
     ) -> Result<(), LaunchError> {
         let slot = match authority {
-            BootstrapAuthority::ConsoleInputChannel => &mut self.console_input_channel,
-            BootstrapAuthority::ConsoleOutputChannel => &mut self.console_output_channel,
-            BootstrapAuthority::SessionInputChannel => &mut self.session_input_channel,
-            BootstrapAuthority::SessionOutputChannel => &mut self.session_output_channel,
-            BootstrapAuthority::SessionStartupChannel => &mut self.session_startup_channel,
             BootstrapAuthority::IoReadyChannel => &mut self.io_ready_channel,
             _ => return Err(LaunchError::UnsupportedAuthority),
         };

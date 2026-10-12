@@ -983,6 +983,11 @@ pub const SIGNALS: &[Signal] = &[
         name: "terminated",
     },
     Signal {
+        object: "task_group",
+        bit: 0,
+        name: "terminated",
+    },
+    Signal {
         object: "process",
         bit: 0,
         name: "terminated",
@@ -5524,7 +5529,8 @@ const TASK_GROUP_CREATE_RESULTS: &[ResultValue] = &[ResultValue {
                 | RIGHT_TRANSFER
                 | RIGHT_INSPECT
                 | RIGHT_REQUEST_STOP
-                | RIGHT_TASK_GROUP_ATTACH_PROCESS,
+                | RIGHT_TASK_GROUP_ATTACH_PROCESS
+                | RIGHT_WAIT,
         ),
     }),
 }];
@@ -9677,6 +9683,86 @@ pub const SYSCALLS: &[Syscall] = &[
         failure_results: &[],
     },
     Syscall {
+        number: 158,
+        name: "process_derive_observer",
+        feature: FeatureGate::Core,
+        arguments: &[Argument {
+            name: "process",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("process"),
+                required_rights: RIGHT_WAIT | RIGHT_TRANSFER | RIGHT_REQUEST_STOP,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        }],
+        results: &[ResultValue {
+            name: "observer",
+            kind: ValueKind::Handle,
+            handle: Some(ProducedHandle {
+                object: ProducedObject::Kind("process"),
+                rights: ProducedRights::Fixed(RIGHT_WAIT | RIGHT_TRANSFER),
+            }),
+        }],
+        blocking: BlockingClass::Never,
+        cancellation: CancellationClass::None,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Task,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
+        number: 159,
+        name: "task_group_request_stop",
+        feature: FeatureGate::Core,
+        arguments: &[Argument {
+            name: "task_group",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("task_group"),
+                required_rights: RIGHT_REQUEST_STOP,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        }],
+        results: &[],
+        blocking: BlockingClass::Never,
+        cancellation: CancellationClass::None,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Task,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
+        number: 160,
+        name: "console_discard_input",
+        feature: FeatureGate::Core,
+        arguments: &[Argument {
+            name: "console",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("console"),
+                required_rights: RIGHT_READ,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        }],
+        results: &[ResultValue {
+            name: "discarded",
+            kind: ValueKind::ByteCount,
+            handle: None,
+        }],
+        blocking: BlockingClass::Never,
+        cancellation: CancellationClass::None,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
         number: 496,
         name: "native_block_transfer",
         feature: FeatureGate::Core,
@@ -9769,6 +9855,9 @@ pub const SEMANTIC_RULES: &[&str] = &[
     "Native task and object inspectors are immutable capability-scoped views. Process, thread, and object KOIDs plus scan cursors are observation-only values and can never be exchanged for operational authority. Out-of-scope targeted lookup returns not_found.",
     "Task inspector records carry a bounded UTF-8 name as name_length bytes followed by zero-filled capacity. Process names are the immutable labels committed by ProcessBuilder publication; Thread names are immutable scheduler identity labels retained through the retiring registry phase.",
     "Inspector derivation is monotonic: a derived Process, TaskGroup, or ResourceDomain view cannot widen its parent's task scope, object scope, visibility, or rights. Derivation requires DUPLICATE | TRANSFER | INSPECT | DERIVE and returns exactly that base set; INSPECT_DETAILS is never added or preserved by the existing derivation calls. Callers attenuate the returned handle before delegation. Native task operations remain handle-based; numeric PID and TID namespaces belong exclusively to compatibility personalities.",
+    "process_derive_observer requires WAIT | TRANSFER | REQUEST_STOP on a Process and returns a new WAIT | TRANSFER handle for the same KOID. It never copies supervisor stop or inspect authority and the derived observer cannot itself derive further observers. General handle duplication still requires DUPLICATE.",
+    "task_group_request_stop closes new membership admission and requests asynchronous member stop. TASK_GROUP_TERMINATED is sticky and becomes observable only after pending construction reservations have completed or rolled back and every member Process has completed retirement. It covers this flat TaskGroup only, not processes attached to other groups.",
+    "console_discard_input requires READ and atomically discards the currently accepted physical Console input prefix. It returns the byte count; input arriving later remains queued. An outstanding transactional read claim returns would_block without discarding any bytes. This operation has no terminal or character interpretation.",
     "Every live TaskGroup handle participates in shared group-lifetime ownership regardless of its attenuated rights. Closing the last TaskGroup handle asynchronously requests stop for every member. Rights control operations available through a handle; they do not change this ownership effect.",
     "Inspector scans require the exact published page capacity for their record type. Cursor zero starts a scan and a returned next_cursor of zero ends it. Pages and complete scans are weakly consistent with concurrent task, object, and handle-table mutation; generation-qualified handle values prevent slot reuse from aliasing an earlier observation.",
     "Memory and CPU inspectors publish immutable point-in-time copies. Their handles grant observation only; they never expose writable accounting storage or allocator and scheduler synchronization to userspace. CPU categories are scheduler-tick observations and a multi-CPU snapshot is weakly consistent across CPUs.",

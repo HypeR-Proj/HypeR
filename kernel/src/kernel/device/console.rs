@@ -30,13 +30,31 @@ type InputLock<T> = InterruptSpinLock<T, crate::hal::irq::LocalMask>;
 const INPUT_CAPACITY: usize = 4096;
 pub(crate) const TRANSFER_BATCH_BYTES: usize = 256;
 
-static INPUT: InputLock<InputState> = InterruptSpinLock::new(InputState::new());
-static SIGNALS: SignalState = SignalState::with_initial_level(SignalMask::from_trusted_bits(
-    hyper::abi::native::HYPER_NATIVE_SIGNAL_CONSOLE_WRITABLE,
-));
-#[cfg(not(feature = "kernel-self-test"))]
-static OBJECT_PUBLISHED: AtomicBool = AtomicBool::new(false);
-static RECEIVE_ERRORS: AtomicU64 = AtomicU64::new(0);
+/// Permanent state belongs to one physical Console endpoint. Runtime drivers
+/// retain this endpoint independently of exported userspace capabilities.
+struct ConsoleState {
+    input: InputLock<InputState>,
+    signals: SignalState,
+    receive_errors: AtomicU64,
+    #[cfg(not(feature = "kernel-self-test"))]
+    object_published: AtomicBool,
+}
+
+impl ConsoleState {
+    const fn new() -> Self {
+        Self {
+            input: InputLock::new(InputState::new()),
+            signals: SignalState::with_initial_level(SystemConsole::WRITABLE),
+            receive_errors: AtomicU64::new(0),
+            #[cfg(not(feature = "kernel-self-test"))]
+            object_published: AtomicBool::new(false),
+        }
+    }
+}
+
+// The current board selects one physical UART. Each exported Console retains
+// its own backing explicitly; userspace session policy never uses a global ID.
+static SYSTEM_ENDPOINT: ConsoleState = ConsoleState::new();
 
 struct InputState {
     bytes: ByteRing<INPUT_CAPACITY>,
@@ -53,13 +71,13 @@ impl InputState {
         }
     }
 
-    fn publish_readable(&self, readable: bool) {
+    fn publish_readable(&self, signals: &SignalState, readable: bool) {
         let (clear, set) = if readable {
             (SignalMask::EMPTY, SystemConsole::READABLE)
         } else {
             (SystemConsole::READABLE, SignalMask::EMPTY)
         };
-        if let Err(error) = SIGNALS.update(clear, set) {
+        if let Err(error) = signals.update(clear, set) {
             console_invariant("readiness signal update", error)
         }
     }
@@ -104,10 +122,10 @@ pub(crate) enum IoError {
 
 /// Userspace authority over the physical host console.
 ///
-/// There is one exported identity. The object contains only its accounting
-/// charge; the permanent device service owns the FIFO and readiness state so
-/// IRQ delivery never depends on an active userspace handle.
+/// The retained permanent endpoint owns the FIFO and readiness state. IRQ
+/// delivery never depends on an active userspace handle.
 pub(crate) struct SystemConsole {
+    endpoint: &'static ConsoleState,
     _object_charge: CommittedCharge,
 }
 
@@ -132,7 +150,8 @@ impl SystemConsole {
         if !Self::is_available() {
             return Err(ObjectError::Unavailable);
         }
-        if OBJECT_PUBLISHED
+        if SYSTEM_ENDPOINT
+            .object_published
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
         {
@@ -141,7 +160,9 @@ impl SystemConsole {
         let result = Self::try_new(domain)
             .and_then(|payload| ObjectPublication::try_new(payload).map_err(Into::into));
         if result.is_err() {
-            OBJECT_PUBLISHED.store(false, Ordering::Release);
+            SYSTEM_ENDPOINT
+                .object_published
+                .store(false, Ordering::Release);
         }
         result
     }
@@ -159,6 +180,7 @@ impl SystemConsole {
             )?
             .commit();
         Ok(Self {
+            endpoint: &SYSTEM_ENDPOINT,
             _object_charge: charge,
         })
     }
@@ -168,7 +190,7 @@ impl SystemConsole {
         if capacity == 0 {
             return Ok(ReadClaim::empty());
         }
-        INPUT.with(|state| {
+        self.endpoint.input.with(|state| {
             if state.claim.is_some() || state.bytes.is_empty() {
                 return Err(IoError::WouldBlock);
             }
@@ -177,6 +199,7 @@ impl SystemConsole {
                 None => console_invariant("input claim generation", "exhausted"),
             };
             let mut claim = ReadClaim {
+                endpoint: self.endpoint,
                 generation,
                 length: 0,
                 bytes: [0; TRANSFER_BATCH_BYTES],
@@ -195,8 +218,25 @@ impl SystemConsole {
             // A claimed head is not available to another reader. Producers
             // retain later bytes behind it; commit or abort republishes the
             // accurate level while holding this same lock.
-            state.publish_readable(false);
+            state.publish_readable(&self.endpoint.signals, false);
             Ok(claim)
+        })
+    }
+
+    /// Drops the accepted input prefix at one lock-protected cutoff. A reader
+    /// copying a claimed prefix must finish first; callers retry on `WouldBlock`.
+    /// Bytes arriving after this cutoff remain available to the new consumer.
+    pub(crate) fn discard_input(&self) -> Result<usize, IoError> {
+        self.endpoint.input.with(|state| {
+            if state.claim.is_some() {
+                return Err(IoError::WouldBlock);
+            }
+            let count = INPUT_CAPACITY - state.bytes.remaining_capacity();
+            if !state.bytes.discard_front(count) {
+                console_invariant("input discard", "retained prefix disappeared")
+            }
+            state.publish_readable(&self.endpoint.signals, false);
+            Ok(count)
         })
     }
 
@@ -225,7 +265,10 @@ impl KernelObject for SystemConsole {
         .union(Rights::WRITE);
 
     fn signal_source(&self) -> Option<SignalSource<'_>> {
-        Some(SignalSource::new(&SIGNALS, Self::SUPPORTED_SIGNALS))
+        Some(SignalSource::new(
+            &self.endpoint.signals,
+            Self::SUPPORTED_SIGNALS,
+        ))
     }
 }
 
@@ -235,6 +278,7 @@ impl KernelObject for SystemConsole {
 /// bytes, after the caller has completed every fallible user-memory operation.
 #[must_use = "console input must be committed after user copy or explicitly aborted"]
 pub(crate) struct ReadClaim {
+    endpoint: &'static ConsoleState,
     generation: u64,
     length: usize,
     bytes: [u8; TRANSFER_BATCH_BYTES],
@@ -244,6 +288,7 @@ pub(crate) struct ReadClaim {
 impl ReadClaim {
     const fn empty() -> Self {
         Self {
+            endpoint: &SYSTEM_ENDPOINT,
             generation: 0,
             length: 0,
             bytes: [0; TRANSFER_BATCH_BYTES],
@@ -259,13 +304,13 @@ impl ReadClaim {
         if !self.active {
             return;
         }
-        INPUT.with(|state| {
+        self.endpoint.input.with(|state| {
             require_claim(state, self.generation, self.length);
             if !state.bytes.discard_front(self.length) {
                 console_invariant("input claim commit", "retained prefix disappeared")
             }
             state.claim = None;
-            state.publish_readable(!state.bytes.is_empty());
+            state.publish_readable(&self.endpoint.signals, !state.bytes.is_empty());
         });
         self.active = false;
     }
@@ -274,10 +319,10 @@ impl ReadClaim {
         if !self.active {
             return;
         }
-        INPUT.with(|state| {
+        self.endpoint.input.with(|state| {
             require_claim(state, self.generation, self.length);
             state.claim = None;
-            state.publish_readable(!state.bytes.is_empty());
+            state.publish_readable(&self.endpoint.signals, !state.bytes.is_empty());
         });
         self.active = false;
     }
@@ -291,21 +336,25 @@ impl Drop for ReadClaim {
 
 /// Delivers one validated UART byte from IRQ context.
 pub(super) fn receive(byte: u8) {
-    INPUT.with(|state| {
+    SYSTEM_ENDPOINT.input.with(|state| {
         let was_available = state.claim.is_none() && !state.bytes.is_empty();
         if !state.bytes.push(byte) {
-            RECEIVE_ERRORS.fetch_add(1, Ordering::Relaxed);
+            SYSTEM_ENDPOINT
+                .receive_errors
+                .fetch_add(1, Ordering::Relaxed);
             return;
         }
         if !was_available && state.claim.is_none() {
-            state.publish_readable(true);
+            state.publish_readable(&SYSTEM_ENDPOINT.signals, true);
         }
     });
 }
 
 /// Records one byte rejected by the physical UART's framing/error state.
 pub(super) fn record_receive_error() {
-    RECEIVE_ERRORS.fetch_add(1, Ordering::Relaxed);
+    SYSTEM_ENDPOINT
+        .receive_errors
+        .fetch_add(1, Ordering::Relaxed);
 }
 
 /// Publishes whether the deferred output queue can accept at least one byte.
@@ -315,7 +364,7 @@ pub(crate) fn publish_writable(writable: bool) {
     } else {
         (SystemConsole::WRITABLE, SignalMask::EMPTY)
     };
-    if let Err(error) = SIGNALS.update(clear, set) {
+    if let Err(error) = SYSTEM_ENDPOINT.signals.update(clear, set) {
         console_invariant("writability signal update", error)
     }
 }

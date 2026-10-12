@@ -34,20 +34,20 @@ input, output, and static/dynamic linking.
 | --- | --- |
 | Collections, formatting, `System` allocator | Shared Native process heap |
 | Arguments and environment reads | Immutable startup bytes; iterators own snapshots |
-| stdin/stdout/stderr | Native service byte channels; Console fallback for bootstrap programs |
+| stdin/stdout/stderr | Request-sized connector streams or binary byte channels; Console fallback when explicitly delegated |
 | `Instant`, sleep, timed waits | Native monotonic clock and scheduler deadline parking |
 | Mutex, RwLock, Condvar, Once, parking | Upstream atomic/futex algorithms with Native wait/wake bridge |
 | `thread_local!` | Key-based TLS in a per-thread control block; bounded destructor passes |
 | `thread::Builder::spawn` | Native thread creation, join, and detached-stack reclamation |
 | Files | Read/write/create/append/truncate, seek, metadata/times/permissions, rename/copy, hard links, symlink queries, directory traversal and recursive removal, advisory locks and sync |
 | Paths and cwd | Canonicalization, current-directory observation and mutation through rooted Directory scopes |
-| Subprocesses | Native ProcessBuilder, arguments/environment, cwd capability, wait/try_wait/kill, piped or inherited byte-channel stdio |
+| Subprocesses | Native ProcessBuilder, arguments/environment, cwd capability, wait/try_wait/kill, piped byte channels or inherited private connector streams |
 | Networking | Upstream unsupported implementation |
 | Wall-clock time | RTC-anchored UTC, or uncalibrated Unix epoch plus uptime without RTC |
 | Environment mutation | Upstream unsupported behavior |
 | Cryptographic randomness | Unsupported; no entropy source is claimed |
 | HashMap seeds | Upstream unsupported-target address-based fallback; no strong collision-attack resistance claim |
-| Terminal detection | Upstream fallback reports false; terminal sizing is unavailable |
+| Terminal detection | Per-descriptor connector metadata for `IsTerminal`; sizing uses the separate Native terminal API |
 | Panic | Abort; diagnostics use stderr, no unwinding or symbolized backtrace |
 
 This is a partial std platform port. Crates that directly depend on Unix,

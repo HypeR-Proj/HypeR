@@ -30,6 +30,7 @@ pub fn cvt(status: i64) -> crate::io::Result<()> {
         -4 => ErrorKind::Unsupported,
         -5 => ErrorKind::OutOfMemory,
         -11 => ErrorKind::TimedOut,
+        -12 => ErrorKind::Interrupted,
         -13 => ErrorKind::WouldBlock,
         -15 => ErrorKind::BrokenPipe,
         -16 => ErrorKind::NotFound,

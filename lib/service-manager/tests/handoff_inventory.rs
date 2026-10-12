@@ -16,7 +16,7 @@ fn basic() -> Vec<Slot> {
         OBJECT_INSPECTOR,
         MEMORY_INSPECTOR,
         CPU_INSPECTOR,
-        SERVICE_OUTPUT,
+        LOG_CONNECTOR,
         STAGE_GROUP,
         CONSOLE,
     ]
@@ -156,7 +156,7 @@ fn environment_rights_are_checked_before_accepting_supervision() {
 }
 
 #[test]
-fn waiting_core_session_keeps_its_decision_writer_across_handoff() -> Result<(), String> {
+fn formal_session_requires_raw_controller_across_handoff() -> Result<(), String> {
     let manifest = crate::manifest::parse(include_str!(
         "../../../bootstrap/stage1/init/config/services-console-only.json"
     ))
@@ -166,12 +166,15 @@ fn waiting_core_session_keeps_its_decision_writer_across_handoff() -> Result<(),
     let mut slots = basic();
     assert!(validate_session_source(&slots, &plan, manifest.service_count()).is_err());
     slots.push(Slot {
-        key: SESSION_DECISION,
+        key: RAW_CONTROLLER,
         rights: Rights::READ.bits(),
     });
     assert!(validate_session_source(&slots, &plan, manifest.service_count()).is_err());
     let writer = slots.last_mut().ok_or("writer")?;
-    writer.rights = Rights::WRITE.bits();
+    writer.rights = Rights::WRITE
+        .union(Rights::WAIT)
+        .union(Rights::DUPLICATE)
+        .bits();
     assert!(validate_session_source(&slots, &plan, manifest.service_count()).is_ok());
     Ok(())
 }

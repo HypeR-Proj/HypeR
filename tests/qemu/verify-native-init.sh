@@ -398,7 +398,6 @@ while :; do
         grep -q 'HypeR init-system: core supervision adopted' "$log" &&
         grep -q 'HypeR init-system: root namespace switched' "$log" &&
         grep -Fxq 'HypeR session: console ready' "$native_output" &&
-        grep -Fxq 'HypeR virtual console: ready' "$native_output" &&
         grep -Eq '^TYPE[[:space:]]+KOID[[:space:]]+OWNER[[:space:]]+NAME[[:space:]]+STATE$' "$native_output" &&
         grep -Eq '^HANDLE[[:space:]]+OBJECT[[:space:]]+KIND[[:space:]]+RIGHTS$' "$native_output" &&
         grep -Eq '^KOID[[:space:]]+KIND[[:space:]]+STATE[[:space:]]+HANDLES[[:space:]]+REFS$' "$native_output" &&

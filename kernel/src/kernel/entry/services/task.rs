@@ -129,6 +129,21 @@ impl TaskServices for DeferredProcessServices<'_> {
             .snapshot())
     }
 
+    fn derive_process_observer(&self, process: HandleValue) -> Result<HandleValue, ProcessError> {
+        self.process.derive_process_observer(process)
+    }
+
+    fn request_task_group_stop(&self, group: HandleValue) -> Result<(), ProcessError> {
+        let group = self
+            .process
+            .resolve_handle::<crate::kernel::process::TaskGroupObject>(
+                group,
+                Rights::REQUEST_STOP,
+            )?;
+        group.object().group().request_stop()?;
+        Ok(())
+    }
+
     fn request_process_stop(&self, process: HandleValue) -> Result<(), ProcessError> {
         let process = self
             .process

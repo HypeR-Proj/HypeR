@@ -3,8 +3,6 @@
 
 //! Service process supervision during startup handshakes and steady operation.
 
-use std::convert::Infallible;
-
 use crate::manifest::{MAX_SERVICES, Manifest};
 use crate::supervision::{self, TerminationAction};
 use hyper_os::handle::{ByteChannelObject, ConsoleObject, OwnedHandle, ProcessObject};
@@ -190,39 +188,7 @@ impl SupervisorSet {
         }
     }
 
-    pub(super) fn supervise(
-        &mut self,
-        manifest: &Manifest<'_>,
-        console: &OwnedHandle<ConsoleObject>,
-    ) -> Result<Infallible, LaunchError> {
-        loop {
-            let selected = {
-                let mut items = Vec::with_capacity(MAX_SERVICES);
-                let mut services = Vec::with_capacity(MAX_SERVICES);
-                for (index, process) in self.processes.iter().enumerate() {
-                    if let Some(process) = process {
-                        items.push(WaitItem::new(
-                            process.as_handle_ref(),
-                            ObjectSignals::<ProcessObject>::TERMINATED,
-                        ));
-                        services.push(index);
-                    }
-                }
-                let observation = wait_many(&items, hyper_os::DEADLINE_INFINITE)
-                    .map_err(|_| LaunchError::OperatingSystem)?;
-                *services
-                    .get(observation.index)
-                    .ok_or(LaunchError::InvalidPlan)?
-            };
-            if self.observe_service_termination(manifest, selected, None, console)?
-                == TerminationAction::FailSystem
-            {
-                return Err(LaunchError::CriticalServiceTerminated);
-            }
-        }
-    }
-
-    fn observe_service_termination(
+    pub(super) fn observe_service_termination(
         &mut self,
         manifest: &Manifest<'_>,
         index: usize,
@@ -240,19 +206,5 @@ impl SupervisorSet {
             service.critical(),
             required_service == Some(index),
         ))
-    }
-
-    pub(super) fn request_service_stop(&self) -> Result<(), LaunchError> {
-        let mut failed = false;
-        for supervisor in self.processes.iter().filter_map(Option::as_ref) {
-            if supervisor.as_process_supervisor().request_stop().is_err() {
-                failed = true;
-            }
-        }
-        if failed {
-            Err(LaunchError::StopRollbackFailed)
-        } else {
-            Ok(())
-        }
     }
 }

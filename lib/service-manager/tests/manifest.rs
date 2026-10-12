@@ -187,24 +187,39 @@ impl AuthorityPolicy for Policy {
                 duplicable: true,
                 creatable: false,
             }),
-            "bootstrap.console-input-channel"
-            | "bootstrap.console-output-channel"
-            | "bootstrap.session-input-channel"
-            | "bootstrap.session-output-channel"
-            | "bootstrap.session-startup-channel"
-            | "bootstrap.session-client-input-channel"
-            | "bootstrap.session-client-output-channel"
-            | "bootstrap.session-client-error-channel"
-            | "bootstrap.shell-output-channel"
-            | "bootstrap.shell-error-channel" => Some(AuthorityDeclaration {
-                key: test_authority_key(source),
-                provider: None,
-                object_kind: 4,
-                rights: WAIT | READ | WRITE | DUPLICATE | TRANSFER,
-                movable: true,
-                duplicable: false,
-                creatable: false,
-            }),
+            "bootstrap.console-control-server" | "bootstrap.console-log-server" => {
+                Some(AuthorityDeclaration {
+                    key: test_authority_key(source),
+                    provider: None,
+                    object_kind: 22,
+                    rights: WAIT | READ | WRITE | DUPLICATE | TRANSFER,
+                    movable: true,
+                    duplicable: false,
+                    creatable: false,
+                })
+            }
+            "bootstrap.console-controller" | "bootstrap.console-log-connector" => {
+                Some(AuthorityDeclaration {
+                    key: test_authority_key(source),
+                    provider: None,
+                    object_kind: 22,
+                    rights: WAIT | READ | WRITE | DUPLICATE | TRANSFER,
+                    movable: false,
+                    duplicable: true,
+                    creatable: false,
+                })
+            }
+            "bootstrap.shell-output-channel" | "bootstrap.shell-error-channel" => {
+                Some(AuthorityDeclaration {
+                    key: test_authority_key(source),
+                    provider: None,
+                    object_kind: 4,
+                    rights: WAIT | READ | WRITE | DUPLICATE | TRANSFER,
+                    movable: true,
+                    duplicable: false,
+                    creatable: false,
+                })
+            }
             "bootstrap.root-directory" => Some(AuthorityDeclaration {
                 key: test_authority_key(source),
                 provider: None,
@@ -222,15 +237,17 @@ impl AuthorityPolicy for Policy {
                 duplicable: true,
                 creatable: false,
             }),
-            "bootstrap.environment-directory" => Some(AuthorityDeclaration {
-                key: test_authority_key(source),
-                provider: None,
-                object_kind: 5,
-                rights: READ | INSPECT | EXECUTE | PROTECT | DUPLICATE | TRANSFER,
-                movable: false,
-                duplicable: true,
-                creatable: false,
-            }),
+            "bootstrap.environment-directory" | "bootstrap.boot-environment-directory" => {
+                Some(AuthorityDeclaration {
+                    key: test_authority_key(source),
+                    provider: None,
+                    object_kind: 5,
+                    rights: READ | INSPECT | EXECUTE | PROTECT | DUPLICATE | TRANSFER,
+                    movable: false,
+                    duplicable: true,
+                    creatable: false,
+                })
+            }
             "bootstrap.child-loader" => Some(AuthorityDeclaration {
                 key: test_authority_key(source),
                 provider: None,
@@ -367,28 +384,29 @@ impl AuthorityPolicy for Policy {
             ("/svc/session-manager", "session.console-manager")
             | ("/svc/session-manager", "session.console-manager-alias") => (100, 2, INSPECT),
             ("/svc/network-manager", "network.console-manager") => (101, 2, INSPECT),
-            ("/svc/console-input", "console.system") => (200, 3, WAIT | READ),
-            ("/svc/console-output", "console.system") => (200, 3, WAIT | WRITE),
-            ("/svc/console-input", "console.data") => (201, 4, WAIT | WRITE),
-            ("/svc/console-output", "console.data") => (201, 4, WAIT | READ),
-            ("/svc/session", "session.console-input") => (202, 4, WAIT | READ),
-            ("/svc/session", "session.console-output") => (203, 4, WAIT | WRITE),
-            ("/svc/session", "session.startup-decision") => (209, 4, WAIT | READ),
-            ("/svc/session", "session.client-input") => (204, 4, WAIT | WRITE),
-            ("/svc/session", "session.client-output") => (205, 4, WAIT | READ),
-            ("/svc/session", "session.client-error") => (206, 4, WAIT | READ),
-            ("/bin/sh", "stdio.input") => (300, 4, WAIT | READ | DUPLICATE | TRANSFER | INSPECT),
-            ("/bin/sh", "stdio.terminal-input") => {
-                (399, 4, WAIT | READ | DUPLICATE | TRANSFER | INSPECT)
+            ("/svc/console-raw", "console.system") => (200, 3, WAIT | READ | WRITE),
+            ("/svc/console-raw", "console.control") => (201, 22, WAIT | READ),
+            ("/svc/console-raw", "console.logs") => (202, 22, WAIT | READ),
+            ("/svc/session-manager", "session.console-controller") => {
+                (203, 22, WAIT | WRITE | DUPLICATE | TRANSFER)
             }
-            ("/bin/sh" | "/svc/session" | "/svc/vm-manager", "stdio.output") => {
+            ("/svc/session-manager", "session.log-connector") => {
+                (204, 22, WAIT | WRITE | DUPLICATE | TRANSFER)
+            }
+            ("/svc/session-manager", "process.task-factory") => (
+                304,
+                6,
+                CREATE_PROCESS | CREATE_TASK_GROUP | DUPLICATE | TRANSFER,
+            ),
+            ("/bin/sh", "stdio.input") => (300, 4, WAIT | READ | DUPLICATE | TRANSFER | INSPECT),
+            ("/bin/sh" | "/svc/session-manager" | "/svc/vm-manager", "stdio.output") => {
                 (301, 4, WAIT | WRITE | DUPLICATE | TRANSFER)
             }
-            ("/bin/sh" | "/svc/session" | "/svc/vm-manager", "stdio.error") => {
+            ("/bin/sh" | "/svc/session-manager" | "/svc/vm-manager", "stdio.error") => {
                 (302, 4, WAIT | WRITE | DUPLICATE | TRANSFER)
             }
             ("/svc/vm-manager", "process.root-directory") => (303, 5, READ | DUPLICATE | TRANSFER),
-            ("/bin/sh" | "/svc/session", "process.root-directory") => (
+            ("/bin/sh" | "/svc/session-manager", "process.root-directory") => (
                 303,
                 5,
                 READ | WRITE
@@ -400,40 +418,38 @@ impl AuthorityPolicy for Policy {
                     | SET_ATTRIBUTES
                     | LOCK_FILE,
             ),
-            ("/bin/sh" | "/svc/session", "process.task-factory") => {
-                (304, 6, CREATE_PROCESS | DUPLICATE | TRANSFER)
-            }
-            ("/bin/sh" | "/svc/session", "process.task-group") => {
+            ("/bin/sh", "process.task-factory") => (304, 6, CREATE_PROCESS | DUPLICATE | TRANSFER),
+            ("/bin/sh" | "/svc/session-manager", "process.task-group") => {
                 (305, 7, ATTACH_PROCESS | DUPLICATE | TRANSFER)
             }
-            ("/bin/sh" | "/svc/session", "process.resource-domain") => {
+            ("/bin/sh" | "/svc/session-manager", "process.resource-domain") => {
                 (306, 8, SPONSOR | DUPLICATE | TRANSFER)
             }
-            ("/bin/sh" | "/svc/session", "process.task-inspector") => {
+            ("/bin/sh" | "/svc/session-manager", "process.task-inspector") => {
                 (307, 16, DUPLICATE | TRANSFER | INSPECT)
             }
-            ("/bin/sh" | "/svc/session", "process.object-inspector") => {
+            ("/bin/sh" | "/svc/session-manager", "process.object-inspector") => {
                 (308, 17, DUPLICATE | TRANSFER | INSPECT | INSPECT_DETAILS)
             }
-            ("/bin/sh" | "/svc/session", "process.memory-inspector") => {
+            ("/bin/sh" | "/svc/session-manager", "process.memory-inspector") => {
                 (309, 18, DUPLICATE | TRANSFER | INSPECT)
             }
-            ("/bin/sh" | "/svc/session", "process.cpu-inspector") => {
+            ("/bin/sh" | "/svc/session-manager", "process.cpu-inspector") => {
                 (310, 19, DUPLICATE | TRANSFER | INSPECT)
             }
-            ("/bin/sh" | "/svc/session", "process.environment-directory") => (
+            ("/bin/sh" | "/svc/session-manager", "process.environment-directory") => (
                 317,
                 5,
                 READ | INSPECT | EXECUTE | PROTECT | DUPLICATE | TRANSFER,
             ),
-            ("/bin/sh" | "/svc/session" | "/svc/vm-manager", "process.child-loader") => {
+            ("/bin/sh" | "/svc/session-manager" | "/svc/vm-manager", "process.child-loader") => {
                 (316, 21, READ | EXECUTE | DUPLICATE | TRANSFER)
             }
-            ("/bin/sh" | "/svc/session", "process.child-library-directory")
+            ("/bin/sh" | "/svc/session-manager", "process.child-library-directory")
             | ("/svc/vm-manager", "process.child-library-directory") => {
                 (315, 5, READ | EXECUTE | PROTECT | DUPLICATE | TRANSFER)
             }
-            ("/svc/session", "vm.manager-connection") => (
+            ("/svc/session-manager", "vm.manager-connection") => (
                 hyper_service::vm::MANAGER_CONNECTION.as_raw(),
                 22,
                 WAIT | WRITE | DUPLICATE | TRANSFER,
@@ -530,14 +546,14 @@ fn production_manifest_matches_the_validated_schema() {
     let Ok(plan) = validated else {
         return;
     };
-    assert_eq!(manifest.service_count(), 4);
+    assert_eq!(manifest.service_count(), 3);
     assert_eq!(plan.vm_config_path(), Some("/boot/etc/hyper/vms.json"));
     let shell = manifest
         .services()
-        .find(|service| service.name() == "session");
+        .find(|service| service.name() == "session-manager");
     assert_eq!(
         shell.map(|service| service.capabilities().count()),
-        Some(17)
+        Some(16)
     );
 }
 
@@ -605,7 +621,7 @@ fn production_manifest_marks_required_data_plane_services_critical() {
     let Ok(manifest) = parsed else {
         return;
     };
-    for name in ["console-input", "console-output", "session", "vm-manager"] {
+    for name in ["console-raw", "session-manager", "vm-manager"] {
         let service = manifest.services().find(|service| service.name() == name);
         assert!(service.is_some_and(|service| service.critical()));
     }
@@ -630,7 +646,7 @@ fn process_launchers_receive_a_separate_delegatable_library_capability() {
         return;
     };
     let expected = READ | EXECUTE | PROTECT | DUPLICATE | TRANSFER;
-    for image in ["/svc/session", "/svc/vm-manager"] {
+    for image in ["/svc/session-manager", "/svc/vm-manager"] {
         let delegated = manifest
             .services()
             .enumerate()
@@ -832,7 +848,7 @@ fn rejects_rights_above_the_destination_contract() {
             error.service(),
             error.capability()
         )),
-        Err((ValidationErrorKind::ExcessPurposeRights, Some(0), Some(0),))
+        Err((ValidationErrorKind::ExcessPurposeRights, Some(0), Some(1),))
     );
 }
 
@@ -847,8 +863,8 @@ fn production_launch_contract_rejects_under_delegated_directory_authority() {
             "[\"read\",\"execute\"]",
             1,
         ),
+        1,
         2,
-        4,
     )] {
         assert_ne!(under_delegated, production, "rights fixture must change the manifest");
         let parsed = parse(&under_delegated);
@@ -989,7 +1005,7 @@ fn native_service_manifest_does_not_require_a_vm_fleet() {
     let Ok(plan) = validated else {
         return;
     };
-    assert_eq!(manifest.service_count(), 3);
+    assert_eq!(manifest.service_count(), 2);
     assert_eq!(plan.vm_config_path(), None);
     assert_eq!(
         plan.unique_service_for_purpose(hyper_service::vm::PROVISIONING.as_raw()),
@@ -1012,7 +1028,7 @@ fn services_have_output_without_input_or_physical_console_authority() {
         return;
     };
     assert!(validate(&manifest, &Policy).is_ok());
-    for name in ["session", "vm-manager"] {
+    for name in ["session-manager", "vm-manager"] {
         let service = manifest.services().find(|service| service.name() == name);
         assert!(service.is_some());
         let Some(service) = service else {
@@ -1040,7 +1056,7 @@ fn services_have_output_without_input_or_physical_console_authority() {
                     || capability.source() == "bootstrap.console")
         );
     }
-    for name in ["console-input", "console-output"] {
+    for name in ["console-raw"] {
         let service = manifest.services().find(|service| service.name() == name);
         assert!(service.is_some());
         let Some(service) = service else {

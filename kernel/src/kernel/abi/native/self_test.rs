@@ -326,6 +326,11 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
     }
 
     impl ConsoleServices for RejectingServices {
+        fn discard_console_input(&self, _: HandleValue) -> Result<usize, ConsoleServiceError> {
+            self.calls.set(self.calls.get().saturating_add(1));
+            Err(ConsoleServiceError::Process(ProcessError::Allocation))
+        }
+
         fn read_console(
             &self,
             _: HandleValue,
@@ -821,6 +826,16 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
         }
 
         fn process_info(&self, _: HandleValue) -> Result<ProcessSnapshot, ProcessError> {
+            self.calls.set(self.calls.get().saturating_add(1));
+            Err(ProcessError::Allocation)
+        }
+
+        fn derive_process_observer(&self, _: HandleValue) -> Result<HandleValue, ProcessError> {
+            self.calls.set(self.calls.get().saturating_add(1));
+            Err(ProcessError::Allocation)
+        }
+
+        fn request_task_group_stop(&self, _: HandleValue) -> Result<(), ProcessError> {
             self.calls.set(self.calls.get().saturating_add(1));
             Err(ProcessError::Allocation)
         }

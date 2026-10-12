@@ -18,12 +18,11 @@ const TASK_INSPECTOR: u16 = 6;
 const OBJECT_INSPECTOR: u16 = 7;
 const MEMORY_INSPECTOR: u16 = 8;
 const CPU_INSPECTOR: u16 = 9;
-const SERVICE_OUTPUT: u16 = 10;
+const LOG_CONNECTOR: u16 = 10;
 const DEVICE: u16 = 11;
-const CONSOLE_INPUT: u16 = 12;
-const CONSOLE_OUTPUT: u16 = 13;
-const SESSION_INPUT: u16 = 14;
-const SESSION_OUTPUT: u16 = 15;
+const RAW_CONTROL_SERVER: u16 = 12;
+const RAW_CONTROLLER: u16 = 13;
+const LOG_SERVER: u16 = 14;
 const IO_BROKER_SERVER: u16 = 16;
 const IO_BROKER_CLIENT: u16 = 17;
 const IO_READY: u16 = 18;
@@ -38,12 +37,11 @@ const STAGE_GROUP: u16 = 30;
 const CONSOLE: u16 = 31;
 const BOOT_ENVIRONMENT: u16 = 32;
 const SYSTEM_ENVIRONMENT: u16 = 33;
-const SESSION_STARTUP: u16 = 34;
-const SESSION_DECISION: u16 = 35;
+const LAST_ROLE: u16 = SYSTEM_ENVIRONMENT;
 
 const PROCESS_BASE: u16 = 100;
 const MAX_SLOTS: usize = 64;
-const _: () = assert!(SESSION_DECISION as usize + MAX_SERVICES <= MAX_SLOTS);
+const _: () = assert!(LAST_ROLE as usize + MAX_SERVICES <= MAX_SLOTS);
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -83,27 +81,18 @@ impl<'a> InventoryOffer<'a> {
         offer.add(OBJECT_INSPECTOR, a.object_inspector.as_handle_ref())?;
         offer.add(MEMORY_INSPECTOR, a.memory_inspector.as_handle_ref())?;
         offer.add(CPU_INSPECTOR, a.cpu_inspector.as_handle_ref())?;
-        offer.add(SERVICE_OUTPUT, a.service_output_channel.as_handle_ref())?;
+        offer.add(LOG_CONNECTOR, a.log_connector.as_handle_ref())?;
         if let Some(handle) = &a.device {
             offer.add(DEVICE, handle.as_handle_ref())?;
         }
-        if let Some(handle) = &a.console_input_channel {
-            offer.add(CONSOLE_INPUT, handle.as_handle_ref())?;
+        if let Some(handle) = &a.raw_control_server {
+            offer.add(RAW_CONTROL_SERVER, handle.as_handle_ref())?;
         }
-        if let Some(handle) = &a.console_output_channel {
-            offer.add(CONSOLE_OUTPUT, handle.as_handle_ref())?;
+        if let Some(handle) = &a.raw_controller {
+            offer.add(RAW_CONTROLLER, handle.as_handle_ref())?;
         }
-        if let Some(handle) = &a.session_input_channel {
-            offer.add(SESSION_INPUT, handle.as_handle_ref())?;
-        }
-        if let Some(handle) = &a.session_output_channel {
-            offer.add(SESSION_OUTPUT, handle.as_handle_ref())?;
-        }
-        if let Some(handle) = &a.session_startup_channel {
-            offer.add(SESSION_STARTUP, handle.as_handle_ref())?;
-        }
-        if let Some(handle) = &a.session_startup_writer {
-            offer.add(SESSION_DECISION, handle.as_handle_ref())?;
+        if let Some(handle) = &a.log_server {
+            offer.add(LOG_SERVER, handle.as_handle_ref())?;
         }
         if let Some(handle) = &a.io_broker_server {
             offer.add(IO_BROKER_SERVER, handle.as_handle_ref())?;

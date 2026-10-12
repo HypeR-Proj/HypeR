@@ -152,18 +152,4 @@ impl SupervisorSet {
             required_service == Some(index),
         ))
     }
-
-    pub(super) fn request_service_stop(&self) -> Result<(), LaunchError> {
-        let mut failed = false;
-        for supervisor in self.processes.iter().filter_map(Option::as_ref) {
-            if supervisor.as_process_supervisor().request_stop().is_err() {
-                failed = true;
-            }
-        }
-        if failed {
-            Err(LaunchError::StopRollbackFailed)
-        } else {
-            Ok(())
-        }
-    }
 }
