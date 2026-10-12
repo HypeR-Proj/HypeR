@@ -50,8 +50,19 @@ const _: () = {
 };
 
 unsafe extern "C" {
+    fn aarch64_fp_reset();
     fn aarch64_fp_restore(state: *const State);
     fn aarch64_fp_save_and_clear(state: *mut State);
+}
+
+/// Clears firmware state once before this CPU can run any lower-world owner.
+///
+/// # Safety
+/// CPU admission must have established FP/SIMD support. Local exceptions must
+/// remain masked, and no Native or guest register image may be resident yet.
+pub(super) unsafe fn initialize_cpu() {
+    // SAFETY: The admission caller establishes capability and exclusive bank ownership.
+    unsafe { aarch64_fp_reset() };
 }
 
 /// Resolves a first-use trap without advancing the interrupted instruction.

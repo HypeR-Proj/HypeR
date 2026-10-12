@@ -190,8 +190,8 @@ aarch64_boot_initialize_el2:
     msr     cnthctl_el2, xzr
     msr     cnthp_ctl_el2, xzr
     isb
-    // Clear firmware state before any untrusted lower world can run.
-    b       aarch64_fp_reset
+    // CPU admission checks optional FP/SIMD support before clearing its bank.
+    ret
 .size aarch64_boot_initialize_el2, . - aarch64_boot_initialize_el2
 
 /* Clears Rust static storage and installs the early fault vectors. */

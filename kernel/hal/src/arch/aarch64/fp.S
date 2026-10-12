@@ -57,7 +57,7 @@
     msr fpsr, xzr
 .endm
 
-/* Boot tail-call: no stack, preserve all registers except x1 and x2. */
+/* CPU admission leaf: no stack, preserve all registers except x1 and x2. */
 .global aarch64_fp_reset
 .type aarch64_fp_reset, %function
 aarch64_fp_reset:
