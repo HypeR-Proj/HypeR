@@ -237,39 +237,16 @@ fn run_session(
                 fail_run("failed to publish native-user generation", error);
             }
         };
-        let binding = active_run.binding();
-        let (mut active_address, retry) = match execution_owner.address_space().activate(
+        let active_address = match execution_owner.address_space().activate(
             active_run.pin(),
             &kernel_access,
             identifier,
-            binding,
         ) {
-            Ok(crate::kernel::mm::user_space::NativeActivation::Active(active)) => {
-                (Some(active), None)
-            }
-            Ok(crate::kernel::mm::user_space::NativeActivation::Retry(proof)) => {
-                (None, Some(proof))
-            }
+            Ok(active) => active,
             Err(error) => fail_run("failed to activate native-user address space", error),
         };
-        if let Some(proof) = retry {
-            drop(active_address);
-            let returned_pin = active_run.abort_before_machine_entry(proof);
-            drop(interrupt_mask);
-            finish_pin(returned_pin);
-            if let Err(error) = crate::kernel::task::scheduler::yield_now() {
-                fail_run("failed to yield during Native mapping replacement", error);
-            }
-            (pin, execution) = reacquire_execution(session);
-            continue;
-        }
-        let active = match active_address.take() {
-            Some(active) => active,
-            None => hyper::debug::invariant_failure("Native activation lost its outcome"),
-        };
-        drop(active_address);
-        let active_address = active;
         let observed_epoch = active_address.mapping_epoch();
+        let binding = active_run.binding();
         // SAFETY: The scheduler pin, admitted generation, and active address
         // root uniquely own the stopped context until its return capability is
         // consumed. UserExecution uses UnsafeCell solely for this seam.

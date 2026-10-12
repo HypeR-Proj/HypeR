@@ -151,13 +151,6 @@ fn with_guest(
         super::super::vm_registry::prepare_migration_guest(guest_program(false))
             .map_err(|_| Error::Construction)?;
     let installed = prepared.install().map_err(|_| Error::Construction)?;
-    // Initial placement rotates across CPUs. Pin this fixture explicitly so
-    // the Native probes must replace a guest's FP bank on the same CPU.
-    scheduler::set_thread_affinity(
-        installed.boot_vcpu_for_test(),
-        scheduler::CpuMask::single(CpuIndex::BOOT),
-    )
-    .map_err(|_| Error::Scheduler)?;
     let running = installed
         .start_boot_for_test()
         .map_err(|_| Error::Scheduler)?;

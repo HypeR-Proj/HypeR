@@ -246,11 +246,6 @@ pub(crate) struct NativeAddressSpace {
     identifier: ManuallyDrop<ActiveIdentifier<HostAsid>>,
     state: ManuallyDrop<StateLock>,
     root_vmar_object_published: AtomicBool,
-    #[cfg(all(
-        feature = "kernel-self-test",
-        any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64)
-    ))]
-    admission_retries: AtomicU64,
     _owner_charge: CommittedCharge,
 }
 
@@ -332,22 +327,20 @@ impl NativeImageSegment {
         })
     }
 
-    /// Prepares executable pages while pinned. Release the caller's pin before
-    /// committing: the cross-CPU translation transport may need to yield.
-    pub(crate) fn prepare_install<'owner>(
+    pub(crate) fn install(
         self,
-        address_space: &'owner NativeAddressSpace,
+        address_space: &NativeAddressSpace,
         pin: &(impl PinnedExecution + 'static),
-    ) -> Result<PreparedNativeChange<'owner>, Error> {
-        self.prepare_install_in_vmar(address_space, address_space.logical().root_vmar(), pin)
+    ) -> Result<(), Error> {
+        self.install_in_vmar(address_space, address_space.logical().root_vmar(), pin)
     }
 
-    pub(crate) fn prepare_install_in_vmar<'owner>(
+    pub(crate) fn install_in_vmar(
         self,
-        address_space: &'owner NativeAddressSpace,
+        address_space: &NativeAddressSpace,
         vmar: super::Vmar,
         pin: &(impl PinnedExecution + 'static),
-    ) -> Result<PreparedNativeChange<'owner>, Error> {
+    ) -> Result<(), Error> {
         let logical = address_space.logical();
         let prepared = match self.storage {
             ImageStorage::Writable(storage) => logical.prepare_map_writable(
@@ -376,7 +369,8 @@ impl NativeImageSegment {
                 )?
             }
         };
-        address_space.prepare_change(prepared)
+        address_space.prepare_change(prepared)?.commit()?;
+        Ok(())
     }
 }
 
@@ -422,11 +416,6 @@ impl NativeAddressSpace {
                 residency,
             })),
             root_vmar_object_published: AtomicBool::new(false),
-            #[cfg(all(
-                feature = "kernel-self-test",
-                any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64)
-            ))]
-            admission_retries: AtomicU64::new(0),
             _owner_charge: owner_charge,
         }))
     }
@@ -684,8 +673,7 @@ impl NativeAddressSpace {
         pin: &'a dyn PinnedExecution,
         kernel_access: &crate::hal::user::PreparedKernelAccess<'_>,
         identifier: IdentifierLease<HostAsid>,
-        binding: hyper::hal::user::UserRunBinding,
-    ) -> Result<NativeActivation<'a>, Error> {
+    ) -> Result<ActiveNativeAddressSpace<'a>, Error> {
         if identifier.generation() != self.identifier.generation() {
             return Err(Error::Identifier(
                 crate::kernel::mm::translation_id::Error::InvalidToken,
@@ -700,14 +688,9 @@ impl NativeAddressSpace {
             return Err(Error::Residency(ResidencyError::AlreadyActive));
         }
         let backend = self.state.with(|state| {
-            match state
+            state
                 .residency
-                .check_admission(cpu.get(), state.current.epoch)
-            {
-                Ok(()) => {}
-                Err(ResidencyError::Busy) => return Ok(None),
-                Err(error) => return Err(Error::Residency(error)),
-            }
+                .check_admission(cpu.get(), state.current.epoch)?;
             // SAFETY: The state lock closes the update cut through the local
             // install and active publication; `pin` prevents CPU migration.
             let backend = unsafe {
@@ -730,65 +713,21 @@ impl NativeAddressSpace {
                 let _ = unsafe { crate::hal::user::deactivate_local(backend) };
                 return Err(Error::Residency(error));
             }
-            Ok(Some(backend))
+            Ok(backend)
         });
         let backend = match backend {
-            Ok(Some(backend)) => backend,
-            Ok(None) => {
-                ACTIVE_OWNER[cpu].store(0, Ordering::Release);
-                #[cfg(all(
-                    feature = "kernel-self-test",
-                    any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64)
-                ))]
-                self.admission_retries.fetch_add(1, Ordering::Relaxed);
-                // No machine root was installed. Release the logical run and
-                // scheduler pin before retrying, so the updater can progress.
-                return Ok(NativeActivation::Retry(UnenteredNativeRun { binding }));
-            }
+            Ok(backend) => backend,
             Err(error) => {
                 ACTIVE_OWNER[cpu].store(0, Ordering::Release);
                 return Err(error);
             }
         };
-        Ok(NativeActivation::Active(ActiveNativeAddressSpace {
+        Ok(ActiveNativeAddressSpace {
             owner: self,
             cpu,
             backend: Some(backend),
             identifier: Some(identifier),
-        }))
-    }
-
-    /// Hold a real update gate across a test scheduling interval without
-    /// replacing the root. The closure must not initiate mapping changes.
-    #[cfg(all(
-        feature = "kernel-self-test",
-        any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64)
-    ))]
-    pub(crate) fn with_closed_admission_for_test<T>(&self, test: impl FnOnce() -> T) -> T {
-        let cut = match self
-            .state
-            .with(|state| state.residency.begin_update(state.current.epoch))
-        {
-            Ok(cut) => cut,
-            Err(_) => hyper::debug::invariant_failure("Native admission test could not close gate"),
-        };
-        let result = test();
-        if self
-            .state
-            .with(|state| state.residency.abort_update(cut))
-            .is_err()
-        {
-            hyper::debug::invariant_failure("Native admission test could not reopen gate");
-        }
-        result
-    }
-
-    #[cfg(all(
-        feature = "kernel-self-test",
-        any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64)
-    ))]
-    pub(crate) fn admission_retries_for_test(&self) -> u64 {
-        self.admission_retries.load(Ordering::Relaxed)
+        })
     }
 
     /// Retires the last machine root and unregisters its software identity only
@@ -948,22 +887,6 @@ impl Drop for NativeAddressSpace {
     fn drop(&mut self) {
         // ManuallyDrop fields intentionally retain published owners. See the
         // type-level teardown contract above.
-    }
-}
-
-pub(crate) enum NativeActivation<'owner> {
-    Active(ActiveNativeAddressSpace<'owner>),
-    Retry(UnenteredNativeRun),
-}
-
-/// Admission was closed before translation or architecture entry became active.
-pub(crate) struct UnenteredNativeRun {
-    binding: hyper::hal::user::UserRunBinding,
-}
-
-impl UnenteredNativeRun {
-    pub(crate) const fn binding(&self) -> hyper::hal::user::UserRunBinding {
-        self.binding
     }
 }
 

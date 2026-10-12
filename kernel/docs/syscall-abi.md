@@ -70,8 +70,7 @@ same bounded little-endian `u64` CPU-mask words as process-builder affinity.
 The nonempty mask must include an allowed registered CPU; bits above the kernel
 CPU limit are rejected. If the current CPU remains allowed, placement is kept.
 Otherwise the scheduler chooses an allowed CPU and safely migrates the saved
-context. This explicit update is separate from the kernel's round-robin initial
-placement; it does not trigger periodic load balancing.
+context. This enforces explicit affinity without automatic load balancing.
 
 Success means the update or required source-context handoff was accepted; the
 handoff may finish before or after return. Stopping VMs and retired vCPUs reject

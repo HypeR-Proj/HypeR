@@ -35,8 +35,6 @@ pub(crate) fn run() -> Result<(), Error> {
         }
         crate::pr_info!("HypeR test: Native register isolation passed (same-hart and migratable)");
         integer_only(&domain, &group)?;
-        let exit = [0x13, 0x05, 0, 0, 0x93, 0x08, 0x70, 0, 0x73, 0, 0, 0];
-        super::verify_admission_retry(&domain, &group, &exit, MachineAbi::Riscv64, 0)?;
         super::fp::run(&domain, &group)
     })();
     group.request_stop().map_err(|_| Error::Group)?;

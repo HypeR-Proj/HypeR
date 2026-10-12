@@ -46,8 +46,7 @@ The current foundation includes:
   architecture handoffs including x86 boot parameters;
 - KASLR with RELA/RELR relocation on AArch64;
 - permanent stage-1 mappings, guest stage-2 translation, boot allocation,
-  buddy allocation with address-width-bounded free-block lookup, slab allocation,
-  and a bounded per-CPU fast path behind
+  buddy allocation, slab allocation, and a bounded per-CPU fast path behind
   Rust's global allocator interface;
 - SMP startup with a scheduler-owned idle thread on every admitted CPU;
 - class-aware, intrusive ready queues with RT FIFO and a replaceable Fair
@@ -100,8 +99,6 @@ The current foundation includes:
   user Thread, dispatches the initial handle, scheduling, lifecycle, and Event
   syscalls, contains a user fault, and retires the complete Process ownership
   graph;
-- round-robin initial CPU placement shared by kernel, Native and vCPU threads,
-  constrained by affinity; wakeups retain their assigned CPU;
 - safe AArch64 IRQ-tail preemption, including deactivation and resumption of
   scheduler-owned vCPU continuations;
 - IRQ domains and shared handler registration, host/guest GICv2 and GICv3, PLIC, x2APIC, host
@@ -128,7 +125,7 @@ The current foundation includes:
 
 This list describes implemented foundations, not a claim of production
 completeness. In particular, general-purpose VMM resource policy, device assignment, strong
-guest isolation policy, cross-architecture asynchronous preemption, periodic load balancing, broad hardware discovery, stable
+guest isolation policy, cross-architecture asynchronous preemption, automatic load balancing, broad hardware discovery, stable
 management APIs, and a general-purpose virtual I/O stack are still under
 development.
 

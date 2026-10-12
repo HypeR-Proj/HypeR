@@ -792,19 +792,11 @@ only when a Fair peer is ready. Voluntary yield replenishes the slice, while
 blocking and interruption by real-time work retain its remainder. Idle threads
 never enter an ordinary run queue.
 
-Kernel, Native user, and vCPU threads share a round-robin initial CPU placement
-policy. Each new reservation selects the next registered, schedulable CPU
-allowed by its `CpuMask`. Selection and cursor advancement are serialized by
-the existing coordinator; failed reservations do not advance it. Single-CPU
-constraints leave the cursor unchanged, so pinned services cannot bias other
-creations. Empty masks and masks with no registered CPU are rejected.
-This spreads new work, including boot vCPUs of separate VMs, without sampling
-remote run queues. It does not measure CPU utilization or rebalance existing
-work; wakeups retain their assignment, and threads created before SMP admission
-remain on their original CPU.
-
-Ordinary threads carry movable placement policy. Explicit migration and affinity
-updates move dormant, ready, and fully stopped blocked movable threads synchronously under the
+Ordinary kernel threads carry movable placement policy and may retain an
+explicit `CpuMask`; creation prefers the calling CPU when admitted, then the
+lowest-numbered registered CPU in the mask. Empty masks and masks with no
+registered CPU are rejected. Explicit migration and affinity updates move
+dormant, ready, and fully stopped blocked movable threads synchronously under the
 exclusive coordinator. A running or switch-in-flight thread retains the request
 on its own `Thread`; the source CPU commits a switch and the incoming switch tail
 publishes target membership only after assembly has saved the complete source
@@ -817,8 +809,8 @@ their detached threads move. The public vCPU control is `set_affinity`: keeping
 its assigned CPU in the mask preserves placement; excluding it selects an
 eligible CPU and triggers this handoff. The scheduler Thread owns the mask,
 which survives guest CPU off/on cycles. No separate public migrate operation
-or duplicate vCPU affinity state is needed. Bootstrap and idle threads remain
-pinned. Periodic load balancing and idle-CPU work stealing remain future policy.
+or duplicate vCPU affinity state is needed. Bootstrap and idle threads remain pinned. Automatic load
+selection and balancing are deliberately separate future policy.
 The kernel always builds the SMP-capable scheduler and per-CPU infrastructure;
 the same image remains valid when firmware admits only the boot CPU. There is
 no separate uniprocessor configuration or single-CPU scheduler implementation.
