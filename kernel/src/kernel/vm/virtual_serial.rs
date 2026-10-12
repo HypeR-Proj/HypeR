@@ -165,6 +165,7 @@ impl VirtualSerial {
 
     /// No allocation or data copy into a kernel queue. Only the first byte of
     /// an unread batch publishes readiness; subsequent bytes do not notify.
+    #[cfg(any(not(CONFIG_ARCH_AARCH64), feature = "kernel-self-test"))]
     pub(crate) fn publish_guest_output(&self, byte: u8) {
         self.state.with(|_| {
             if !self
@@ -178,8 +179,37 @@ impl VirtualSerial {
         });
     }
 
-    pub(crate) fn acknowledge_output(&self, consumed: u64) -> Result<(), Error> {
+    /// The `AArch64` UART uses transport backpressure instead of dropping output.
+    /// A disconnected sink consumes bytes without blocking guest execution.
+    #[cfg(CONFIG_ARCH_AARCH64)]
+    pub(crate) fn try_publish_guest_output(&self, byte: u8) -> bool {
         self.state.with(|_| {
+            if self
+                .output_closed
+                .load(core::sync::atomic::Ordering::Acquire)
+            {
+                return true;
+            }
+            let Some(output) = self.output.get() else {
+                return true;
+            };
+            match output.try_publish(byte) {
+                Ok(readable) => {
+                    if readable {
+                        self.update_signals(
+                            crate::kernel::object::SignalMask::EMPTY,
+                            Self::READABLE,
+                        );
+                    }
+                    true
+                }
+                Err(()) => false,
+            }
+        })
+    }
+
+    pub(crate) fn acknowledge_output(&self, consumed: u64) -> Result<(), Error> {
+        let route = self.state.with(|state| -> Result<_, Error> {
             let output = self.output.get().ok_or(Error::Disconnected)?;
             let readable = output
                 .acknowledge(consumed)
@@ -189,8 +219,17 @@ impl VirtualSerial {
             if !readable {
                 self.update_signals(Self::READABLE, crate::kernel::object::SignalMask::EMPTY);
             }
-            Ok(())
-        })
+            Ok(state.route)
+        })?;
+        // Never acquire the UART/controller locks under the port lock. A guest
+        // may be waiting for TX space with interrupts or WFI rather than polling.
+        #[cfg(CONFIG_ARCH_AARCH64)]
+        if let Some(route) = route {
+            super::device::kick_virtual_serial(route);
+        }
+        #[cfg(not(CONFIG_ARCH_AARCH64))]
+        let _ = route;
+        Ok(())
     }
 
     pub(crate) fn register_output(
@@ -285,7 +324,20 @@ impl KernelObject for VirtualSerial {
     fn on_zero_active_handles(&self, _retirement: &mut crate::kernel::object::ObjectRetirement) {
         // Synchronize with admitted writers before closing. The independent
         // VMO lease survives until the final VM/object reference retires.
-        self.state.with(|state| self.close_output(state));
+        let route = self.state.with(|state| {
+            let route = state.route;
+            self.close_output(state);
+            route
+        });
+        // Closing the sink also releases TX backpressure. Refresh the FIFO and
+        // interrupt level so a guest waiting for TX space need not poll again.
+        // As with acknowledgement, the UART lock must follow port-lock release.
+        #[cfg(CONFIG_ARCH_AARCH64)]
+        if let Some(route) = route {
+            super::device::kick_virtual_serial(route);
+        }
+        #[cfg(not(CONFIG_ARCH_AARCH64))]
+        let _ = route;
     }
 }
 

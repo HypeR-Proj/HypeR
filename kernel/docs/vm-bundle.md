@@ -86,8 +86,33 @@ The first byte of an unread batch asserts READABLE; subsequent bytes do not
 notify. Acknowledgement clears it only if all published bytes were consumed.
 Thus output arriving before clearing stays readable and output arriving after
 clearing reasserts readiness. The existing signal wait protocol closes the
-check-to-park race. Full rings drop new bytes and count loss without blocking
-the guest or overwriting unconsumed bytes. See the generated ABI for layout.
+check-to-park race. The AArch64 SBSA UART retains unsent bytes in its TX FIFO
+when this ring is full; runtime acknowledgements resume transmission and update
+the guest interrupt level. Closing the last runtime handle drains pending TX
+into a disconnected sink and updates the interrupt level as well, so a guest
+waiting for space need not poll. Other producers drop new bytes and count loss when
+full. No producer overwrites unconsumed bytes. See the generated ABI for layout.
+
+The AArch64 reference guest exposes `arm,sbsa-uart` at `0x09000000`, with SPI 1
+(INTID 33), fixed 115200 baud / 8N1 and separate 32-byte receive/transmit FIFOs.
+The always-enabled SBSA interface includes DR, RSR/ECR, FR, IMSC, RIS, MIS and
+ICR. RX/TX interrupts use fixed one-eighth FIFO thresholds; RX timeout expires
+after 32 bit periods using the host counter, including while the guest sleeps.
+Overrun preserves queued bytes and reports the error separately from interrupt
+clearing. The byte transport supplies no parity, framing or break errors.
+PL011 baud/configuration, DMA, modem, flow-control and identification registers
+are not exposed. Reserved registers read as zero and ignore writes. Byte,
+halfword and word accesses at register bases are accepted; byte access to a
+16-bit register is an extension of the minimum SBSA interface.
+
+MMIO completes in the kernel. TX completes once the bounded output transport
+accepts the byte, with no simulated wire delay or userspace device-model round
+trip. FIFO state, byte publication and IRQ state share the UART lock across
+vCPUs. A reserved per-VM timer delivers receive timeouts and is retired before
+device storage is freed. The device tree supplies `current-speed` rather than
+PL011 clock nodes; Linux continues to use `ttyAMA0` and can discover earlycon
+through `stdout-path`. RISC-V retains its NS16550 model. Physical host UART
+drivers are independent of these guest devices.
 
 `vm-runtime` uses a persistent WaitSet for output, control, vCPU termination,
 and actionable client channel states, with an infinite deadline. It owns a
@@ -97,7 +122,10 @@ space. The runtime subscribes to client READABLE only when it can accept another
 message, and to client WRITABLE only while output is pending. Peer closure drains
 already accepted input. Neither direction requires periodic polling.
 
-The lock order is port, signal state, then scheduler/WaitSet notification.
+The lock order is UART, port, signal state, then scheduler/WaitSet notification.
+Input injection and output acknowledgement release the port lock before
+updating the UART. Timer control precedes the UART lock; retirement waits for
+callbacks only after releasing the UART lock.
 Guest-device kicks run after releasing the port lock. Output byte publication
 uses Release and readers use Acquire; consumption completes before the syscall
 releases slots under the port lock. Atomic byte access also tolerates a hostile

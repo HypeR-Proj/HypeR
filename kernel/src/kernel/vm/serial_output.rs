@@ -25,6 +25,7 @@ pub(crate) struct SharedAtomicOutput {
     _pinned: CommittedCharge,
     produced: AtomicU64,
     consumed: AtomicU64,
+    #[cfg(any(not(CONFIG_ARCH_AARCH64), feature = "kernel-self-test"))]
     dropped: AtomicU64,
 }
 
@@ -58,6 +59,7 @@ impl SharedAtomicOutput {
             _lease: lease,
             produced: AtomicU64::new(0),
             consumed: AtomicU64::new(0),
+            #[cfg(any(not(CONFIG_ARCH_AARCH64), feature = "kernel-self-test"))]
             dropped: AtomicU64::new(0),
         };
         output.word(0).store(0, Ordering::Relaxed);
@@ -76,14 +78,26 @@ impl SharedAtomicOutput {
 
     /// Caller holds the port lock across publication and signal mutation.
     /// Returns true only on the empty-to-nonempty transition.
+    #[cfg(any(not(CONFIG_ARCH_AARCH64), feature = "kernel-self-test"))]
     pub(crate) fn publish(&self, byte: u8) -> bool {
+        match self.try_publish(byte) {
+            Ok(readable) => readable,
+            Err(()) => {
+                let dropped = self.dropped.load(Ordering::Relaxed).saturating_add(1);
+                self.dropped.store(dropped, Ordering::Relaxed);
+                self.word(8).store(dropped, Ordering::Relaxed);
+                false
+            }
+        }
+    }
+
+    /// Preserve the caller's byte on pressure. The UART retains it in its TX
+    /// FIFO until a consumer acknowledgement makes transport space available.
+    pub(crate) fn try_publish(&self, byte: u8) -> Result<bool, ()> {
         let produced = self.produced.load(Ordering::Relaxed);
         let consumed = self.consumed.load(Ordering::Relaxed);
         let Some(slot) = super::serial_ring::writable_slot(produced, consumed, CAPACITY) else {
-            let dropped = self.dropped.load(Ordering::Relaxed).saturating_add(1);
-            self.dropped.store(dropped, Ordering::Relaxed);
-            self.word(8).store(dropped, Ordering::Relaxed);
-            return false;
+            return Err(());
         };
         let offset = HEADER as usize + slot;
         let page_size = hyper::mm::PAGE_SIZE as usize;
@@ -97,7 +111,7 @@ impl SharedAtomicOutput {
             .store(byte, Ordering::Relaxed);
         self.word(0).store(produced + 1, Ordering::Release);
         self.produced.store(produced + 1, Ordering::Relaxed);
-        produced == consumed
+        Ok(produced == consumed)
     }
 
     /// Validates a batch acknowledgement under the same port lock as writers.

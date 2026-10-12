@@ -4,12 +4,10 @@
 //! RISC-V reference UART and PLIC service.
 
 use super::super::super::registry::{VmBinding, VmId};
-use crate::kernel::time::{OwnedArmedReservedTimer, ReservedTimer};
+use super::super::serial_timeout::SerialTimeout;
 use crate::kernel::vm::virtual_serial::Route;
-use alloc::boxed::Box;
 use hyper::abi::native::*;
-use hyper::mm::{FallibleArc, try_box};
-use hyper::sync::{InterruptSpinLock, PublishedOnce};
+use hyper::sync::InterruptSpinLock;
 use hyper::vm::device::uart16550::Ns16550;
 use hyper::vm::exit::{MmioAccess, MmioAction, MmioOperation};
 use hyper::vm::interrupt::VirtualInterruptId;
@@ -25,7 +23,6 @@ type Lock<T> = InterruptSpinLock<T, crate::hal::irq::LocalMask>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Error {
-    Allocation,
     Timer,
     InvalidAccess,
     InvalidInterrupt,
@@ -36,19 +33,9 @@ struct Console {
     uart: Ns16550,
     closed: bool,
 }
-struct TimerControl {
-    armed: Option<OwnedArmedReservedTimer>,
-    deadline: Option<u64>,
-}
-struct TimeoutContext {
-    route: PublishedOnce<Route>,
-}
-
 pub(crate) struct VirtualDeviceSet {
     console: Lock<Console>,
-    timer_control: Lock<TimerControl>,
-    timer: FallibleArc<ReservedTimer>,
-    timeout_context: Box<TimeoutContext>,
+    timeout: SerialTimeout,
     virtual_serial: Option<super::super::VirtualSerialBinding>,
 }
 
@@ -61,11 +48,7 @@ impl VirtualDeviceSet {
 
     pub(in crate::kernel::vm) fn bind_virtual_serial(&self, vm: VmId, vcpu: u32) {
         let route = Route { vm, vcpu };
-        if self.timeout_context.route.publish(route).is_err() {
-            crate::kernel::crash::fatal(format_args!(
-                "HypeR: duplicate UART timer route publication"
-            ));
-        }
+        self.timeout.bind(route);
         if let Some(output) = &self.virtual_serial {
             output.bind(route);
         }
@@ -79,49 +62,23 @@ impl VirtualDeviceSet {
 
     /// Called after registry lookup is cut, before ownership reclamation.
     pub(in crate::kernel::vm) fn quiesce(&self) -> Result<(), Error> {
-        self.timer_control.with(|control| {
-            self.console.with(|console| console.closed = true);
-            control.deadline = None;
-            // Never wait for a callback under the console or PLIC lock.
-            if let Some(armed) = control.armed.take() {
-                armed.retire().map_err(|_| Error::Timer)?;
-            }
-            Ok(())
-        })
+        self.timeout
+            .quiesce(|| self.console.with(|console| console.closed = true))
+            .map_err(|_| Error::Timer)
     }
 
     fn reschedule(&self) -> Result<(), Error> {
-        // Lock order: timer control -> console -> PLIC. Callback takes only
-        // console -> PLIC, and never timer control. Exact retirement waits only
-        // after console unlock, so an in-flight callback can always finish.
-        self.timer_control.with(|control| {
-            let deadline = self.console.with(|console| {
-                if console.closed {
-                    None
-                } else {
-                    console.uart.next_timeout()
-                }
-            });
-            if deadline == control.deadline {
-                return Ok(());
-            }
-            if let Some(armed) = control.armed.take() {
-                armed.retire().map_err(|_| Error::Timer)?;
-            }
-            control.deadline = None;
-            if let Some(deadline) = deadline {
-                if self.timeout_context.route.get().is_none() {
-                    return Err(Error::Closed);
-                }
-                let context = (&*self.timeout_context as *const TimeoutContext).expose_provenance();
-                control.armed = Some(
-                    ReservedTimer::arm_owned(self.timer.clone(), deadline, uart_timeout, context)
-                        .map_err(|_| Error::Timer)?,
-                );
-                control.deadline = Some(deadline);
-            }
-            Ok(())
-        })
+        self.timeout
+            .reschedule(|| {
+                self.console.with(|console| {
+                    if console.closed {
+                        None
+                    } else {
+                        console.uart.next_timeout()
+                    }
+                })
+            })
+            .map_err(|_| Error::Timer)
     }
 
     fn access(
@@ -213,47 +170,28 @@ fn pump_input(uart: &mut Ns16550, binding: Option<&super::super::VirtualSerialBi
     }
 }
 
-fn uart_timeout(context: usize) {
-    let pointer = core::ptr::with_exposed_provenance::<TimeoutContext>(context);
-    // SAFETY: the device owns this stable box. Quiesce retires its exact timer
-    // (including an in-flight callback) before the box can be destroyed.
-    let context = unsafe { &*pointer };
-    if let Some(route) = context.route.get().copied() {
-        let _ = super::super::super::registry::with_binding(route.vm, |binding| {
-            binding.devices().receive(binding, route, true)
-        });
-    }
+fn uart_timeout(route: Route) {
+    let _ = super::super::super::registry::with_binding(route.vm, |binding| {
+        binding.devices().receive(binding, route, true)
+    });
 }
 
 pub(super) fn prepare(
     virtual_serial: Option<super::super::VirtualSerialBinding>,
 ) -> Result<VirtualDeviceSet, Error> {
     let frequency = crate::kernel::time::counter_frequency_hz().map_err(|_| Error::Timer)?;
-    let timer = FallibleArc::try_new(ReservedTimer::try_new().map_err(|_| Error::Timer)?)
-        .map_err(|_| Error::Allocation)?;
-    let timeout_context = try_box(TimeoutContext {
-        route: PublishedOnce::new(),
-    })
-    .map_err(|_| Error::Allocation)?;
     Ok(VirtualDeviceSet {
         console: Lock::new(Console {
             uart: Ns16550::with_clock(frequency, UART_CLOCK),
             closed: false,
         }),
-        timer_control: Lock::new(TimerControl {
-            armed: None,
-            deadline: None,
-        }),
-        timer,
-        timeout_context,
+        timeout: SerialTimeout::try_new(uart_timeout).map_err(|_| Error::Timer)?,
         virtual_serial,
     })
 }
 
 pub(super) const fn dynamic_allocation_bytes() -> usize {
-    FallibleArc::<ReservedTimer>::allocation_size()
-        + ReservedTimer::allocation_size()
-        + core::mem::size_of::<TimeoutContext>()
+    SerialTimeout::allocation_bytes()
 }
 pub(super) const fn timer_count() -> u64 {
     1

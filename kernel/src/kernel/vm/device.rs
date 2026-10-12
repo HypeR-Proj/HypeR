@@ -11,6 +11,8 @@ use crate::kernel::object::{KernelRef, VmDeviceBinding};
 use crate::kernel::vm::virtual_serial::{Route, VirtualSerial};
 
 pub(in crate::kernel) mod selected;
+#[cfg(any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64))]
+mod serial_timeout;
 
 pub use selected::Error;
 pub(crate) use selected::VirtualDeviceSet;
@@ -31,7 +33,13 @@ impl VirtualSerialBinding {
         Self { serial }
     }
 
+    #[cfg(CONFIG_ARCH_AARCH64)]
+    pub(super) fn try_write_byte(&self, byte: u8) -> bool {
+        self.serial.object().try_publish_guest_output(byte)
+    }
+
     /// Allocation-free publication into the registered userspace output buffer.
+    #[cfg(not(CONFIG_ARCH_AARCH64))]
     pub(super) fn write_byte(&self, byte: u8) {
         self.serial.object().publish_guest_output(byte)
     }

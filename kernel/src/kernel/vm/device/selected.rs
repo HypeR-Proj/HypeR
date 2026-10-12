@@ -92,33 +92,33 @@ pub(in crate::kernel) fn write_console_byte(
 
 /// Heap storage retained by one selected virtual-device set.
 pub(super) fn dynamic_allocation_bytes() -> usize {
-    #[cfg(CONFIG_ARCH_RISCV64)]
+    #[cfg(any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64))]
     {
         platform::dynamic_allocation_bytes()
     }
-    #[cfg(not(CONFIG_ARCH_RISCV64))]
+    #[cfg(not(any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64)))]
     {
         0
     }
 }
 
 pub(super) const fn timer_count() -> u64 {
-    #[cfg(CONFIG_ARCH_RISCV64)]
+    #[cfg(any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64))]
     {
         platform::timer_count()
     }
-    #[cfg(not(CONFIG_ARCH_RISCV64))]
+    #[cfg(not(any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64)))]
     {
         0
     }
 }
 
 pub(super) fn quiesce(devices: &VirtualDeviceSet) -> Result<(), Error> {
-    #[cfg(CONFIG_ARCH_RISCV64)]
+    #[cfg(any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64))]
     {
         devices.quiesce()
     }
-    #[cfg(not(CONFIG_ARCH_RISCV64))]
+    #[cfg(not(any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64)))]
     {
         let _ = devices;
         Ok(())
