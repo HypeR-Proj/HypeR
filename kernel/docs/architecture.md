@@ -1031,3 +1031,13 @@ Final retirement still closes admission and waits for every resident CPU to
 acknowledge the end of hardware access before freeing page tables or backing.
 It uses stable software identity and conservative local invalidation, without
 claiming a new hardware tag merely to destroy an inactive address space.
+
+## Floating-point state
+
+AArch64 and RISC-V use soft-float kernels with run-scoped lazy restoration for
+Native threads. AArch64 guests are also lazy; RISC-V guests restore once per run
+to retain the supported platform's normal illegal-instruction delegation. [Floating-point context ownership](floating-point.md)
+describes first-use traps, scheduling and migration boundaries, and the linked
+image audit. Native application ABIs remain hard-float. This avoids unconditional
+FP copying on direct exception returns; it does not promise a performance gain
+for every workload, since kernel memory routines also use general registers.
