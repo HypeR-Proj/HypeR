@@ -6,6 +6,7 @@
 mod authority;
 mod handoff;
 mod launcher;
+mod recovery;
 mod report;
 mod supervisor;
 mod vm_connection;
@@ -101,12 +102,10 @@ struct Runtime {
 
 impl Runtime {
     fn from_startup(startup: &mut Startup<'_>, root_directory: Directory) -> Result<Self, Error> {
-        let (console_input_channel, session_input_channel) =
-            channel::create_pair().map_err(|_| Error::OperatingSystem)?;
-        let (session_output_channel, console_output_channel) =
-            channel::create_pair().map_err(|_| Error::OperatingSystem)?;
-        let (session_startup_writer, session_startup_channel) =
-            channel::create_pair().map_err(|_| Error::OperatingSystem)?;
+        let (raw_control_server, raw_controller) =
+            CapabilityChannel::create().map_err(|_| Error::OperatingSystem)?;
+        let (log_server, log_connector) =
+            CapabilityChannel::create().map_err(|_| Error::OperatingSystem)?;
         let factory = startup
             .take(startup::TASK_FACTORY)
             .map_err(|_| Error::OperatingSystem)?;
@@ -153,17 +152,11 @@ impl Runtime {
                     .duplicate(console.info().map_err(|_| Error::OperatingSystem)?.rights)
                     .map_err(|_| Error::OperatingSystem)?
             },
-            console_input_channel: Some(console_input_channel),
-            console_output_channel: Some(console_output_channel),
-            session_input_channel: Some(session_input_channel),
-            // Share only the writer with services. Output bypasses session so
-            // session's own logging never depends on its relay loop draining it.
-            service_output_channel: session_output_channel
-                .duplicate(hyper_service::stdio::STANDARD_OUTPUT_CONTRACT.allowed_rights())
-                .map_err(|_| Error::OperatingSystem)?,
-            session_output_channel: Some(session_output_channel),
-            session_startup_channel: Some(session_startup_channel),
-            session_startup_writer: Some(session_startup_writer),
+            raw_control_server: Some(raw_control_server.into_handle()),
+            raw_controller: Some(raw_controller.into_handle()),
+            log_server: Some(log_server.into_handle()),
+            log_connector: log_connector.into_handle(),
+            service_output_channel: None,
             io_ready_channel: None,
             io_broker_server: None,
             io_broker_client: None,
@@ -295,69 +288,24 @@ impl Runtime {
                 }
             }
             self.launcher.authorities.close_unstarted_vm_manager();
-            self.activate_recovery_console()?;
             let _ = self.launcher.authorities.console.as_emergency_console().write_all(
                 b"HypeR init: system init unavailable; retaining core supervision and recovery shell\n");
-            self.supervisors
-                .supervise(manifest, &self.launcher.authorities.console)
-                .map(|never| match never {})
+            self.recovery_console(manifest)
         })();
         match result {
             Ok(()) => Ok(()),
             Err(error) => {
-                let session = plan
-                    .unique_service_for_purpose(hyper_service::session::STARTUP_DECISION.as_raw());
-                if self.launcher.authorities.session_startup_writer.is_some()
-                    && session.is_some_and(|index| {
-                        self.supervisors.processes[index]
-                            .as_ref()
-                            .is_some_and(|owner| {
-                                owner
-                                    .as_process_supervisor()
-                                    .info()
-                                    .is_ok_and(|info| info.terminal.is_none())
-                            })
-                    })
-                {
-                    let _ = self
-                        .launcher
-                        .authorities
-                        .console
-                        .as_emergency_console()
-                        .write_all(error.diagnostic());
-                    self.activate_recovery_console()?;
-                    return self
-                        .supervisors
-                        .supervise(manifest, &self.launcher.authorities.console)
-                        .map(|never| match never {});
-                }
-                if let Err(stop_error) = self.supervisors.request_service_stop() {
-                    let _ = self
-                        .launcher
-                        .authorities
-                        .console
-                        .as_emergency_console()
-                        .write_all(stop_error.diagnostic());
-                }
-                Err(error)
+                let _ = self
+                    .launcher
+                    .authorities
+                    .console
+                    .as_emergency_console()
+                    .write_all(error.diagnostic());
+                // Recovery owns input only before a committed handoff. Do not
+                // tear down healthy storage merely because another service failed.
+                self.recovery_console(manifest)
             }
         }
-    }
-
-    /// Consume the sole decision writer only after boot has a terminal outcome.
-    /// The channel is part of handoff ownership; a successful transfer does not
-    /// publish a decision from the departing supervisor.
-    fn activate_recovery_console(&mut self) -> Result<(), LaunchError> {
-        if let Some(writer) = self.launcher.authorities.session_startup_writer.take() {
-            match writer
-                .as_byte_channel()
-                .try_send(&[hyper_service::session::ShellMode::Recovery.encode()])
-            {
-                Ok(()) => {}
-                Err(_) => return Err(LaunchError::OperatingSystem),
-            }
-        }
-        Ok(())
     }
 
     fn prepare_system_libraries(&mut self) -> Result<bool, LaunchError> {
@@ -399,7 +347,6 @@ pub(super) enum LaunchError {
     OperatingSystem,
     RequiredServiceUnavailable,
     ServiceUnavailable,
-    StopRollbackFailed,
     UnsupportedAuthority,
     UnsupportedRestartPolicy,
     UnsupportedSupervisionGraph,
@@ -439,7 +386,6 @@ impl LaunchError {
             Self::OperatingSystem => b"HypeR init: service launch operation failed\n",
             Self::RequiredServiceUnavailable => b"HypeR init: startup provider unavailable\n",
             Self::ServiceUnavailable => b"HypeR init: service image or resources unavailable\n",
-            Self::StopRollbackFailed => b"HypeR init: service rollback failed\n",
             Self::UnsupportedAuthority => b"HypeR init: unsupported service authority\n",
             Self::UnsupportedRestartPolicy => b"HypeR init: unsupported restart policy\n",
             Self::UnsupportedSupervisionGraph => {
@@ -457,7 +403,6 @@ impl LaunchError {
             Self::OperatingSystem => b"kernel operation rejected",
             Self::RequiredServiceUnavailable => b"startup provider unavailable",
             Self::ServiceUnavailable => b"service image or resources unavailable",
-            Self::StopRollbackFailed => b"rollback failed",
             Self::UnsupportedAuthority => b"unsupported authority",
             Self::UnsupportedRestartPolicy => b"unsupported restart policy",
             Self::UnsupportedSupervisionGraph => b"unsupported supervision graph",

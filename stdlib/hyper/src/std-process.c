@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <hyper/std.h>
+#include <hyper/stream.h>
 #include <hyper/launch.h>
 #include <stdlib.h>
 #include <hyper/startup.h>
@@ -11,7 +12,6 @@
 #define CWD UINT32_C(0x80040001)
 #define CHILD_LIB UINT32_C(0x80040002)
 #define STDIN UINT32_C(0x80030001)
-#define TERMINAL_INPUT UINT32_C(0x80030004)
 
 /* The PAL's opaque builder token owns its local argument encoding as well
  * as the kernel transaction. Only seal uploads the complete payload. */
@@ -219,31 +219,18 @@ int64_t __hyper_std_process_inherit(uint64_t builder, uint32_t stream, uint64_t 
 	builder = ((LaunchBuilder *)(uintptr_t)builder)->handle;
 	if (stream > 2 || parent_stream > 2)
 		return HYPER_NATIVE_STATUS_INVALID_ARGUMENT;
-	hyper_native_handle_t alias = (!source && stream == 0 && parent_stream == 0)
-					      ? hyper_runtime_capability(TERMINAL_INPUT)
-					      : 0;
-	if (!source)
+	if (!source) {
+		uint64_t connector = hyper_runtime_stream_connector(parent_stream);
+		if (connector)
+			return delegate(builder, connector, HYPER_STREAM_INPUT + stream,
+					HYPER_NATIVE_RIGHT_WRITE | HYPER_NATIVE_RIGHT_WAIT |
+						HYPER_NATIVE_RIGHT_DUPLICATE |
+						HYPER_NATIVE_RIGHT_TRANSFER);
 		source = hyper_runtime_capability(STDIN + parent_stream);
+	}
 	uint64_t rights = HYPER_NATIVE_RIGHT_DUPLICATE | HYPER_NATIVE_RIGHT_TRANSFER |
 			  HYPER_NATIVE_RIGHT_WAIT |
 			  (stream == 0 ? HYPER_NATIVE_RIGHT_READ : HYPER_NATIVE_RIGHT_WRITE);
-	if (alias) {
-		hyper_native_object_basic_info_t input_info = {0}, alias_info = {0};
-		int64_t status = hyper_object_get_basic_info(source, &input_info).status;
-		if (status != 0)
-			return status;
-		status = hyper_object_get_basic_info(alias, &alias_info).status;
-		if (status != 0)
-			return status;
-		if (!input_info.koid || input_info.koid != alias_info.koid ||
-		    input_info.object_kind != HYPER_NATIVE_OBJECT_BYTE_CHANNEL ||
-		    alias_info.object_kind != input_info.object_kind)
-			return HYPER_NATIVE_STATUS_INVALID_ARGUMENT;
-		rights |= HYPER_NATIVE_RIGHT_INSPECT;
-		status = delegate(builder, alias, TERMINAL_INPUT, rights);
-		if (status != 0)
-			return status;
-	}
 	return delegate(builder, source, STDIN + stream, rights);
 }
 

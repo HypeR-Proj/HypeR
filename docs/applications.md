@@ -99,7 +99,7 @@ raw rights mask and flags, whose interpretation depends on the object kind.
 `--list-kinds` describes all SDK object types. A newer kernel kind unknown to
 this SDK is still listed as `unknown(0x...)`, preserving its numeric type ID.
 
-The default service manifests grant the session and shell object inspector
+The default service manifests grant the session manager and shell object inspector
 `INSPECT | INSPECT_DETAILS | DUPLICATE | TRANSFER`. The shell adds an inspector
 with exactly `INSPECT | INSPECT_DETAILS` only when the resolved executable path
 is `/system/bin/handle` (including the bare command `handle`).
@@ -334,31 +334,30 @@ rejection, and an autostart failure followed by a successful independent guest.
 
 ## Interactive transport
 
-Session routing and shell output supervision use nonblocking byte-channel
-relays. Each direction retains at most one message and rotates I/O priority.
-A readiness notification is an observation, so handlers retry the complete wait
-set when a subsequent nonblocking read finds no message. An unredirected
-foreground child shares the terminal input endpoint with the shell; only an
-actual read consumes input. This preserves typed-ahead commands when the child
-does not read stdin. File redirections and pipelines use separate binary streams.
-The shell drains child output before its next prompt and stops a supervised child
-if its terminal connection fails.
+Physical byte transport belongs to `console-raw`; formal line discipline belongs
+to `terminal-service`. Session-manager supervises the terminal and shell, without
+relaying input or output. The shell gives a scoped terminal lease to a command
+with unredirected terminal stdin; in a pipeline this is the first stage.
+It becomes active only after its Process observer is bound; termination restores
+the parent settings and preserves unconsumed typeahead. File redirections and
+pipeline edges remain separate binary streams.
 
-Terminal stdin carries both `stdio.input` and a same-object
-`stdio.terminal-input` capability. The runtime verifies their identity. The
-console-input service splits command/EOF records and normalizes CR and CRLF to LF across
-hardware reads; std terminal input also accepts CR and consumes standalone
-Ctrl-D as EOF without closing the shared endpoint. Native channel readers such
-as `vmm console` receive normalized line endings and the unchanged Ctrl-D byte. This interactive path is not a
-binary serial tunnel or a full POSIX tty. Ordinary pipes and files preserve all
-bytes. Default std child-process inheritance preserves terminal provenance.
-See [the runtime contract](../stdlib/hyper/README.md) for compatibility details.
+Terminal stdin uses a connector and one private request/response connection per
+process. Ordinary `Read` requests only the caller's byte count instead of
+prefetching terminal input into Rust's global stdin buffer. The generic runtime
+does not interpret CR or Ctrl-D: canonical EOF, conversion, raw binary handling
+and read timing are implemented by the formal terminal. `top` and `vmm console`
+select raw mode and use the same runtime input owner as `std::io`.
+See [Native terminals](terminal.md) and the
+[runtime contract](../stdlib/hyper/README.md).
 
-`make test-console ARCH=aarch64` checks typeahead bursts, terminal EOF and CRLF,
-std child inheritance and binary pipes, randomized individually echoed keystrokes,
-idle-to-input transitions, burst recovery, and returning from top and VM console.
-`QEMU_CPUS` selects the CPU count; `CONSOLE_TYPED_ROUNDS` overrides the default
-40 paced commands. Diagnostics are written to `target/app/aarch64/console.log`.
+`make test-console ARCH=aarch64` checks interactive shell typeahead, EOF,
+std child inheritance, binary pipes, paced input, idle wakeups and return from
+full-screen/VM clients. `make test-terminal ARCH=aarch64` additionally checks
+terminal metadata, read timeouts, canonical EOF, all 256 raw byte values and
+restoration after a raw-mode child exits. `terminal-probe` is included only in
+development images. `QEMU_CPUS` selects the CPU count;
+`CONSOLE_TYPED_ROUNDS` overrides the default 40 paced commands.
 
 ### Memory cache reporting
 
@@ -391,13 +390,13 @@ Default units retain small KiB quantities; `free --bytes` avoids rounding.
 
 ## Console and storage visibility
 
-The critical virtual console manager (`/svc/session`, later `/boot/svc/session`)
-waits for the supervisor's explicit decision. Stage-1 selects `/svc/fallback-sh`
-only on failure before handoff; formal init selects `/system/bin/sh` after it
-adopts supervision. A missing formal shell or abnormal shell exit never selects
-bootstrap recovery. Ctrl-D or `exit`
-restarts the selected shell on the same console; it is not a system failure. Shell channels are recreated on each launch; the physical transport
-continues to belong to the console services.
+Stage-1 init owns raw recovery before handoff. Formal init owns errors after
+handoff and launches session-manager for interactive service. Session-manager
+restarts a fresh terminal/shell session after exit or failure, with bounded
+retries and a delay. It revokes the old raw binding before stopping the terminal
+and session groups, waits for retirement, discards stale input, then attaches a fresh epoch.
+A missing formal shell never selects bootstrap recovery. The physical Console
+transport and independent background log channels survive session restarts.
 
 On board images, `vmm list` and `vmm status NAME` include the infrastructure I/O VM
 as read-only, using `io-vm.name` from the board JSON (default `io`). The snapshot reports its lifecycle, vCPU count, guest memory and current pCPU

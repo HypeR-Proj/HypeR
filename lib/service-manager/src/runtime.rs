@@ -69,7 +69,7 @@ impl Runtime {
     ///
     /// A failed mount keeps the physical backend and filesystem manager alive
     /// for system-side diagnosis. Bootstrap no longer owns failure handling.
-    /// Failures after service launch request service shutdown before return.
+    /// Failures keep healthy services supervised under formal init ownership.
     #[inline(never)]
     fn launch_validated_graph(
         &mut self,
@@ -82,8 +82,8 @@ impl Runtime {
             return Err(LaunchError::InvalidPlan);
         }
         let result = (|| {
-            // Ownership has committed and root switching has completed. Formal
-            // mount failures are handled here, never by the bootstrap supervisor.
+            // Ownership has committed. Formal mount and root-switch failures
+            // are handled here, never by the bootstrap supervisor.
             let mut storage_available = self.mount_formal_volumes()?;
             if manifest
                 .services()
@@ -103,12 +103,11 @@ impl Runtime {
                 } else {
                     storage_available = false;
                     let _ = self.launcher.authorities.console.as_emergency_console().write_all(
-                        b"HypeR init: system services unavailable; system console remains available\n",
+                        b"HypeR init: system services unavailable; core services remain supervised\n",
                     );
                 }
             }
             self.configure_vm_fleet(manifest, plan, vm_manager_index, storage_available)?;
-            self.activate_console()?;
             self.supervisors
                 .supervise(manifest, &self.launcher.authorities.console)
                 .map(|never| match never {})
@@ -116,56 +115,19 @@ impl Runtime {
         match result {
             Ok(()) => Ok(()),
             Err(error) => {
-                let session = plan
-                    .unique_service_for_purpose(hyper_service::session::STARTUP_DECISION.as_raw());
-                if self.launcher.authorities.session_startup_writer.is_some()
-                    && session.is_some_and(|index| {
-                        self.supervisors.processes[index]
-                            .as_ref()
-                            .is_some_and(|owner| {
-                                owner
-                                    .as_process_supervisor()
-                                    .info()
-                                    .is_ok_and(|info| info.terminal.is_none())
-                            })
-                    })
-                {
-                    let _ = self
-                        .launcher
-                        .authorities
-                        .console
-                        .as_emergency_console()
-                        .write_all(error.diagnostic());
-                    self.activate_console()?;
-                    return self
-                        .supervisors
-                        .supervise(manifest, &self.launcher.authorities.console)
-                        .map(|never| match never {});
-                }
-                if let Err(stop_error) = self.supervisors.request_service_stop() {
-                    let _ = self
-                        .launcher
-                        .authorities
-                        .console
-                        .as_emergency_console()
-                        .write_all(stop_error.diagnostic());
-                }
-                Err(error)
+                let _ = self
+                    .launcher
+                    .authorities
+                    .console
+                    .as_emergency_console()
+                    .write_all(error.diagnostic());
+                // Handoff is committed: keep healthy formal/core services alive.
+                // Session supervision is a formal service and owns its recovery.
+                self.supervisors
+                    .supervise(manifest, &self.launcher.authorities.console)
+                    .map(|never| match never {})
             }
         }
-    }
-
-    /// Only the adopted supervisor selects the formal console. Failures after
-    /// handoff never authorize a bootstrap recovery shell.
-    fn activate_console(&mut self) -> Result<(), LaunchError> {
-        let mode = hyper_service::session::ShellMode::System;
-        if let Some(writer) = self.launcher.authorities.session_startup_writer.take() {
-            match writer.as_byte_channel().try_send(&[mode.encode()]) {
-                Ok(()) => {}
-                Err(_) => return Err(LaunchError::OperatingSystem),
-            }
-        }
-        Ok(())
     }
 
     /// Finish only the business-service handshake. Storage ownership never
@@ -258,7 +220,6 @@ pub(super) enum LaunchError {
     OperatingSystem,
     RequiredServiceUnavailable,
     ServiceUnavailable,
-    StopRollbackFailed,
     UnsupportedAuthority,
     UnsupportedRestartPolicy,
     UnsupportedSupervisionGraph,
@@ -301,7 +262,6 @@ impl LaunchError {
             Self::OperatingSystem => b"HypeR init: service launch operation failed\n",
             Self::RequiredServiceUnavailable => b"HypeR init: startup provider unavailable\n",
             Self::ServiceUnavailable => b"HypeR init: service image or resources unavailable\n",
-            Self::StopRollbackFailed => b"HypeR init: service rollback failed\n",
             Self::UnsupportedAuthority => b"HypeR init: unsupported service authority\n",
             Self::UnsupportedRestartPolicy => b"HypeR init: unsupported restart policy\n",
             Self::UnsupportedSupervisionGraph => {
@@ -324,7 +284,6 @@ impl LaunchError {
             Self::OperatingSystem => b"kernel operation rejected",
             Self::RequiredServiceUnavailable => b"startup provider unavailable",
             Self::ServiceUnavailable => b"service image or resources unavailable",
-            Self::StopRollbackFailed => b"rollback failed",
             Self::UnsupportedAuthority => b"unsupported authority",
             Self::UnsupportedRestartPolicy => b"unsupported restart policy",
             Self::UnsupportedSupervisionGraph => b"unsupported supervision graph",

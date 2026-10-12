@@ -69,21 +69,21 @@ def main():
         send(b'echo TYPEAHEAD_FIRST\necho TYPEAHEAD_SECOND\n')
         await_text(rb'(?m)^TYPEAHEAD_FIRST\n')
         await_text(console_lines(b'TYPEAHEAD_SECOND', b'hyper-sh$ '))
-        # CRLF may be split by the hardware; EOF belongs only to cat.
+        # A terminal sends CR for Enter; EOF belongs only to cat.
+        # Raw shell input must not consume a later byte speculatively.
         send(b'cat\r')
         pump(0.03)
-        send(b'\nterminal-cat\r\n\x04echo AFTER_TERMINAL_EOF\r\n')
+        send(b'terminal-cat\r\x04echo AFTER_TERMINAL_EOF\r')
         await_text(rb'(?m)^terminal-cat\n')
         await_text(console_lines(b'AFTER_TERMINAL_EOF', b'hyper-sh$ '))
-        send(b'/system/bin/std-test --child terminal-line\r\nterminal-line\r\n')
+        send(b'/system/bin/std-test --child terminal-line\rterminal-line\r')
         await_text(console_lines(b'TERMINAL_LINE_OK', b'hyper-sh$ '))
-        send(b'/system/bin/std-test --child terminal-inherit\ninherit-data\r\n\x04')
+        send(b'/system/bin/std-test --child terminal-inherit\rinherit-data\r\x04')
         await_text(console_lines(b'inherit-data', b'TERMINAL_INHERIT_OK', b'hyper-sh$ '))
         run('/system/bin/std-test --child binary-eof-byte', rb'BINARY_EOF_BYTE_OK')
         # The console service survives both a requested shell exit and EOF.
         for exit_input in (b'exit\n', b'\x04'):
             send(exit_input)
-            await_text(rb'HypeR virtual console: shell exited; restarting\n')
             await_text(console_lines(b'HypeR session: console ready', b'hyper-sh$ '))
             run('echo AFTER_SHELL_RESTART', rb'\nAFTER_SHELL_RESTART\n')
         rounds = int(os.environ.get('CONSOLE_TYPED_ROUNDS', '40'))

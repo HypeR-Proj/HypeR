@@ -87,7 +87,13 @@ def payload_server():
             if self.path != '/payload':
                 self.send_error(404)
                 return
-            if self.headers.get('Content-Length') != str(len(payload)):
+            length = self.headers.get('Content-Length', '')
+            if length != str(len(payload)):
+                # Drain bounded invalid uploads before closing: otherwise macOS
+                # can reset the socket while the client is still sending and
+                # hide the HTTP rejection behind a transport error.
+                if length.isdecimal() and int(length) <= len(payload):
+                    self.rfile.read(int(length))
                 self.send_error(400, 'unexpected payload length')
                 return
             received = self.rfile.read(len(payload))

@@ -593,6 +593,7 @@ pub(in crate::kernel) trait InspectServices: UserMemoryServices {
 }
 
 pub(in crate::kernel) trait ConsoleServices {
+    fn discard_console_input(&self, console: HandleValue) -> Result<usize, ConsoleServiceError>;
     fn read_console(
         &self,
         console: HandleValue,
@@ -895,6 +896,8 @@ pub(in crate::kernel) trait TaskServices: UserMemoryServices {
     ) -> Result<crate::kernel::task::WaitOutcome, ObjectServiceError>;
     fn process_info(&self, process: HandleValue) -> Result<ProcessSnapshot, ProcessError>;
     fn request_process_stop(&self, process: HandleValue) -> Result<(), ProcessError>;
+    fn derive_process_observer(&self, process: HandleValue) -> Result<HandleValue, ProcessError>;
+    fn request_task_group_stop(&self, group: HandleValue) -> Result<(), ProcessError>;
 }
 
 /// Services audited for the masked machine-entry path.

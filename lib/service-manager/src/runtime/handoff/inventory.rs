@@ -26,12 +26,11 @@ const TASK_INSPECTOR: u16 = 6;
 const OBJECT_INSPECTOR: u16 = 7;
 const MEMORY_INSPECTOR: u16 = 8;
 const CPU_INSPECTOR: u16 = 9;
-const SERVICE_OUTPUT: u16 = 10;
+const LOG_CONNECTOR: u16 = 10;
 const DEVICE: u16 = 11;
-const CONSOLE_INPUT: u16 = 12;
-const CONSOLE_OUTPUT: u16 = 13;
-const SESSION_INPUT: u16 = 14;
-const SESSION_OUTPUT: u16 = 15;
+const RAW_CONTROL_SERVER: u16 = 12;
+const RAW_CONTROLLER: u16 = 13;
+const LOG_SERVER: u16 = 14;
 const IO_BROKER_SERVER: u16 = 16;
 const IO_BROKER_CLIENT: u16 = 17;
 const IO_READY: u16 = 18;
@@ -50,12 +49,11 @@ const STAGE_GROUP: u16 = 30;
 const CONSOLE: u16 = 31;
 const BOOT_ENVIRONMENT: u16 = 32;
 const SYSTEM_ENVIRONMENT: u16 = 33;
-const SESSION_STARTUP: u16 = 34;
-const SESSION_DECISION: u16 = 35;
+const LAST_ROLE: u16 = SYSTEM_ENVIRONMENT;
 
 const PROCESS_BASE: u16 = 100;
 const MAX_SLOTS: usize = 64;
-const _: () = assert!(SESSION_DECISION as usize + MAX_SERVICES <= MAX_SLOTS);
+const _: () = assert!(LAST_ROLE as usize + MAX_SERVICES <= MAX_SLOTS);
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -78,13 +76,10 @@ fn receive_slot(slot: &Slot) -> hyper_os::Result<CapabilityReceiveSlot> {
         OBJECT_INSPECTOR => CapabilityReceiveSlot::new::<ObjectInspectorObject>(rights),
         MEMORY_INSPECTOR => CapabilityReceiveSlot::new::<MemoryInspectorObject>(rights),
         CPU_INSPECTOR => CapabilityReceiveSlot::new::<CpuInspectorObject>(rights),
-        SERVICE_OUTPUT => CapabilityReceiveSlot::new::<ByteChannelObject>(rights),
+        LOG_CONNECTOR => CapabilityReceiveSlot::new::<CapabilityChannelObject>(rights),
         DEVICE => CapabilityReceiveSlot::new::<DeviceAssignmentAuthorityObject>(rights),
-        CONSOLE_INPUT => CapabilityReceiveSlot::new::<ByteChannelObject>(rights),
-        CONSOLE_OUTPUT => CapabilityReceiveSlot::new::<ByteChannelObject>(rights),
-        SESSION_INPUT => CapabilityReceiveSlot::new::<ByteChannelObject>(rights),
-        SESSION_OUTPUT | SESSION_STARTUP | SESSION_DECISION => {
-            CapabilityReceiveSlot::new::<ByteChannelObject>(rights)
+        RAW_CONTROL_SERVER | RAW_CONTROLLER | LOG_SERVER => {
+            CapabilityReceiveSlot::new::<CapabilityChannelObject>(rights)
         }
         IO_BROKER_SERVER => CapabilityReceiveSlot::new::<CapabilityChannelObject>(rights),
         IO_BROKER_CLIENT => CapabilityReceiveSlot::new::<CapabilityChannelObject>(rights),
@@ -115,7 +110,7 @@ fn validate_inventory(slots: &[Slot], core_count: usize) -> hyper_os::Result<()>
         return Err(hyper_os::Error::InvalidResponse);
     }
     for (index, slot) in slots.iter().enumerate() {
-        if !(ROOT_DIRECTORY..=SESSION_DECISION).contains(&slot.key)
+        if !(ROOT_DIRECTORY..=LAST_ROLE).contains(&slot.key)
             && !(PROCESS_BASE..PROCESS_BASE + MAX_SERVICES as u16).contains(&slot.key)
         {
             return Err(hyper_os::Error::InvalidResponse);
@@ -141,7 +136,7 @@ fn validate_inventory(slots: &[Slot], core_count: usize) -> hyper_os::Result<()>
         OBJECT_INSPECTOR,
         MEMORY_INSPECTOR,
         CPU_INSPECTOR,
-        SERVICE_OUTPUT,
+        LOG_CONNECTOR,
         STAGE_GROUP,
         CONSOLE,
     ] {
@@ -171,23 +166,23 @@ fn validate_inventory(slots: &[Slot], core_count: usize) -> hyper_os::Result<()>
     Ok(())
 }
 
-/// A still-waiting core session must receive its decision from the adopted
-/// supervisor. Reject a handoff that would lose the sole decision writer.
+/// The formal session manager must receive a raw controller, never a live
+/// bootstrap shell or a post-handoff recovery decision channel.
 pub(super) fn validate_session_source(
     slots: &[Slot],
     plan: &crate::manifest::LaunchPlan<'_>,
-    core_count: usize,
+    _core_count: usize,
 ) -> hyper_os::Result<()> {
     if plan
-        .unique_service_for_purpose(hyper_service::session::STARTUP_DECISION.as_raw())
-        .is_some_and(|index| index < core_count)
+        .unique_service_for_purpose(hyper_service::session::CONSOLE_CONTROLLER.as_raw())
+        .is_some()
     {
         let slot = slots
             .iter()
-            .find(|slot| slot.key == SESSION_DECISION)
+            .find(|slot| slot.key == RAW_CONTROLLER)
             .ok_or(hyper_os::Error::MissingHandle)?;
         let rights = Rights::from_bits(slot.rights).ok_or(hyper_os::Error::InvalidResponse)?;
-        if !rights.contains(Rights::WRITE) {
+        if !rights.contains(Rights::WRITE.union(Rights::WAIT).union(Rights::DUPLICATE)) {
             return Err(hyper_os::Error::MissingHandle);
         }
     }
@@ -305,14 +300,12 @@ pub(super) fn adopt(
         object_inspector: r.required(OBJECT_INSPECTOR)?,
         memory_inspector: r.required(MEMORY_INSPECTOR)?,
         cpu_inspector: r.required(CPU_INSPECTOR)?,
-        service_output_channel: r.required(SERVICE_OUTPUT)?,
+        log_connector: r.required(LOG_CONNECTOR)?,
+        service_output_channel: None,
         device: r.optional(DEVICE)?,
-        console_input_channel: r.optional(CONSOLE_INPUT)?,
-        console_output_channel: r.optional(CONSOLE_OUTPUT)?,
-        session_input_channel: r.optional(SESSION_INPUT)?,
-        session_output_channel: r.optional(SESSION_OUTPUT)?,
-        session_startup_channel: r.optional(SESSION_STARTUP)?,
-        session_startup_writer: r.optional(SESSION_DECISION)?,
+        raw_control_server: r.optional(RAW_CONTROL_SERVER)?,
+        raw_controller: r.optional(RAW_CONTROLLER)?,
+        log_server: r.optional(LOG_SERVER)?,
         io_broker_server: r.optional(IO_BROKER_SERVER)?,
         io_broker_client: r.optional(IO_BROKER_CLIENT)?,
         io_ready_channel: r.optional(IO_READY)?,

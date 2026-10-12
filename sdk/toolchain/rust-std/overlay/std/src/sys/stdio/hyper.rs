@@ -8,6 +8,7 @@ pub struct Stdin;
 pub struct Stdout;
 pub struct Stderr;
 pub const STDIN_BUF_SIZE: usize = 8192;
+pub fn stdin_exact() -> bool { unsafe { ffi::__hyper_std_stdin_exact() != 0 } }
 impl Stdin {
     pub const fn new() -> Self {
         Self
@@ -41,6 +42,7 @@ macro_rules! output {
                 Ok(actual)
             }
             fn flush(&mut self) -> io::Result<()> {
+                cvt(unsafe { ffi::__hyper_std_flush($stream) })?;
                 Ok(())
             }
         }

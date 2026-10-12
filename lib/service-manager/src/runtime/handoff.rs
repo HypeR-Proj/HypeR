@@ -82,11 +82,10 @@ pub(super) fn run_system(startup: &mut Startup<'_>) -> Result<(), Error> {
             // The rendezvous already moved every Process owner here. Failure
             // to switch roots is recoverable; dropping this runtime would stop
             // the very services needed to repair the deployment.
-            runtime.activate_console().map_err(|_| Error::Bootstrap)?;
+            // Formal services can still start from their retained environment.
+            // They do not depend on the namespace switch succeeding.
             return runtime
-                .supervisors
-                .supervise(&manifest, &runtime.launcher.authorities.console)
-                .map(|never| match never {})
+                .launch_validated_graph(&manifest, &plan)
                 .map_err(|_| Error::Bootstrap);
         }
         let _ = runtime

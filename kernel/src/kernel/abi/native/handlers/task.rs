@@ -70,6 +70,34 @@ pub(in crate::kernel::abi::native) fn sys_process_exit(arguments: &Arguments) ->
 }
 
 #[inline(never)]
+pub(in crate::kernel::abi::native) fn sys_process_derive_observer(
+    services: &impl TaskServices,
+    arguments: &Arguments,
+) -> DeferredAction {
+    DeferredAction::Return(handle_result(parse_single_handle(arguments).and_then(
+        |process| {
+            services
+                .derive_process_observer(process)
+                .map_err(status_from_process_error)
+        },
+    )))
+}
+
+#[inline(never)]
+pub(in crate::kernel::abi::native) fn sys_task_group_request_stop(
+    services: &impl TaskServices,
+    arguments: &Arguments,
+) -> DeferredAction {
+    DeferredAction::Return(status_only(parse_single_handle(arguments).and_then(
+        |group| {
+            services
+                .request_task_group_stop(group)
+                .map_err(status_from_process_error)
+        },
+    )))
+}
+
+#[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_process_request_stop(
     services: &impl TaskServices,
     arguments: &Arguments,

@@ -57,8 +57,9 @@ Format adapters implement media operations. The manager is outside the file
 read/write path, and io-runtime continues forwarding console and power events
 while waiting for the initial mount result.
 
-The default image places `fs-fat` on `/system` and `fs-erofs` in the boot RAM
-filesystem. Worker placement is configurable independently of format detection.
+The default image places both `fs-fat` and `fs-erofs` in the boot RAM filesystem.
+Worker placement is configurable independently of format detection and mount
+phase: formal init still requests the default FAT data mount from its own fstab.
 `fs-fat` implements writable FAT32. `fs-erofs` implements read-only,
 uncompressed core EROFS, including compact/extended inodes, plain and inline
 data, directories and symlinks. It validates a present superblock CRC32C and

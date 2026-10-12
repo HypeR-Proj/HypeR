@@ -2,17 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use hyper_os::handle::{ByteChannelObject, OwnedHandle};
+use hyper_os::stream::{ProcessInput, ReadResult};
 use hyper_os::wait::{ObjectSignals, WaitItem, wait_many};
 use std::io::Write;
 
 pub(crate) fn console_session(
-    input: &OwnedHandle<ByteChannelObject>,
+    input: &mut ProcessInput,
     output: &mut impl Write,
     console_channel: &OwnedHandle<ByteChannelObject>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use hyper_vmm::console::{Input, InputAction};
     let mut bytes = [0u8; hyper_os::channel::MAX_MESSAGE_BYTES];
     let mut keyboard = Input::default();
+    // Read only the byte the interactive state machine will consume. A detach
+    // sequence must not prefetch the next shell command into this dying client.
+    input.start_read(1, hyper_os::DEADLINE_INFINITE)?;
     loop {
         if keyboard.is_pending() {
             match console_channel
@@ -30,11 +34,7 @@ pub(crate) fn console_session(
             guest_signals = guest_signals.union(ObjectSignals::<ByteChannelObject>::WRITABLE);
         }
         let waits = [
-            WaitItem::new(
-                input.as_handle_ref(),
-                ObjectSignals::<ByteChannelObject>::READABLE
-                    .union(ObjectSignals::<ByteChannelObject>::PEER_CLOSED),
-            ),
+            input.wait_item(),
             WaitItem::new(console_channel.as_handle_ref(), guest_signals),
         ];
         // stdout is line-buffered. Publish prompts and partial guest output
@@ -58,7 +58,7 @@ pub(crate) fn console_session(
             {
                 continue; // Writable: retry the buffered input on the next pass.
             }
-            output.write_all(b"\n[vmm] virtual machine disconnected\n")?;
+            output.write_all(b"\r\n[vmm] virtual machine disconnected\r\n")?;
             return Ok(());
         }
         if observation.index != 0
@@ -66,23 +66,31 @@ pub(crate) fn console_session(
         {
             return Ok(());
         }
-        let count = match input.as_byte_channel().try_receive(&mut bytes) {
-            Ok(count) => count,
-            Err(hyper_os::Error::Status(hyper_os::Status::WOULD_BLOCK)) => continue,
+        let count = match input.try_complete(&mut bytes) {
+            Ok(Some(ReadResult::Data(count))) => count,
+            Ok(Some(
+                ReadResult::Eof | ReadResult::Cancelled | ReadResult::ConfigurationChanged,
+            )) => return Ok(()),
+            Ok(Some(ReadResult::TimedOut)) => {
+                input.start_read(1, hyper_os::DEADLINE_INFINITE)?;
+                continue;
+            }
+            Ok(None) => continue,
             Err(error) => return console_error(output, b"input", error),
         };
         for byte in bytes[..count].iter().copied() {
             match keyboard.push(byte) {
                 InputAction::Continue => {}
-                InputAction::Menu => output.write_all(b"\n[vmm] d/q: detach, any other key: resume\n")?,
-                InputAction::Resume => output.write_all(b"\n[vmm] resumed\n")?,
-                InputAction::Overflow => output.write_all(b"\n[vmm] guest input buffer full; excess input discarded (Ctrl-] still works)\n")?,
+                InputAction::Menu => output.write_all(b"\r\n[vmm] d/q: detach, any other key: resume\r\n")?,
+                InputAction::Resume => output.write_all(b"\r\n[vmm] resumed\r\n")?,
+                InputAction::Overflow => output.write_all(b"\r\n[vmm] guest input buffer full; excess input discarded (Ctrl-] still works)\r\n")?,
                 InputAction::Detach => {
-                    output.write_all(b"\n[vmm] detached\n")?;
+                    output.write_all(b"\r\n[vmm] detached\r\n")?;
                     return Ok(());
                 }
             }
         }
+        input.start_read(1, hyper_os::DEADLINE_INFINITE)?;
     }
 }
 
@@ -91,7 +99,7 @@ fn console_error(
     operation: &[u8],
     error: hyper_os::Error,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let _ = output.write_all(b"\n[vmm] console ");
+    let _ = output.write_all(b"\r\n[vmm] console ");
     let _ = output.write_all(operation);
     let _ = output.write_all(b" failed: ");
     let reason: &[u8] = match error {
@@ -106,6 +114,6 @@ fn console_error(
         _ => b"invalid response",
     };
     let _ = output.write_all(reason);
-    let _ = output.write_all(b"\n");
+    let _ = output.write_all(b"\r\n");
     Err(error.into())
 }

@@ -17,9 +17,8 @@ use hyper_service::{
     session as session_contract, stdio as stdio_contract, vm as vm_contract,
 };
 
-const CONSOLE_INPUT_IMAGE: &str = "/svc/console-input";
-const CONSOLE_OUTPUT_IMAGE: &str = "/svc/console-output";
-const SESSION_IMAGE: &str = "/svc/session";
+const CONSOLE_RAW_IMAGE: &str = "/svc/console-raw";
+const SESSION_IMAGE: &str = "/svc/session-manager";
 const SHELL_IMAGE: &str = "/bin/sh";
 const VM_MANAGER_IMAGE: &str = "/svc/vm-manager";
 pub const IO_RUNTIME_IMAGE: &str = "/svc/io-runtime";
@@ -58,13 +57,13 @@ macro_rules! define_bootstrap_authorities {
 
 define_bootstrap_authorities! {
     Console = 1 => "bootstrap.console",
-    ConsoleInputChannel = 2 => "bootstrap.console-input-channel",
-    ConsoleOutputChannel = 3 => "bootstrap.console-output-channel",
-    SessionInputChannel = 4 => "bootstrap.session-input-channel",
-    SessionOutputChannel = 5 => "bootstrap.session-output-channel",
-    SessionStartupChannel = 37 => "bootstrap.session-startup-channel",
+    ConsoleControlServer = 2 => "bootstrap.console-control-server",
+    ConsoleController = 3 => "bootstrap.console-controller",
+    ConsoleLogServer = 4 => "bootstrap.console-log-server",
+    ConsoleLogConnector = 5 => "bootstrap.console-log-connector",
     ChildLoader = 35 => "bootstrap.child-loader",
     EnvironmentDirectory = 36 => "bootstrap.environment-directory",
+    BootEnvironmentDirectory = 37 => "bootstrap.boot-environment-directory",
     RootDirectory = 12 => "bootstrap.root-directory",
     DynamicLibraryDirectory = 13 => "bootstrap.dynamic-library-directory",
     TaskFactory = 14 => "bootstrap.task-factory",
@@ -100,12 +99,17 @@ impl AuthorityPolicy for BootstrapPolicy {
             BootstrapAuthority::Console => {
                 duplicate_authority(authority, ConsoleObject::KIND.as_raw(), console_rights())
             }
-            BootstrapAuthority::ConsoleInputChannel
-            | BootstrapAuthority::ConsoleOutputChannel
-            | BootstrapAuthority::SessionInputChannel
-            | BootstrapAuthority::SessionOutputChannel
-            | BootstrapAuthority::SessionStartupChannel
-            | BootstrapAuthority::IoReadyChannel => move_authority(authority),
+            BootstrapAuthority::IoReadyChannel => move_authority(authority),
+            BootstrapAuthority::ConsoleController | BootstrapAuthority::ConsoleLogConnector => {
+                duplicate_authority(
+                    authority,
+                    CapabilityChannelObject::KIND.as_raw(),
+                    Rights::WAIT
+                        .union(Rights::WRITE)
+                        .union(Rights::DUPLICATE)
+                        .union(Rights::TRANSFER),
+                )
+            }
             BootstrapAuthority::ServiceOutputChannel => duplicate_authority(
                 authority,
                 ByteChannelObject::KIND.as_raw(),
@@ -116,7 +120,8 @@ impl AuthorityPolicy for BootstrapPolicy {
                 FileObject::KIND.as_raw(),
                 process_contract::CHILD_LOADER_CONTRACT.allowed_rights(),
             ),
-            BootstrapAuthority::EnvironmentDirectory => duplicate_authority(
+            BootstrapAuthority::EnvironmentDirectory
+            | BootstrapAuthority::BootEnvironmentDirectory => duplicate_authority(
                 authority,
                 DirectoryObject::KIND.as_raw(),
                 process_contract::ENVIRONMENT_DIRECTORY_CONTRACT.allowed_rights(),
@@ -183,7 +188,9 @@ impl AuthorityPolicy for BootstrapPolicy {
                 FileObject::KIND.as_raw(),
                 hyper_service::process::EXECUTABLE_FILE_RIGHTS.as_rights(),
             ),
-            BootstrapAuthority::VmProvisioningChannel
+            BootstrapAuthority::ConsoleControlServer
+            | BootstrapAuthority::ConsoleLogServer
+            | BootstrapAuthority::VmProvisioningChannel
             | BootstrapAuthority::IoBrokerServer
             | BootstrapAuthority::IoBrokerClient
             | BootstrapAuthority::FilesystemAttach
@@ -233,8 +240,7 @@ impl AuthorityPolicy for BootstrapPolicy {
             .or_else(|| image.strip_prefix("/system"))
             .unwrap_or(image);
         let contract = match image {
-            CONSOLE_INPUT_IMAGE => find_contract(console_contract::INPUT_STARTUP_CONTRACTS, name),
-            CONSOLE_OUTPUT_IMAGE => find_contract(console_contract::OUTPUT_STARTUP_CONTRACTS, name),
+            CONSOLE_RAW_IMAGE => find_contract(console_contract::STARTUP_CONTRACTS, name),
             SESSION_IMAGE => find_contract(session_contract::STARTUP_CONTRACTS, name)
                 .or_else(|| find_contract(stdio_contract::STARTUP_CONTRACTS, name))
                 .or_else(|| find_contract(process_contract::SHELL_STARTUP_CONTRACTS, name))

@@ -8,6 +8,8 @@ use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use hyper::mm::FallibleArc;
 use hyper::sync::InterruptSpinLock;
 
+use crate::kernel::object::{SignalMask, SignalSource, SignalState};
+
 use super::lifecycle::StopDispatchProgress;
 use super::{Process, ProcessStopReport, TerminalReason};
 use crate::kernel::accounting::{
@@ -57,6 +59,7 @@ struct TaskGroupInner {
     domain_id: ResourceDomainId,
     domain: ResourceDomain,
     object_published: AtomicBool,
+    signals: SignalState,
     state: GroupLock<GroupState>,
 }
 
@@ -109,6 +112,34 @@ pub(crate) struct TaskGroup {
 }
 
 impl TaskGroup {
+    pub(crate) const TERMINATED: SignalMask = SignalMask::from_trusted_bits(
+        hyper::abi::native::HYPER_NATIVE_SIGNAL_TASK_GROUP_TERMINATED,
+    );
+
+    pub(crate) fn signal_source(&self) -> SignalSource<'_> {
+        SignalSource::new(&self.inner.signals, Self::TERMINATED)
+    }
+
+    /// Stopping closes admission before this predicate can become true. Pending
+    /// construction reservations count as members until committed or rolled back,
+    /// so a late Process publication cannot resurrect a terminated group.
+    fn publish_termination_if_empty(&self) {
+        let terminated = self.inner.state.with(|state| {
+            state.phase != GroupPhase::Active
+                && state.pending_members == 0
+                && state.active_members == 0
+        });
+        if terminated
+            && self
+                .inner
+                .signals
+                .update(SignalMask::EMPTY, Self::TERMINATED)
+                .is_err()
+        {
+            group_invariant_violation();
+        }
+    }
+
     pub(crate) fn try_new(domain: &ResourceDomain) -> Result<Self, TaskGroupError> {
         let amount = ResourceAmount::ZERO
             .with(ResourceKind::KernelObjects, 1)
@@ -124,6 +155,7 @@ impl TaskGroup {
             domain_id: domain.id(),
             domain: domain.clone(),
             object_published: AtomicBool::new(false),
+            signals: SignalState::new(),
             state: GroupLock::new(GroupState {
                 phase: GroupPhase::Active,
                 stop_generation: 0,
@@ -236,6 +268,7 @@ impl TaskGroup {
             } = process.request_stop(TerminalReason::TaskGroupStop { generation });
             dispatch.observe(dispatch_complete);
         }
+        self.publish_termination_if_empty();
         Ok(TaskGroupStopReport {
             generation,
             newly_requested,
@@ -326,6 +359,7 @@ impl Drop for PreparedTaskGroupMembership {
                 None => group_invariant_violation(),
             };
         });
+        self.group.publish_termination_if_empty();
     }
 }
 
@@ -419,6 +453,7 @@ impl TaskGroupMembership {
         drop(process);
         drop(detached_record);
         drop(record);
+        self.group.publish_termination_if_empty();
     }
 }
 

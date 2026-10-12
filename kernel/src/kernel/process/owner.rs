@@ -1270,7 +1270,6 @@ impl Process {
             Some(membership) => membership,
             None => process_invariant_violation(),
         };
-        membership.retire();
         drop(process_charge);
         // Retired is an observation of completed cleanup, not its start.
         self.inner.state.with(|state| {
@@ -1283,6 +1282,8 @@ impl Process {
             Some(object) => object.object().publish_final_snapshot(final_snapshot),
             None => process_invariant_violation(),
         }
+        // Group termination observes completed Process cleanup and its final snapshot.
+        membership.retire();
     }
 
     /// Publishes object-visible termination before waking Process joiners.

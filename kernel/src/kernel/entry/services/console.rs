@@ -10,6 +10,13 @@ use crate::kernel::mm::user_space::UserSlice;
 use crate::kernel::process::ProcessError;
 
 impl ConsoleServices for DeferredProcessServices<'_> {
+    fn discard_console_input(&self, value: HandleValue) -> Result<usize, ConsoleServiceError> {
+        let console = self
+            .process
+            .resolve_handle::<crate::kernel::device::console::SystemConsole>(value, Rights::READ)?;
+        Ok(console.object().discard_input()?)
+    }
+
     fn read_console(
         &self,
         value: HandleValue,

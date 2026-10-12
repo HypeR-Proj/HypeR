@@ -17,12 +17,13 @@ options, history, pipelines or file redirection. Its builtins are `cd`, `pwd`,
 It can launch recovery tools or explicitly selected system programs when those
 are accessible. The `svc` directories are never searched for bare command names.
 
-Session waits for init's one-shot startup decision before launching either
-shell. Stage-1 selects fallback only for failures before handoff. After ownership
-transfers, formal init selects the formal shell, including when a later mount
-or service fails. Session does not infer recovery from channel closure or a
-timeout. Failed shell launches retry with a delay; shell exit restarts the
-selected shell on the same transport without changing environments.
+Stage-1 init launches fallback directly only for failures before supervision
+handoff. Its input and output are raw byte streams from `console-raw`, with no
+terminal settings or line discipline. After ownership transfers, formal init
+starts `session-manager`, which launches `terminal-service` and the formal
+shell. Terminal or shell exit retires the old session and starts a fresh one,
+with bounded retries and a delay. Failures after handoff never select bootstrap
+recovery. See [Native terminals](terminal.md) for ownership and restart behavior.
 
 Both shells open `mount` and `umount` through their fixed boot image environment;
 other bare commands, including `sh`, resolve under `/system/bin`. Explicit paths
@@ -84,9 +85,13 @@ duplication (`2>&1`) or here-document support. Lines are limited to 512 bytes,
 commands to 32 words including the command name, and pipelines to eight stages.
 
 `pwd`, `help` and `clear` can run as pipeline stages or redirect their output.
-`cd` and `exit` require a standalone command without redirection. Ctrl-D sent
-on its own to a running command closes its terminal input; at an empty shell
-prompt it exits the shell. This is not full terminal job control.
+`cd` and `exit` require a standalone command without redirection. A command with
+unredirected terminal stdin receives a scoped terminal lease; in a pipeline this
+is the first stage. Its default input is canonical. Ctrl-D after a partial line
+makes that line readable, and at an empty line produces one zero-length read;
+it does not permanently close the input stream. Commands that select raw mode
+receive Ctrl-D as an ordinary byte. At an empty shell prompt, Ctrl-D exits the
+shell. This is not Unix terminal job control.
 
 ## echo and cat
 

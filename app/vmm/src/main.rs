@@ -65,11 +65,13 @@ fn run(startup: &mut Startup<'_>) -> Result<(), Box<dyn std::error::Error>> {
             output,
             "Connected to {name}. Press Ctrl-] for the control menu."
         )?;
-        return session::console_session(
-            hyper_rt::process::stdin()?,
-            &mut output,
-            &console_channel,
-        );
+        output.flush()?;
+        let mut terminal = hyper_terminal::Terminal::take(startup)?;
+        if let Some(terminal) = terminal.as_mut() {
+            terminal.set_settings(hyper_terminal::Settings::raw())?;
+        }
+        let mut input = hyper_os::stream::ProcessInput::acquire()?;
+        return session::console_session(&mut input, &mut output, &console_channel);
     }
     if let Some(completion) = completion {
         if !matches!(response, Response::Accepted) {

@@ -185,10 +185,15 @@ impl KernelObject for TaskGroupObject {
     const KIND: ObjectKind = ObjectKind::TASK_GROUP;
     const TRANSFER_CLASS: TransferClass = TransferClass::RendezvousOnly;
     const SUPPORTED_RIGHTS: Rights = Rights::DUPLICATE
+        .union(Rights::WAIT)
         .union(Rights::TRANSFER)
         .union(Rights::INSPECT)
         .union(Rights::REQUEST_STOP)
         .union(Rights::TASK_GROUP_ATTACH_PROCESS);
+
+    fn signal_source(&self) -> Option<SignalSource<'_>> {
+        Some(self.group.signal_source())
+    }
 
     fn on_zero_active_handles(&self, _retirement: &mut crate::kernel::object::ObjectRetirement) {
         // A TaskGroup handle is an ownership lease, not merely an inspector.

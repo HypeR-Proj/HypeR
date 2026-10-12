@@ -59,6 +59,15 @@ pub(in crate::kernel) fn dispatch_deferred(
     invocation: NativeInvocation,
 ) -> DeferredAction {
     match invocation.number() {
+        abi::HYPER_NATIVE_SYS_PROCESS_DERIVE_OBSERVER => {
+            handlers::sys_process_derive_observer(services, invocation.arguments())
+        }
+        abi::HYPER_NATIVE_SYS_TASK_GROUP_REQUEST_STOP => {
+            handlers::sys_task_group_request_stop(services, invocation.arguments())
+        }
+        abi::HYPER_NATIVE_SYS_CONSOLE_DISCARD_INPUT => {
+            handlers::sys_console_discard_input(services, invocation.arguments())
+        }
         abi::HYPER_NATIVE_SYS_HANDLE_GET_INFO => DeferredAction::Return(
             handlers::sys_handle_get_info(services, invocation.arguments()),
         ),

@@ -20,7 +20,7 @@ mod task;
 mod vfs;
 mod vm;
 
-pub(super) use console::{sys_console_read, sys_console_write};
+pub(super) use console::{sys_console_discard_input, sys_console_read, sys_console_write};
 pub(super) use device::{
     sys_device_claim, sys_device_claim_bundle, sys_device_claim_matching, sys_device_firmware_read,
     sys_device_irq_complete, sys_device_irq_pending, sys_device_mmio, sys_device_profile_info,
@@ -69,10 +69,11 @@ pub(super) use system::{
     sys_system_config,
 };
 pub(super) use task::{
-    sys_atomic_wait, sys_atomic_wake, sys_process_exit, sys_process_get_current_id,
-    sys_process_get_info, sys_process_request_stop, sys_resource_domain_create,
-    sys_task_group_create, sys_thread_create, sys_thread_exit, sys_thread_request_stop,
-    sys_thread_sleep, sys_thread_start, sys_thread_yield,
+    sys_atomic_wait, sys_atomic_wake, sys_process_derive_observer, sys_process_exit,
+    sys_process_get_current_id, sys_process_get_info, sys_process_request_stop,
+    sys_resource_domain_create, sys_task_group_create, sys_task_group_request_stop,
+    sys_thread_create, sys_thread_exit, sys_thread_request_stop, sys_thread_sleep,
+    sys_thread_start, sys_thread_yield,
 };
 pub(super) use vfs::{
     sys_directory_begin_read, sys_directory_canonicalize, sys_directory_create_directory,

@@ -845,6 +845,32 @@ impl Process {
             .map_err(Into::into)
     }
 
+    pub(crate) fn derive_process_observer(
+        &self,
+        value: HandleValue,
+    ) -> Result<HandleValue, ProcessError> {
+        let reservation = self.reserve_handles::<1>()?;
+        let prepared = self.inner.state.with(|state| {
+            require_handle_phase(state.lifecycle.phase())?;
+            Ok::<_, ProcessError>(
+                self.inner
+                    .handles
+                    .with(|table| table.derive_process_observer(value))?,
+            )
+        });
+        let prepared = match prepared {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.abort_handles(reservation);
+                return Err(error);
+            }
+        };
+        match self.publish_handles(reservation, [prepared]) {
+            Ok(values) => Ok(values[0]),
+            Err(failure) => Err(failure.error),
+        }
+    }
+
     pub(crate) fn duplicate_handle(
         &self,
         value: HandleValue,

@@ -4,6 +4,9 @@
 // Must match stdlib/hyper/include/hyper/std.h and thread.h. No Rust-private layouts.
 #[link(name = "hyper-std", kind = "static")]
 unsafe extern "C" {
+    pub fn __hyper_std_stdin_exact() -> i32;
+    pub fn __hyper_std_is_terminal(stream: u32) -> i32;
+    pub fn __hyper_std_flush(stream: u32) -> i64;
     pub fn __hyper_std_argument(index: usize) -> *const u8;
     pub fn __hyper_std_environment(index: usize) -> *const u8;
     pub fn __hyper_std_read(buffer: *mut u8, capacity: usize, actual: *mut usize) -> i64;
