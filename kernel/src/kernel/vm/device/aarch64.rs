@@ -3,6 +3,8 @@
 
 //! `AArch64` SBSA UART and virtual GIC guest-platform device service.
 
+use alloc::boxed::Box;
+use hyper::mm::try_box;
 use hyper::sync::InterruptSpinLock;
 use hyper::vm::aarch64::device::sbsa_uart::{
     AccessError, REFERENCE_BASE, REFERENCE_INTERRUPT, REFERENCE_SIZE, SbsaUart,
@@ -22,6 +24,7 @@ struct Console {
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Error {
+    Allocation,
     InvalidInterrupt,
     Timer,
     Closed,
@@ -29,7 +32,9 @@ pub enum Error {
 }
 
 pub(crate) struct VirtualDeviceSet {
-    console: ConsoleLock,
+    // Allocate the FIFO state once before publication rather than copying it
+    // through the by-value VM construction transaction on the kernel stack.
+    console: Box<ConsoleLock>,
     console_interrupt: GicInterruptId,
     timeout: SerialTimeout,
     virtual_serial: Option<super::super::VirtualSerialBinding>,
@@ -45,10 +50,11 @@ impl VirtualDeviceSet {
             GicInterruptId::new(REFERENCE_INTERRUPT).ok_or(Error::InvalidInterrupt)?;
         let frequency = crate::kernel::time::counter_frequency_hz().map_err(|_| Error::Timer)?;
         Ok(Self {
-            console: InterruptSpinLock::new(Console {
+            console: try_box(InterruptSpinLock::new(Console {
                 uart: SbsaUart::with_clock(frequency),
                 closed: false,
-            }),
+            }))
+            .map_err(|_| Error::Allocation)?,
             timeout: SerialTimeout::try_new(uart_timeout).map_err(|_| Error::Timer)?,
             console_interrupt,
             virtual_serial,
@@ -181,7 +187,7 @@ fn pump_serial(
 }
 
 pub(super) const fn dynamic_allocation_bytes() -> usize {
-    SerialTimeout::allocation_bytes()
+    SerialTimeout::allocation_bytes() + core::mem::size_of::<ConsoleLock>()
 }
 pub(super) const fn timer_count() -> u64 {
     1
