@@ -35,7 +35,7 @@ impl VmLifecycleResources {
             FallibleArc::<crate::kernel::vm::endpoint::VcpuEndpoint>::allocation_size()
                 .checked_mul(count)
                 .ok_or(Error::Allocation)?;
-        let timer_bytes = crate::kernel::time::ReservedTimer::allocation_size()
+        let timer_bytes = crate::kernel::time::IrqCallout::allocation_size()
             .checked_mul(count)
             .ok_or(Error::Allocation)?;
         let allocation_bytes = VirtualMachine::allocation_size()

@@ -143,8 +143,12 @@ fn start_local_tick(counter_frequency_hz: u64) -> Result<(), Error> {
     }
     crate::kernel::time::initialize_local_timer_queue()?;
     let first_deadline = crate::kernel::time::monotonic_ticks().wrapping_add(interval);
-    let _ =
-        crate::kernel::time::schedule_periodic(first_deadline, interval, handle_periodic_tick, 0)?;
+    let _ = crate::kernel::time::schedule_irq_periodic(
+        first_deadline,
+        interval,
+        handle_periodic_tick,
+        0,
+    )?;
     Ok(())
 }
 

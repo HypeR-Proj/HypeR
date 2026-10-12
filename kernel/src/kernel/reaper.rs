@@ -12,6 +12,9 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use hyper::sync::{DeferredWork, PublishedOnce, WorkDisposition};
 
+#[cfg(all(feature = "kernel-self-test", CONFIG_ARCH_AARCH64))]
+pub(crate) mod retry_test;
+
 const REAP_BATCH: usize = 16;
 const RETIREMENT_RETRY_NS: u64 = 10_000_000;
 
@@ -19,9 +22,9 @@ static WORK: DeferredWork = DeferredWork::new();
 static WAKE: crate::kernel::sync::Completion = crate::kernel::sync::Completion::new();
 static WORKER_PUBLISHED: AtomicBool = AtomicBool::new(false);
 static IRQ_PROMPTS_READY: AtomicBool = AtomicBool::new(false);
-// The timer callback borrows this service-owned reservation, never the
-// worker's stack. Publication occurs once before any retry can be armed.
-static RETRY_TIMER: PublishedOnce<crate::kernel::time::ReservedTimer> = PublishedOnce::new();
+// The permanent callout owns its callback context. Its timer worker requests
+// retirement work without sharing the reaper's stack or lifecycle token.
+static RETRY_TIMER: PublishedOnce<crate::kernel::time::Callout<()>> = PublishedOnce::new();
 static RETRY_DUE: AtomicBool = AtomicBool::new(false);
 
 #[cfg(feature = "kernel-self-test")]
@@ -137,10 +140,9 @@ pub(crate) fn service_irq_prompt() {
 extern "C" fn worker_entry(_argument: usize) {
     let mut access = ReaperAccess { _private: () };
     let mut prefer_objects = false;
-    // Reserve one node for the worker lifetime: retry under memory pressure
-    // must not require another allocation. Its queue follows timer ownership,
-    // never a hard-coded processor identity.
-    let retry_timer = match crate::kernel::time::ReservedTimer::try_new() {
+    // Allocate once: retries under memory pressure do not need another node.
+    // Ordinary callback delivery happens on the source CPU's timer worker.
+    let retry_timer = match crate::kernel::time::Callout::try_new((), retry_expired) {
         Ok(timer) => timer,
         Err(error) => crate::kernel::crash::fatal(format_args!(
             "HypeR: reaper timer reservation failed: {error:?}"
@@ -153,26 +155,33 @@ extern "C" fn worker_entry(_argument: usize) {
         Some(timer) => timer,
         None => hyper::debug::invariant_failure("reaper retry timer missing after publication"),
     };
-    let mut armed_retry: Option<crate::kernel::time::ArmedReservedTimer<'_>> = None;
+    let mut retry_pending = false;
     loop {
+        // Clear the previous batch's request before inspecting any producer
+        // condition. A retry racing the condition check must remain sticky;
+        // clearing WORK afterward could erase its sole wake responsibility.
+        WORK.begin_batch();
         // Unrelated retirement work may wake the worker while a delayed retry
         // remains delayed. Preserve that timer so a steady producer stream
         // cannot postpone older Process or VM retirement indefinitely.
         if RETRY_DUE.swap(false, Ordering::AcqRel) {
-            let timer = match armed_retry.take() {
-                Some(timer) => timer,
-                None => crate::kernel::crash::fatal(format_args!(
+            if !retry_pending {
+                crate::kernel::crash::fatal(format_args!(
                     "HypeR: retirement retry expired without timer ownership"
-                )),
-            };
-            if let Err(error) = timer.retire() {
+                ));
+            }
+            // Publishing RETRY_DUE can wake this Thread before the callback
+            // returns. Join it before making the reservation available again.
+            if let Err(error) = retry_timer.drain() {
                 crate::kernel::crash::fatal(format_args!(
                     "HypeR: reaper timer retirement failed: {error:?}"
                 ));
             }
+            retry_pending = false;
             crate::kernel::process::promote_delayed_retirements(&mut access);
         }
-        WORK.begin_batch();
+        #[cfg(all(feature = "kernel-self-test", CONFIG_ARCH_AARCH64))]
+        retry_test::pause_after_retry_check(retry_pending);
         crate::kernel::process::reap_one_process(&mut access);
         let first_vm_pass = crate::kernel::vm::lifecycle::reap_batch(&mut access);
         let mut subsystem_work = false;
@@ -207,19 +216,19 @@ extern "C" fn worker_entry(_argument: usize) {
             first_vm_pass
         };
         let process_work = crate::kernel::process::retirement_work(&access);
-        if (process_work.delayed || vm_retirement.needs_retry) && armed_retry.is_none() {
+        if (process_work.delayed || vm_retirement.needs_retry) && !retry_pending {
             let deadline = match crate::kernel::time::deadline_after(RETIREMENT_RETRY_NS) {
                 Ok(deadline) => deadline,
                 Err(error) => crate::kernel::crash::fatal(format_args!(
                     "HypeR: reaper retry deadline failed: {error:?}"
                 )),
             };
-            armed_retry = Some(match retry_timer.arm(deadline, retry_expired, 0) {
-                Ok(timer) => timer,
-                Err(error) => crate::kernel::crash::fatal(format_args!(
+            if let Err(error) = retry_timer.arm_at(deadline) {
+                crate::kernel::crash::fatal(format_args!(
                     "HypeR: reaper retry timer failed: {error:?}"
-                )),
-            });
+                ));
+            }
+            retry_pending = true;
         }
         let more_work =
             subsystem_work || process_work.ready || vm_retirement.continue_immediately();
@@ -286,7 +295,11 @@ fn reap_one_object(access: &mut ReaperAccess) -> ReapStep {
     }
 }
 
-fn retry_expired(_context: usize) {
+fn retry_expired(
+    _context: &(),
+    _callout: crate::kernel::time::CalloutRef<'_>,
+    _event: crate::kernel::time::TimerEvent,
+) {
     #[cfg(feature = "kernel-self-test")]
     TEST_RETRY_CPU.store(
         crate::kernel::cpu::current_index().map_or(usize::MAX, |cpu| cpu.get()),

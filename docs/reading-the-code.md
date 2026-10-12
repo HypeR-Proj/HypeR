@@ -168,6 +168,7 @@ follow the selected case:
 | GIC registers | [GIC service](../kernel/src/kernel/vm/device/gic.rs), [VM interrupt controller](../kernel/hal/src/arch/aarch64/vm_interrupt.rs) | Decode access, synchronize hardware state and update the virtual interrupt model |
 | Guest memory fault | [guest memory owner](../kernel/src/kernel/vm/memory.rs), [stage-2 backend](../kernel/hal/src/arch/aarch64/stage2.rs) | Resolve admitted guest backing and translation faults; reject accesses outside policy |
 | Host IRQ while a guest runs | [IRQ entry](../kernel/src/kernel/entry/irq.rs), [VM timer/maintenance integration](../kernel/src/kernel/vm/timer.rs) | Dispatch the host interrupt, reconcile virtual delivery and schedule through the guest IRQ postlude when required |
+| Host software deadline | [timer service](../kernel/src/kernel/time/timers.rs), [Callout lifecycle](../kernel/src/kernel/time/callout/lifecycle.rs), [timer workers](../kernel/src/kernel/time/worker.rs) | Claim expiry under the source queue lock; deliver an explicit IRQ callback or enqueue normal-context work. [Timer contracts](../kernel/docs/timers.md) describe cancellation and shutdown. |
 
 For a deferred device access, continue in
 [the vCPU runner](../kernel/src/kernel/vm/vcpu/runner.rs) and

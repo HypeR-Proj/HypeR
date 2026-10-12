@@ -71,7 +71,7 @@ impl PreparedTimeout {
 
     /// Publishes an exact scheduler generation to a one-shot timer callback.
     ///
-    /// `schedule_at` either returns a live exact handle or proves that its
+    /// `schedule_irq_at` either returns a live exact handle or proves that its
     /// provisional queue entry was detached before returning an error. The
     /// context may therefore be dropped normally on the error path.
     pub(crate) fn arm(
@@ -84,7 +84,7 @@ impl PreparedTimeout {
             ticket,
             super::WaitSource::Timer,
         ));
-        let timer = crate::kernel::time::schedule_at(
+        let timer = crate::kernel::time::schedule_irq_at(
             deadline,
             crate::kernel::time::TimerMode::OneShot,
             expire_wait,
@@ -244,7 +244,7 @@ fn retire_timeout(
         return Ok(());
     }
 
-    match crate::kernel::time::cancel(timer) {
+    match crate::kernel::time::cancel_irq_timer(timer) {
         Ok(()) => Ok(()),
         Err(crate::kernel::time::Error::TimerQueue(
             hyper::time::TimerQueueError::InvalidHandle,

@@ -7,9 +7,21 @@
 //! IRQ domain for physical delivery but does not own interrupt-controller
 //! discovery or routing policy.
 
+mod callout;
 mod realtime;
 mod tick;
 mod timers;
+mod worker;
+
+#[allow(
+    unused_imports,
+    reason = "cancellation outcomes are part of the callout API"
+)]
+pub(crate) use callout::CancelOutcome;
+pub(crate) use callout::{Callout, CalloutRef};
+#[cfg(feature = "kernel-self-test")]
+pub(crate) use worker::permanent_worker_count_for_test;
+pub(crate) use worker::{initialize as initialize_workers, service_irq_prompt};
 
 pub(crate) use realtime::initialize as initialize_realtime;
 pub(crate) use realtime::now as realtime;
@@ -22,11 +34,12 @@ use core::hint::spin_loop;
     unused_imports,
     reason = "owned timer guards serve the RISC-V guest timer"
 )]
-pub(crate) use timers::OwnedArmedReservedTimer;
-pub(crate) use timers::{ArmedReservedTimer, ReservedTimer};
+pub(crate) use timers::OwnedArmedIrqCallout;
+pub(crate) use timers::{ArmedIrqCallout, IrqCallout};
 pub use timers::{
-    QueueStats as TimerQueueStats, TimerCallback, TimerEvent, TimerHandle, TimerMode, cancel,
-    local_statistics as timer_statistics, schedule_after, schedule_at, schedule_periodic,
+    QueueStats as TimerQueueStats, TimerCallback, TimerEvent, TimerHandle, TimerMode,
+    cancel_irq_timer, local_statistics as timer_statistics, schedule_irq_after, schedule_irq_at,
+    schedule_irq_periodic,
 };
 
 use hyper::hal::interrupt::InterruptId;
@@ -51,6 +64,12 @@ pub enum Error {
     TimerQueue(hyper::time::TimerQueueError),
     TimerQueueAlreadyInitialized,
     TimerQueueNotInitialized,
+    CalloutClosed,
+    CalloutBusy,
+    CalloutGenerationExhausted,
+    CalloutWorkerUnavailable,
+    CalloutCallbackContext,
+    CalloutWait(crate::kernel::task::scheduler::Error),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

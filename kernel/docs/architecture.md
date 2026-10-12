@@ -438,9 +438,10 @@ A Process reaching Stopped transfers a counted owner to the kernel reaper.
 The reaper closes its handles, waits for outstanding address-space references,
 and completes acknowledged address-space retirement before breaking TaskGroup
 membership. Retained references and failed machine retirement remain queued;
-the reaper arms its preallocated one-shot timer only before waiting with pending
-Process work. Expiry uses the same durable wake protocol as producers. Each
-batch attempts one Process so object finalizers and detached Threads can still
+the reaper arms its preallocated one-shot Callout only before waiting with
+pending Process work. A per-CPU timer worker delivers the callback through the
+same durable wake protocol as producers. Each batch attempts one Process so
+object finalizers and detached Threads can still
 make progress; no retry policy is attached to a particular CPU's periodic tick.
 Timer cancellation follows its owner queue even after worker migration. Future
 CPU hotplug must transfer or drain live timer queues before taking a CPU offline,
@@ -840,9 +841,17 @@ until cancellation succeeds or a release/acquire handshake proves that an
 already-detached callback has returned. A timer stays on the CPU which armed
 it even if the blocked Thread migrates. Early notification or cancellation
 uses the handle's queue identity to retire it from that source CPU; remote
-retirement deliberately leaves an obsolete earlier comparator programmed and
-therefore causes at most one harmless timer interrupt before the source
-programs its next deadline. Sleep is policy over this common timed-wait path.
+retirement of these IRQ timers deliberately leaves an obsolete earlier
+comparator programmed and therefore causes at most one harmless timer interrupt
+before the source programs its next deadline. Sleep is policy over this common
+timed-wait path.
+Ordinary kernel callbacks use typed `Callout` owners and per-CPU `ktimer`
+Threads; `IrqCallout` and the `schedule_irq_*` interfaces explicitly retain
+hard-IRQ execution for critical paths. Both use the same allocation-free,
+augmented red-black deadline queue. Callout shutdown closes rearm admission and
+joins execution before callback context destruction. See
+[Kernel timers and callouts](timers.md) for execution contexts, cancellation,
+clock ordering, cross-CPU prompting, and validation.
 Waits are migratable by default. A blocker retaining genuine CPU-local state
 must arm with `CpuLocal` mobility, which rejects reassignment in both Armed and
 Queued phases rather than relying on the generic `Blocked` state.

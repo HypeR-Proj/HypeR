@@ -7,7 +7,7 @@ use alloc::boxed::Box;
 use hyper::mm::{FallibleArc, try_box};
 use hyper::sync::{InterruptSpinLock, PublishedOnce};
 
-use crate::kernel::time::{OwnedArmedReservedTimer, ReservedTimer};
+use crate::kernel::time::{IrqCallout, OwnedArmedIrqCallout};
 use crate::kernel::vm::virtual_serial::Route;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -18,7 +18,7 @@ pub(super) enum Error {
 }
 
 struct Control {
-    armed: Option<OwnedArmedReservedTimer>,
+    armed: Option<OwnedArmedIrqCallout>,
     deadline: Option<u64>,
 }
 
@@ -29,13 +29,13 @@ struct Context {
 
 pub(super) struct SerialTimeout {
     control: InterruptSpinLock<Control, crate::hal::irq::LocalMask>,
-    reservation: FallibleArc<ReservedTimer>,
+    reservation: FallibleArc<IrqCallout>,
     context: Box<Context>,
 }
 
 impl SerialTimeout {
     pub(super) fn try_new(expire: fn(Route)) -> Result<Self, Error> {
-        let reservation = FallibleArc::try_new(ReservedTimer::try_new().map_err(|_| Error::Timer)?)
+        let reservation = FallibleArc::try_new(IrqCallout::try_new().map_err(|_| Error::Timer)?)
             .map_err(|_| Error::Allocation)?;
         Ok(Self {
             control: InterruptSpinLock::new(Control {
@@ -52,8 +52,8 @@ impl SerialTimeout {
     }
 
     pub(super) const fn allocation_bytes() -> usize {
-        FallibleArc::<ReservedTimer>::allocation_size()
-            + ReservedTimer::allocation_size()
+        FallibleArc::<IrqCallout>::allocation_size()
+            + IrqCallout::allocation_size()
             + core::mem::size_of::<Context>()
     }
 
@@ -82,7 +82,7 @@ impl SerialTimeout {
                 }
                 let context = core::ptr::from_ref(&*self.context).expose_provenance();
                 control.armed = Some(
-                    ReservedTimer::arm_owned(self.reservation.clone(), deadline, expire, context)
+                    IrqCallout::arm_owned(self.reservation.clone(), deadline, expire, context)
                         .map_err(|_| Error::Timer)?,
                 );
                 control.deadline = Some(deadline);
