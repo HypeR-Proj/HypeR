@@ -91,6 +91,109 @@ fn buddy_splits_and_coalesces_blocks() {
 }
 
 #[test]
+fn buddy_reclaims_interleaved_owners_and_reuses_every_fragment() {
+    const PAGES: usize = 8192;
+    let (memory, handoff) = handoff(PAGES);
+    // SAFETY: The test buffer owns the full direct map for this allocator.
+    let mut buddy =
+        crate::require_ok(unsafe { BuddyAllocator::from_handoff(&handoff, memory.pointer as u64) });
+    let pages: Vec<_> = (0..PAGES)
+        .map(|_| crate::require_ok(buddy.allocate(0)))
+        .collect();
+    let mut freed = HashSet::new();
+    for page in pages
+        .iter()
+        .filter(|page| (page.get() / PAGE_SIZE).is_multiple_of(2))
+    {
+        // SAFETY: Each even page is live and released exactly once.
+        crate::require_ok(unsafe { buddy.deallocate(*page, 0) });
+        assert!(freed.insert(page.get()));
+    }
+    assert_eq!(buddy.stats().free_blocks[0], PAGES / 2);
+    assert_eq!(buddy.allocate(1), Err(BuddyError::OutOfMemory));
+    let reused: Vec<_> = (0..PAGES / 2)
+        .map(|_| {
+            let page = crate::require_ok(buddy.allocate(0));
+            assert!(freed.remove(&page.get()));
+            page
+        })
+        .collect();
+    assert!(freed.is_empty());
+    assert_eq!(buddy.allocate(0), Err(BuddyError::OutOfMemory));
+    for page in reused.iter().chain(
+        pages
+            .iter()
+            .filter(|page| !(page.get() / PAGE_SIZE).is_multiple_of(2)),
+    ) {
+        // SAFETY: This is the complete, disjoint set of remaining live pages.
+        crate::require_ok(unsafe { buddy.deallocate(*page, 0) });
+    }
+    assert_eq!(buddy.stats().free_blocks[13], 1);
+    assert_eq!(buddy.free_pages(), PAGES);
+}
+
+#[test]
+fn buddy_mixed_order_random_reuse_preserves_live_blocks_and_coalesces() {
+    const PAGES: usize = 1024;
+    let (memory, handoff) = handoff(PAGES);
+    // SAFETY: The test buffer owns the full direct map for this allocator.
+    let mut buddy =
+        crate::require_ok(unsafe { BuddyAllocator::from_handoff(&handoff, memory.pointer as u64) });
+    let mut occupied = [false; PAGES];
+    let mut live = Vec::new();
+    let mut seed = 0x48_59_50_45_52_u64;
+    for _ in 0..30_000 {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        if !live.is_empty() && seed & 1 == 0 {
+            let (address, order): (hyper::mm::PhysicalAddress, usize) =
+                live.swap_remove((seed as usize >> 8) % live.len());
+            let first = address.get() as usize / PAGE_SIZE as usize;
+            for (page, used) in occupied.iter_mut().enumerate().skip(first).take(1 << order) {
+                assert!(*used);
+                *used = false;
+                // SAFETY: This page remains allocated until the release below.
+                let byte = unsafe { memory.pointer.add(page * PAGE_SIZE as usize).read() };
+                assert_eq!(byte, 0x5a);
+            }
+            // SAFETY: swap_remove consumes the only live allocation record.
+            crate::require_ok(unsafe { buddy.deallocate(address, order) });
+        } else {
+            let order = (seed as usize >> 8) % 6;
+            match buddy.allocate(order) {
+                Ok(address) => {
+                    let first = address.get() as usize / PAGE_SIZE as usize;
+                    for (page, used) in occupied.iter_mut().enumerate().skip(first).take(1 << order)
+                    {
+                        assert!(!*used);
+                        *used = true;
+                        // SAFETY: This newly allocated page is exclusive to the test.
+                        unsafe { memory.pointer.add(page * PAGE_SIZE as usize).write(0x5a) };
+                    }
+                    live.push((address, order));
+                }
+                Err(error) => assert_eq!(error, BuddyError::OutOfMemory),
+            }
+        }
+        assert_eq!(
+            buddy.free_pages(),
+            occupied.iter().filter(|used| !**used).count()
+        );
+        assert_eq!(
+            free_pages_from_blocks(&buddy.stats().free_blocks),
+            buddy.free_pages()
+        );
+    }
+    for (address, order) in live {
+        // SAFETY: The remaining allocation records are disjoint and live.
+        crate::require_ok(unsafe { buddy.deallocate(address, order) });
+    }
+    assert_eq!(buddy.stats().free_blocks[10], 1);
+    assert!(buddy.allocate(10).is_ok());
+}
+
+#[test]
 fn slab_reuses_small_objects_and_returns_empty_pages() {
     let (memory, handoff) = handoff(128);
     // SAFETY: The aligned test buffer is a stable writable direct map.
