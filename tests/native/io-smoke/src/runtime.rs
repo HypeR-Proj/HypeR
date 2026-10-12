@@ -13,7 +13,7 @@ use hyper_os::wait::{self, ObjectSignals, WaitItem};
 use hyper_vm_image::guest_fdt;
 use hyper_vm_image::guest_fdt::io::{DmaRange, IoDevices, MmioDevice, SharedMemory};
 use hyper_vm_support::io_backend::{Backend, Completion};
-use hyper_vm_support::io_guest::Image;
+use hyper_vm_support::io_guest::{Image, PhysicalAssignment, SharedGrant};
 use std::io::{self, Read, Write};
 use std::num::NonZeroU64;
 use std::process::ExitCode;
@@ -23,7 +23,6 @@ use std::time::Duration;
 type Result<T> = std::result::Result<T, String>;
 const RAM_BASE: u64 = 0x4000_0000;
 const RAM_BYTES: u64 = 64 * 1024 * 1024;
-const SHARED_BASE: u64 = RAM_BASE + RAM_BYTES;
 const FRONT_MMIO: u64 = 0x0a00_0000;
 const MAILBOX_MMIO: u64 = 0x0a01_0000;
 const NOTIFICATION_MMIO: u64 = 0x0a02_0000;
@@ -135,12 +134,25 @@ fn install(
     startup: &Startup<'_>,
     image: &Image,
     own: &hyper_os::OwnedHandle<hyper_os::handle::GuestMemoryObject>,
-    shared: Option<&hyper_os::OwnedHandle<hyper_os::handle::GuestMemoryObject>>,
+    shared: Option<SharedGrant<'_>>,
     physical: Option<&hyper_os::OwnedHandle<hyper_os::handle::PhysicalDeviceObject>>,
     serial_address: u64,
 ) -> Result<Guest> {
-    let installed =
-        hyper_vm_support::io_guest::install(startup, image, own, shared, physical, serial_address)?;
+    let address_space_bytes = shared.map_or(RAM_BYTES, |grant| grant.guest_offset + grant.size);
+    let physical = physical.map(|device| PhysicalAssignment {
+        device: device.as_handle_ref(),
+        base: PHYSICAL_MMIO,
+        irq: 40,
+    });
+    let installed = hyper_vm_support::io_guest::install_mapped(
+        startup,
+        image,
+        own,
+        shared.as_slice(),
+        address_space_bytes,
+        physical.as_slice(),
+        serial_address,
+    )?;
     Ok(Guest {
         machine: installed.machine,
         cpus: installed.cpus,
@@ -276,11 +288,18 @@ fn suite(startup: &Startup<'_>) -> Result<()> {
         device::dma_extent(authority, io.memory.as_handle_ref(), 0, RAM_BYTES).map_err(show)?;
     let front_extent =
         device::dma_extent(authority, front.memory.as_handle_ref(), 0, RAM_BYTES).map_err(show)?;
+    // Select a nonidentity shared alias explicitly: physical allocation order
+    // is not part of the DMA contract. Either slot is disjoint from I/O RAM.
+    let shared_base = if front_extent.physical_base == RAM_BASE + RAM_BYTES {
+        RAM_BASE + 2 * RAM_BYTES
+    } else {
+        RAM_BASE + RAM_BYTES
+    };
     println!(
-        "IO-VM-SMOKE: DMA RAM host={:#x}/{:#x}, Linux aliases={RAM_BASE:#x}/{SHARED_BASE:#x}",
+        "IO-VM-SMOKE: DMA RAM host={:#x}/{:#x}, Linux aliases={RAM_BASE:#x}/{shared_base:#x}",
         io_extent.physical_base, front_extent.physical_base
     );
-    if io_extent.physical_base == RAM_BASE || front_extent.physical_base == SHARED_BASE {
+    if io_extent.physical_base == RAM_BASE || front_extent.physical_base == shared_base {
         return Err(
             "fixture placement did not exercise nonidentity DMA for both RAM regions".into(),
         );
@@ -312,7 +331,7 @@ fn suite(startup: &Startup<'_>) -> Result<()> {
         },
         DmaRange {
             dma_base: front_extent.physical_base,
-            cpu_base: SHARED_BASE,
+            cpu_base: shared_base,
             size: RAM_BYTES,
         },
     ];
@@ -330,7 +349,7 @@ fn suite(startup: &Startup<'_>) -> Result<()> {
             }),
             dma_ranges: &dma,
             shared_memory: Some(SharedMemory {
-                base: SHARED_BASE,
+                base: shared_base,
                 size: RAM_BYTES,
                 guest_base: RAM_BASE,
             }),
@@ -355,7 +374,12 @@ fn suite(startup: &Startup<'_>) -> Result<()> {
             startup,
             &io,
             &io_grant,
-            Some(&front_grant),
+            Some(SharedGrant {
+                memory: front_grant.as_handle_ref(),
+                guest_offset: shared_base - RAM_BASE,
+                memory_offset: 0,
+                size: RAM_BYTES,
+            }),
             Some(&physical),
             0xd000_0000,
         )?);
