@@ -7,6 +7,7 @@ import os
 import random
 import re
 import sys
+import time
 
 from session import Session, native_command
 from guest_console import append_console_output
@@ -103,7 +104,13 @@ def main():
                 pump(0.002)
             pump(0.3)
             send(b'\x03')
-            await_text(rb'\^C\n')
+            # The raw shell deliberately reads one byte at a time so it cannot
+            # steal a future foreground command's input. Draining this backlog
+            # includes thousands of IPC round trips under cross-arch TCG.
+            # Keep a bounded liveness check without sending a rescue key.
+            started = time.monotonic()
+            await_text(rb'\^C\n', timeout=60)
+            print(f'console burst drained in {time.monotonic() - started:.2f}s', flush=True)
             await_text(rb'hyper-sh\$ ')
             run('echo AFTER_BURST', rb'\nAFTER_BURST\n')
         send(b'top -d 0.1\n')

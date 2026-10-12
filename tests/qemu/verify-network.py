@@ -345,6 +345,9 @@ def run(args):
             output_filter=partial(append_console_output, filter_guest_logs=True)) as session:
         scenario = Scenario(session, url, digest, args.expect_tx_offload)
         session.await_text(rb'HypeR io-runtime: ready; bootstrap mounts complete\n', timeout=180)
+        # Storage readiness precedes formal terminal ownership. Commands sent
+        # before the shell prompt can be discarded by the session's input reset.
+        session.await_text(rb'hyper-sh\$ ', timeout=180)
         deadline = time.monotonic() + 90
         while True:
             listing = scenario.native('vmm list')
