@@ -174,8 +174,7 @@ fn exercise_policy_transitions() -> Result<(), Error> {
     FIFO_SEQUENCE.store(0, Ordering::Release);
 
     let guard = scheduler::preempt_disable()?;
-    let dormant =
-        scheduler::kthread_create_fifo("policy-dormant", policy_peer, 1, ThreadPriority::HIGHEST)?;
+    let dormant = local_fifo_thread("policy-dormant", policy_peer, 1, ThreadPriority::HIGHEST)?;
     scheduler::set_thread_fair_policy(dormant)?;
     scheduler::thread_ready(dormant)?;
     if FIFO_SEQUENCE.load(Ordering::Acquire) != 0 {
@@ -190,7 +189,7 @@ fn exercise_policy_transitions() -> Result<(), Error> {
     let _ = super::support::quiesce_workers()?;
 
     let guard = scheduler::preempt_disable()?;
-    let ready = scheduler::kthread_create("policy-ready", policy_peer, 2)?;
+    let ready = local_fair_thread("policy-ready", policy_peer, 2)?;
     scheduler::thread_ready(ready)?;
     scheduler::set_thread_fifo_policy(ready, ThreadPriority::HIGHEST)?;
     scheduler::set_thread_fair_policy(ready)?;
@@ -207,8 +206,7 @@ fn exercise_policy_transitions() -> Result<(), Error> {
 
     let current = scheduler::current_thread_id()?;
     scheduler::set_thread_fifo_policy(current, ThreadPriority::HIGHEST)?;
-    let peer =
-        scheduler::kthread_create_fifo("policy-running", policy_peer, 3, ThreadPriority::NORMAL)?;
+    let peer = local_fifo_thread("policy-running", policy_peer, 3, ThreadPriority::NORMAL)?;
     scheduler::thread_ready(peer)?;
     let switches = scheduler::statistics()?.context_switches;
     scheduler::set_thread_fair_policy(current)?;
@@ -224,7 +222,7 @@ fn exercise_policy_transitions() -> Result<(), Error> {
     }
 
     let guard = scheduler::preempt_disable()?;
-    let candidate = scheduler::kthread_create_fifo(
+    let candidate = local_fifo_thread(
         "policy-fair-to-fifo",
         policy_peer,
         4,
@@ -250,8 +248,8 @@ fn exercise_fair_rotation() -> Result<(), Error> {
     FAIR_ROTATION.ran.store(0, Ordering::Release);
     let _ = scheduler::cond_resched()?;
     let guard = scheduler::preempt_disable()?;
-    let first = scheduler::kthread_create("fair-peer/0", fair_rotation_peer, 1 << 0)?;
-    let second = scheduler::kthread_create("fair-peer/1", fair_rotation_peer, 1 << 1)?;
+    let first = local_fair_thread("fair-peer/0", fair_rotation_peer, 1 << 0)?;
+    let second = local_fair_thread("fair-peer/1", fair_rotation_peer, 1 << 1)?;
     scheduler::thread_ready(first)?;
     scheduler::thread_ready(second)?;
 
@@ -298,9 +296,7 @@ fn exercise_affinity_creation() -> Result<(), Error> {
     } else {
         None
     };
-    let local_affinity = remote.map_or(CpuMask::single(current), |remote| {
-        CpuMask::EMPTY.with_cpu(current).with_cpu(remote)
-    });
+    let local_affinity = CpuMask::single(current);
     let local = scheduler::kthread_create_with_affinity(
         "affinity-local",
         affinity_local_worker,
@@ -404,12 +400,9 @@ fn exercise_fifo_preemption_points() -> Result<(), Error> {
         return Err(Error::StateMismatch);
     }
 
-    let first =
-        scheduler::kthread_create_fifo("fifo-peer/0", fifo_peer, 2, ThreadPriority::NORMAL)?;
-    let second =
-        scheduler::kthread_create_fifo("fifo-peer/1", fifo_peer, 3, ThreadPriority::NORMAL)?;
-    let higher =
-        scheduler::kthread_create_fifo("fifo-higher", fifo_peer, 1, ThreadPriority::HIGHEST)?;
+    let first = local_fifo_thread("fifo-peer/0", fifo_peer, 2, ThreadPriority::NORMAL)?;
+    let second = local_fifo_thread("fifo-peer/1", fifo_peer, 3, ThreadPriority::NORMAL)?;
+    let higher = local_fifo_thread("fifo-higher", fifo_peer, 1, ThreadPriority::HIGHEST)?;
     scheduler::thread_ready(first)?;
     scheduler::thread_ready(second)?;
     scheduler::set_thread_fifo_policy(first, ThreadPriority::NORMAL)?;
@@ -436,7 +429,7 @@ fn exercise_fifo_preemption_points() -> Result<(), Error> {
 fn exercise_running_priority_changes(mode: usize, expected: usize) -> Result<(), Error> {
     FIFO_SEQUENCE.store(0, Ordering::Release);
     FIFO_FAILURE.store(0, Ordering::Release);
-    let worker = scheduler::kthread_create_fifo(
+    let worker = local_fifo_thread(
         "fifo-priority-change",
         fifo_priority_change,
         mode,
@@ -458,7 +451,7 @@ extern "C" fn fifo_priority_change(mode: usize) {
         Err(_) => return record_fifo_failure(1),
     };
     let equal_expected = if mode == 2 { 3 } else { 1 };
-    let equal = match scheduler::kthread_create_fifo(
+    let equal = match local_fifo_thread(
         "fifo-priority-peer",
         fifo_peer,
         equal_expected,
@@ -476,15 +469,11 @@ extern "C" fn fifo_priority_change(mode: usize) {
     }
 
     if mode == 0 {
-        let lower = match scheduler::kthread_create_fifo(
-            "fifo-lower-peer",
-            fifo_peer,
-            3,
-            ThreadPriority::new(200),
-        ) {
-            Ok(id) => id,
-            Err(_) => return record_fifo_failure(5),
-        };
+        let lower =
+            match local_fifo_thread("fifo-lower-peer", fifo_peer, 3, ThreadPriority::new(200)) {
+                Ok(id) => id,
+                Err(_) => return record_fifo_failure(5),
+            };
         if scheduler::thread_ready(lower).is_err()
             || scheduler::set_thread_fifo_policy(current, ThreadPriority::new(64)).is_err()
             || scheduler::set_thread_fifo_policy(current, ThreadPriority::new(200)).is_err()
@@ -506,15 +495,11 @@ extern "C" fn fifo_priority_change(mode: usize) {
         {
             return record_fifo_failure(8);
         }
-        let future_equal = match scheduler::kthread_create_fifo(
-            "fifo-future-peer",
-            fifo_peer,
-            1,
-            ThreadPriority::new(64),
-        ) {
-            Ok(id) => id,
-            Err(_) => return record_fifo_failure(9),
-        };
+        let future_equal =
+            match local_fifo_thread("fifo-future-peer", fifo_peer, 1, ThreadPriority::new(64)) {
+                Ok(id) => id,
+                Err(_) => return record_fifo_failure(9),
+            };
         if scheduler::thread_ready(future_equal).is_err()
             || !matches!(scheduler::cond_resched(), Ok(false))
             || scheduler::yield_now().is_err()
@@ -584,8 +569,7 @@ fn exercise_completion_events() -> Result<(), Error> {
         } else {
             "completion/1"
         };
-        let waiter =
-            scheduler::kthread_create_fifo(name, completion_waiter, index, ThreadPriority::NORMAL)?;
+        let waiter = local_fifo_thread(name, completion_waiter, index, ThreadPriority::NORMAL)?;
         scheduler::thread_ready(waiter)?;
     }
     let _ = scheduler::preempt_enable_and_reschedule(guard)?;
@@ -625,9 +609,9 @@ extern "C" fn completion_waiter(argument: usize) {
 
 fn exercise_mutex_and_semaphore_handoff() -> Result<(), Error> {
     let state = &SYNC_STATE;
-    let producer = scheduler::kthread_create("sync-producer", producer, 0)?;
-    let first = scheduler::kthread_create("sync-consumer/0", consumer, 0)?;
-    let second = scheduler::kthread_create("sync-consumer/1", consumer, 1)?;
+    let producer = local_fair_thread("sync-producer", producer, 0)?;
+    let first = local_fair_thread("sync-consumer/0", consumer, 0)?;
+    let second = local_fair_thread("sync-consumer/1", consumer, 1)?;
     let guard = scheduler::preempt_disable()?;
     scheduler::thread_ready(producer)?;
     if !scheduler::thread_ready(first)? || scheduler::thread_ready(first)? {
@@ -718,7 +702,7 @@ fn exercise_wait_queue_wake_all() -> Result<(), Error> {
     let state = &WAIT_STATE;
     let guard = scheduler::preempt_disable()?;
     for index in 0..2 {
-        let id = scheduler::kthread_create_fifo(
+        let id = local_fifo_thread(
             if index == 0 { "waiter/0" } else { "waiter/1" },
             waiter,
             index,
@@ -759,4 +743,29 @@ extern "C" fn waiter(argument: usize) {
     if state.done.release().is_err() {
         state.worker_error.store(2, Ordering::Release);
     }
+}
+
+// These cases assert ordering and preemption within one run queue. Explicit
+// affinity keeps that contract independent of the default placement policy.
+fn local_fair_thread(
+    name: &str,
+    entry: crate::kernel::task::thread::KernelThreadEntry,
+    argument: usize,
+) -> Result<crate::kernel::task::thread::ThreadId, scheduler::Error> {
+    scheduler::kthread_create_with_affinity(name, entry, argument, CpuMask::single(CpuIndex::BOOT))
+}
+
+fn local_fifo_thread(
+    name: &str,
+    entry: crate::kernel::task::thread::KernelThreadEntry,
+    argument: usize,
+    priority: ThreadPriority,
+) -> Result<crate::kernel::task::thread::ThreadId, scheduler::Error> {
+    scheduler::kthread_create_fifo_with_affinity(
+        name,
+        entry,
+        argument,
+        priority,
+        CpuMask::single(CpuIndex::BOOT),
+    )
 }

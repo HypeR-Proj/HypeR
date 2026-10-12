@@ -21,7 +21,7 @@ pub(crate) fn create_thread(
     .get(vcpu_id as usize)
     .copied()
     .unwrap_or("vcpu");
-    crate::kernel::task::scheduler::vcpu_create(name, vcpu_id, execution, resources, thread_entry)
+    crate::kernel::task::scheduler::vcpu_create(name, execution, resources, thread_entry)
 }
 
 extern "C" fn thread_entry(_argument: usize) {

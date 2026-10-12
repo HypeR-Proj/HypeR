@@ -24,6 +24,7 @@ mod object_wait;
 mod reschedule_ipi;
 mod reserved_timer;
 mod scheduler_parallel;
+mod scheduler_placement;
 mod scheduler_sync;
 #[cfg(all(CONFIG_ARCH_AARCH64, feature = "kernel-smmuv3-test"))]
 pub(crate) mod smmuv3;
@@ -62,6 +63,7 @@ pub(crate) fn run() {
         crate::kernel::task::scheduler::test_wait_queue_topology,
     );
     run_case("kernel scheduler/sync tests", scheduler_sync::run);
+    run_case("initial thread CPU placement", scheduler_placement::run);
     run_case(
         "file-cache growth and pressure ownership tests",
         io_cache::run,

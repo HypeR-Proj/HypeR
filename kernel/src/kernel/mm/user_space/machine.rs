@@ -327,20 +327,22 @@ impl NativeImageSegment {
         })
     }
 
-    pub(crate) fn install(
+    /// Prepares executable pages while pinned. Release the caller's pin before
+    /// committing: the cross-CPU translation transport may need to yield.
+    pub(crate) fn prepare_install<'owner>(
         self,
-        address_space: &NativeAddressSpace,
+        address_space: &'owner NativeAddressSpace,
         pin: &(impl PinnedExecution + 'static),
-    ) -> Result<(), Error> {
-        self.install_in_vmar(address_space, address_space.logical().root_vmar(), pin)
+    ) -> Result<PreparedNativeChange<'owner>, Error> {
+        self.prepare_install_in_vmar(address_space, address_space.logical().root_vmar(), pin)
     }
 
-    pub(crate) fn install_in_vmar(
+    pub(crate) fn prepare_install_in_vmar<'owner>(
         self,
-        address_space: &NativeAddressSpace,
+        address_space: &'owner NativeAddressSpace,
         vmar: super::Vmar,
         pin: &(impl PinnedExecution + 'static),
-    ) -> Result<(), Error> {
+    ) -> Result<PreparedNativeChange<'owner>, Error> {
         let logical = address_space.logical();
         let prepared = match self.storage {
             ImageStorage::Writable(storage) => logical.prepare_map_writable(
@@ -369,8 +371,7 @@ impl NativeImageSegment {
                 )?
             }
         };
-        address_space.prepare_change(prepared)?.commit()?;
-        Ok(())
+        address_space.prepare_change(prepared)
     }
 }
 

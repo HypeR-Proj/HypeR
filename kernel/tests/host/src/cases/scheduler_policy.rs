@@ -8,8 +8,72 @@ mod policy;
 
 use hyper::cpu::CpuIndex;
 use policy::{
-    CpuMask, PlacementPolicy, SchedulingClass, SchedulingPolicy, ThreadPlacement, ThreadPriority,
+    CpuMask, PlacementPolicy, RoundRobinPlacement, SchedulingClass, SchedulingPolicy,
+    ThreadPlacement, ThreadPriority,
 };
+
+#[test]
+fn initial_placement_rotates_only_through_admitted_cpus() {
+    let mut indices = vec![0, 2, 5, hyper::cpu::MAX_CPUS - 1];
+    indices.retain(|index| *index < hyper::cpu::MAX_CPUS);
+    indices.sort_unstable();
+    indices.dedup();
+    let cpus: Vec<_> = indices
+        .into_iter()
+        .map(|index| crate::require_some(CpuIndex::new(index)))
+        .collect();
+    let online = cpus
+        .iter()
+        .fold(CpuMask::EMPTY, |mask, cpu| mask.with_cpu(*cpu));
+    let mut placement = RoundRobinPlacement::new();
+    for _ in 0..3 {
+        for &cpu in &cpus {
+            assert_eq!(placement.select(CpuMask::ALL, online), Some(cpu));
+        }
+    }
+    let constrained = &cpus[cpus.len().saturating_sub(2)..];
+    let affinity = constrained
+        .iter()
+        .fold(CpuMask::EMPTY, |mask, cpu| mask.with_cpu(*cpu));
+    for _ in 0..3 {
+        for &cpu in constrained {
+            assert_eq!(placement.select(affinity, online), Some(cpu));
+        }
+    }
+}
+
+#[test]
+fn constrained_and_rejected_placements_do_not_bias_unrestricted_work() {
+    let cpus: Vec<_> = (0..hyper::cpu::MAX_CPUS.min(3))
+        .map(|index| crate::require_some(CpuIndex::new(index)))
+        .collect();
+    let online = cpus
+        .iter()
+        .fold(CpuMask::EMPTY, |mask, cpu| mask.with_cpu(*cpu));
+    let mut placement = RoundRobinPlacement::new();
+    // Bootstrap admits only one CPU; later admission must work with the same policy.
+    assert_eq!(
+        placement.select(CpuMask::ALL, CpuMask::single(cpus[0])),
+        Some(cpus[0])
+    );
+    for _ in 0..3 {
+        for &cpu in &cpus {
+            assert_eq!(placement.select(CpuMask::EMPTY, online), None);
+            assert_eq!(placement.select(CpuMask::ALL, CpuMask::EMPTY), None);
+            if let Some(&offline) = cpus.get(1) {
+                assert_eq!(
+                    placement.select(CpuMask::single(offline), CpuMask::single(cpus[0])),
+                    None
+                );
+            }
+            assert_eq!(
+                placement.select(CpuMask::single(cpus[0]), online),
+                Some(cpus[0])
+            );
+            assert_eq!(placement.select(CpuMask::ALL, online), Some(cpu));
+        }
+    }
+}
 
 #[test]
 fn scheduling_profiles_encode_only_class_relevant_parameters() {

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Static scheduling classes and thread placement vocabulary.
+//! Scheduling classes and thread placement policy.
 //!
 //! This module describes policy inputs without owning runnable queues or
 //! performing context switches. The initial closed policy set contains a
@@ -172,6 +172,35 @@ impl CpuMask {
             mask.words[CPU_MASK_WORDS - 1] = (1u64 << remainder) - 1;
         }
         mask
+    }
+}
+
+/// Initial placement shared by kernel, Native, and vCPU Threads.
+///
+/// The scheduler serializes selection with Thread reservation. This distributes
+/// new work without inspecting remote run queues or moving live contexts.
+#[derive(Clone, Copy)]
+pub(crate) struct RoundRobinPlacement {
+    next: usize,
+}
+
+impl RoundRobinPlacement {
+    pub(crate) const fn new() -> Self {
+        Self { next: 0 }
+    }
+
+    pub(crate) fn select(&mut self, affinity: CpuMask, online: CpuMask) -> Option<CpuIndex> {
+        let start = self.next;
+        let mut eligible = (0..MAX_CPUS)
+            .filter_map(|offset| CpuIndex::new((start + offset) % MAX_CPUS))
+            .filter(|cpu| affinity.contains(*cpu) && online.contains(*cpu));
+        let cpu = eligible.next()?;
+        // Single-CPU constraints must not repeatedly reset the shared cursor
+        // and funnel unconstrained work onto the CPU following a pinned worker.
+        if eligible.next().is_some() {
+            self.next = (cpu.get() + 1) % MAX_CPUS;
+        }
+        Some(cpu)
     }
 }
 

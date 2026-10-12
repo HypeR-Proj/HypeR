@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Cross-CPU scheduler placement and context-handoff contracts.
+//! Workers explicitly select their source while dormant so initial placement
+//! cannot turn a migration test into an already-on-target no-op.
 
 use hyper::cpu::CpuIndex;
 use hyper::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -200,6 +202,7 @@ fn exercise_ready_migration(target: CpuIndex) -> Result<(), Error> {
         ThreadPriority::NORMAL,
         affinity,
     )?;
+    scheduler::migrate_thread(worker, CpuIndex::BOOT)?;
     scheduler::thread_ready(worker)?;
     scheduler::yield_now()?;
     if READY_STAGE.load(Ordering::Acquire) != 1 {
@@ -247,6 +250,7 @@ fn exercise_running_migration(target: CpuIndex) -> Result<(), Error> {
         ThreadPriority::NORMAL,
         affinity,
     )?;
+    scheduler::migrate_thread(worker, CpuIndex::BOOT)?;
     scheduler::thread_ready(worker)?;
     scheduler::yield_now()?;
     wait_until(
@@ -284,6 +288,7 @@ fn exercise_blocked_migration(target: CpuIndex) -> Result<(), Error> {
         ThreadPriority::NORMAL,
         affinity,
     )?;
+    scheduler::migrate_thread(worker, CpuIndex::BOOT)?;
     scheduler::thread_ready(worker)?;
     scheduler::yield_now()?;
     if BLOCK_STAGE.load(Ordering::Acquire) != 1
@@ -318,6 +323,7 @@ fn exercise_remote_running_migration(source: CpuIndex, target: CpuIndex) -> Resu
         ThreadPriority::NORMAL,
         affinity,
     )?;
+    scheduler::migrate_thread(worker, source)?;
     scheduler::thread_ready(worker)?;
     wait_until("remote migration worker did not start", || {
         REMOTE_STAGE.load(Ordering::Acquire) == 1
@@ -367,6 +373,7 @@ fn exercise_sleep_migration(target: CpuIndex) -> Result<(), Error> {
         ThreadPriority::NORMAL,
         affinity,
     )?;
+    scheduler::migrate_thread(worker, CpuIndex::BOOT)?;
     scheduler::thread_ready(worker)?;
     scheduler::yield_now()?;
     if SLEEP_STAGE.load(Ordering::Acquire) != 1

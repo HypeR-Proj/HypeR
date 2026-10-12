@@ -624,9 +624,9 @@ pub fn kthread_create(
 
 /// Creates a dormant kernel thread constrained to `affinity`.
 ///
-/// The scheduler prefers the calling CPU when it is admitted and registered;
-/// otherwise it deterministically selects the lowest-numbered registered CPU
-/// in the mask. Explicit migration and affinity updates retain this constraint.
+/// Initial placement rotates across admitted CPUs in the mask, sharing one
+/// cursor with Native and vCPU Threads. Wakeups retain the assigned CPU;
+/// explicit migration and affinity updates retain the supplied constraint.
 pub fn kthread_create_with_affinity(
     name: &str,
     entry: KernelThreadEntry,
@@ -685,8 +685,7 @@ fn kthread_create_with_policy_and_affinity(
     policy: SchedulingPolicy,
     affinity: CpuMask,
 ) -> Result<ThreadId, Error> {
-    let cpu = current_cpu()?;
-    let reservation = reserve_thread(|scheduler| scheduler.reserve_kernel_thread(cpu, affinity))?;
+    let reservation = reserve_thread(|scheduler| scheduler.reserve_new_thread(affinity))?;
     let id = reservation.id();
     let mut thread = match prepare_boxed_thread(Thread::kernel(
         id,
@@ -751,14 +750,11 @@ pub(crate) fn discard_dormant_kernel_thread(id: ThreadId) -> Result<(), Error> {
 
 pub(in crate::kernel) fn vcpu_create(
     name: &str,
-    topology_index: u32,
     execution: ExternalThreadExecution,
     resources: ThreadResourceOwnership,
     entry: KernelThreadEntry,
 ) -> Result<DormantVcpuThread, Error> {
-    let cpu = current_cpu()?;
-    let reservation =
-        reserve_thread(|scheduler| scheduler.reserve_vcpu_thread(cpu, topology_index))?;
+    let reservation = reserve_thread(|scheduler| scheduler.reserve_new_thread(CpuMask::ALL))?;
     let id = reservation.id();
     let thread = match prepare_boxed_thread(Thread::vcpu(
         id,
@@ -788,8 +784,7 @@ pub(in crate::kernel) fn prepare_user_thread(
     entry: KernelThreadEntry,
     affinity: CpuMask,
 ) -> Result<DormantUserThread, Error> {
-    let cpu = current_cpu()?;
-    let reservation = reserve_thread(|scheduler| scheduler.reserve_kernel_thread(cpu, affinity))?;
+    let reservation = reserve_thread(|scheduler| scheduler.reserve_new_thread(affinity))?;
     let id = reservation.id();
     let thread = match prepare_boxed_thread(Thread::user(
         id,

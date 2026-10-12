@@ -28,7 +28,9 @@ use super::registry::{
 };
 use super::switch_handoff::{SwitchDisposition, SwitchHandoff, SwitchingContext};
 use super::{Error, MigrationStatus, SecondaryStack, Statistics};
-use crate::kernel::task::policy::{CpuMask, PlacementPolicy, SchedulingClass, SchedulingPolicy};
+use crate::kernel::task::policy::{
+    CpuMask, PlacementPolicy, RoundRobinPlacement, SchedulingClass, SchedulingPolicy,
+};
 use crate::kernel::task::thread::{
     DeferredFifoPlacement, ExecutionKind, MigrationRequest, QueueMembership, Thread, ThreadId,
     ThreadScheduleState, ThreadState,
@@ -424,6 +426,8 @@ pub(super) struct Scheduler {
     /// This is policy metadata, not a mirror of CPU-local execution state.
     /// Cross-CPU placement may read it without nesting a target CPU lock.
     schedulable_cpus: CpuMask,
+    /// TransitionLock-owned cursor; only successful reservations consume a turn.
+    initial_placement: RoundRobinPlacement,
     /// Stack-scoped authority installed only while one `CpuScheduler` lock is held.
     active_domain: Option<ActiveCpuDomain>,
     /// Coordinator-owned entity awaiting publication after a source CPU lock
@@ -558,6 +562,7 @@ impl Scheduler {
             registry,
             cpu_reservations: PerCpu::new([false; hyper::cpu::MAX_CPUS]),
             schedulable_cpus: CpuMask::EMPTY,
+            initial_placement: RoundRobinPlacement::new(),
             active_domain: None,
             deferred_ready_handoff: None,
             deferred_blocked_handoff: None,
@@ -766,20 +771,23 @@ impl Scheduler {
         Ok(())
     }
 
-    pub fn reserve_kernel_thread(
-        &mut self,
-        preferred_cpu: CpuIndex,
-        affinity: CpuMask,
-    ) -> Result<ThreadReservation, Error> {
-        let cpu = self.select_cpu(preferred_cpu, affinity)?;
-        self.reserve_thread_slot(cpu)
+    pub fn reserve_new_thread(&mut self, affinity: CpuMask) -> Result<ThreadReservation, Error> {
+        if affinity.is_empty() {
+            return Err(Error::EmptyCpuAffinity);
+        }
+        let mut placement = self.initial_placement;
+        let cpu = placement
+            .select(affinity, self.schedulable_cpus)
+            .ok_or(Error::NoRegisteredCpuInAffinity)?;
+        let reservation = self.reserve_thread_slot(cpu)?;
+        self.initial_placement = placement;
+        Ok(reservation)
     }
 
-    /// Selects an admitted registered CPU, retaining creator locality where possible.
+    /// Selects an admitted CPU for affinity validation or an explicit update.
     ///
-    /// If the preferred CPU is unavailable or excluded, the lowest-numbered
-    /// registered CPU in the mask provides a stable fallback. This is an
-    /// initial assignment only; load balancing may replace the policy later.
+    /// Retain the current assignment when possible. This does not consume a
+    /// creation turn or rebalance already assigned Threads.
     fn select_cpu(&self, preferred_cpu: CpuIndex, affinity: CpuMask) -> Result<CpuIndex, Error> {
         if affinity.is_empty() {
             return Err(Error::EmptyCpuAffinity);
@@ -804,31 +812,6 @@ impl Scheduler {
         affinity: CpuMask,
     ) -> Result<(), Error> {
         self.select_cpu(preferred_cpu, affinity).map(|_| ())
-    }
-
-    /// Spreads one immutable guest topology over currently admitted host CPUs.
-    /// The boot vCPU retains creator locality; subsequent members wrap through
-    /// schedulable CPUs. Readiness itself does not rebalance dormant Threads,
-    /// so assigning every member to the creator would serialize guest SMP.
-    pub fn reserve_vcpu_thread(
-        &mut self,
-        preferred: CpuIndex,
-        topology_index: u32,
-    ) -> Result<ThreadReservation, Error> {
-        let count = (0..hyper::cpu::MAX_CPUS)
-            .filter_map(CpuIndex::new)
-            .filter(|cpu| self.cpu_is_schedulable(*cpu))
-            .count();
-        if count == 0 {
-            return Err(Error::NoRegisteredCpuInAffinity);
-        }
-        let ordinal = topology_index as usize % count;
-        let cpu = (0..hyper::cpu::MAX_CPUS)
-            .filter_map(|offset| CpuIndex::new((preferred.get() + offset) % hyper::cpu::MAX_CPUS))
-            .filter(|cpu| self.cpu_is_schedulable(*cpu))
-            .nth(ordinal)
-            .ok_or(Error::NoRegisteredCpuInAffinity)?;
-        self.reserve_thread_slot(cpu)
     }
 
     pub fn publish_thread(

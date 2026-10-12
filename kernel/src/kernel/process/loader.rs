@@ -130,8 +130,9 @@ fn prepare_address_space(
     )
     .map_err(|_| Error::Address)?;
     let stack_vmar = address_space.reserve_initial_stack(reservation)?;
-    // Every mapping installation, including executable cache maintenance, uses
-    // the existing address-space transaction and CPU pinning mechanisms.
+    // Pin executable cache maintenance, then unpin before committing mappings.
+    // Independent loaders can contend for the cross-CPU translation transport;
+    // waiting for its owner must remain a legal scheduling point.
     for segment in image.segments() {
         let range = UserSlice::new(
             UserAddress::new(LOADER_BASE + segment.address),
@@ -154,9 +155,9 @@ fn prepare_address_space(
             segment.data_offset,
         )?;
         let pin = crate::kernel::task::scheduler::preempt_disable()?;
-        let result = prepared.install(address_space, &pin);
+        let result = prepared.prepare_install(address_space, &pin);
         crate::kernel::task::scheduler::preempt_enable_without_reschedule(pin)?;
-        result?;
+        result?.commit()?;
     }
     let stack = NativeImageSegment::try_new(
         address_space,
@@ -164,9 +165,9 @@ fn prepare_address_space(
         Permissions::read_write(),
     )?;
     let pin = crate::kernel::task::scheduler::preempt_disable()?;
-    let result = stack.install_in_vmar(address_space, stack_vmar, &pin);
+    let result = stack.prepare_install_in_vmar(address_space, stack_vmar, &pin);
     crate::kernel::task::scheduler::preempt_enable_without_reschedule(pin)?;
-    result?;
+    result?.commit()?;
     ProcessImage::try_native(
         machine_abi(image.machine),
         UserAddress::new(LOADER_BASE + image.entry),
