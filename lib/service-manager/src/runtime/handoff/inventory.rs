@@ -12,9 +12,7 @@ use super::super::{
     supervisor::SupervisorSet,
 };
 use crate::manifest::MAX_SERVICES;
-use hyper_os::capability_channel::{
-    CapabilityChannel, CapabilityDisposition, CapabilityReceiveSlot,
-};
+use hyper_os::capability_channel::{CapabilityChannel, CapabilityReceiveSlot};
 use hyper_os::fs::Directory;
 use hyper_os::handle::*;
 use serde::{Deserialize, Serialize};
@@ -64,133 +62,6 @@ const _: () = assert!(SESSION_DECISION as usize + MAX_SERVICES <= MAX_SLOTS);
 pub(super) struct Slot {
     key: u16,
     rights: u64,
-}
-
-pub(super) struct InventoryOffer<'a> {
-    pub(super) slots: Vec<Slot>,
-    pub(super) dispositions: Vec<CapabilityDisposition<'a>>,
-}
-
-impl<'a> InventoryOffer<'a> {
-    pub(super) fn new(
-        a: &'a AuthorityInventory,
-        group: &'a OwnedHandle<TaskGroupObject>,
-    ) -> hyper_os::Result<Self> {
-        let mut offer = Self {
-            slots: Vec::with_capacity(MAX_SLOTS),
-            dispositions: Vec::with_capacity(MAX_SLOTS),
-        };
-        offer.add(ROOT_DIRECTORY, a.root_directory.as_handle_ref())?;
-        offer.add(LIBRARY_DIRECTORY, a.library_directory.as_handle_ref())?;
-        offer.add(BOOT_ENVIRONMENT, a.boot_environment.as_handle_ref())?;
-        offer.add(
-            SYSTEM_ENVIRONMENT,
-            a.system_environment
-                .as_ref()
-                .ok_or(hyper_os::Error::MissingHandle)?
-                .as_handle_ref(),
-        )?;
-        offer.add(FACTORY, a.factory.as_handle_ref())?;
-        offer.add(GROUP, a.group.as_handle_ref())?;
-        offer.add(DOMAIN, a.domain.as_handle_ref())?;
-        offer.add(TASK_INSPECTOR, a.task_inspector.as_handle_ref())?;
-        offer.add(OBJECT_INSPECTOR, a.object_inspector.as_handle_ref())?;
-        offer.add(MEMORY_INSPECTOR, a.memory_inspector.as_handle_ref())?;
-        offer.add(CPU_INSPECTOR, a.cpu_inspector.as_handle_ref())?;
-        offer.add(SERVICE_OUTPUT, a.service_output_channel.as_handle_ref())?;
-        if let Some(handle) = &a.device {
-            offer.add(DEVICE, handle.as_handle_ref())?;
-        }
-        if let Some(handle) = &a.console_input_channel {
-            offer.add(CONSOLE_INPUT, handle.as_handle_ref())?;
-        }
-        if let Some(handle) = &a.console_output_channel {
-            offer.add(CONSOLE_OUTPUT, handle.as_handle_ref())?;
-        }
-        if let Some(handle) = &a.session_input_channel {
-            offer.add(SESSION_INPUT, handle.as_handle_ref())?;
-        }
-        if let Some(handle) = &a.session_output_channel {
-            offer.add(SESSION_OUTPUT, handle.as_handle_ref())?;
-        }
-        if let Some(handle) = &a.session_startup_channel {
-            offer.add(SESSION_STARTUP, handle.as_handle_ref())?;
-        }
-        if let Some(handle) = &a.session_startup_writer {
-            offer.add(SESSION_DECISION, handle.as_handle_ref())?;
-        }
-        if let Some(handle) = &a.io_broker_server {
-            offer.add(IO_BROKER_SERVER, handle.as_handle_ref())?;
-        }
-        if let Some(handle) = &a.io_broker_client {
-            offer.add(IO_BROKER_CLIENT, handle.as_handle_ref())?;
-        }
-        if let Some(handle) = &a.io_ready_channel {
-            offer.add(IO_READY, handle.as_handle_ref())?;
-        }
-        if let Some(handle) = &a.filesystem_attach {
-            offer.add(FILESYSTEM_ATTACH, handle.as_handle_ref())?;
-        }
-        if let Some(handle) = &a.filesystem_provider {
-            offer.add(FILESYSTEM_PROVIDER, handle.as_handle_ref())?;
-        }
-        if let Some(handle) = &a.filesystem_control_server {
-            offer.add(FILESYSTEM_CONTROL_SERVER, handle.as_handle_ref())?;
-        }
-        if let Some(handle) = &a.filesystem_control_client {
-            offer.add(FILESYSTEM_CONTROL_CLIENT, handle.as_handle_ref())?;
-        }
-        if let Some(authority) = &a.vm_creation {
-            offer.add(VM_AUTHORITY, authority.as_handle_ref())?;
-        }
-        if let Some(fleet) = &a.vm_fleet {
-            offer.add(VM_GROUP, fleet.group.as_handle_ref())?;
-            offer.add(VM_DOMAIN, fleet.domain.as_handle_ref())?;
-            if let Some(handle) = &fleet.provisioning {
-                offer.add(VM_PROVISIONING, handle.as_handle_ref())?;
-            }
-            if let Some(provisioner) = &fleet.provisioner {
-                offer.add(PROVISIONER, provisioner.channel.as_handle_ref())?;
-            }
-        }
-        if let Some(connection) = &a.vm_connection {
-            offer.add(VM_CLIENT, connection.client.as_handle_ref())?;
-            if let Some(handle) = &connection.server {
-                offer.add(VM_MANAGER, handle.as_handle_ref())?;
-            }
-        }
-        offer.add(STAGE_GROUP, group.as_handle_ref())?;
-        offer.add(CONSOLE, a.console.as_handle_ref())?;
-        Ok(offer)
-    }
-
-    fn add<T: TypedObject>(&mut self, key: u16, source: HandleRef<'a, T>) -> hyper_os::Result<()> {
-        let rights = source.info()?.rights;
-        self.dispositions.push(CapabilityDisposition::duplicate(
-            source,
-            RightsOffer::Exact(rights),
-        )?);
-        self.slots.push(Slot {
-            key,
-            rights: rights.bits(),
-        });
-        Ok(())
-    }
-
-    pub(super) fn describe_processes(
-        &mut self,
-        supervisors: &SupervisorSet,
-    ) -> hyper_os::Result<()> {
-        for (index, process) in supervisors.processes.iter().enumerate() {
-            if let Some(process) = process {
-                self.slots.push(Slot {
-                    key: PROCESS_BASE + index as u16,
-                    rights: process.info()?.rights.bits(),
-                });
-            }
-        }
-        Ok(())
-    }
 }
 
 fn receive_slot(slot: &Slot) -> hyper_os::Result<CapabilityReceiveSlot> {
@@ -462,10 +333,7 @@ pub(super) fn adopt(
         launcher: ServiceLauncher { authorities },
         supervisors: SupervisorSet { processes },
         _stage_group: Some(r.required(STAGE_GROUP)?),
-        system_init: None,
-        core_manifest: None,
-        adopted: true,
-        boot_failed: false,
+        bootstrap_storage_ready: false,
     })
 }
 

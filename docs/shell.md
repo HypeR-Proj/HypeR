@@ -18,10 +18,11 @@ It can launch recovery tools or explicitly selected system programs when those
 are accessible. The `svc` directories are never searched for bare command names.
 
 Session waits for init's one-shot startup decision before launching either
-shell. A successful initialization selects the formal shell. Startup failure,
-a closed decision channel or a 180-second decision timeout selects the fallback
-shell. Failure to load the formal shell or an abnormal shell exit also enters
-recovery. Clean exit restarts the selected shell on the same transport.
+shell. Stage-1 selects fallback only for failures before handoff. After ownership
+transfers, formal init selects the formal shell, including when a later mount
+or service fails. Session does not infer recovery from channel closure or a
+timeout. Failed shell launches retry with a delay; shell exit restarts the
+selected shell on the same transport without changing environments.
 
 Both shells open `mount` and `umount` through their fixed boot image environment;
 other bare commands, including `sh`, resolve under `/system/bin`. Explicit paths

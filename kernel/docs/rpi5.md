@@ -314,9 +314,11 @@ applies fstab and starts separate workers to mount EROFS at `/system` and FAT at
 The boot files remain ordinary firmware-readable files in the configuration
 FAT volume.
 
-Expected storage readiness is `HypeR io-runtime: ready; Native volumes mounted`,
-after fs-backend reports each successful mount. System init then adopts core
-supervision and switches roots before launching VM management. Check `mount`,
+Bootstrap readiness is `HypeR io-runtime: ready; bootstrap mounts complete`,
+after fs-backend has mounted `/system` from the RAM root's fstab. System init
+then adopts core supervision, switches roots, and requests `/system/etc/fstab`.
+The later `FAT mounted at /data` and fleet-configuration result precede the shell;
+bootstrap readiness alone does not mean that data is mounted. Check `mount`,
 `vmm status io`, `ls /data`, and a small file write/read. `BOARD_SYSTEM_LAYOUT=ramfs`
 keeps system programs in RAM with the same handoff and root switch; see
 [boot layout](../../docs/boot-layout.md). Earlier configuration-volume mounting

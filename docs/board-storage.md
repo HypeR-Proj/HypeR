@@ -48,8 +48,9 @@ the broker. Native filesystem workers receive only their selected block capabili
 
 HypeR's Native block initiator uses standard virtio-scsi split queues and shared
 pages. `io-runtime` creates an independent initiator for each declared Native
-volume and moves its activated capability to `fs-backend`. The manager applies fstab,
-detects the media and starts a separate format-worker process per mounted
+volume and moves its activated capability to `fs-backend`. The manager applies the
+bootstrap fstab first; formal init requests `/system/etc/fstab` after handoff and
+root switching. The manager detects media and starts a separate worker per mounted
 volume. The manager publishes the worker transport beneath the RAM namespace:
 `/data` is writable FAT; the default deployment mounts its read-only EROFS volume at
 `/system`. File reads access the volume through the generic kernel VFS and cache;
@@ -66,10 +67,11 @@ board JSON into bounded Native and Linux client manifests. Linux kernel and
 module binaries remain digest-verified appliance artifacts; HypeR contributes
 a separate configuration archive to the Linux initramfs.
 
-Core console services start independently. After successful formal-environment
-startup, session starts `/system/bin/sh`; failure selects `/boot/svc/fallback-sh`.
-An explicit readiness channel gates init's
-loading of `/data/vms.json` until the configuration filesystem is mounted.
+Core console services start independently. Stage-1 failures before supervision
+transfer select `svc/fallback-sh` in the boot environment. After handoff, formal
+init handles failures and starts `/system/bin/sh`. The bootstrap readiness
+channel precedes handoff; formal init mounts `/data` before loading its VM fleet
+configuration.
 The manager acknowledges the complete fleet configuration before attempting
 autostart, including an empty fleet or one with no autostart VMs. Init supervises
 configuration admission and the manager service; guest lifecycle failures remain
@@ -84,11 +86,12 @@ services available. If `/system` is usable, system init can adopt the core
 services, switch root and start the VM manager even when `/data` failed.
 That manager continues to answer inspection requests and refuses VM creation
 and startup until configuration is available on a subsequent boot. If the
-system-init handoff or root switch fails, only core and recovery services
-continue; the system graph is not launched. The VM manager does not
+handoff fails, boot init retains core supervision and its recovery shell. If the
+root switch fails after handoff, formal init retains core supervision and its
+formal console; the system service graph is not launched. The VM manager does not
 silently retry provisioning or assume that an unobservable I/O VM name is free.
-Critical failures before the startup decision select recovery when the console
-is available; critical failures after that decision remain fatal. Provider failure does not
+Formal init retains its console for startup failures when possible; critical
+failures during steady supervision remain fatal. Neither reopens bootstrap recovery. Provider failure does not
 waive the kernel's DMA retirement requirements.
 
 The manager retains each I/O session endpoint until the runtime reports its VM
@@ -196,9 +199,11 @@ FAT volumes can be formatted empty; additional EROFS volumes require an image.
 
 `native.volumes` describes access, independently of image construction: each
 entry has `source` (`PARTUUID=...` or `PARTLABEL=...`) and `read-only`.
-`native.fstab` describes mount targets and options. When omitted, the builder
-selects the filesystem partitions and generates `/system` and `/data` mounts
-from their content roles. `native.layout` must match the selected Make layout.
+`native.boot-fstab` describes bootstrap mounts, and `native.fstab` describes
+mounts requested after formal init takes over. With no explicit `native` policy,
+the builder selects filesystem partitions and generates `/system` in the boot
+table and `/data` in the formal table from their content roles. An explicit policy
+supplies both tables (either can be empty). `native.layout` must match the selected Make layout.
 The ramfs layout omits the generated system partition. User labels are not
 reserved; `hyper-data` and `hyper-system` are defaults in the board files.
 
@@ -206,7 +211,7 @@ Guest board entries use `disk: {"source": "PARTLABEL=alpine"}` with an optional
 `read-only` flag. Native clients allocate IDs from 8 down; guest clients allocate
 from 1 up. These share eight data slots; client zero is management only. The
 builder generates HypeR's `etc/hyper/storage.json`, broker admission table and
-fstab. Linux receives only client IDs and network policy, never partition
+both fstabs. Linux receives only client IDs and network policy, never partition
 selectors. Worker availability is checked when mounting, not by a build-time
 provider dependency graph. FAT cannot preserve arbitrary system-payload symlinks.
 
@@ -273,7 +278,8 @@ formal shell launched from recovery. It is included in
 
 `make test-storage-failure ARCH=aarch64` verifies Native recovery with a missing
 controller, provider exit, closed or malformed readiness, the full readiness
-timeout, and an invalid provider executable. It also checks recovery after early critical-manager failure, fatal supervision
+timeout, and an invalid provider executable. It also checks the formal console
+after early critical-manager failure, fatal supervision
 after a critical manager exits from a ready formal environment, and provider
 survival when the fleet file is absent. These are functional checks without performance
 thresholds; they use separate bootstrap archives and no persistent board disk.

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Service policy shared by stage-1 init and the system supervisor.
+//! Formal-system service policy and supervision; independent of boot init.
 //!
 //! Parsing and planning deliberately depend on no operating-system binding.
 //! The runtime adapter must obtain real root-`Directory` and process-construction

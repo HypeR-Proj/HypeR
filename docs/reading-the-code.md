@@ -66,16 +66,17 @@ interrupts, time and platform/VM services before publishing userspace.
 
 [Kernel init](../kernel/src/kernel/init/mod.rs) snapshots `/init`, maps the selected
 bootstrap loader and prepares initial capabilities. The userspace loader
-validates and maps init itself. [Native init runtime](../lib/service-manager/src/runtime.rs) consumes
+validates and maps init itself. [Bootstrap init runtime](../bootstrap/stage1/lib/service-manager/src/runtime.rs) consumes
 the service manifest and supervises services. The virtual console manager in
 [session](../bootstrap/stage1/session/src/main.rs) starts the shell after the console exists
 and can restart it after exit. A shell is not itself a boot-critical service.
 
-The two init entry points share the [service manager](../lib/service-manager/src/lib.rs).
+The two init entry points use independent service-manager implementations.
 [Boot init](../bootstrap/stage1/init/src/main.rs) starts the core services; the
-[handoff protocol](../lib/service-manager/src/runtime/handoff.rs) starts system init
+[handoff sender](../bootstrap/stage1/lib/service-manager/src/runtime/handoff.rs) starts system init
 with a read-only description of those services and its prospective capabilities.
-System init validates its system manifest before registering the receive operation.
+The [formal receiver](../lib/service-manager/src/runtime/handoff.rs) reads its
+own init policy and validates the system manifest before registering receive.
 One capability rendezvous moves every core Process supervisor and carries the
 management capabilities and group leases. That successful operation is the ownership
 commit; boot init then exits without waiting for an acknowledgement. Preparation
@@ -126,7 +127,7 @@ flowchart TB
    its memory and serial channel, creates a pending VM, attaches memory and
    bootstrap information, seals it, installs it and starts the boot vCPU.
    [vm-support](../lib/vm-support/src/lib.rs) contains shared loading/device
-   mechanisms; [SDK VM bindings](../lib/rust/hyper-os/src/vm.rs) expose the Native
+   mechanisms; [SDK VM bindings](../stdlib/rust/hyper-os/src/vm.rs) expose the Native
    operations used here.
 3. [VM services](../kernel/src/kernel/vm/service.rs) resolve capabilities and
    implement `create_pending`, `seal`, `install` and `start_vcpu`.
@@ -260,8 +261,8 @@ Both eventually publish scheduler-owned Threads, but only Process creation
 loads a new image and address space.
 
 - **Process:** [std process adapter](../sdk/toolchain/rust-std/overlay/std/src/sys/process/hyper.rs)
-  and [libhyper process adapter](../lib/hyper/src/std-process.c), or an explicit
-  [SDK ProcessBuilder](../lib/rust/hyper-os/src/task.rs), lead through Native
+  and [libhyper process adapter](../stdlib/hyper/src/std-process.c), or an explicit
+  [SDK ProcessBuilder](../stdlib/rust/hyper-os/src/task.rs), lead through Native
   dispatch to [the kernel builder](../kernel/src/kernel/process/builder.rs).
   Follow `start_process_builder`, [bootstrap mapping](../kernel/src/kernel/process/loader.rs),
   [Process owner](../kernel/src/kernel/process/owner.rs) and
@@ -276,22 +277,22 @@ loads a new image and address space.
   A loader failure after kernel commit
   stops and joins the child rather than returning a retryable builder.
 - **Additional Thread:** [std thread adapter](../sdk/toolchain/rust-std/overlay/std/src/sys/thread/hyper.rs)
-  uses [thread_spawn.c](../lib/hyper/src/thread_spawn.c). Native `thread_create`
+  uses [thread_spawn.c](../stdlib/hyper/src/thread_spawn.c). Native `thread_create`
   reaches `create_thread` in [task services](../kernel/src/kernel/entry/services/task.rs),
   which validates start information and affinity and asks the Process owner to
   prepare the user Thread. Creation and `thread_start` are separate operations.
   [UserThread](../kernel/src/kernel/process/user_thread.rs) and
   [scheduler Thread](../kernel/src/kernel/task/thread.rs) serve different ownership roles.
-- **Stack:** [stack.c](../lib/hyper/src/stack.c) manages guarded reservations and
+- **Stack:** [stack.c](../stdlib/hyper/src/stack.c) manages guarded reservations and
   explicit growth for both the runtime-created main stack and SDK-created worker stacks.
-  [Runtime initialization](../lib/hyper/src/runtime.c) copies startup data;
-  [bootstrap handoff](../lib/hyper/src/bootstrap.c) builds the final entry vector,
+  [Runtime initialization](../stdlib/hyper/src/runtime.c) copies startup data;
+  [bootstrap handoff](../stdlib/hyper/src/bootstrap.c) builds the final entry vector,
   switches to the final stack and only then releases the kernel bootstrap
   reservation. Static programs also retire the loader mapping; dynamic programs
   retain their formal loader for runtime linking. The
-  [address-layout table](../lib/elf-loader/README.md#address-layout)
+  [address-layout table](../lib/dynamic-loader/elf/README.md#address-layout)
   separates current placement policy from the kernel entry contract.
-  See [stack APIs](../lib/hyper/README.md#guarded-growable-stacks) before changing
+  See [stack APIs](../stdlib/hyper/README.md#guarded-growable-stacks) before changing
   stack size or cleanup. A userspace stack is separate from its kernel stack.
 
 **Where the new Thread's SP comes from:** `hyper_runtime_thread_spawn_with_stack`
@@ -307,7 +308,7 @@ userspace, `aarch64_run_native_user` in
 writes `SP_EL0`, and executes `eret` after restoring the remaining user state.
 `worker` therefore starts on its final stack; it does not perform another stack
 switch. Its `hyper_runtime_thread_attach_stack` call only associates the stack
-descriptor with the per-thread SDK state in [thread.c](../lib/hyper/src/thread.c).
+descriptor with the per-thread SDK state in [thread.c](../stdlib/hyper/src/thread.c).
 
 **Who reclaims it:** the SDK starts one process-lifetime reaper lazily on the
 first runtime thread spawn. It waits for kernel `THREAD_TERMINATED` events,
@@ -322,7 +323,7 @@ and bounded by the capacity reserved at creation, not automatic fault-driven gro
 ## 6. Native file access: ramfs versus `/data`
 
 Start with [std fs](../sdk/toolchain/rust-std/overlay/std/src/sys/fs/hyper.rs),
-[std-fs.c](../lib/hyper/src/std-fs.c), then Native filesystem dispatch.
+[std-fs.c](../stdlib/hyper/src/std-fs.c), then Native filesystem dispatch.
 [Kernel VFS services](../kernel/src/kernel/vfs/service.rs) and
 [entry adapters](../kernel/src/kernel/entry/services/vfs.rs) enforce capability
 rights, copy payloads and invoke the VFS objects.
@@ -354,8 +355,8 @@ flowchart TB
 For ramfs, read [the VFS adapter](../kernel/src/kernel/vfs/ramfs.rs) and
 [ramfs implementation](../kernel/src/fs/ramfs.rs).
 For `/data`, read [the remote filesystem adapter](../kernel/src/kernel/vfs/remote.rs),
-[common service protocol](../lib/rust/hyper-filesystem/src/protocol.rs),
-[FAT media engine](../lib/rust/hyper-fatfs/src/volume.rs),
+[common service protocol](../stdlib/rust/hyper-filesystem/src/protocol.rs),
+[FAT media engine](../bootstrap/stage1/lib/fatfs/src/volume.rs),
 [block interface](../kernel/src/fs/block.rs),
 [Native block owner](../kernel/src/kernel/block/mod.rs),
 [request lifecycle](../kernel/src/kernel/block/request.rs) and
@@ -364,8 +365,9 @@ For `/data`, read [the remote filesystem adapter](../kernel/src/kernel/vfs/remot
 [Native storage](../bootstrap/stage1/io-runtime/src/runtime/storage.rs) negotiates each
 configured Native volume client and moves its capability to
 [fs-backend](../bootstrap/stage1/fs-backend/src/main.rs). That manager detects the format,
-applies fstab, launches a separate FAT or EROFS worker for each mount and remains
-outside the data path. Kernel VFS
+applies the bootstrap fstab, then `/system/etc/fstab` when requested by formal init.
+It launches a separate FAT or EROFS worker for each mount and remains outside the
+data path. Kernel VFS
 and cache hits need no worker round trip; misses and mutations go directly to
 the worker through [filesystem RPC](filesystem-services.md). Neither io-runtime
 nor fs-backend relays individual file operations. The Linux I/O VM supplies
@@ -459,7 +461,7 @@ Useful checks to read beside these paths:
 | VM ownership and trapped device operations | [vm-smoke](../app/vm-smoke/src/main.rs), [QEMU harness](../tests/qemu/verify-vm-smoke.py) |
 | Guest SMP and power | [guest SMP harness](../tests/qemu/verify-guest-smp.py) |
 | Native file and guest disk integration | [CI entry points](../tests/ci/run.sh): `board-storage` and `io-vm` |
-| SDK stacks and thread cleanup | [stack tests](../lib/hyper/tests/unit/stack.c), [spawn tests](../lib/hyper/tests/unit/thread-spawn.c) |
+| SDK stacks and thread cleanup | [stack tests](../stdlib/hyper/tests/unit/stack.c), [spawn tests](../stdlib/hyper/tests/unit/thread-spawn.c) |
 
 Use [development](development.md) for commands and test prerequisites. A model
 test can establish a transition invariant; QEMU checks integration. Neither
@@ -530,7 +532,7 @@ These facilities share scheduler machinery but answer different questions:
 | WaitSet | Which registered object subscription became ready? | [WaitSet](../kernel/src/kernel/object/wait_set.rs) |
 | Atomic wait | Does this userspace word still have the expected value before sleeping? | [atomic waits](../kernel/src/kernel/process/atomic_wait.rs) |
 
-[SDK wait bindings](../lib/rust/hyper-os/src/wait.rs) show how applications
+[SDK wait bindings](../stdlib/rust/hyper-os/src/wait.rs) show how applications
 consume object readiness. WaitSet registrations are persistent, with one-shot
 delivery and explicit `rearm`; read `add`, `wait`, delivery completion and
 `remove` together. Readiness is an observation, not a reservation of all the
@@ -712,7 +714,10 @@ when changing the relay.
 ## 14. From configuration to a running service or disk image
 
 Configuration has several consumers; modifying the wrong layer can leave the
-runtime unchanged even when the source file looks correct.
+runtime unchanged even when the source file looks correct. The table below
+follows the formal supervisor. Bootstrap has its own
+[service-manager implementation](../bootstrap/stage1/lib/service-manager/src/lib.rs),
+with the same handoff wire contract and an independent dependency graph.
 
 | Question | Follow this path |
 | --- | --- |
@@ -731,9 +736,9 @@ that an existing persistent configuration volume was reset.
 
 Read [deployment tests](../tests/build/app-deployment.py) and
 [board-image tests](../tests/build/board-image.py) alongside packaging changes.
-For service configuration, [check-services](../lib/service-manager/examples/check-services.rs)
-provides a host-side entry into the manifest validation rather than requiring
-a boot merely to discover invalid service wiring.
+For service configuration, [the admission tool](../scripts/check-service-manifest.py)
+selects bootstrap's parser for core manifests and the formal parser for combined
+handoff graphs. It validates service wiring without booting the product.
 
 ## 15. Picking a first contribution and validating it
 

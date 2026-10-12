@@ -27,7 +27,7 @@ impl VirtualConsole {
         &self,
         startup: &Startup<'_>,
         root: &hyper_os::fs::Directory,
-        mut mode: contract::ShellMode,
+        mode: contract::ShellMode,
     ) -> Result<(), ()> {
         loop {
             let started = Instant::now();
@@ -47,13 +47,6 @@ impl VirtualConsole {
             })();
             let (process, input_writer, output_reader, error_reader) = match prepared {
                 Ok(client) => client,
-                Err(error) if mode == contract::ShellMode::System => {
-                    eprintln!(
-                        "HypeR virtual console: system shell unavailable ({error}); entering recovery"
-                    );
-                    mode = contract::ShellMode::Recovery;
-                    continue;
-                }
                 Err(error) => {
                     eprintln!(
                         "HypeR virtual console: shell launch failed ({error}); retrying in one second"
@@ -79,21 +72,6 @@ impl VirtualConsole {
                 .as_process_supervisor()
                 .wait_terminated(hyper_os::DEADLINE_INFINITE)
                 .map_err(|_| ())?;
-            if mode == contract::ShellMode::System {
-                use hyper_os::task::ProcessTermination;
-                let info = process.as_process_supervisor().info().map_err(|_| ())?;
-                if !matches!(
-                    info.terminal,
-                    Some(
-                        ProcessTermination::ThreadExited { status: 0 }
-                            | ProcessTermination::ProcessExited { status: 0 }
-                            | ProcessTermination::LastThreadExited { status: 0 }
-                    )
-                ) {
-                    eprintln!("HypeR virtual console: system shell failed; entering recovery");
-                    mode = contract::ShellMode::Recovery;
-                }
-            }
             println!("HypeR virtual console: shell exited; restarting");
             // Rapid crashes/EOF must not turn supervision into a spawn loop.
             if let Some(delay) = Duration::from_millis(250).checked_sub(started.elapsed()) {
@@ -198,46 +176,37 @@ fn run(mut startup: Startup<'_>) -> Result<(), ()> {
     let root = startup.take_root_directory().map_err(|_| ())?;
     println!("HypeR virtual console: ready");
     // No input is consumed and no shell process exists until initialization
-    // selects an environment. A failed or hung supervisor leaves recovery.
-    let mode = startup_mode(&decision);
+    // explicitly selects an environment. Channel closure cannot identify which
+    // supervisor failed: ownership may already have moved to formal init.
+    let mode = startup_mode(&decision).map_err(|error| {
+        eprintln!("HypeR virtual console: startup decision unavailable ({error})");
+    })?;
     drop(decision);
     console.serve(&startup, &root, mode)
 }
 
-fn startup_mode(decision: &OwnedHandle<ByteChannelObject>) -> contract::ShellMode {
-    let result = (|| -> hyper_os::Result<contract::ShellMode> {
-        let deadline =
-            hyper_os::time::deadline_after(Duration::from_secs(contract::STARTUP_TIMEOUT_SECONDS))?
-                .as_raw();
-        loop {
-            let mut bytes = [0_u8; 1];
-            match decision.as_byte_channel().try_receive(&mut bytes) {
-                Ok(1) => {
-                    return contract::ShellMode::decode(bytes[0])
-                        .ok_or(hyper_os::Error::InvalidResponse);
-                }
-                Ok(_) => return Err(hyper_os::Error::InvalidResponse),
-                Err(hyper_os::Error::Status(hyper_os::Status::WOULD_BLOCK)) => {}
-                Err(error) => return Err(error),
+fn startup_mode(
+    decision: &OwnedHandle<ByteChannelObject>,
+) -> hyper_os::Result<contract::ShellMode> {
+    loop {
+        let mut bytes = [0_u8; 1];
+        match decision.as_byte_channel().try_receive(&mut bytes) {
+            Ok(1) => {
+                return contract::ShellMode::decode(bytes[0])
+                    .ok_or(hyper_os::Error::InvalidResponse);
             }
-            wait_many(
-                &[WaitItem::new(
-                    decision.as_handle_ref(),
-                    ObjectSignals::<ByteChannelObject>::READABLE
-                        .union(ObjectSignals::<ByteChannelObject>::PEER_CLOSED),
-                )],
-                deadline,
-            )?;
+            Ok(_) => return Err(hyper_os::Error::InvalidResponse),
+            Err(hyper_os::Error::Status(hyper_os::Status::WOULD_BLOCK)) => {}
+            Err(error) => return Err(error),
         }
-    })();
-    match result {
-        Ok(mode) => mode,
-        Err(error) => {
-            eprintln!(
-                "HypeR virtual console: startup decision unavailable ({error}); entering recovery"
-            );
-            contract::ShellMode::Recovery
-        }
+        wait_many(
+            &[WaitItem::new(
+                decision.as_handle_ref(),
+                ObjectSignals::<ByteChannelObject>::READABLE
+                    .union(ObjectSignals::<ByteChannelObject>::PEER_CLOSED),
+            )],
+            hyper_os::DEADLINE_INFINITE,
+        )?;
     }
 }
 

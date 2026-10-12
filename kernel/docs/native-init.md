@@ -88,7 +88,7 @@ responsibilities. Kernel-image relocation during boot is unchanged.
 The [bootstrap loader](../../bootstrap/stage1/userspace-loader/README.md) accepts
 static core executables. The [formal loader](../../lib/dynamic-loader/README.md)
 loads both static and dynamic programs. They share bounded ELF64 mapping and
-stack encoding in [lib/elf-loader](../../lib/elf-loader/README.md), accepting
+stack encoding in [lib/dynamic-loader/elf](../../lib/dynamic-loader/elf/README.md), accepting
 branded AArch64/RISC-V `ET_EXEC`/`ET_DYN` images and rejecting overlapping load
 segments, W+X, nonempty ELF TLS and executable stacks. A dynamic `PT_INTERP`
 must match `/lib64/ld-hyper-<arch>.so`; the formal loader validates that identity
@@ -146,7 +146,7 @@ library range. The returned
 base is authoritative. Backing is mapped only as allocations need it; overflow
 regions have independent VMARs, so this reservation is not a heap size limit.
 The kernel still owns the root address space and
-resource accounting; allocator policy lives in `lib/hyper`.
+resource accounting; allocator policy lives in `stdlib/hyper`.
 
 The child receives an ordinary executable File. Its userspace loader acquires
 `PROTECT` before reading size or ELF bytes, then maps file-backed private
@@ -168,7 +168,7 @@ Later file-backed instruction or data faults can also fail: exhausted bounded
 reclaim/refill retries terminate the Process as an unhandled page fault. Explicit
 mapping and copy syscalls instead report allocation, quota or I/O failure statuses.
 
-See the [loader address layout](../../lib/elf-loader/README.md#address-layout)
+See the [loader address layout](../../lib/dynamic-loader/elf/README.md#address-layout)
 for the current mapping windows and their policy boundaries.
 
 ## Bootstrap capabilities

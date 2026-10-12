@@ -19,8 +19,8 @@ owner-only block-management channel, validates GPT and resolves the partition
 selectors in `etc/hyper/storage.json`. It binds each selected range and access
 policy to an independent I/O client, then transfers exclusive `NativeBlock`
 capabilities, partition UUIDs and labels, sector counts and read-only policies
-to fs-backend. BEGIN transfers the readiness writer; FINISH starts the initial
-fstab mounts. No raw writable alias remains in io-runtime after a volume moves
+to fs-backend. BEGIN transfers the readiness writer; FINISH starts only the bootstrap
+`etc/fstab` mounts. No raw writable alias remains in io-runtime after a volume moves
 to the filesystem manager.
 
 The Linux I/O VM validates HypeR's selected ranges and creates their `dm-linear`
@@ -31,11 +31,13 @@ magic, then loads the corresponding known worker executable. Disk bytes select
 a format, never an executable path; FAT's informational type label is not an
 authoritative format test.
 
-The manager reads `etc/fstab` and optional `etc/hyper/filesystem.json` through
-its fixed `process.environment-directory`. They appear under `/boot` after
-handoff; mount targets resolve through the separate live namespace root.
-The fstab selects authorized partitions by `PARTLABEL=` or `PARTUUID=`,
-mountpoints, access modes and startup order.
+At startup the manager reads only the RAM filesystem's `etc/fstab` and optional
+`etc/hyper/filesystem.json` through its fixed `process.environment-directory`.
+They appear under `/boot` after handoff. Formal init then requests the automatic
+mounts in `/system/etc/fstab`, through the manager's control connector. Mount
+requests select their table explicitly in the live namespace, as do mount targets.
+Both tables select authorized partitions by `PARTLABEL=` or `PARTUUID=`,
+mountpoints, access modes and order within that environment.
 The JSON selects `worker_directories` (default `[{"environment":"svc"}]`),
 bounded to 16 KiB and eight normalized paths. `environment` entries are relative
 to the fixed boot directory and use its static loader; `namespace` entries are
@@ -55,11 +57,13 @@ Format adapters implement media operations. The manager is outside the file
 read/write path, and io-runtime continues forwarding console and power events
 while waiting for the initial mount result.
 
+The default image places `fs-fat` on `/system` and `fs-erofs` in the boot RAM
+filesystem. Worker placement is configurable independently of format detection.
 `fs-fat` implements writable FAT32. `fs-erofs` implements read-only,
 uncompressed core EROFS, including compact/extended inodes, plain and inline
 data, directories and symlinks. It validates a present superblock CRC32C and
 rejects compression, xattrs, external devices and unsupported inode layouts.
-Its [reader documentation](../lib/rust/hyper-erofs/README.md) gives bounds and
+Its [reader documentation](../bootstrap/stage1/lib/erofs/README.md) gives bounds and
 supported block sizes. Recognition alone is not a promise that a worker can
 read every extension of that filesystem format.
 
@@ -252,9 +256,9 @@ It cannot recursively predict more work. This worker is separate from memory
 reclamation, so a backend waiting for memory cannot deadlock the reclaim path.
 
 Implementation entry points: [manager](../bootstrap/stage1/fs-backend/src/main.rs),
-[common worker](../lib/fs-service/src/lib.rs), [FAT worker](../bootstrap/stage1/fs-fat/src/main.rs),
+[common worker](../bootstrap/stage1/lib/fs-service/src/lib.rs), [FAT worker](../bootstrap/stage1/fs-fat/src/main.rs),
 [EROFS worker](../bootstrap/stage1/fs-erofs/src/main.rs),
-[wire protocol](../lib/rust/hyper-filesystem/src/protocol.rs),
+[wire protocol](../stdlib/rust/hyper-filesystem/src/protocol.rs),
 [kernel adapter](../kernel/src/kernel/vfs/remote.rs), and
 [transport](../kernel/src/kernel/vfs/remote/transport.rs).
 See [FAT semantics](fat.md) and [VFS cache](../kernel/docs/vfs.md#file-data-cache)

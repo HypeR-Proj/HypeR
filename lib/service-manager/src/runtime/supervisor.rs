@@ -7,38 +7,13 @@ use std::convert::Infallible;
 
 use crate::manifest::{MAX_SERVICES, Manifest};
 use crate::supervision::{self, TerminationAction};
-use hyper_os::handle::{ByteChannelObject, ConsoleObject, OwnedHandle, ProcessObject};
+use hyper_os::handle::{ConsoleObject, OwnedHandle, ProcessObject};
 use hyper_os::wait::{ObjectSignals, WaitItem, wait_many};
 
 use super::LaunchError;
 use super::report::report_service_termination;
 
 const _: () = assert!(MAX_SERVICES < hyper_os::wait::MAX_ITEMS);
-
-pub(super) enum StorageReadiness {
-    Ready,
-    Unavailable(StorageFailure),
-}
-
-pub(super) enum StorageFailure {
-    ProviderUnavailable,
-    ChannelClosed,
-    InvalidReply,
-    MountUnavailable,
-    TimedOut,
-}
-
-impl StorageFailure {
-    pub(super) const fn diagnostic(&self) -> &'static [u8] {
-        match self {
-            Self::ProviderUnavailable => b"HypeR init: storage unavailable: provider unavailable\n",
-            Self::ChannelClosed => b"HypeR init: storage unavailable: readiness channel closed\n",
-            Self::InvalidReply => b"HypeR init: storage unavailable: invalid readiness reply\n",
-            Self::MountUnavailable => b"HypeR init: storage unavailable: required mount failed\n",
-            Self::TimedOut => b"HypeR init: storage unavailable: readiness timed out\n",
-        }
-    }
-}
 
 /// Stable service-index ownership and wait-set mapping.
 pub(super) struct SupervisorSet {
@@ -122,70 +97,6 @@ impl SupervisorSet {
                 TerminationAction::FailSystem => {
                     return Err(LaunchError::CriticalServiceTerminated);
                 }
-            }
-        }
-    }
-
-    pub(super) fn wait_for_storage(
-        &mut self,
-        manifest: &Manifest<'_>,
-        ready_service: usize,
-        reader: &OwnedHandle<ByteChannelObject>,
-        console: &OwnedHandle<ConsoleObject>,
-    ) -> Result<StorageReadiness, LaunchError> {
-        let deadline = hyper_os::time::deadline_after(std::time::Duration::from_secs(
-            hyper_service::io::READY_TIMEOUT_SECONDS,
-        ))
-        .map_err(|_| LaunchError::OperatingSystem)?
-        .as_raw();
-        loop {
-            let observed = match self.wait_for_service_event(
-                manifest,
-                ready_service,
-                WaitItem::new(
-                    reader.as_handle_ref(),
-                    ObjectSignals::<ByteChannelObject>::READABLE
-                        .union(ObjectSignals::<ByteChannelObject>::PEER_CLOSED),
-                ),
-                deadline,
-                console,
-            ) {
-                Ok(observed) => observed,
-                Err(LaunchError::WaitTimedOut) => {
-                    return Ok(StorageReadiness::Unavailable(StorageFailure::TimedOut));
-                }
-                Err(LaunchError::RequiredServiceUnavailable) => {
-                    return Ok(StorageReadiness::Unavailable(
-                        StorageFailure::ProviderUnavailable,
-                    ));
-                }
-                Err(error) => return Err(error),
-            };
-            if !ObjectSignals::<ByteChannelObject>::READABLE.is_present_in(observed) {
-                return Ok(StorageReadiness::Unavailable(StorageFailure::ChannelClosed));
-            }
-            let mut message = [0; 64];
-            match reader.as_byte_channel().try_receive(&mut message) {
-                Ok(length) if message.get(..length) == Some(hyper_service::io::READY_MESSAGE) => {
-                    return Ok(StorageReadiness::Ready);
-                }
-                Ok(length)
-                    if message.get(..length)
-                        == Some(hyper_service::filesystem::FAILURE_MESSAGE) =>
-                {
-                    return Ok(StorageReadiness::Unavailable(
-                        StorageFailure::MountUnavailable,
-                    ));
-                }
-                Err(hyper_os::Error::Status(hyper_os::Status::WOULD_BLOCK)) => continue,
-                Err(hyper_os::Error::Status(hyper_os::Status::PEER_CLOSED)) => {
-                    return Ok(StorageReadiness::Unavailable(StorageFailure::ChannelClosed));
-                }
-                Err(hyper_os::Error::MessageTooLarge { .. }) => {
-                    return Ok(StorageReadiness::Unavailable(StorageFailure::InvalidReply));
-                }
-                Ok(_) => return Ok(StorageReadiness::Unavailable(StorageFailure::InvalidReply)),
-                Err(_) => return Err(LaunchError::OperatingSystem),
             }
         }
     }

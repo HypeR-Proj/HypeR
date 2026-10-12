@@ -4,13 +4,10 @@
 //! Immutable handoff description travels separately from live authority.
 
 use super::super::Error;
-use super::{
-    Runtime, SystemInitConfig,
-    inventory::{InventoryOffer, Slot},
-};
+use super::inventory::Slot;
 use crate::manifest::MAX_MANIFEST_BYTES;
-use hyper_os::handle::{OwnedHandle, TaskGroupObject, VmoObject};
-use hyper_os::memory::{PAGE_SIZE, SnapshotVmo, WritableVmo};
+use hyper_os::handle::VmoObject;
+use hyper_os::memory::SnapshotVmo;
 use hyper_os::startup::{Startup, StartupPurpose};
 use serde::{Deserialize, Serialize};
 use std::io::Read;
@@ -23,41 +20,11 @@ const MAX_OFFER_BYTES: usize = MAX_MANIFEST_BYTES * 2 + 16384;
 pub(super) struct PreparedOffer {
     version: u32,
     pub(super) core_manifest: String,
-    pub(super) boot_failed: bool,
-    pub(super) next: SystemInitConfig,
+    pub(super) storage_ready: bool,
     pub(super) slots: Vec<Slot>,
 }
 
 impl PreparedOffer {
-    pub(super) fn new(
-        runtime: &Runtime,
-        group: &OwnedHandle<TaskGroupObject>,
-        next: &SystemInitConfig,
-        core: &str,
-    ) -> hyper_os::Result<Self> {
-        let mut inventory = InventoryOffer::new(&runtime.launcher.authorities, group)?;
-        inventory.describe_processes(&runtime.supervisors)?;
-        Ok(Self {
-            version: 1,
-            core_manifest: core.into(),
-            boot_failed: runtime.boot_failed,
-            next: next.clone(),
-            slots: inventory.slots,
-        })
-    }
-
-    pub(super) fn snapshot(&self) -> hyper_os::Result<SnapshotVmo> {
-        let bytes = serde_json::to_vec(self).map_err(|_| hyper_os::Error::InvalidResponse)?;
-        if bytes.len() > MAX_OFFER_BYTES {
-            return Err(hyper_os::Error::InvalidResponse);
-        }
-        let size = (bytes.len() as u64 + 8).div_ceil(PAGE_SIZE) * PAGE_SIZE;
-        let vmo = WritableVmo::create(size)?;
-        vmo.write_all_at(0, &(bytes.len() as u64).to_le_bytes())?;
-        vmo.write_all_at(8, &bytes)?;
-        SnapshotVmo::from_vmo(vmo.as_handle_ref())
-    }
-
     pub(super) fn read(startup: &mut Startup<'_>) -> hyper_os::Result<Self> {
         let handle = startup.take(SNAPSHOT)?;
         let snapshot = SnapshotVmo::from_vmo(handle.as_handle_ref())?;
@@ -75,10 +42,6 @@ impl PreparedOffer {
         if offer.version != 1 || offer.core_manifest.len() > MAX_MANIFEST_BYTES {
             return Err(hyper_os::Error::InvalidResponse);
         }
-        offer
-            .next
-            .validate()
-            .map_err(|_| hyper_os::Error::InvalidResponse)?;
         Ok(offer)
     }
 }

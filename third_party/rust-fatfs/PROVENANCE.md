@@ -76,6 +76,6 @@ further access rather than claiming rollback. On a completely full volume,
 rename can report no space when it cannot publish a second directory entry;
 the original entry remains intact.
 
-Regression coverage lives in `lib/rust/hyper-fatfs/tests/volume.rs`.
+Regression coverage lives in `bootstrap/stage1/lib/fatfs/tests/volume.rs`.
 Keep this patch small, review it when updating the pinned upstream source,
 and remove it when an upstream version supplies equivalent guarantees.

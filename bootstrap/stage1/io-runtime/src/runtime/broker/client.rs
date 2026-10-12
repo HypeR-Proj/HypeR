@@ -7,6 +7,8 @@ use super::super::{Result, check_deadline, deadline, show};
 use super::{BindingPhase, ClientBinding, ClientSlot, listener};
 use hyper_io_runtime::broker_exchange::Pending;
 use hyper_io_runtime::broker_exchange::Step;
+use hyper_io_runtime::protocol::BackendOperation;
+use hyper_io_runtime::protocol::control::{Command, MAX_RECORD, Reply, Request, Status};
 use hyper_os::capability_channel::{CapabilityChannel, CapabilityDisposition};
 #[cfg(feature = "broker-test")]
 use hyper_os::guest_io::Mailbox;
@@ -15,8 +17,6 @@ use hyper_os::handle::{CapabilityChannelObject, RightsOffer};
 use hyper_os::vm;
 use hyper_os::wait::{ObjectSignals, WaitItem};
 use hyper_service::io;
-use hyper_vm_support::io_protocol::{Command, MAX_RECORD, Reply, Request, Status};
-use hyper_vm_support::virtio_mmio::BackendOperation;
 
 pub(super) fn session_closed(session: &CapabilityChannel) -> bool {
     hyper_os::wait::wait_many(
@@ -383,7 +383,7 @@ struct HeldReply<'a> {
     hold: bool,
 }
 #[cfg(feature = "broker-test")]
-impl hyper_vm_support::io_backend::ControlTransport for HeldReply<'_> {
+impl hyper_io_runtime::broker_exchange::ControlTransport for HeldReply<'_> {
     fn send(&self, bytes: &[u8]) -> hyper_os::Result<()> {
         self.mailbox.send(bytes)
     }
