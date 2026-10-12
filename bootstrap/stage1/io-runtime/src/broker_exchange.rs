@@ -2,8 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! One bounded mailbox transaction, driven by the supervisor's fair slot loop.
-use hyper_vm_support::io_backend::ControlTransport;
-use hyper_vm_support::io_protocol::{MAX_RECORD, Reply, Request};
+use crate::protocol::control::{MAX_RECORD, Reply, Request};
+
+/// Low-frequency backend configuration transport; queue notifications bypass it.
+pub trait ControlTransport {
+    fn send(&self, record: &[u8]) -> hyper_os::Result<()>;
+    fn receive(&self, record: &mut [u8]) -> hyper_os::Result<usize>;
+}
+impl ControlTransport for hyper_os::guest_io::Mailbox {
+    fn send(&self, record: &[u8]) -> hyper_os::Result<()> {
+        hyper_os::guest_io::Mailbox::send(self, record)
+    }
+    fn receive(&self, record: &mut [u8]) -> hyper_os::Result<usize> {
+        hyper_os::guest_io::Mailbox::receive(self, record)
+    }
+}
 
 pub struct Pending {
     pub request: Request,

@@ -4,12 +4,12 @@
 //! Independently scheduled MMIO/IRQ service: the main I/O runtime may block
 //! waiting for Linux storage without blocking Linux's physical device exits.
 
+use crate::guest::install::{InstalledGuest, PHYSICAL_MMIO};
 use hyper_os::handle::{
     ByteChannelObject, OwnedHandle, PhysicalDeviceObject, VirtualCpuObject, VirtualMachineObject,
 };
 use hyper_os::wait::{ObjectSignals, RegistrationId, WaitSet};
 use hyper_os::{Error, Result, Status, channel, device, vm};
-use hyper_vm_support::io_guest::{InstalledGuest, PHYSICAL_MMIO};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 

@@ -545,7 +545,7 @@ U-mode trap vector and full integer/FP state capture. x86-64 currently rejects
 native-user entry as unsupported. Process lifetime, handles, rights, syscall
 numbers, bootstrap ELF admission, residency, and resource accounting remain in
 the kernel. Application ELF parsing, stack encoding and relocation belong to
-`bootstrap/stage1/userspace-loader`, `lib/elf-loader`, `lib/dynamic-loader` and
+`bootstrap/stage1/userspace-loader`, `lib/dynamic-loader/elf`, `lib/dynamic-loader` and
 the SDK runtime. Descendant process builders explicitly select a loader File;
 only initial `/init` uses the kernel's `/lib/userspace-loader-hyper-<arch>` lookup.
 The kernel

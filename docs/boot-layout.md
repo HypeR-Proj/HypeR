@@ -39,15 +39,16 @@ Source placement does not change the runtime paths below.
 /boot/bin/mount, umount             static filesystem administration tools
 /boot/svc/                         static console, I/O and filesystem services
 /boot/etc/hyper/services.json       core service graph
-/boot/etc/hyper/init.json           system-init image and graph paths
+/boot/etc/hyper/init.json           successor executable path
 /boot/etc/hyper/filesystem.json     filesystem-worker search directories
 /boot/etc/hyper/storage.json        GPT partition selectors and access policy
-/boot/etc/fstab                    ordered runtime mount policy
+/boot/etc/fstab                    bootstrap mounts (initially /etc/fstab)
 /boot/lib64/                       static bootstrap userspace loader
 /boot/vm/io.itb                    pinned I/O VM image
 /system/bin/                       formal sh and ordinary Native commands
-/system/svc/                       init-system, vm-manager and vm-runtime
+/system/svc/                       init-system, vm-manager, vm-runtime, fs-fat
 /system/etc/hyper/services.json    system service graph
+/system/etc/fstab                  mounts requested by formal init
 /system/lib64/ld-hyper-<arch>.so    formal executable loader and dynamic linker
 /system/lib64/<arch>-hyper-hyper/  shared libraries for system programs
 /data/vms.json                    writable VM fleet configuration
@@ -57,8 +58,9 @@ Source placement does not change the runtime paths below.
 The archive initially contains `/init`, `/bin`, `/svc`, `/etc`, `/vm` and
 `/lib64` directly, plus `/lib -> lib64`. System init prepares a separate ramfs
 root and atomically switches the shared namespace to it. The original root
-becomes `/boot`; existing system and data mounts move to the new `/system` and
-`/data` without unmounting or restarting their filesystem workers. In an all-RAM
+becomes `/boot`; the existing `/system` mount moves with it, without restarting
+its worker. Formal init then requests the data mounts in `/system/etc/fstab`.
+Any additional mounts explicitly selected for bootstrap also survive the switch. In an all-RAM
 deployment, the switch promotes the RAM subtree into a mount and removes its
 old directory entry in the same transaction, without copying its files.
 
@@ -99,13 +101,16 @@ through the process root. Each system process receives the library Directory
 deployment and in RAM in ramfs deployment. Bootstrap and recovery do not need
 the formal loader.
 
-The default static set includes init, console-input, console-output, session,
-fallback-sh, io-runtime, fs-backend, fs-fat, fs-erofs, mount and umount. It is selected
+The default RAM selection includes init, console-input, console-output, session,
+fallback-sh, io-runtime, fs-backend, fs-erofs, mount and umount. It is selected
 through `APP_BOOT_COMPONENTS`, using component staged names (`session-service`
 for session), and built separately with shared-library delivery disabled.
 The console-input/output workers use the existing `no_std` runtime. The other
 Rust boot programs retain std; fallback-sh omits clap and advanced shell features. Storage startup and recovery commands do not require any
-library on `/system`. Ordinary tools are not duplicated in `/boot`.
+library on `/system`. The FAT worker is still a static executable, but lives in
+`/system/svc/fs-fat` by default. It is loaded only when a later mount needs FAT.
+Add `fs-fat` to `APP_BOOT_COMPONENTS` when FAT is needed before `/system` becomes
+available. Ordinary tools are not duplicated in `/boot`.
 
 Original ELF build products retain debug information. Packaged copies use the
 existing debug-section stripping policy. System programs and their transitive
@@ -130,7 +135,8 @@ change the executable's runtime launch policy.
 ## Supervision handoff
 
 Stage-1 init validates and starts core services, including the console owner,
-then waits for the filesystem manager's initial mount result. Session does not
+then waits for the filesystem manager's bootstrap mount result from the RAM
+filesystem's `/etc/fstab` (only `/system` by default). Session does not
 launch a shell or read terminal input while this startup decision is pending.
 The I/O VM starts through io-runtime independently of the business VM manager.
 Its VM creation authority belongs to core services; no business fleet domain or
@@ -150,14 +156,20 @@ registers a receive operation. One capability-channel rendezvous transfers the e
 core Process supervisors and the management inventory. That successful transfer
 is the supervisor-ownership commit point: stage-1 init exits and system init
 owns the already-running core services. System init then prepares and commits
-the configured root switch before launching formal services. It does not restart
+the configured root switch, requests automatic mounts from `/system/etc/fstab`,
+then launches formal services and configures the VM fleet. A later mount failure
+is reported by formal init; it does not undo handoff or prevent unrelated Native
+services from starting. It does not restart
 the console, I/O VM or filesystem workers during these transitions. After formal
 initialization succeeds, it sends the session a one-shot decision to launch
-`/system/bin/sh`. A startup failure selects the static `svc/fallback-sh` in the
-retained boot environment instead. The decision writer follows supervisor
-ownership through handoff; closing it without a reply also selects recovery.
+`/system/bin/sh`. Only stage-1 failures before handoff select the static
+`svc/fallback-sh` in the boot environment. The decision writer follows supervisor
+ownership through handoff; closing it without a reply is a session failure,
+not permission to start bootstrap recovery.
 
-`/etc/hyper/init.json` supplies the root-switch plan: the new root staging path,
+The boot `/etc/hyper/init.json` selects only the successor executable. Formal
+init reads `/system/etc/hyper/init.json`, which selects its service manifest and
+supplies the root-switch plan: the new root staging path,
 the old-root attachment path, directories and mount moves. Custom policies may
 explicitly request links; the default policy creates none.
 The staging path and mount sources refer to the old namespace; the old-root
@@ -167,7 +179,7 @@ already exist. Preparing ramfs and changing the VFS root
 require `MANAGE_NAMESPACE | WRITE | EXECUTE` on a namespace-root Directory,
 held by init and transferred to its successor. Ordinary shell and filesystem-worker
 directory grants do not include `MANAGE_NAMESPACE`. A preparation or switch
-failure leaves the old root active; the successor retains core supervision and starts the recovery shell
+failure leaves the old root active; the successor retains core supervision and starts the formal shell
 instead of dropping their process owners or launching formal services. The
 supervisor transfer and namespace switch are separate, explicit commit points.
 The old ramdisk remains mounted and resident for core services and recovery;
@@ -176,12 +188,12 @@ switching roots does not itself reclaim its backing memory.
 Nested disk mounts move with their mounted ancestor. If an optional ancestor
 is absent, an existing child mount is moved separately. RAM subtree promotion
 rejects mounted descendants: a configured child below an all-RAM subtree reports an
-error and keeps recovery available instead of silently losing the child mount.
+error while preserving core supervision and the formal console.
 
 An unavailable `/system`, a missing system-init executable, a rejected candidate graph,
 or a failed pre-commit handshake leaves core supervision and the recovery shell
-in stage-1. An unrelated data-volume failure selects recovery but does not prevent handoff when
-`/system` is already available. In particular, ramfs deployment can adopt core
+in stage-1. An unrelated data-volume failure is handled by formal init and does
+not prevent handoff when `/system` is already available. In particular, ramfs deployment can adopt core
 supervision and run system tools without any disk; VM fleet provisioning still
 requires its configured file, normally `/data/vms.json`.
 
@@ -192,18 +204,30 @@ on the next boot. After commit, critical-service failures follow the configured 
 does not make an arbitrary critical system service failure recoverable.
 The formal shell retains its existing features under `/system/bin/sh`. Recovery
 uses `/boot/svc/fallback-sh`, without clap, history, pipelines or redirection.
-No `svc` directory is searched for commands. A missing formal shell or abnormal
-exit falls back to recovery; a 180-second decision timeout also exposes recovery
-if init becomes stuck.
+No `svc` directory is searched for commands. Session waits for an explicit
+supervisor decision; it never selects recovery on a timer. A missing formal
+shell is retried, and shell exit restarts the selected shell. Neither path
+switches back to the bootstrap shell after handoff.
 
 ## Runtime filesystem policy
 
-The default generated fstab is:
+Each environment owns its fstab. The initial RAM root's `/etc/fstab`, retained as
+`/boot/etc/fstab` after handoff, contains only bootstrap mounts:
 
 ```fstab
 PARTLABEL=hyper-system /system auto ro 0 0
+```
+
+The system payload's `/system/etc/fstab` contains later mounts:
+
+```fstab
 PARTLABEL=hyper-data /data auto rw 0 0
 ```
+
+Stage-1 never reads the formal table. Formal init requests it after adopting core
+supervision and switching roots. An empty formal table needs no filesystem service;
+in an all-RAM deployment the bootstrap table is empty. There are no numeric stage
+flags, and the kernel never reads either table.
 
 Sources select authorized GPT partitions with `PARTUUID=` or `PARTLABEL=`.
 They do not name Linux device paths. HypeR reads the GPT and grants the selected
@@ -213,8 +237,10 @@ mount. `auto` selects the recognized format; explicit `fat`, `vfat`, or `erofs`
 requires a matching format. EROFS mounts require `ro`. Supported options are
 `defaults`, `ro`, `rw`, `auto`, `noauto` and `nofail`. The final two fields must
 be `0 0`; fsck and dump scheduling are not implemented. Entries run in file
-order. A required failure prevents initial readiness; `nofail` makes that
-entry optional, and `noauto` leaves it for an explicit mount command.
+order within the selected table. A required bootstrap failure prevents bootstrap
+readiness. A required formal failure is reported after handoff; the formal shell
+and unrelated system services remain available. `nofail` makes an entry
+optional, and `noauto` leaves it for an explicit mount command.
 
 `/boot/etc/hyper/filesystem.json` (initially `/etc/hyper/filesystem.json`)
 contains only runtime worker search policy:
@@ -228,8 +254,10 @@ contains only runtime worker search policy:
 `environment` paths are relative to the filesystem manager's fixed boot directory
 and use the static bootstrap loader. `namespace` paths are absolute in the live
 namespace and use the formal loader and libraries from `/system`. Mount targets
-always use the live namespace. The manager rereads its fstab and worker policy
-through the fixed boot directory, so remounting needs no root aliases.
+always use the live namespace. Startup reads the bootstrap fstab and worker policy
+through the fixed boot directory. Administrative requests carry an explicit fstab
+path in the live namespace; the default is `/system/etc/fstab`. Worker policy
+continues to come from the boot environment. Neither lookup requires root aliases.
 
 A format needed to mount `/system` must have its worker in an already available
 filesystem. Identifying EROFS does not require its worker to be built in: if
@@ -239,7 +267,9 @@ workers and unsupported format features are distinct errors.
 
 ```text
 mount                               list managed mounts
-mount -a                            apply automatic fstab entries
+mount -a                            apply /system/etc/fstab
+mount -T /boot/etc/fstab -a          retry bootstrap entries after root switch
+mount -T /etc/fstab -a               retry bootstrap entries before root switch
 mount /data                         mount one fstab target
 mount -t auto -o ro PARTLABEL=hyper-system /system   select a GPT partition
 umount /data                        sync and detach an idle mount
@@ -285,7 +315,7 @@ make run BOARD_SYSTEM_LAYOUT=ramfs
 ```
 
 This uses `target/board/qemu-ramfs/`; Pi 5 uses
-`target/board/rpi5-native-ramfs/`. Its fstab omits a system disk mount.
+`target/board/rpi5-native-ramfs/`. Its bootstrap fstab is empty; the formal fstab still mounts `/data`.
 Partition capacities and content belong to `disk.partitions`. Mount policy is
 separate, for example:
 
@@ -296,7 +326,8 @@ separate, for example:
     {"source": "PARTLABEL=hyper-data", "read-only": false},
     {"source": "PARTLABEL=hyper-system", "read-only": true}
   ],
-  "fstab": "PARTLABEL=hyper-system /system auto ro 0 0\nPARTLABEL=hyper-data /data auto rw 0 0\n"
+  "boot-fstab": "PARTLABEL=hyper-system /system auto ro 0 0\n",
+  "fstab": "PARTLABEL=hyper-data /data auto rw 0 0\n"
 }
 ```
 
@@ -312,7 +343,7 @@ Functional checks live in `tests/qemu/verify-boot-system.py`; its `--recovery`
 mode omits storage and checks shell survival. Combined with `--ramfs`, it also
 requires successful handoff and working RAM-resident system commands. Parser
 bounds and EROFS fixture checks run with
-`cargo test --manifest-path lib/rust/Cargo.toml -p hyper-erofs`.
+`cargo test --manifest-path bootstrap/stage1/Cargo.toml -p bootstrap-erofs`.
 `tests/qemu/verify-vm-manager-isolation.py` takes a built split deployment and
 creates private test disks. It exercises Native reads, writes and remounts with
 vm-manager omitted, missing, exiting before configuration, closing or corrupting

@@ -352,7 +352,7 @@ Ctrl-D as EOF without closing the shared endpoint. Native channel readers such
 as `vmm console` receive normalized line endings and the unchanged Ctrl-D byte. This interactive path is not a
 binary serial tunnel or a full POSIX tty. Ordinary pipes and files preserve all
 bytes. Default std child-process inheritance preserves terminal provenance.
-See [the runtime contract](../lib/hyper/README.md) for compatibility details.
+See [the runtime contract](../stdlib/hyper/README.md) for compatibility details.
 
 `make test-console ARCH=aarch64` checks typeahead bursts, terminal EOF and CRLF,
 std child inheritance and binary pipes, randomized individually echoed keystrokes,
@@ -392,9 +392,10 @@ Default units retain small KiB quantities; `free --bytes` avoids rounding.
 ## Console and storage visibility
 
 The critical virtual console manager (`/svc/session`, later `/boot/svc/session`)
-waits for the initialization outcome, then starts `/system/bin/sh` on success or
-`/boot/svc/fallback-sh` for recovery (initially `/svc/fallback-sh`). A missing
-system shell or abnormal shell exit also selects recovery. Ctrl-D or `exit`
+waits for the supervisor's explicit decision. Stage-1 selects `/svc/fallback-sh`
+only on failure before handoff; formal init selects `/system/bin/sh` after it
+adopts supervision. A missing formal shell or abnormal shell exit never selects
+bootstrap recovery. Ctrl-D or `exit`
 restarts the selected shell on the same console; it is not a system failure. Shell channels are recreated on each launch; the physical transport
 continues to belong to the console services.
 

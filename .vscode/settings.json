@@ -16,9 +16,10 @@
     "rust-analyzer.linkedProjects": [
         "kernel/Cargo.toml",
         "sdk/abi/Cargo.toml",
-        "lib/rust/Cargo.toml",
-        // Also owns bootstrap/stage1 programs and application libraries in lib/.
+        "stdlib/rust/Cargo.toml",
+        // Formal applications own lib/; bootstrap has an independent workspace.
         "app/Cargo.toml",
+        "bootstrap/stage1/Cargo.toml",
         "sdk/toolchain/tests/rust-smoke/Cargo.toml",
         "sdk/toolchain/tests/std-smoke/Cargo.toml",
         "tools/fit-pack/Cargo.toml"

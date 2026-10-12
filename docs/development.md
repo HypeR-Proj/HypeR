@@ -11,7 +11,7 @@ SPDX-License-Identifier: Apache-2.0
 
 Open the repository root in VS Code with the `rust-lang.rust-analyzer`
 extension installed. The shared `.vscode/settings.json` explicitly loads all
-Cargo project roots, including the SDK workspace, Native applications,
+Cargo project roots, including the stdlib workspace, bootstrap, Native applications,
 shared libraries under `lib/`, and build tools. The shared libraries belong to
 `app/Cargo.toml`; do not add them as separate linked projects. Run
 `make sdk ARCH=aarch64` once to prepare the Native target
@@ -52,7 +52,8 @@ Both editor commands explicitly run once per Cargo workspace. The check script
 resolves the owning workspace with `cargo locate-project` before selecting its
 target and SDK configuration, so invoking it from `lib/tool-args`, a `shared/`
 crate, or an application subdirectory uses the same Native configuration as
-`app/`. A direct invocation from the repository root checks the Native workspace.
+`app/`. Bootstrap subdirectories resolve to `bootstrap/stage1/` and select
+static linking. A direct invocation from the repository root checks `app/`.
 Checks use `--locked` so editor activity cannot silently rewrite lockfiles.
 
 The editor defaults to AArch64, like the existing kernel editor configuration;
@@ -77,10 +78,12 @@ Use these repository-root commands for short feedback loops:
 | App deployment and packaging | `sh tests/ci/run.sh scripts` |
 | Kernel or app runtime behavior | The relevant QEMU target below |
 
-`app-test` uses SDK source patches within the existing app workspace, an explicit
+`app-test` uses SDK source patches within both Native workspaces, an explicit
 host target, and ordinary Cargo. It does not assemble an SDK or require patched
 std; the first invocation can download missing Cargo dependencies.
-`APP_TEST_PACKAGE=hyper-service-manager` selects the init policy and supervisor library;
+`APP_TEST_PACKAGE=hyper-service-manager` selects the formal supervisor;
+`APP_TEST_WORKSPACE=bootstrap/stage1 APP_TEST_PACKAGE=bootstrap-service-manager`
+selects the independent bootstrap supervisor;
 `APP_TEST_ARGS=supervision` filters its test names.
 Run it from the repository root so Native editor-target defaults are not loaded.
 `app-sdk-test` separately tests the assembled SDK contract. Production app
@@ -253,11 +256,11 @@ exact coverage and supported runtime expectations.
 | `kernel/src/platform/` | Firmware parsing and immutable platform description |
 | `kernel/src/mm/`, `kernel/src/sync/`, `kernel/src/time/` | Reusable allocation, synchronization, and timing mechanisms |
 | `sdk/abi/` | Native ABI schema, generated Rust definitions, C header, and reference |
-| `lib/hyper/` | Freestanding Native C runtime and architecture syscall veneers |
+| `stdlib/hyper/` | Freestanding Native C runtime and architecture syscall veneers |
 | `bootstrap/stage1/` | Static bootstrap services, recovery tools and initial executable loader |
-| `lib/elf-loader/` | Shared bounded ELF mapping and initial stack construction |
+| `lib/dynamic-loader/elf/` | Shared bounded ELF mapping and initial stack construction |
 | `lib/dynamic-loader/` | Formal static/dynamic application loading, relocation and runtime loading |
-| `lib/rust/` | Safe `no_std` Native OS binding, raw syscalls, and Rust runtime entry |
+| `stdlib/rust/` | Safe `no_std` Native OS binding, raw syscalls, and Rust runtime entry |
 | `sdk/toolchain/` | Clang/Cargo drivers, linker contract, and transactional SDK assembly |
 | `app/` | Native system applications built only against the assembled SDK |
 | `kernel/tests/` | Kernel host tests, self-tests, image verification, and QEMU acceptance |

@@ -54,8 +54,9 @@ flowchart TB
 virtio-scsi. Guest networking uses virtio-net through the same trusted Linux
 I/O VM, which automatically bridges each guest TAP to the configured uplink.
 Native io-runtime owns the shared-memory bindings and delegates named volumes
-to fs-backend. That manager applies fstab and starts separate FAT or EROFS
-workers; file operations reach the worker directly through kernel VFS, while
+to fs-backend. That manager mounts `/system` from the bootstrap fstab; formal
+init then requests the mounts in `/system/etc/fstab`, including `/data`. Separate
+FAT or EROFS workers own each mount; file operations reach the worker directly through kernel VFS, while
 cache hits stay in the kernel.
 HypeR Native reserves a future network endpoint without establishing a link.
 

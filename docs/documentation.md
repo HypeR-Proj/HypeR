@@ -40,7 +40,7 @@ references into one GitHub Pages artifact. The intended public address is
   signatures of undocumented items, but the pipeline does not invent prose
   for them or enforce a documentation-coverage quota.
 - Doxygen publishes standard C documentation comments from the ABI headers,
-  C runtime, stage-1 loader, shared ELF mapping primitives and dynamic loader. Ordinary C comments
+  C runtime, stage-1 loader, independently owned ELF mapping primitives and dynamic loader. Ordinary C comments
   are not converted and undocumented functions do not receive generated
   descriptions.
 - Markdown source-code links resolve to files at the built Git revision;

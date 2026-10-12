@@ -9,7 +9,7 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
-hyper-vm-image = { path = "../../lib/rust/hyper-vm-image" }
+hyper-vm-image = { path = "../../lib/vm-image" }
 
 [lints.clippy]
 unwrap_used = "deny"
@@ -18,3 +18,6 @@ panic = "deny"
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
+
+[patch.crates-io]
+hyper-abi = { path = "../../sdk/abi" }

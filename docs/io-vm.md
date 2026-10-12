@@ -153,8 +153,10 @@ Native data clients use IDs from 8 down; guest clients use IDs from 1 up, sharin
 eight slots. Each Native data client has its own shared-memory pool and
 mailbox/notification routes. io-runtime activates the connection and moves its
 exclusive block capability plus discovered partition UUID/label to fs-backend.
-The manager applies fstab and selects separate format workers for `/data` and
-`/system`. Init waits for explicit filesystem readiness before reading the fleet.
+The manager first applies only the bootstrap fstab to mount `/system`. After
+handoff and root switching, formal init asks it to apply `/system/etc/fstab`,
+loading the FAT worker from `/system` for `/data`. Fleet configuration follows
+these formal mounts; separate workers own each mounted volume.
 Native clients are absent from the business broker's admission table.
 
 Owner block commands are additive protocol-v3 operations 11–14 (`BLOCK_HELLO`,
