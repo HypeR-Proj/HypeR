@@ -19,6 +19,7 @@ bootargs=$7
 verify_vm=${HYPER_TEST_VM:-1}
 case "$verify_vm" in 0|1) ;; *) echo "HYPER_TEST_VM must be 0 or 1" >&2; exit 2 ;; esac
 memory_value='[0-9]+(\.[0-9])? (B|KiB|MiB|GiB|TiB|PiB|EiB)'
+escape=$(printf '\033')
 timeout_seconds=${QEMU_BOOT_TIMEOUT_SECONDS:-90}
 total_timeout_seconds=${QEMU_NATIVE_TIMEOUT_SECONDS:-300}
 temp=$(mktemp -d -t hyper-native-init.XXXXXX)
@@ -98,9 +99,9 @@ while :; do
         exit 1
     fi
     # The deferred writer commits a retained opaque Console TX prefix as one
-    # frame. Normalize an application's explicit CRLF only; an interleaved
+    # frame. Normalize CRLF and the shell's bracketed-paste mode toggles; an interleaved
     # kernel record must make the line contract fail rather than be hidden.
-    sed 's/\r$//' "$log" >"$native_output"
+    sed -e 's/\r$//' -e "s/${escape}\\[?2004[hl]//g" "$log" >"$native_output"
     if grep -Eq '^(hyper-sh\$ )*sh: (Native operation failed|I/O failed|input channel closed|protocol violation|command launch failed|operating-system request failed)' "$native_output"; then
         cat "$log" >&2
         echo "Native shell reported an unexpected runtime failure" >&2
@@ -240,19 +241,20 @@ while :; do
             ;;
         std_static)
             if grep -Fxq 'HYPER_STD_OK hello static' "$native_output"; then
-                send_commands 1 '/system/bin/std-test --help\n'
+                send_commands 1 '/system/bin/std-test --help; echo STD-HELP-STATUS=$?\n'
                 command_phase='std_help'
             fi
             ;;
         std_help)
             if grep -Fxq 'HypeR standard library acceptance probe' "$native_output" &&
-                grep -q '^Usage: .*std-test' "$native_output"; then
-                if grep -Eq '^(hyper-sh\$ )*sh: command failed$' "$native_output"; then
+                grep -q '^Usage: .*std-test' "$native_output" &&
+                grep -Eq '^STD-HELP-STATUS=[0-9]+$' "$native_output"; then
+                if ! grep -Fxq 'STD-HELP-STATUS=0' "$native_output"; then
                     cat "$log" >&2
                     echo "std success/help path returned failure" >&2
                     exit 1
                 fi
-                send_commands 1 '/system/bin/std-test --unknown-option\n'
+                send_commands 1 '/system/bin/std-test --unknown-option; echo STD-ERROR-STATUS=$?\n'
                 command_phase='std_error'
             fi
             ;;
@@ -261,14 +263,14 @@ while :; do
             # may arrive between fragments of this stderr diagnostic.
             if sed 's/hyper-sh\$ //g' "$native_output" |
                 grep -q "unexpected argument '--unknown-option'" &&
-                grep -Eq '^(hyper-sh\$ )*sh: command failed$' "$native_output"; then
-                send_commands 1 '/system/bin/std-test --panic\n'
+                grep -Eq '^STD-ERROR-STATUS=[1-9][0-9]*$' "$native_output"; then
+                send_commands 1 '/system/bin/std-test --panic; echo STD-ABORT-STATUS=$?\n'
                 command_phase='std_panic'
             fi
             ;;
         std_panic)
             if grep -q 'HYPER_STD_EXPECTED_PANIC' "$native_output" &&
-                [ "$(grep -Ec '^(hyper-sh\$ )*sh: command failed$' "$native_output")" -eq 2 ]; then
+                grep -Eq '^STD-ABORT-STATUS=[1-9][0-9]*$' "$native_output"; then
                 send_commands 1 'ps --help\n'
                 command_phase='cli_ps'
             fi
@@ -311,19 +313,19 @@ while :; do
             fi
             ;;
         cli_shell)
-            if grep -Fq 'Native capability-scoped command shell' "$native_output"; then
-                send_commands 1 'cd --help\n'
+            if grep -Fq 'Native system shell' "$native_output"; then
+                send_commands 1 'help\n'
                 command_phase='cli_builtin'
             fi
             ;;
         cli_builtin)
-            if grep -Fq 'Usage: sh cd' "$native_output"; then
-                send_commands 1 'echo HYPER_CLAP_BUILTIN_OK\n'
+            if grep -Fq 'Builtins: cd pwd echo printf' "$native_output"; then
+                send_commands 1 'echo HYPER_SHELL_BUILTIN_OK\n'
                 command_phase='cli_echo'
             fi
             ;;
         cli_echo)
-            if grep -Fq 'HYPER_CLAP_BUILTIN_OK' "$native_output"; then
+            if grep -Fq 'HYPER_SHELL_BUILTIN_OK' "$native_output"; then
                 send_commands 1 'ls -1\n'
                 command_phase='ls_root'
             fi
@@ -411,7 +413,7 @@ while :; do
         [ "$(grep -Ec '^(hyper-sh\$ )*HYPER_STD_STDERR_OK$' "$native_output")" -eq 2 ] &&
         grep -Fxq '/system/bin' "$native_output" &&
         grep -Fxq '/system' "$native_output" &&
-        grep -Fxq 'HYPER_CLAP_BUILTIN_OK' "$native_output" &&
+        grep -Fxq 'HYPER_SHELL_BUILTIN_OK' "$native_output" &&
         grep -Fxq 'HYPER_CD_CHILD_OK' "$native_output" &&
         grep -Fxq 'HYPER_CD_PARENT_OK' "$native_output" &&
         grep -Eq "^Mem:([[:space:]]+$memory_value){3}[[:space:]]+($memory_value|—)[[:space:]]+$memory_value$" "$native_output" &&
