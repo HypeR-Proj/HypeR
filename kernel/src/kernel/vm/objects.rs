@@ -5,6 +5,7 @@
 
 mod authority;
 mod guest_memory;
+pub(crate) mod guest_memory_access;
 pub(crate) use guest_memory::GuestMemoryObject;
 mod installed;
 mod pending;

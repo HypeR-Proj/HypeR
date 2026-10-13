@@ -235,9 +235,25 @@ PCI functions. Vendor capabilities describe common configuration, the queue
 notification register, the read-to-clear ISR, device configuration and the
 PCI_CFG indirect-access window. Both register access paths share state. INTx
 uses the guest GIC, including mask/unmask with retained pending status; MSI-X,
-legacy/transitional virtio, PCI root-port hotplug and online runtime ownership
-handoff are not implemented. The virtual bus is independent of physical RP1
+legacy/transitional virtio remain unsupported. This business-VM profile has a
+fixed endpoint topology. The virtual bus is independent of physical RP1
 assignment and cannot address host PCI resources.
+
+The I/O appliance has a separate userspace PCIe host bus in domain 1. Bootstrap
+advertises two ECAM buses at `0x0a600000` and a 2 MiB memory window at
+`0x0aa00000`. Bus 0 contains a root port with an empty, standard PCIe hotplug
+slot; bus 1 is its downstream bus. Physical RP1 assignment remains in domain 0,
+with its own DMA translations. The virtual bus uses guest addresses and cannot
+access physical PCI configuration or business-VM memory aliases.
+
+After online adoption, the formal I/O runtime can populate the empty slot and
+raise the standard presence-change notification. The Linux PCIe hotplug driver
+then enumerates the endpoint without a reboot or an explicit sysfs rescan.
+Hotplug uses INTA/INTID 120; the console endpoint uses INTB/INTID 121, preserving
+ordinary PCI interrupt swizzling through slot zero. Guest-programmed bus
+numbers, bridge window and interrupt controls survive the runtime transfer.
+See [the handoff contract](bootstrap-handoff.md#running-provider-transfer) and
+[virtio-console](virtio-console.md) for device ownership and lifecycle.
 
 Queue notifications remain direct kernel routes. Only ECAM, BAR configuration
 and virtio configuration enter userspace. BAR relocation is confined to the
@@ -766,3 +782,11 @@ Run `make test-board-network NETWORK_VIRTIO_TRANSPORT=pci QEMU_CPUS=4` for
 PCI enumeration, guest disk read/write, networking, driver rebind and repeated
 VM retirement. The default `make test-board-network` covers MMIO. Both use
 fresh disposable disks and functional checks, without performance thresholds.
+
+### Hotplugged agent transport
+
+The formal runtime can insert a named virtio serial port into the running I/O
+VM after ownership transfer. Stage1 supplies only the empty PCIe slot. See
+[virtio-console](virtio-console.md) for the Linux kernel requirements, bounded
+byte-stream interface, reset semantics and explicit hotplug acceptance target.
+This does not add a guest-agent daemon or change the appliance's SBSA console.

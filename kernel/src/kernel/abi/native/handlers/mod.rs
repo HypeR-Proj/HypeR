@@ -28,11 +28,13 @@ pub(super) use device::{
     sys_vmo_get_dma_extent,
 };
 pub(super) use guest_io::{
-    sys_filesystem_mount, sys_filesystem_unmount, sys_guest_mailbox_create,
-    sys_guest_mailbox_receive, sys_guest_mailbox_send, sys_guest_mapping_create,
-    sys_guest_mapping_release, sys_guest_notification_access, sys_guest_notification_configure,
-    sys_guest_notification_control, sys_guest_notification_create, sys_native_block_activate,
-    sys_native_block_create, sys_native_block_transfer,
+    sys_filesystem_mount, sys_filesystem_unmount, sys_guest_interrupt_create,
+    sys_guest_interrupt_set_level, sys_guest_mailbox_create, sys_guest_mailbox_receive,
+    sys_guest_mailbox_send, sys_guest_mapping_create, sys_guest_mapping_release,
+    sys_guest_memory_scalar, sys_guest_memory_transfer, sys_guest_notification_access,
+    sys_guest_notification_configure, sys_guest_notification_control,
+    sys_guest_notification_create, sys_native_block_activate, sys_native_block_create,
+    sys_native_block_transfer,
 };
 pub(super) use handles::{
     sys_handle_close, sys_handle_duplicate, sys_handle_get_info, sys_handle_replace,

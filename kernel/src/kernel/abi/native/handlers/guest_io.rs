@@ -351,3 +351,80 @@ pub(in crate::kernel::abi::native) fn sys_guest_notification_access(
         Err(status) => failure(status),
     })
 }
+
+#[inline(never)]
+pub(in crate::kernel::abi::native) fn sys_guest_memory_transfer(
+    services: &impl GuestIoServices,
+    arguments: &Arguments,
+) -> DeferredAction {
+    let result = (|| {
+        require_zero(&arguments[5..])?;
+        if arguments[1] > 1 || arguments[4] == 0 || arguments[4] > 4096 {
+            return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
+        }
+        let memory = parse_handle(arguments[0])?;
+        let buffer = optional_user_slice(arguments[3], arguments[4])?
+            .ok_or(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
+        services
+            .transfer_guest_memory(memory, arguments[1] != 0, arguments[2], buffer)
+            .map_err(status_from_vm_service_error)
+    })();
+    DeferredAction::Return(status_only(result))
+}
+
+#[inline(never)]
+pub(in crate::kernel::abi::native) fn sys_guest_memory_scalar(
+    services: &impl GuestIoServices,
+    arguments: &Arguments,
+) -> DeferredAction {
+    let result = (|| {
+        require_zero(&arguments[5..])?;
+        if arguments[1] > 1 {
+            return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
+        }
+        services
+            .scalar_guest_memory(
+                parse_handle(arguments[0])?,
+                arguments[1] != 0,
+                arguments[2],
+                parse_u32(arguments[3])?,
+                arguments[4],
+            )
+            .map_err(status_from_vm_service_error)
+    })();
+    DeferredAction::Return(match result {
+        Ok(value) => success([value, 0]),
+        Err(status) => failure(status),
+    })
+}
+
+#[inline(never)]
+pub(in crate::kernel::abi::native) fn sys_guest_interrupt_create(
+    services: &impl GuestIoServices,
+    arguments: &Arguments,
+) -> DeferredAction {
+    let result = (|| {
+        require_zero(&arguments[2..])?;
+        services
+            .create_guest_interrupt(parse_handle(arguments[0])?, parse_u32(arguments[1])?)
+            .map_err(status_from_vm_service_error)
+    })();
+    DeferredAction::Return(handle_result(result))
+}
+
+#[inline(never)]
+pub(in crate::kernel::abi::native) fn sys_guest_interrupt_set_level(
+    services: &impl GuestIoServices,
+    arguments: &Arguments,
+) -> DeferredAction {
+    let result = (|| {
+        require_zero(&arguments[2..])?;
+        if arguments[1] > 1 {
+            return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
+        }
+        services
+            .set_guest_interrupt_level(parse_handle(arguments[0])?, arguments[1] != 0)
+            .map_err(status_from_vm_service_error)
+    })();
+    DeferredAction::Return(status_only(result))
+}

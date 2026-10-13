@@ -333,6 +333,18 @@ pub(in crate::kernel) fn dispatch_deferred(
         abi::HYPER_NATIVE_SYS_VIRTUAL_CPU_COMPLETE_MMIO => {
             handlers::sys_virtual_cpu_complete_mmio(services, invocation.arguments())
         }
+        abi::HYPER_NATIVE_SYS_GUEST_MEMORY_TRANSFER => {
+            handlers::sys_guest_memory_transfer(services, invocation.arguments())
+        }
+        abi::HYPER_NATIVE_SYS_GUEST_MEMORY_SCALAR => {
+            handlers::sys_guest_memory_scalar(services, invocation.arguments())
+        }
+        abi::HYPER_NATIVE_SYS_GUEST_INTERRUPT_CREATE => {
+            handlers::sys_guest_interrupt_create(services, invocation.arguments())
+        }
+        abi::HYPER_NATIVE_SYS_GUEST_INTERRUPT_SET_LEVEL => {
+            handlers::sys_guest_interrupt_set_level(services, invocation.arguments())
+        }
         abi::HYPER_NATIVE_SYS_GUEST_MEMORY_CREATE => {
             handlers::sys_guest_memory_create(services, invocation.arguments())
         }

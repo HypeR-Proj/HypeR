@@ -122,7 +122,7 @@ impl Runtime {
             .take()
             .ok_or(hyper_os::Error::MissingHandle)?;
         let channel = CapabilityChannel::from_handle(endpoint);
-        let description = receive_description(&channel, b"HYPER-IO-DESCRIBE/1")?;
+        let description = receive_description(&channel, b"HYPER-IO-DESCRIBE/2")?;
         let (ready, reader) = hyper_os::channel::create_pair()?;
         let builder = self.provider_builder("io-runtime", "/svc/io-runtime", Some("io-runtime"))?;
         move_handle(
@@ -139,7 +139,7 @@ impl Runtime {
         )?;
         move_handle(&builder, ready, READY, Rights::WRITE.union(Rights::WAIT))?;
         self.start_provider(index, builder)?;
-        ready_message(&reader, b"HYPER-IO-READY/1")?;
+        ready_message(&reader, b"HYPER-IO-READY/2")?;
         self.confirm_provider(index)
     }
 
