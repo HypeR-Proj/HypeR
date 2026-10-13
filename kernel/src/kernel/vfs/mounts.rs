@@ -3,7 +3,7 @@
 
 //! Immutable mount-table snapshots; publication never holds a lock across I/O.
 
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use hyper::mm::FallibleArc;
 use hyper::sync::SpinLock;
 
@@ -162,6 +162,9 @@ impl View {
 
 pub(super) struct MountTable {
     current: SpinLock<View>,
+    // Read and written only while current is locked. Readers can keep using
+    // immutable views, but topology edits wait for a reversible switch owner.
+    transition_pending: AtomicBool,
     reclaim_cursor: AtomicUsize,
 }
 
@@ -172,6 +175,7 @@ impl MountTable {
                 root,
                 topology: None,
             }),
+            transition_pending: AtomicBool::new(false),
             reclaim_cursor: AtomicUsize::new(0),
         }
     }
@@ -242,7 +246,7 @@ impl MountTable {
         mounted.freeze()?;
         let result = mounted.unmount_with(|| {
             let retired = self.current.with(|current| {
-                if !current.same(old) {
+                if self.transition_pending.load(Ordering::Relaxed) || !current.same(old) {
                     return Err(Error::Busy);
                 }
                 let prepared = replacement.take().ok_or(Error::InvalidBackendResult)?;
@@ -334,7 +338,7 @@ impl MountTable {
 
     fn replace(&self, old: &View, prepared: &mut Option<View>) -> Result<View, Error> {
         self.current.with(|current| {
-            if !current.same(old) {
+            if self.transition_pending.load(Ordering::Relaxed) || !current.same(old) {
                 return Err(Error::Busy);
             }
             let replacement = prepared.take().ok_or(Error::InvalidBackendResult)?;

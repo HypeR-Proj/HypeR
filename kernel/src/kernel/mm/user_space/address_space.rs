@@ -4,6 +4,7 @@
 //! Concurrent VMAR authority and transactional native address-space mappings.
 
 mod file;
+mod residency;
 
 use alloc::vec::Vec;
 use core::mem::{ManuallyDrop, size_of};
@@ -202,6 +203,7 @@ struct Mapping<Backend: PageBackend, Account: MemoryAccount> {
     object: MappingObject<Backend, Account>,
     ownership: FallibleArc<MappingOwnership<Account::Charge>>,
     write_lease: Option<WritableMappingLease<Backend, Account>>,
+    locks: Option<FallibleArc<residency::LockedPages<Account>>>,
 }
 
 impl<Backend: PageBackend, Account: MemoryAccount> Clone for Mapping<Backend, Account> {
@@ -213,6 +215,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> Clone for Mapping<Backend, Ac
             object: self.object.clone(),
             ownership: self.ownership.clone(),
             write_lease: self.write_lease.clone(),
+            locks: self.locks.clone(),
         }
     }
 }
@@ -944,6 +947,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
             object,
             ownership,
             write_lease,
+            locks: None,
         });
         sort_mappings(&mut replacement);
         let replacement = FallibleArc::try_new(MappingSet {
@@ -2226,6 +2230,12 @@ fn append_fragments<'a, Backend: PageBackend, Account: MemoryAccount>(
             },
             maximum_permissions: original.maximum_permissions,
             object: original.object.clone(),
+            locks: original
+                .locks
+                .as_ref()
+                .map(|locks| locks.retain::<Backend>(range))
+                .transpose()?
+                .flatten(),
             ownership,
             write_lease: if fragment_permissions.contains(Access::Write)
                 && original.object.private().is_none()

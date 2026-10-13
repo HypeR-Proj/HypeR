@@ -20,7 +20,7 @@ pub struct Worker {
     // Closing this endpoint is a durable stop notification, even if the worker
     // is between servicing a request and entering WaitSet::wait.
     stop: Option<OwnedHandle<ByteChannelObject>>,
-    thread: Option<JoinHandle<Result<()>>>,
+    thread: Option<JoinHandle<Result<Exit>>>,
 }
 impl Worker {
     /// Stop accepting exits, request VM shutdown, and join the worker. No VM
@@ -28,8 +28,32 @@ impl Worker {
     pub fn stop(mut self) -> Result<()> {
         self.stop.take();
         match self.thread.take() {
-            Some(thread) => thread.join().map_err(|_| Error::Status(Status::INTERNAL))?,
+            Some(thread) => {
+                thread
+                    .join()
+                    .map_err(|_| Error::Status(Status::INTERNAL))??;
+                Ok(())
+            }
             None => Ok(()),
+        }
+    }
+
+    /// Joins the MMIO consumer at a request boundary without stopping the VM.
+    /// Pending exits and IRQ levels remain in their kernel objects for the
+    /// successor. A failure still follows the normal stop-on-error path.
+    pub fn quiesce(mut self) -> Result<()> {
+        self.stop
+            .as_ref()
+            .ok_or(Error::MissingHandle)?
+            .as_byte_channel()
+            .send(&[QUIESCE])?;
+        let thread = self.thread.take().ok_or(Error::MissingHandle)?;
+        match thread
+            .join()
+            .map_err(|_| Error::Status(Status::INTERNAL))??
+        {
+            Exit::Quiesced => Ok(()),
+            Exit::Stopped => Err(Error::Status(Status::PEER_CLOSED)),
         }
     }
 }
@@ -41,10 +65,21 @@ impl Drop for Worker {
     }
 }
 
-struct MachineGuard(Arc<OwnedHandle<VirtualMachineObject>>);
+const QUIESCE: u8 = 1;
+enum Exit {
+    Stopped,
+    Quiesced,
+}
+
+struct MachineGuard {
+    machine: Arc<OwnedHandle<VirtualMachineObject>>,
+    stop_on_drop: bool,
+}
 impl Drop for MachineGuard {
     fn drop(&mut self) {
-        let _ = vm::request_stop(self.0.as_handle_ref());
+        if self.stop_on_drop {
+            let _ = vm::request_stop(self.machine.as_handle_ref());
+        }
     }
 }
 
@@ -68,7 +103,17 @@ pub fn start(
     physical: &OwnedHandle<PhysicalDeviceObject>,
     guest: &InstalledGuest,
 ) -> Result<Worker> {
-    start_mode(physical, guest, Mode::Sdhci)
+    start_mode(physical, guest, Mode::Sdhci, true)
+}
+
+/// Starts a new consumer for an already assigned, running SDHCI device.
+/// The predecessor must have completed `Worker::quiesce` first. This does not
+/// reset hardware or revalidate power-on register contents.
+pub fn resume(
+    physical: &OwnedHandle<PhysicalDeviceObject>,
+    guest: &InstalledGuest,
+) -> Result<Worker> {
+    start_mode(physical, guest, Mode::Sdhci, false)
 }
 
 #[cfg(feature = "userspace-device-test")]
@@ -76,7 +121,15 @@ pub fn start_virtio_test(
     physical: &OwnedHandle<PhysicalDeviceObject>,
     guest: &InstalledGuest,
 ) -> Result<Worker> {
-    start_mode(physical, guest, Mode::VirtioTest)
+    start_mode(physical, guest, Mode::VirtioTest, true)
+}
+
+#[cfg(feature = "userspace-device-test")]
+pub fn resume_virtio_test(
+    physical: &OwnedHandle<PhysicalDeviceObject>,
+    guest: &InstalledGuest,
+) -> Result<Worker> {
+    start_mode(physical, guest, Mode::VirtioTest, false)
 }
 
 #[derive(Clone, Copy)]
@@ -120,6 +173,7 @@ fn start_mode(
     physical: &OwnedHandle<PhysicalDeviceObject>,
     guest: &InstalledGuest,
     mode: Mode,
+    validate: bool,
 ) -> Result<Worker> {
     if guest.cpus.is_empty() || guest.cpus.len() > 8 {
         return Err(Error::Status(Status::NOT_SUPPORTED));
@@ -127,10 +181,15 @@ fn start_mode(
     let physical = physical.duplicate(physical.info()?.rights)?;
     // Share the same process-local capabilities. Installed VM/vCPU handles
     // intentionally cannot be duplicated through the Native capability API.
-    let machine = MachineGuard(Arc::clone(&guest.machine));
+    let machine = MachineGuard {
+        machine: Arc::clone(&guest.machine),
+        stop_on_drop: true,
+    };
     // Even a read may have device side effects. Only inspect capabilities after
     // installation has retained the VM backing and activated the DMA lease.
-    mode.validate(&physical)?;
+    if validate {
+        mode.validate(&physical)?;
+    }
     let mut cpus = Vec::new();
     cpus.try_reserve_exact(guest.cpus.len())
         .map_err(|_| Error::Status(Status::NO_MEMORY))?;
@@ -141,10 +200,11 @@ fn start_mode(
     let waits = WaitSet::new(cpus.len() + 3)?;
     let stop_id = waits.add(
         receiver.as_handle_ref(),
-        ObjectSignals::<ByteChannelObject>::PEER_CLOSED,
+        ObjectSignals::<ByteChannelObject>::PEER_CLOSED
+            .union(ObjectSignals::<ByteChannelObject>::READABLE),
     )?;
     let machine_id = waits.add(
-        machine.0.as_handle_ref(),
+        machine.machine.as_handle_ref(),
         ObjectSignals::<VirtualMachineObject>::TERMINATED,
     )?;
     let irq_id = waits.add(
@@ -242,19 +302,34 @@ impl Pump {
         self.waits.rearm(self.cpu_ids[index])
     }
 
-    fn run(mut self) -> Result<()> {
+    fn run(mut self) -> Result<Exit> {
         let result = self.service();
-        // A transport failure must terminate Linux, waking any Native client
-        // waiting for its response. MachineGuard also covers unwinding.
-        let stop = vm::request_stop(self.machine.0.as_handle_ref());
-        result.and(stop)
+        if matches!(result, Ok(Exit::Quiesced)) {
+            // All register accesses and MMIO completions have finished. Only
+            // this path disarms retirement; an error or unwind still stops VM.
+            self.machine.stop_on_drop = false;
+        }
+        result
     }
 
-    fn service(&mut self) -> Result<()> {
+    fn service(&mut self) -> Result<Exit> {
+        self.update_irq()?;
         loop {
             let event = self.waits.wait(u64::MAX)?;
-            if event.registration == self.stop_id || event.registration == self.machine_id {
-                return Ok(());
+            if event.registration == self.machine_id {
+                return Ok(Exit::Stopped);
+            }
+            if event.registration == self.stop_id {
+                if ObjectSignals::<ByteChannelObject>::PEER_CLOSED.is_present_in(event.signals) {
+                    return Ok(Exit::Stopped);
+                }
+                let mut command = [0; 1];
+                return match self._stop.as_byte_channel().try_receive(&mut command) {
+                    Ok(1) if command[0] == QUIESCE => Ok(Exit::Quiesced),
+                    Ok(_) => Err(Error::InvalidResponse),
+                    Err(Error::Status(Status::PEER_CLOSED)) => Ok(Exit::Stopped),
+                    Err(error) => Err(error),
+                };
             }
             if event.registration == self.irq_id {
                 self.irq_armed = false;

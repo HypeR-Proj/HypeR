@@ -244,42 +244,18 @@ partition table. No UEFI boot manager is involved.
 The default EEPROM-stub image was subsequently confirmed working on hardware
 on 2026-09-20. Keep the installed EEPROM version with qualification records.
 
-## Diskless I/O VM bring-up
+## Diskless stage-1 recovery
 
-Separate QEMU and Pi 5 appliances are published from the same pinned upstream
-Linux source. `scripts/io-vm.lock.json` selects each platform's immutable OCI
-digest, source revision and successful build/publication runs. HypeR owns guest
-FIT composition and Native VM policy.
+`make rpi5-bringup ARCH=aarch64 BOARD_IMAGE_REPLACE=--replace` packages the
+kernel and static bootstrap recovery environment with pinned firmware. It runs
+stage-1, raw console and fallback-sh only. Without an independent system volume,
+it cannot start formal init, the VM manager or ordinary tools. It does not
+embed a formal system inside the boot archive.
 
-The bring-up target downloads the pinned Pi 5 package by default and selects
-the explicit `hyper.mode=bringup` init policy:
-
-```sh
-make rpi5-io-bringup ARCH=aarch64 BOARD_IMAGE_REPLACE=--replace
-```
-
-`IO_VM_PACKAGE=/path/to/rpi5/appliance` remains an optional development override.
-The released profiles passed Linux CI and QEMU acceptance. Earlier physical Pi
-results used a development reassembly; the published Pi 5 pin subsequently
-served the 2026-10-06 combined storage/network survey. This records basic
-operation, not full hardware qualification; `hardware_qualified` remains false.
-
-This replaces `target/board/rpi5-native/disk.img`, retaining the official
-firmware boot chain and HypeR shell. It registers the board's `io-vm.name` (default `io`) for manual startup through
-vm-manager/vm-runtime without io-runtime, device assignment or a /data mount.
-Use `vmm start io`, `vmm status io` and
-`vmm console io`. Manual startup preserves the Native shell if guest
-bring-up fails; capture the serial log for the terminal vCPU syndrome and address.
-The Native recovery shell does not currently provide a `dmesg` command.
-The guest reports `bring-up ready; no devices assigned, storage service disabled`.
-It waits under VM supervision; it does not provide an interactive Linux shell
-or claim backend readiness. Stop/restart use the normal VMM commands.
-
-The full storage/network deployment is `boards/rpi5.json`; extended fault and
-stress qualification remains deferred. Do not supply its volume/client
-configuration to diskless bring-up. QEMU GICv2 can exercise this guest boot path
-but cannot validate the board's device drivers.
-
+For the complete I/O VM, storage and network deployment use `make rpi5-sd` below.
+Separate QEMU and Pi 5 appliances are published from the same pinned Linux source;
+`scripts/io-vm.lock.json` selects immutable platform digests. `IO_VM_PACKAGE`
+remains an optional development override for that complete deployment.
 
 ## SD-card backend qualification
 
@@ -314,16 +290,16 @@ applies fstab and starts separate workers to mount EROFS at `/system` and FAT at
 The boot files remain ordinary firmware-readable files in the configuration
 FAT volume.
 
-Bootstrap readiness is `HypeR io-runtime: ready; bootstrap mounts complete`,
+Bootstrap readiness is `HypeR bootstrap-stage1-io-runtime: ready; bootstrap mounts complete`,
 after fs-backend has mounted `/system` from the RAM root's fstab. System init
-then adopts core supervision, switches roots, and requests `/system/etc/fstab`.
+starts after stage-1 switches the system filesystem to `/`, adopts core
+supervision, and requests `/etc/fstab`.
 The later `FAT mounted at /data` and fleet-configuration result precede the shell;
 bootstrap readiness alone does not mean that data is mounted. Check `mount`,
-`vmm status io`, `ls /data`, and a small file write/read. `BOARD_SYSTEM_LAYOUT=ramfs`
-keeps system programs in RAM with the same handoff and root switch; see
-[boot layout](../../docs/boot-layout.md). Earlier configuration-volume mounting
-and directory reads passed on Pi 5 D0; those results do not qualify the new
-split deployment or root switch on hardware.
+`vmm status io`, `ls /data`, and a small file write/read. See
+[boot layout](../../docs/boot-layout.md) for the current handoff and retirement.
+Earlier configuration-volume mounting and directory reads passed on Pi 5 D0;
+those results do not qualify later namespace or provider-adoption changes.
 
 The 2026-09-22 hardware run also verified a 256 MiB, two-vCPU Alpine guest
 with a 128 MiB resident I/O VM: both CPUs online, three CPU 1 off/on cycles,
@@ -412,8 +388,8 @@ trusted I/O VM, not DMA isolation.
 If init reports storage readiness failure, first inspect the earlier kernel
 log for `PCI function handoff unavailable` and inspect the forwarded I/O VM
 messages in the captured serial output. The recovery shell and `mount` remain
-available even if storage cannot be mounted; ordinary `/system/bin` tools need
-a mounted system volume or an all-RAM deployment. A link failure records the root-port
+available even if storage cannot be mounted; ordinary `/bin` tools need
+a mounted independent system volume and successful root handoff. A link failure records the root-port
 MMIO address, PCIe status, bus numbers and control register before any endpoint
 access. This distinguishes an inactive PCIe link from rejected bus-number
 programming; neither diagnostic refers to the Ethernet cable or DHCP.

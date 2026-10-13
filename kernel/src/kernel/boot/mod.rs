@@ -109,6 +109,9 @@ fn format_error(
 
 use crate::hal::platform::ProtocolInputs;
 
+mod archive;
+pub(crate) use archive::Archive;
+
 /// State shared only between the top-level kernel initialization steps.
 ///
 /// Keeping this type small makes dependencies between subsystem entry points
@@ -118,7 +121,7 @@ pub(crate) struct Initialization {
     early_console: Option<ConsoleInfo>,
     early_console_mapping: Option<PermanentMmioMapping>,
     linear_dtb: usize,
-    initial_ramdisk: &'static [u8],
+    initial_ramdisk: Option<Archive>,
     interrupts: Option<irq::interrupt::Capabilities>,
     timer: Option<time::Capabilities>,
 }
@@ -153,8 +156,8 @@ impl Initialization {
         self.early_console_mapping
     }
 
-    pub(crate) const fn initial_ramdisk(&self) -> &'static [u8] {
-        self.initial_ramdisk
+    pub(crate) fn take_initial_ramdisk(&mut self) -> Option<Archive> {
+        self.initial_ramdisk.take()
     }
 
     pub(crate) fn interrupts(&self) -> irq::interrupt::Capabilities {
@@ -381,13 +384,15 @@ pub(crate) fn enter_runtime() -> Result<Initialization, RuntimeError> {
     let linear_dtb =
         mm::memory::linear_address(dtb_address).ok_or(RuntimeError::DtbMapping(dtb_address))?;
     let initial_ramdisk = map_initial_ramdisk(initial_ramdisk)?;
+    let pages = with_boot_state(|state| state.memory.take_archive_pages())
+        .unwrap_or_else(|| fail("archive ownership", "reservation already transferred"));
 
     Ok(Initialization {
         essential,
         early_console,
         early_console_mapping,
         linear_dtb,
-        initial_ramdisk,
+        initial_ramdisk: Some(Archive::new(initial_ramdisk, pages)),
         interrupts: None,
         timer: None,
     })
@@ -404,8 +409,9 @@ fn map_initial_ramdisk(
         return Err(RuntimeError::InitialRamdiskSize(range));
     }
     // SAFETY: Early boot validated and reserved the complete firmware-owned
-    // range before allocator handoff. The permanent linear map covers it, and
-    // BootState retains that reservation for the lifetime of the kernel.
+    // range before allocator handoff. The permanent linear map covers it.
+    // The only caller immediately puts this slice into the one-shot Archive
+    // owner; no public API exposes the artificially extended slice lifetime.
     Ok(unsafe { core::slice::from_raw_parts(core::ptr::with_exposed_provenance(address), size) })
 }
 

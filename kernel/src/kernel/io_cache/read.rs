@@ -18,6 +18,7 @@ const MAX_READ_BYTES: usize = 512 * 1024;
 pub(crate) struct FilePage<Owner = ()> {
     bytes: super::storage::PageBytes,
     owner: Owner,
+    instructions_published: super::CacheLock<bool>,
 }
 
 impl<Owner> FilePage<Owner> {
@@ -30,6 +31,7 @@ impl<Owner> FilePage<Owner> {
         Ok(Self {
             bytes: super::storage::PageBytes::try_copy(bytes)?,
             owner,
+            instructions_published: super::CacheLock::new(false),
         })
     }
 
@@ -37,21 +39,47 @@ impl<Owner> FilePage<Owner> {
         Ok(Self {
             bytes: super::storage::PageBytes::try_copy_parts(parts)?,
             owner,
+            instructions_published: super::CacheLock::new(false),
         })
     }
 
     pub(crate) fn refill_parts(&mut self, parts: &[&[u8]], owner: Owner) -> Refill {
+        self.instructions_published
+            .with(|published| *published = false);
         self.bytes.replace_parts(parts);
         self.owner = owner;
         Refill::Ready
     }
 
     pub(crate) fn refill(&mut self, bytes: &[u8], owner: Owner) -> Refill {
+        self.instructions_published
+            .with(|published| *published = false);
         self.bytes.replace(bytes);
         // Refill runs only after unique ownership, outside the cache lock.
         // Replacing this generic sidecar can release the old file identity.
         self.owner = owner;
         Refill::Ready
+    }
+
+    /// Serializes the first executable exposure across every mapping alias.
+    /// The bounded publisher must not sleep or allocate. Refill has exclusive
+    /// ownership and resets this state before publishing a different payload.
+    pub(crate) fn publish_instructions<E>(
+        &self,
+        publish: impl FnOnce() -> Result<(), E>,
+    ) -> Result<(), E> {
+        self.instructions_published.with(|published| {
+            if !*published {
+                publish()?;
+                *published = true;
+            }
+            Ok(())
+        })
+    }
+
+    #[cfg(not(test))]
+    pub(crate) fn physical_address(&self) -> hyper::mm::PhysicalAddress {
+        self.bytes.physical_address()
     }
 
     pub(crate) fn bytes(&self) -> &[u8] {

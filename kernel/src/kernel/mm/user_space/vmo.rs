@@ -19,10 +19,10 @@ pub(crate) use file_source::FilePageSource;
 pub(super) use private_view::{PinnedPrivateRange, PrivateView, PrivateViewBuilder};
 
 #[cfg(not(test))]
-type UserMemoryLock<T> = InterruptSpinLock<T, crate::hal::irq::LocalMask>;
+pub(super) type UserMemoryLock<T> = InterruptSpinLock<T, crate::hal::irq::LocalMask>;
 
 #[cfg(test)]
-struct TestInterruptMask;
+pub(super) struct TestInterruptMask;
 
 #[cfg(test)]
 impl hyper::hal::interrupt::InterruptMask for TestInterruptMask {
@@ -36,7 +36,7 @@ impl hyper::hal::interrupt::InterruptMask for TestInterruptMask {
 }
 
 #[cfg(test)]
-type UserMemoryLock<T> = InterruptSpinLock<T, TestInterruptMask>;
+pub(super) type UserMemoryLock<T> = InterruptSpinLock<T, TestInterruptMask>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum VmoError<BackendError, AccountError> {
@@ -153,6 +153,28 @@ impl<B: PageBackend, A: MemoryAccount> SnapshotVmo<B, A> {
 pub(crate) enum PrivateMappingMode {
     CopyOnWrite,
     Eager,
+}
+
+fn own_shared_page<B: PageBackend, A: MemoryAccount>(
+    page: B::Page,
+    account: &A,
+) -> VmoResult<B, A, PageRef<B, A>> {
+    // A mapping retains physical storage even when the cache would prefer to
+    // evict it. Charge the requester conservatively, not the filesystem owner.
+    let charge = account
+        .try_charge(MemoryCharge {
+            kernel_bytes:
+                FallibleArc::<UserMemoryLock<OwnedPage<B::Page, A::Charge>>>::allocation_size()
+                    as u64,
+            committed_pages: 1,
+            ..MemoryCharge::default()
+        })
+        .map_err(VmoError::Account)?;
+    FallibleArc::try_new(UserMemoryLock::new(OwnedPage {
+        page,
+        _charge: charge,
+    }))
+    .map_err(map_allocation)
 }
 
 fn allocate_page<B: PageBackend, A: MemoryAccount>(

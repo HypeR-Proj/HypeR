@@ -7,9 +7,13 @@ SPDX-License-Identifier: Apache-2.0
 
 Applications use the installed SDK, Rust std, and clap. Run `APP --help` for
 options (`echo` uses `-n`, `-e` and `-E`; its unknown options are literal text).
-Ordinary commands live in `/system/bin`; the recovery commands `sh`, `mount` and
-`umount` live in `/boot/bin`. The root has no `/bin` alias. System files are on EROFS by default or in RAM with
-`BOARD_SYSTEM_LAYOUT=ramfs`; both use the same init handoff and root switch.
+Ordinary commands, including formal `mount` and `umount`, live in `/bin`.
+Bootstrap recovery uses `/svc/fallback-sh` and `/bin/{mount,umount}` before root
+switching; the old archive remains visible under `/boot` until its references
+allow retirement.
+The independent system filesystem becomes `/` before formal init starts.
+Bootstrap remains temporarily at `/boot`, then retires after provider adoption.
+See [boot and system layout](boot-layout.md) for the handoff and mount policy.
 
 ## Files and system information
 
@@ -17,12 +21,12 @@ Ordinary commands live in `/system/bin`; the recovery commands `sh`, `mount` and
 | --- | --- |
 | `cat` | `cat FILE...`, `cat -n FILE`, `cat -bs FILE`, `cat -`; streams bytes without UTF-8 conversion. Number all lines with `-n`, only nonblank lines with `-b`, and squeeze repeated blank lines with `-s`. Numbering spans inputs. |
 | `grep` | `grep -in PATTERN FILE`, `grep -F TEXT`, `grep -v PATTERN`; filters files or stdin, with counting, filename and quiet modes; `-m NUM` limits selected lines per input and `-x` matches whole lines. |
-| `ls` | `ls /boot/etc/hyper`, `ls FILE DIRECTORY`, `ls -a`, `ls --sort size -r`; defaults to permission mode, IEC size, and sorted names. Symlinks show `name@ -> target`, including dangling targets. `--bytes` gives exact file sizes; `-1` prints names only (retaining `@`, omitting targets), `-d` lists a directory itself, `-t` sorts newest first, and `-S` sorts largest first. Directory sizes are shown as `-`. |
+| `ls` | `ls /etc/hyper`, `ls FILE DIRECTORY`, `ls -a`, `ls --sort size -r`; defaults to permission mode, IEC size, and sorted names. Symlinks show `name@ -> target`, including dangling targets. `--bytes` gives exact file sizes; `-1` prints names only (retaining `@`, omitting targets), `-d` lists a directory itself, `-t` sorts newest first, and `-S` sorts largest first. Directory sizes are shown as `-`. |
 | `ps` | `ps -T`, `ps -p KOID`, `ps --name vm-runtime`; select decimal/hex KOIDs (repeat `-p` or use commas) and intersect with a name substring, optionally including threads. IDs print in hexadecimal; `--no-headers` prints rows only. Thread rows include `process=NAME`; kernel-owned threads use `OWNER=kernel`, and per-CPU idle threads are named `idle/CPU`. |
 | `free` | `free`, `free --bytes`, `free -m -c 5 -s 0.5`; physical totals, ownership and reclaimable cache pages. `-b/-k/-m/-g` select units; `-c` is a finite sample count (default 1), `-s` the interval. |
 | `top` | `top -d 0.5`, `top -b -n 3`; interactive refresh with q/Ctrl-C to quit, or plain finite batch snapshots. Rows sort by CPU usage; `--sort name/koid`, `-p KOID`, `--name TEXT` and `--limit NUM` select the view. |
 | `handle` | `handle shell`, `handle --kind physical-device`, `handle --all --object KOID`; inspect objects, process capabilities, and the processes holding an object. |
-| `ldd` | `ldd /system/bin/vmm`, `ldd --tree /system/svc/vm-runtime`, `ldd --direct FILE`, `ldd -v FILE...`; inspect ELF interpreter and direct/transitive library dependencies without executing code. `--library-dir DIR` checks an alternate library set; unresolved or incompatible dependencies cause a failing exit status. |
+| `ldd` | `ldd /bin/vmm`, `ldd --tree /svc/vm-runtime`, `ldd --direct FILE`, `ldd -v FILE...`; inspect ELF interpreter and direct/transitive library dependencies without executing code. `--library-dir DIR` checks an alternate library set; unresolved or incompatible dependencies cause a failing exit status. |
 | `echo` | `echo hello world`, `echo -n text`, `echo -e 'one\ntwo'`; `-n` suppresses the newline, `-e` enables escapes and `-E` restores literal backslashes. |
 
 `cat`, `ls` and `ldd` report an error per failed path, continue with remaining paths,
@@ -39,9 +43,8 @@ special mode bits. File type is queried separately. `metadata` follows symbolic
 links; `symlink_metadata` inspects the final link itself.
 `std::os::hyper::fs` supplies Native symlink and permission extensions.
 
-`ldd /system/bin/vmm` uses the default system deployment: libraries come from
-`/system/lib/<arch>-hyper-hyper`, and the canonical ELF interpreter name
-`/lib64/ld-hyper-<arch>.so` is checked at `/system/lib64/ld-hyper-<arch>.so`.
+`ldd /bin/vmm` uses the default system deployment: libraries come from
+`/lib/<arch>-hyper-hyper`, and declared ELF interpreter paths are inspected literally.
 Other interpreter names are inspected literally. `--loader` and `--library-dir`
 select explicit locations when inspecting another deployment; these options
 do not modify runtime loader policy. It checks dependency metadata and architecture/ELF ABI compatibility, not symbol bindings or
@@ -102,7 +105,7 @@ this SDK is still listed as `unknown(0x...)`, preserving its numeric type ID.
 The default service manifests grant the session manager and shell object inspector
 `INSPECT | INSPECT_DETAILS | DUPLICATE | TRANSFER`. The shell adds an inspector
 with exactly `INSPECT | INSPECT_DETAILS` only when the resolved executable path
-is `/system/bin/handle` (including the bare command `handle`).
+is `/bin/handle` (including the bare command `handle`).
 A copy at another path does not receive it. This is launcher policy for these
 trusted command paths;
 the kernel checks rights and scope, never the executable name. The task inspector
@@ -216,10 +219,10 @@ instance under the same definition and disconnects the old console session.
 
 ## Configuration
 
-System service wiring in `/system/etc/hyper/services.json` selects a separate VM configuration:
+System service wiring in `/etc/hyper/services.json` selects a separate VM configuration:
 
 ```json
-"virtual-machines": { "config": "/boot/etc/hyper/vms.json" }
+"virtual-machines": { "config": "/etc/hyper/vms.json" }
 ```
 
 The VM file contains definitions, not service capabilities:
@@ -471,15 +474,15 @@ volume contains guest artifacts and configuration, not `hyper.img`. Pi 5 still
 needs its firmware boot files. Existing disks are intentionally preserved by
 `make` and `make run`; use `make rebuild` to reset the disk and refresh its
 packaged content. Normal `make` refreshes host-side kernel, ramdisk and system
-staging, then rejects a preserved disk whose `/system` payload is stale.
+staging, then rejects a preserved disk whose system payload is stale.
 
 `vmm list` and `vmm status NAME` distinguish RAM capacity from **allocated VM
 backing**. Allocation is a live kernel snapshot of resident primary backing:
 RAM, uploaded image pages not yet accessed by the guest, and explicitly admitted
 shared pools. The I/O VM currently has 128 MiB of boot RAM plus a separate 1 MiB
 Native storage initiator pool for each Native volume. The default split layout
-has two pools, for `config` and `system`, so its allocated backing is 130 MiB;
-the configuration-only ramfs layout has one pool and 129 MiB. Dynamically
+has two pools, for `hyper-data` and `hyper-system`, so its allocated backing is 130 MiB;
+each additional Native volume adds a separate shared pool. Dynamically
 attached alias windows are not primary backing. The
 metric excludes
 the runtime process, page tables, and I/O VM mappings of other guests' memory;

@@ -26,7 +26,7 @@ impl Default for Config {
 
 impl Config {
     pub(crate) fn load() -> Result<Self, Box<dyn std::error::Error>> {
-        let file = match std::fs::File::open("/system/etc/hyper/session.json") {
+        let file = match std::fs::File::open("/etc/hyper/session.json") {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(Self::default());

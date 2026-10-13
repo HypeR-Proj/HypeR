@@ -10,7 +10,7 @@ use crate::kernel::abi::native::status::{
 };
 use crate::kernel::abi::native::wire::{
     parse_affinity_request, parse_builder_create, parse_builder_handle, parse_builder_text,
-    parse_handle,
+    parse_handle, require_zero,
 };
 use crate::kernel::capability::HandleValue;
 use hyper::abi::native::{
@@ -134,5 +134,24 @@ pub(in crate::kernel::abi::native) fn sys_process_builder_abort(
             .abort_process_builder(builder)
             .map_err(status_from_process_builder_service_error)
     });
+    DeferredAction::Return(status_only(result))
+}
+
+#[inline(never)]
+pub(in crate::kernel::abi::native) fn sys_process_builder_set_memory_lock(
+    services: &impl ProcessBuilderServices,
+    arguments: &Arguments,
+) -> DeferredAction {
+    let result = (|| {
+        require_zero(&arguments[2..])?;
+        let enabled = match arguments[1] {
+            0 => false,
+            1 => true,
+            _ => return Err(hyper::abi::native::HYPER_NATIVE_STATUS_INVALID_ARGUMENT),
+        };
+        services
+            .set_process_builder_memory_lock(parse_handle(arguments[0])?, enabled)
+            .map_err(status_from_process_builder_service_error)
+    })();
     DeferredAction::Return(status_only(result))
 }

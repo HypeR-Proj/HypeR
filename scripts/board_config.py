@@ -202,18 +202,18 @@ class Board:
     disk_sectors: int
 
     @classmethod
-    def load(cls, path, *, layout=None):
+    def load(cls, path, *, recovery=False):
         with open(path, encoding='utf-8') as stream:
             document = stream.read(1024 * 1024 + 1)
         if len(document) > 1024 * 1024:
             raise ValueError('board configuration exceeds 1 MiB')
-        return cls.parse(json.loads(document, object_pairs_hook=unique_object), layout=layout)
+        return cls.parse(json.loads(document, object_pairs_hook=unique_object), recovery=recovery)
 
     @classmethod
-    def parse(cls, data, *, layout=None):
+    def parse(cls, data, *, recovery=False):
         # Canonicalize before deriving GPT, client manifests or bootstrap files:
         # reloading a generated snapshot must describe exactly the same volumes.
-        data = prepare(data, layout)
+        data = prepare(data, recovery=recovery)
         keys(data, ('format', 'board', 'architecture', 'boot', 'disk', 'files', 'virtual-machines', 'io-vm'), ('native',))
         if data['format'] != 'hyper.board.v1' or data['architecture'] != 'aarch64':
             raise ValueError('unsupported board format or architecture')

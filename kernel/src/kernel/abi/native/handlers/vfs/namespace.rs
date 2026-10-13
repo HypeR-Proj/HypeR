@@ -54,3 +54,40 @@ pub(in crate::kernel::abi::native) fn sys_filesystem_switch_root(
     })();
     DeferredAction::Return(status_only(result))
 }
+
+#[inline(never)]
+pub(in crate::kernel::abi::native) fn sys_filesystem_begin_root_switch(
+    services: &impl VfsServices,
+    arguments: &Arguments,
+) -> DeferredAction {
+    let result = (|| {
+        require_zero(&arguments[2..])?;
+        let request = UserSlice::new(
+            UserAddress::new(arguments[1]),
+            abi::HYPER_NATIVE_FILESYSTEM_ROOT_SWITCH_MIN_SIZE as u64,
+        )
+        .map_err(status_from_address_error)?;
+        services
+            .begin_root_switch(parse_handle(arguments[0])?, request)
+            .map_err(status_from_vfs_service_error)
+    })();
+    DeferredAction::Return(crate::kernel::abi::native::status::handle_result(result))
+}
+#[inline(never)]
+pub(in crate::kernel::abi::native) fn sys_filesystem_finish_root_switch(
+    services: &impl VfsServices,
+    arguments: &Arguments,
+) -> DeferredAction {
+    let result = (|| {
+        require_zero(&arguments[2..])?;
+        let commit = match arguments[1] {
+            0 => false,
+            1 => true,
+            _ => return Err(abi::HYPER_NATIVE_STATUS_INVALID_ARGUMENT),
+        };
+        services
+            .finish_root_switch(parse_handle(arguments[0])?, commit)
+            .map_err(status_from_vfs_service_error)
+    })();
+    DeferredAction::Return(status_only(result))
+}

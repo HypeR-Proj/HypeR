@@ -97,6 +97,9 @@ pub(super) struct Node {
     children: Mutex<Children>,
     pub(super) locks: super::locks::FileLocks,
     pub(super) content: super::file_data::FileContent,
+    // Per-node: root promotion can move an archive subtree to another mount,
+    // and open or unlinked files may outlive the original archive root.
+    archive: Option<FallibleArc<crate::kernel::boot::Archive>>,
     _charge: CommittedCharge,
 }
 
@@ -316,6 +319,7 @@ impl Ramfs {
             children: Mutex::new(Children::new()),
             locks: super::locks::FileLocks::new(),
             content: super::file_data::FileContent::new(),
+            archive: None,
             _charge: charge,
         })?;
         Ok(Self {
@@ -327,7 +331,10 @@ impl Ramfs {
         })
     }
 
-    pub(super) fn from_archive(archive: RamFs<'static>) -> Result<Self, Error> {
+    pub(super) fn from_archive(
+        archive: RamFs<'static>,
+        backing: Option<FallibleArc<crate::kernel::boot::Archive>>,
+    ) -> Result<Self, Error> {
         let budget = Budget(
             ResourceDomain::try_new_root(
                 ResourceLimits::UNLIMITED
@@ -394,6 +401,7 @@ impl Ramfs {
                 children: Mutex::new(children),
                 locks: super::locks::FileLocks::new(),
                 content: super::file_data::FileContent::new(),
+                archive: backing.clone(),
                 _charge: charge,
             })?;
             // Startup cannot acquire sleeping locks. These retained children
@@ -616,7 +624,10 @@ impl Ramfs {
         }
         let data = node.data.lock().map_err(Error::Lock)?;
         if let Some(archive) = data.contents.archive() {
-            return Ok(Some(ExecutableSnapshot::borrowed(archive)));
+            return Ok(Some(ExecutableSnapshot::borrowed(
+                archive,
+                node.archive.clone(),
+            )));
         }
         let charge = sponsor
             .reserve(ResourceAmount::ZERO.with(
@@ -683,6 +694,7 @@ impl Ramfs {
             children: Mutex::new(Children::new()),
             locks: super::locks::FileLocks::new(),
             content: super::file_data::FileContent::new(),
+            archive: None,
             _charge: charge,
         })
         .map_err(Error::from)?;

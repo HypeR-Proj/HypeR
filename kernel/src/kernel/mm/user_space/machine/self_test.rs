@@ -10,7 +10,7 @@ struct TestFile {
     bytes: Vec<u8>,
     reads: FallibleArc<AtomicU64>,
 }
-impl super::super::vmo::FilePageSource for TestFile {
+impl super::super::vmo::FilePageSource<KernelPageBackend> for TestFile {
     fn size(&self) -> u64 {
         self.bytes.len() as u64
     }
@@ -70,6 +70,7 @@ pub(crate) fn prepare_native_entry_self_test(
             code.len() as u64,
             0,
             true,
+            super::super::PrivateMappingMode::CopyOnWrite,
         )?;
         let code_change = logical.prepare_map_private_view(
             logical.root_vmar(),
@@ -152,6 +153,7 @@ fn check_pageable_roots(
             mapping.length(),
             0,
             executable,
+            super::super::PrivateMappingMode::CopyOnWrite,
         )?;
         let permissions = if executable {
             Permissions::read_execute()

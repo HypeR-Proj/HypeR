@@ -217,12 +217,16 @@ pub(crate) fn map_file(
 ) -> Result<(), ServiceError> {
     let permission =
         permissions(u64::from(request.permissions)).ok_or(ServiceError::InvalidInput)?;
-    if !permission.is_valid()
-        || permission == Permissions::NONE
-        || u64::from(request.mode) != hyper::abi::native::HYPER_NATIVE_PRIVATE_MAPPING_COPY_ON_WRITE
-    {
+    if !permission.is_valid() || permission == Permissions::NONE {
         return Err(ServiceError::InvalidInput);
     }
+    let mode = match u64::from(request.mode) {
+        hyper::abi::native::HYPER_NATIVE_PRIVATE_MAPPING_COPY_ON_WRITE => {
+            super::PrivateMappingMode::CopyOnWrite
+        }
+        hyper::abi::native::HYPER_NATIVE_PRIVATE_MAPPING_EAGER => super::PrivateMappingMode::Eager,
+        _ => return Err(ServiceError::InvalidInput),
+    };
     let range = aligned_range(request.address, request.size)?;
     let executable = permission.contains(Access::Execute);
     let file_rights = if executable {
@@ -254,6 +258,7 @@ pub(crate) fn map_file(
                         request.source_length,
                         request.data_offset,
                         executable,
+                        mode,
                     )
                     .map_err(MachineError::Logical)?;
                 let maximum = if executable {
@@ -349,7 +354,11 @@ pub(crate) fn allocate_vmar(
         }
     };
     let child_token = child.token();
-    match process.publish_reserved_object(reservation, child, vmar_rights()) {
+    match process.publish_reserved_object(
+        reservation,
+        child,
+        vmar_rights().union(parent.rights().intersection(Rights::LOCK_MEMORY)),
+    ) {
         Ok(value) => Ok((value, child_token.range().base().get())),
         Err(error) => {
             let rollback = super::transaction::retry_stale(
@@ -606,4 +615,38 @@ const fn vmar_rights() -> Rights {
         .union(Rights::TRANSFER)
         .union(Rights::INSPECT)
         .union(Rights::MAP)
+}
+
+/// Residency is separate from mapping authority and restricted to the caller's
+/// own address space. Allocation and file I/O precede the atomic mapping commit.
+pub(crate) fn set_memory_residency(
+    process: &Process,
+    handle: HandleValue,
+    address: u64,
+    size: u64,
+    current: bool,
+    lock: bool,
+) -> Result<(), ServiceError> {
+    let vmar = process.resolve_handle::<VmarObject>(handle, Rights::LOCK_MEMORY)?;
+    let space = vmar.object().address_space();
+    let owner = process.address_space_owner()?;
+    if !core::ptr::eq(space, &*owner) {
+        return Err(ServiceError::Vfs(VfsError::AccessDenied));
+    }
+    let range = if current {
+        if address != 0 || size != 0 {
+            return Err(ServiceError::InvalidInput);
+        }
+        None
+    } else {
+        Some(aligned_range(address, size)?)
+    };
+    retry_mapping_transaction(process, || {
+        let prepared = space
+            .logical()
+            .prepare_residency(vmar.object().token(), range, lock)
+            .map_err(MachineError::Logical)?;
+        space.prepare_change(prepared)?.commit()?;
+        Ok(())
+    })
 }

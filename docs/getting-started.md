@@ -60,7 +60,7 @@ FIT and root disk into the board disk. Later builds preserve that disk,
 including its VM definitions, Alpine FIT and root filesystem. Changes to
 `boards/qemu.json` or the guest `/init` do not update those existing files.
 `make run` only starts existing artifacts. A changed system executable or
-library requires a matching `/system` image; the build rejects a stale system
+library requires a matching system image; the build rejects a stale system
 payload instead of silently pairing it with a new bootstrap. `make rebuild`
 repacks the whole disk and resets its data. See
 [updating existing deployments](board-storage.md#updating-existing-deployments)
@@ -68,10 +68,11 @@ before changing a persistent deployment.
 
 The applications do not include private kernel or SDK source paths. The RAM
 archive initially supplies `/init`, `/bin`, `/svc` and the bootstrap loader.
-Stage-1 init starts storage, then transfers supervision to system init. System
-init switches to a new ramfs root, retaining that archive at `/boot` and the
-existing disk mounts at `/system` and `/data`. Ordinary programs and their
-shared libraries live on the read-only EROFS volume at `/system`.
+Stage-1 init starts storage, mounts the independent system volume temporarily
+at `/system`, switches it to `/`, then launches system init. The original archive
+is retained at `/boot` until formal providers take over and bootstrap retires.
+Ordinary programs and shared libraries live on the EROFS root; `/tmp` is RAM and
+`/data` is the persistent FAT volume.
 Ordinary applications are dynamic PIEs by default and share `libhyper.so`;
 SDK consumers can select a self-contained static PIE with
 `HYPER_LINK_MODE=static`. Both kinds of system executable use the explicitly
@@ -87,11 +88,9 @@ the bridge and connects each guest TAP automatically; QEMU user networking
 supplies DHCP and NAT. After `vmm start alpine`, use `vmm console alpine` to
 enter the guest. Alpine starts DHCP in the background and renews its lease;
 an absent DHCP server does not block its shell. The persistent disk is
-`target/board/qemu/disk.img`; `BOARD_IMAGE` selects another board disk. To keep
-`/system` in RAM, use `BOARD_SYSTEM_LAYOUT=ramfs` for both build and run. This
-uses `target/board/qemu-ramfs/` and the same init handoff and root switch;
-`/system` is promoted from the RAM-resident subtree without copying its files;
-the old `/boot/system` entry is removed in the same transaction.
+`target/board/qemu/disk.img`; `BOARD_IMAGE` selects another board disk. Formal
+programs are not embedded in the initial archive. For a diskless Pi 5 diagnostic,
+`make rpi5-bringup` builds only static stage-1 and its fallback shell.
 
 For an idle-backend diagnostic without mounted Native storage, build with
 `make RUN_PROFILE=io`,
@@ -99,10 +98,12 @@ then launch with `make run RUN_PROFILE=io`. Its separate
 64 MiB disk is created once during the build. Set `IO_VM_DISK=/path/to/disk.img`
 on both commands to select another diagnostic disk. See [I/O VM](io-vm.md).
 
-Use `make RUN_PROFILE=native` followed by `make run RUN_PROFILE=native`
-for the all-RAM Native/Alpine profile without
-an I/O appliance or physical disk. It retains stage-1 and system init. Explicit `INITRAMFS=...` also defaults to
-that profile. RISC-V retains its existing Native run profile.
+Native-only tests use an explicit fixture init that copies the formal payload
+into an independent RAMFS before entering the ordinary stage-1 supervisor.
+This keeps no-device and secondary-architecture tests separate from product
+deployment. These fixtures do not measure block storage or boot latency;
+`test-boot-system` separately verifies the real EROFS-backed handoff. A product
+bootstrap archive alone provides only its static recovery environment.
 
 Run the standalone kernel mechanism tests separately:
 

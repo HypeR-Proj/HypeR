@@ -47,7 +47,7 @@ pub const SESSION: startup::StartupPurpose<hyper_os::handle::CapabilityChannelOb
 pub const BROKER_SERVER_CONTRACT: StartupContract = StartupContract::exact(
     "io.broker-server",
     BROKER_SERVER,
-    Rights::WAIT.union(Rights::READ),
+    Rights::WAIT.union(Rights::READ).union(Rights::TRANSFER),
 );
 pub const BROKER_CLIENT_CONTRACT: StartupContract = StartupContract::exact(
     "io.broker-client",

@@ -99,6 +99,23 @@ impl<Page> Clone for CachedPage<Page> {
     }
 }
 
+/// Immutable storage attached to a hardware file mapping. Its cache key must
+/// remain discoverable until every mapping owner retires. Ordinary short read
+/// pins may still outlive cache eviction without imposing this constraint.
+pub(crate) struct MappedPage<Page> {
+    inner: FallibleArc<OwnedPage<Page>>,
+}
+impl<Page> MappedPage<Page> {
+    pub(crate) fn value(&self) -> &Page {
+        &self.inner.value
+    }
+}
+impl<Page> Drop for MappedPage<Page> {
+    fn drop(&mut self) {
+        self.inner.release_mapping();
+    }
+}
+
 /// Result of a cache access before backend fill.
 pub(crate) enum CacheAccess<'cache, Page> {
     Hit(CachedPage<Page>),
@@ -262,6 +279,30 @@ impl<Page> FileDataCache<Page> {
         })
     }
 
+    /// Pin key and bytes in one cache-lock interval, serialized with eviction.
+    /// A detached table temporarily has no discoverable key; callers can retry
+    /// or use independent private backing without inventing a second cache key.
+    pub(crate) fn lookup_mapping(
+        &self,
+        key: CacheKey,
+    ) -> Result<Option<MappedPage<Page>>, CacheError> {
+        self.state.with(|control| {
+            let Some(cache) = control.table.as_mut() else {
+                return Ok(None);
+            };
+            let Some(slot) = cache.model.lookup(key)? else {
+                return Ok(None);
+            };
+            let page = cache.pages[slot]
+                .as_ref()
+                .unwrap_or_else(|| cache_invariant_violation());
+            page.retain_mapping();
+            Ok(Some(MappedPage {
+                inner: page.clone(),
+            }))
+        })
+    }
+
     /// Looks up a page or reserves exactly one generation-tagged fill.
     ///
     /// The cache lock covers only the bounded state transition and shared-owner
@@ -280,11 +321,11 @@ impl<Page> FileDataCache<Page> {
                     }
                     return Ok(LockedAccess::CapacityBusy);
                 };
-                let access = if allow_load {
-                    cache.model.access(key)?
-                } else {
-                    cache.model.access_with_admission(key, false)?
-                };
+                let access = cache.model.access_with_victim(key, allow_load, |slot| {
+                    cache.pages[slot]
+                        .as_ref()
+                        .is_some_and(|page| !page.mapping_pinned())
+                })?;
                 match access {
                     state::Access::Hit { slot } => {
                         let Some(page) = cache.pages.get(slot).and_then(Option::as_ref) else {
@@ -308,7 +349,12 @@ impl<Page> FileDataCache<Page> {
                         }
                         Ok(LockedAccess::Load { token, old })
                     }
-                    state::Access::CapacityBusy => Ok(LockedAccess::CapacityBusy),
+                    state::Access::CapacityBusy => {
+                        if allow_load {
+                            self.growth_requested.store(true, Ordering::Release);
+                        }
+                        Ok(LockedAccess::CapacityBusy)
+                    }
                 }
             })?;
         if self.growth_requested.load(Ordering::Acquire) {

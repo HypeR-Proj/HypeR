@@ -5,18 +5,18 @@ SPDX-License-Identifier: Apache-2.0
 
 # Shell and text filtering
 
-The formal shell is `app/shell`, installed as `/system/bin/sh`. It provides
+The formal shell is `app/shell`, installed as `/bin/sh`. It provides
 interactive editing and a shell language with common Bourne/Bash constructs,
 using Native process and stream capabilities. It does not implement the full
 Bash language, job control, or Linux process/signal/descriptor ABIs.
 
 `bootstrap/stage1/fallback-sh` is a separate, statically linked recovery service,
 installed as `/svc/fallback-sh` in the initial ramdisk and retained at
-`/boot/svc/fallback-sh` after root switch. It has no clap dependency, command-line
+`/boot/svc/fallback-sh` after root switch, until system init retires the boot archive. It has no clap dependency, command-line
 options, history, pipelines or file redirection. Its builtins are `cd`, `pwd`,
 `help` and `exit`; bounded line editing and quoted executable arguments remain.
-It can launch recovery tools or explicitly selected system programs when those
-are accessible. The `svc` directories are never searched for bare command names.
+It can launch recovery tools and explicitly selected static programs when those
+are accessible; it does not delegate formal loaders or shell authority. The `svc` directories are never searched for bare command names.
 
 Stage-1 init launches fallback directly only for failures before supervision
 handoff. Its input and output are raw byte streams from `console-raw`, with no
@@ -26,20 +26,21 @@ shell. Terminal or shell exit retires the old session and starts a fresh one,
 with bounded retries and a delay. Failures after handoff never select bootstrap
 recovery. See [Native terminals](terminal.md) for ownership and restart behavior.
 
-The formal shell searches `PATH`, initially `/system/bin:/boot/bin`. Explicit
+The formal shell searches `PATH`, initially `/bin`. Explicit
 paths resolve against its current directory. The fallback shell keeps its fixed
 boot-environment lookup for `mount` and `umount`. In the
-[default deployment](boot-layout.md), there is no root-level `/bin` alias.
-Launching a boot tool does not open the system library directory, so storage
-failure cannot prevent static recovery commands. Use `help` for shell syntax and
+[default deployment](boot-layout.md), the independent system filesystem is the root.
+Fallback launches of boot tools do not open the system library directory, so
+storage failure cannot prevent static recovery commands. Formal commands use the
+formal dynamic loader for both static and dynamic executables. Use `help` for shell syntax and
 `APP --help` for ordinary application options.
 
-After repairing storage from recovery, run `/system/bin/sh -i` to enter the formal
-shell; `exit` returns to the recovery shell. Launching that exact trusted path
-also works from another formal shell. It receives the bootstrap environment,
-diagnostic authority and available filesystem/VM client connectors with rights
-to delegate them to its own tools. Ordinary commands, including copies of these
-tools at other paths, receive only their existing command-specific grants.
+The trusted `/bin/sh` executable can be launched from another formal shell. It
+receives the formal image environment, diagnostic authority and available
+filesystem/VM client connectors with rights to delegate them to its own tools.
+Ordinary commands, including copies at other paths, receive only their
+command-specific grants. Recovery mount commands do not commit a new handoff;
+a new formal startup attempt requires a reboot.
 
 ## Editing and history
 
@@ -122,7 +123,7 @@ commands; `set -u` diagnoses unset parameters. `set +x`, `set +u` and
 ## Pipelines and redirection
 
 ```sh
-ls -1 /system/bin | grep '^c'
+ls -1 /bin | grep '^c'
 cat /data/vms.json | grep -n image
 echo first > /tmp/notes
 echo second >> /tmp/notes

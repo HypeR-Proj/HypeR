@@ -225,11 +225,26 @@ pub(super) struct EntrySnapshot {
 }
 
 impl FilesystemInstance {
+    #[cfg(feature = "kernel-self-test")]
     pub(crate) fn try_from_ramfs(ramfs: RamFs<'static>) -> Result<FallibleArc<Self>, Error> {
+        Self::archive(ramfs, None)
+    }
+
+    pub(super) fn try_from_owned_archive(
+        ramfs: RamFs<'static>,
+        archive: FallibleArc<crate::kernel::boot::Archive>,
+    ) -> Result<FallibleArc<Self>, Error> {
+        Self::archive(ramfs, Some(archive))
+    }
+
+    fn archive(
+        ramfs: RamFs<'static>,
+        backing: Option<FallibleArc<crate::kernel::boot::Archive>>,
+    ) -> Result<FallibleArc<Self>, Error> {
         FallibleArc::try_new(Self {
             _charge: None,
             id: FilesystemId(allocate_identifier(&NEXT_FILESYSTEM_ID)?),
-            backend: Backend::RamFs(super::ramfs::Ramfs::from_archive(ramfs)?),
+            backend: Backend::RamFs(super::ramfs::Ramfs::from_archive(ramfs, backing)?),
         })
         .map_err(Error::from)
     }
@@ -387,6 +402,88 @@ impl FilesystemInstance {
         let mut content = node.content().lock()?;
         self.read_status()?;
         self.read_file_locked(node, cache, offset, destination, &mut content)
+    }
+
+    /// Acquires immutable canonical storage while content protection excludes
+    /// mutation. A cache-admission failure permits an independently charged
+    /// private page; lack of optional cache capacity must not block ELF loading.
+    pub(super) fn shared_file_page(
+        &self,
+        node: &NodeLease,
+        cache: &FileDataCache<CachePage>,
+        offset: u64,
+    ) -> Result<Option<io_cache::MappedPage<CachePage>>, Error> {
+        use io_cache::{CacheAccess, CacheKey, FilePageIndex};
+        if matches!(self.read_cache_policy(), ReadCachePolicy::Direct) {
+            return Ok(None);
+        }
+        let mut content = node.content().lock()?;
+        self.read_status()?;
+        let length =
+            content.length(|| self.attributes(node).map(|attributes| attributes.size()))?;
+        if !offset.is_multiple_of(hyper::mm::PAGE_SIZE)
+            || offset
+                .checked_add(hyper::mm::PAGE_SIZE)
+                .is_none_or(|end| end > length)
+        {
+            return Err(Error::InvalidInput);
+        }
+        let identity = FileIdentity::new(
+            self.cache_generation(),
+            NodeIdentity::new(NonZeroU64::new(node.get()).ok_or(Error::NotRegularFile)?),
+            content.revision(),
+        );
+        let key = CacheKey::new(identity, FilePageIndex::new(offset / hyper::mm::PAGE_SIZE));
+        for _ in 0..8 {
+            match cache.access(key).map_err(|_| Error::Allocation)? {
+                CacheAccess::Hit(_) => {
+                    return cache.lookup_mapping(key).map_err(|_| Error::Allocation);
+                }
+                CacheAccess::Load(reservation) => {
+                    let mut bytes = alloc::vec::Vec::new();
+                    bytes
+                        .try_reserve_exact(hyper::mm::PAGE_SIZE as usize)
+                        .map_err(|_| Error::Allocation)?;
+                    bytes.resize(hyper::mm::PAGE_SIZE as usize, 0);
+                    let mut done = 0;
+                    while done < bytes.len() {
+                        let actual =
+                            self.read_backend_at(node, offset + done as u64, &mut bytes[done..])?;
+                        if actual == 0 || actual > bytes.len() - done {
+                            return Err(Error::InvalidInput);
+                        }
+                        done += actual;
+                    }
+                    let record = &node.remote()?.record;
+                    let _ = reservation.fill_and_publish(
+                        || CachePage::try_copy(&bytes, record.clone()),
+                        |page| page.refill(&bytes, record.clone()),
+                    );
+                    return cache.lookup_mapping(key).map_err(|_| Error::Allocation);
+                }
+                CacheAccess::LoadInProgress => {
+                    return Ok(None);
+                }
+                CacheAccess::CapacityBusy => {
+                    if !cache.prefetch_allowed() {
+                        return Ok(None);
+                    }
+                    let capacity = cache
+                        .usage()
+                        .capacity
+                        .max(256)
+                        .checked_mul(2)
+                        .ok_or(Error::Allocation)?;
+                    if !matches!(
+                        cache.maintain_capacity(capacity),
+                        Ok(io_cache::Maintenance::Resized)
+                    ) {
+                        return Ok(None);
+                    }
+                }
+            }
+        }
+        Ok(None)
     }
 
     fn read_file_locked(

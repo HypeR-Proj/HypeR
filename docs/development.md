@@ -12,8 +12,12 @@ SPDX-License-Identifier: Apache-2.0
 Open the repository root in VS Code with the `rust-lang.rust-analyzer`
 extension installed. The shared `.vscode/settings.json` explicitly loads all
 Cargo project roots, including the stdlib workspace, bootstrap, Native applications,
-shared libraries under `lib/`, and build tools. The shared libraries belong to
-`app/Cargo.toml`; do not add them as separate linked projects. Run
+shared libraries under `lib/`, Native acceptance applications and build tools.
+The shared libraries and `tests/app/` programs belong to
+`app/Cargo.toml`; do not add them as separate linked projects. New formal services
+under `app/`, including init, I/O and filesystem services, are discovered by that
+workspace's member glob. The standalone `tests/native/io-smoke` fixture has its
+own linked project and static Native configuration. Run
 `make sdk ARCH=aarch64` once to prepare the Native target
 and patched std sources, then **Developer: Reload Window** after updating editor
 settings. Continue opening
@@ -52,8 +56,15 @@ Both editor commands explicitly run once per Cargo workspace. The check script
 resolves the owning workspace with `cargo locate-project` before selecting its
 target and SDK configuration, so invoking it from `lib/tool-args`, a `shared/`
 crate, or an application subdirectory uses the same Native configuration as
-`app/`. Bootstrap subdirectories resolve to `bootstrap/stage1/` and select
-static linking. A direct invocation from the repository root checks `app/`.
+`app/`. The same resolution applies from `tests/app/terminal-probe`,
+`tests/app/vm-smoke` and `tests/app/fs-failure`, including their `src/` directories.
+Bootstrap subdirectories resolve to `bootstrap/stage1/` and select
+static linking, including checks invoked from the source-only `contracts/`
+directory and an executable's embedded parser modules. Those modules are indexed
+through the consuming package, not separately listed as Cargo projects. Formal
+workspaces explicitly select dynamic linking, so an inherited `HYPER_LINK_MODE`
+cannot change their editor graph. `tests/native/io-smoke` uses its own static workspace.
+A direct invocation from the repository root checks `app/`.
 Checks use `--locked` so editor activity cannot silently rewrite lockfiles.
 
 The editor defaults to AArch64, like the existing kernel editor configuration;
@@ -81,25 +92,26 @@ Use these repository-root commands for short feedback loops:
 `app-test` uses SDK source patches within both Native workspaces, an explicit
 host target, and ordinary Cargo. It does not assemble an SDK or require patched
 std; the first invocation can download missing Cargo dependencies.
-`APP_TEST_PACKAGE=hyper-service-manager` selects the formal supervisor;
-`APP_TEST_WORKSPACE=bootstrap/stage1 APP_TEST_PACKAGE=bootstrap-service-manager`
+`APP_TEST_PACKAGE=hyper-init` selects the formal supervisor;
+`APP_TEST_WORKSPACE=bootstrap/stage1 APP_TEST_PACKAGE=hyper-bootstrap-stage1-init`
 selects the independent bootstrap supervisor;
 `APP_TEST_ARGS=supervision` filters its test names.
 Run it from the repository root so Native editor-target defaults are not loaded.
 `app-sdk-test` separately tests the assembled SDK contract. Production app
 manifests and builds continue to consume installed SDK sources.
 
-`make app` builds static programs from `bootstrap/stage1/`, including the I/O
-runtime, then ordinary system applications and shared libraries from `lib/`. These libraries explicitly belong
+`make app` selects `APP_BUILD_PROFILE=system`: it builds static programs from
+`bootstrap/stage1/`, including the I/O runtime, then ordinary system applications
+and shared libraries from `lib/`, excluding development-only probes. These libraries explicitly belong
 to `app/Cargo.toml`; they use the same installed-SDK boundary, lints, checks and
 host tests as applications. Native consumers select the `shared/` dylib packages;
 host tests use the implementation rlibs. The Native-only delivery packages are
-excluded from host test linking. `make app-fixtures` additionally builds
+excluded from host test linking. `make app-fixtures` selects the development build profile and additionally builds
 static/dynamic linking probes
 and Rust std smoke programs. Specialized VM smoke binaries remain owned by their
 acceptance targets.
 
-Feature-specific fixtures also build the complete workspace and stage its
+Feature-specific fixtures build the selected component graph and stage its
 executables and DSOs together. `APP_FEATURES` selects package-qualified Cargo
 features; `APP_EXTRA_BINS` selects additional acceptance binaries. Both select
 an automatic variant subdirectory for the Cargo cache and staged applications.
@@ -117,17 +129,18 @@ deployment. The registry also determines which delivery dylibs to exclude from
 host test linking.
 
 Staged Rust library providers use `lib64/<arch>-hyper-hyper/`; deployment
-places the selected closure beneath `/system`.
+places the selected closure in the independent system filesystem.
 Packaging collects their transitive `DT_NEEDED` closure after applying executable
 overrides. Additional standalone fixtures supply `--library-dir` instead of
 manually listing Rust libraries. Runtime-loaded plugins remain explicit entries.
 The component registry also declares loader payloads; the composer places the
 bootstrap loader at `lib64/` in the initial RAM archive and the formal loader
-in the `/system` payload's `lib64/`. The former becomes `/boot/lib64` after
-system init switches the root namespace.
+in the system payload's `lib64/`. The former becomes `/boot/lib64` after
+stage1 switches the root namespace.
 
-`NATIVE_IMAGE_PROFILE=development` is the default and preserves the existing
-apps and test programs. `NATIVE_IMAGE_PROFILE=system` includes all ordinary apps
+`NATIVE_IMAGE_PROFILE=development` is the default for the explicit Native test
+fixture and selects its apps and test programs; product board images use the
+system profile. `NATIVE_IMAGE_PROFILE=system` includes all ordinary apps
 and runtime libraries without acceptance probes; it also avoids building those
 probes. The I/O service is included by the existing I/O/board boot profiles.
 Both image profiles retain the same stage-1/system-init handoff. Image profile
@@ -135,8 +148,8 @@ selection controls payload membership, not the startup architecture. For
 AArch64, formal programs use:
 
 ```text
-/system/lib64/ld-hyper-aarch64.so
-/system/lib64/aarch64-hyper-hyper/
+/lib64/ld-hyper-aarch64.so
+/lib64/aarch64-hyper-hyper/
     libhyper.so
     libhyper_rust_std.so
     libhyper_clap_shared.so
@@ -147,7 +160,7 @@ AArch64, formal programs use:
 
 RISC-V uses `riscv64-hyper-hyper` and `ld-hyper-riscv64.so`. ELF `PT_INTERP`
 names `/lib64/ld-hyper-<arch>.so`. Launchers pass an explicit executable loader
-File and the selected `/system/lib64/<arch>-hyper-hyper` Directory capability.
+File and the selected `/lib64/<arch>-hyper-hyper` Directory capability.
 The kernel does not resolve the interpreter string or choose the library
 directory. The formal loader opens exact `DT_NEEDED` names relative to the
 delegated directory, with no fallback to another architecture or an ambient
@@ -191,9 +204,9 @@ suite, also included in Native CI.
 Plain `make` (or `make all`) builds the kernel and the selected profile's ramdisk.
 The default AArch64 board profile creates a disk only if missing; subsequent
 builds preserve `/data` and guest disks while updating the host-side kernel and
-bootstrap loaded by QEMU and refreshing the generated EROFS `/system` volume.
+bootstrap loaded by QEMU and refreshing the generated EROFS system volume.
 The refresh validates the existing GPT and stages a complete image, preserving
-all bytes outside `/system`, before atomic publication. Stop QEMU before updating
+all bytes outside the system partition, before atomic publication. Stop QEMU before updating
 its system volume. Changed partition layouts still require an explicit rebuild
 or a fresh output directory; ordinary builds never repartition existing data.
 `make run` only starts existing artifacts and fails if
@@ -217,7 +230,13 @@ same static/dynamic std, process, thread, filesystem, shell and userspace Linux
 VM contracts on one and four harts. A separate `make test-vm-smoke ARCH=riscv64`
 init fixture validates Native VM lifecycle, timer/serial WFI wakeups and
 retirement independently of Linux loading.
-Linux acceptance explicitly attaches `/system/bin/vmm` to the buffered guest serial port, exercises guest-console RX, and detaches
+The no-device Native fixtures use a test-only init to copy their formal payload
+into an independent RAMFS, then run the production stage-1 supervisor and
+system init. This preserves userspace coverage on secondary architectures
+without an embedded-system product mode. It does not validate block storage or
+boot latency; the separate AArch64 `test-boot-system` gate validates the real
+EROFS-backed root and bootstrap retirement.
+Linux acceptance explicitly attaches `/bin/vmm` to the buffered guest serial port, exercises guest-console RX, and detaches
 through the local Ctrl-] menu. Both Native
 integration suites also verify named VM isolation and repeated runtime crashes
 with guest-memory reclamation. x86-64 has a build and image contract only.

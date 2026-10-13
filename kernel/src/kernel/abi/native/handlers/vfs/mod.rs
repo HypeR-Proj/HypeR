@@ -25,6 +25,7 @@ use hyper::abi::native::{
 mod metadata;
 mod namespace;
 pub(in crate::kernel::abi::native) use namespace::{
+    sys_filesystem_begin_root_switch, sys_filesystem_finish_root_switch,
     sys_filesystem_mount_ramfs, sys_filesystem_switch_root,
 };
 

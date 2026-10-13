@@ -66,7 +66,7 @@ interrupts, time and platform/VM services before publishing userspace.
 
 [Kernel init](../kernel/src/kernel/init/mod.rs) snapshots `/init`, maps the selected
 bootstrap loader and prepares initial capabilities. The userspace loader
-validates and maps init itself. [Bootstrap init runtime](../bootstrap/stage1/lib/service-manager/src/runtime.rs) consumes
+validates and maps init itself. [Bootstrap init runtime](../bootstrap/stage1/init/src/runtime.rs) consumes
 the service manifest and supervises core services. After handoff,
 [session-manager](../app/session-manager/src/main.rs) starts the formal terminal
 and shell and supervises their session group. Pre-handoff failures use the
@@ -74,23 +74,25 @@ independent bootstrap fallback shell.
 
 The two init entry points use independent service-manager implementations.
 [Boot init](../bootstrap/stage1/init/src/main.rs) starts the core services; the
-[handoff sender](../bootstrap/stage1/lib/service-manager/src/runtime/handoff.rs) starts system init
+[handoff sender](../bootstrap/stage1/init/src/runtime/handoff.rs) starts system init
 with a read-only description of those services and its prospective capabilities.
-The [formal receiver](../lib/service-manager/src/runtime/handoff.rs) reads its
+The [formal receiver](../app/init/src/runtime/handoff.rs) reads its
 own init policy and validates the system manifest before registering receive.
 One capability rendezvous moves every core Process supervisor and carries the
 management capabilities and group leases. That successful operation is the ownership
 commit; boot init then exits without waiting for an acknowledgement. Preparation
 failure leaves core supervision and the recovery shell with boot init.
 
-After adoption, [root-switch policy](../lib/service-manager/src/runtime/root_switch.rs)
-prepares a new ramfs root and invokes the generic VFS namespace operation.
-That is a separate commit: it publishes the new root and moved mount edges
-together, retaining the old root at `/boot`. Namespace-root capabilities follow
-the switch, while fixed directory capabilities remain confined to their
-original locations. A rejected switch keeps core supervision in system init
-and leaves the original namespace usable; the system service graph starts
-only after the switch succeeds. See [boot layout](boot-layout.md).
+Before starting the successor, [stage-1 root policy](../bootstrap/stage1/init/src/runtime/root_switch.rs)
+verifies that `/system` is an independent mount and prepares a reversible root
+transition. The mounted system becomes `/`; the original archive moves to `/boot`.
+Namespace-root capabilities follow that transition, while fixed directory
+capabilities remain confined to their original locations. Formal init opens from
+the new root and receives the transition owner together with core supervision.
+Before that transfer, failed launch or admission restores the bootstrap root and
+fallback services. After adoption, formal init commits the transition, replaces
+core providers and eventually retires the original archive. See
+[boot layout](boot-layout.md).
 
 For image contents and launch commands, use the
 [getting-started guide](getting-started.md) and
@@ -357,7 +359,7 @@ For ramfs, read [the VFS adapter](../kernel/src/kernel/vfs/ramfs.rs) and
 [ramfs implementation](../kernel/src/fs/ramfs.rs).
 For `/data`, read [the remote filesystem adapter](../kernel/src/kernel/vfs/remote.rs),
 [common service protocol](../stdlib/rust/hyper-filesystem/src/protocol.rs),
-[FAT media engine](../bootstrap/stage1/lib/fatfs/src/volume.rs),
+[FAT media engine](../bootstrap/stage1/fs-fat/src/volume.rs),
 [block interface](../kernel/src/fs/block.rs),
 [Native block owner](../kernel/src/kernel/block/mod.rs),
 [request lifecycle](../kernel/src/kernel/block/request.rs) and
@@ -366,7 +368,7 @@ For `/data`, read [the remote filesystem adapter](../kernel/src/kernel/vfs/remot
 [Native storage](../bootstrap/stage1/io-runtime/src/runtime/storage.rs) negotiates each
 configured Native volume client and moves its capability to
 [fs-backend](../bootstrap/stage1/fs-backend/src/main.rs). That manager detects the format,
-applies the bootstrap fstab, then `/system/etc/fstab` when requested by formal init.
+applies the bootstrap fstab, then `/etc/fstab` when requested by formal init.
 It launches a separate FAT or EROFS worker for each mount and remains outside the
 data path. Kernel VFS
 and cache hits need no worker round trip; misses and mutations go directly to
@@ -422,9 +424,9 @@ Read [vm-runtime I/O setup](../app/vm-runtime/src/io_devices.rs),
 [asynchronous backend control](../lib/vm-support/src/io_backend.rs).
 [The runtime supervisor](../app/vm-runtime/src/supervisor.rs) services deferred
 MMIO and backend replies without holding the vCPU in a synchronous RPC.
-The [I/O broker](../bootstrap/stage1/io-runtime/src/runtime/broker/mod.rs) authorizes client sessions;
-[client bindings](../bootstrap/stage1/io-runtime/src/runtime/broker/client.rs) own their admission and retirement;
-[broker exchange](../bootstrap/stage1/io-runtime/src/broker_exchange.rs) handles their control
+The [I/O broker](../app/io-runtime/src/runtime/broker/mod.rs) authorizes client sessions;
+[client bindings](../app/io-runtime/src/runtime/broker/client.rs) own their admission and retirement;
+[broker exchange](../app/io-runtime/src/broker_exchange.rs) handles their control
 traffic. [The protocol](../lib/vm-support/src/io_protocol.rs) defines the
 negotiation records.
 
@@ -461,7 +463,7 @@ Useful checks to read beside these paths:
 | Area | Tests |
 | --- | --- |
 | vGIC state and synchronization | [controller tests](../kernel/tests/host/src/cases/vgic.rs), [quiesce tests](../kernel/tests/host/src/cases/vgic_quiesce.rs) |
-| VM ownership and trapped device operations | [vm-smoke](../app/vm-smoke/src/main.rs), [QEMU harness](../tests/qemu/verify-vm-smoke.py) |
+| VM ownership and trapped device operations | [vm-smoke](../tests/app/vm-smoke/src/main.rs), [QEMU harness](../tests/qemu/verify-vm-smoke.py) |
 | Guest SMP and power | [guest SMP harness](../tests/qemu/verify-guest-smp.py) |
 | Native file and guest disk integration | [CI entry points](../tests/ci/run.sh): `board-storage` and `io-vm` |
 | SDK stacks and thread cleanup | [stack tests](../stdlib/hyper/tests/unit/stack.c), [spawn tests](../stdlib/hyper/tests/unit/thread-spawn.c) |
@@ -720,15 +722,15 @@ when changing the relay.
 Configuration has several consumers; modifying the wrong layer can leave the
 runtime unchanged even when the source file looks correct. The table below
 follows the formal supervisor. Bootstrap has its own
-[service-manager implementation](../bootstrap/stage1/lib/service-manager/src/lib.rs),
+[service-manager implementation](../bootstrap/stage1/init/src/lib.rs),
 with the same handoff wire contract and an independent dependency graph.
 
 | Question | Follow this path |
 | --- | --- |
 | Which executable is deployed, and where? | [component declarations](../mk/README.md) → [deployment tool](../scripts/app-deployment.py) |
-| Is the service graph valid? | [manifest parsing](../lib/service-manager/src/manifest/parse.rs) → [planning](../lib/service-manager/src/manifest/plan/mod.rs) |
-| Who supplies a service's capabilities? | [provisioning](../lib/service-manager/src/runtime/provision.rs) → [launcher](../lib/service-manager/src/runtime/launcher.rs) |
-| What happens when it exits? | [runtime supervisor](../lib/service-manager/src/runtime/supervisor.rs) and [supervision policy](../lib/service-manager/src/supervision.rs) |
+| Is the service graph valid? | [manifest parsing](../app/init/src/manifest/parse.rs) → [planning](../app/init/src/manifest/plan/mod.rs) |
+| Who supplies a service's capabilities? | [provisioning](../app/init/src/runtime/provision.rs) → [launcher](../app/init/src/runtime/launcher.rs) |
+| What happens when it exits? | [runtime supervisor](../app/init/src/runtime/supervisor.rs) and [supervision policy](../app/init/src/supervision.rs) |
 | Which files and volumes go into a board image? | [board configuration](../scripts/board_config.py) → [bootstrap generation](../scripts/board_bootstrap.py) → [disk packer](../scripts/pack-board-image.py) |
 | Which I/O VM build is imported? | [package lock](../scripts/io-vm.lock.json) and [I/O VM documentation](io-vm.md) |
 

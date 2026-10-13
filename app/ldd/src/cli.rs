@@ -7,7 +7,7 @@ use std::path::PathBuf;
 #[derive(Debug, Parser)]
 #[command(about = "Inspect Native ELF shared-library dependencies without executing code")]
 #[command(
-    after_help = "Uses /system/lib/<arch>-hyper-hyper unless --library-dir is given. Native PT_INTERP identities resolve to the formal loader in /system/lib64; --loader selects another file explicitly. Does not resolve symbols or validate relocations; successful inspection does not guarantee that an image can run."
+    after_help = "Uses /lib/<arch>-hyper-hyper unless --library-dir is given. PT_INTERP paths are inspected literally; --loader selects another file explicitly. Does not resolve symbols or validate relocations; successful inspection does not guarantee that an image can run."
 )]
 pub struct Ldd {
     /// Show which object requires each library; repeated objects are not expanded again.

@@ -49,11 +49,11 @@ the broker. Native filesystem workers receive only their selected block capabili
 HypeR's Native block initiator uses standard virtio-scsi split queues and shared
 pages. `io-runtime` creates an independent initiator for each declared Native
 volume and moves its activated capability to `fs-backend`. The manager applies the
-bootstrap fstab first; formal init requests `/system/etc/fstab` after handoff and
+bootstrap fstab first; formal init requests `/etc/fstab` after handoff and
 root switching. The manager detects media and starts a separate worker per mounted
 volume. The manager publishes the worker transport beneath the RAM namespace:
 `/data` is writable FAT; the default deployment mounts its read-only EROFS volume at
-`/system`. File reads access the volume through the generic kernel VFS and cache;
+`/system` before stage-1 switches it to `/`. File reads access the volume through the generic kernel VFS and cache;
 they do not populate
 a second ramfs copy. Cache misses and mutations use bounded shared-memory RPC
 directly to the worker. See [filesystem services](filesystem-services.md) and
@@ -69,7 +69,7 @@ a separate configuration archive to the Linux initramfs.
 
 Core console services start independently. Stage-1 failures before supervision
 transfer select `svc/fallback-sh` in the boot environment. After handoff, formal
-init handles failures and starts `/system/bin/sh`. The bootstrap readiness
+init handles failures and starts `/bin/sh`. The bootstrap readiness
 channel precedes handoff; formal init mounts `/data` before loading its VM fleet
 configuration.
 The manager acknowledges the complete fleet configuration before attempting
@@ -178,16 +178,15 @@ before refreshing packaged guest artifacts.
 
 ### Native volume and placement policy
 
-Plain `make`, `make rebuild` and `make run` use `/boot` in RAM, `/system` on
-EROFS and `/data` on the persistent FAT volume after system init switches
-root. Before that transition the RAM archive itself is `/`. The root switch
-moves existing disk mounts without reopening their files or losing cached
-content. `BOARD_SYSTEM_LAYOUT=ramfs` follows the same transition but promotes
-the RAM-resident `/system` subtree into its own mount, removing the old directory
-entry without copying the files. The formal root has no compatibility aliases.
-Default output directories are `target/board/qemu/` and
-`target/board/rpi5-native/`; ramfs appends `-ramfs` to keep its artifacts separate. See [boot and system layout](boot-layout.md) for commands,
-static component selection, handoff semantics and fstab examples.
+Plain `make`, `make rebuild` and `make run` keep only bootstrap in RAM and use
+an independent EROFS system root. Stage-1 mounts that root temporarily at `/system`,
+switches it to `/`, then starts formal init. The original archive stays at `/boot`
+until formal providers adopt its live resources and bootstrap retires. The
+persistent FAT volume is mounted at `/data` afterward. Namespace switching keeps
+filesystem identity and cached contents; formal programs are never copied into
+the boot archive. Default outputs are `target/board/qemu/` and
+`target/board/rpi5-native/`. See [boot and system layout](boot-layout.md) for
+component selection and handoff details.
 
 `disk.partitions` owns the image layout. Each entry declares a unique `label`,
 `size-mib` (8 MiB to 16 TiB), an optional explicit `uuid`, and optional
@@ -204,8 +203,8 @@ entry has `source` (`PARTUUID=...` or `PARTLABEL=...`) and `read-only`.
 mounts requested after formal init takes over. With no explicit `native` policy,
 the builder selects filesystem partitions and generates `/system` in the boot
 table and `/data` in the formal table from their content roles. An explicit policy
-supplies both tables (either can be empty). `native.layout` must match the selected Make layout.
-The ramfs layout omits the generated system partition. User labels are not
+supplies both tables. Normal images require `native.layout: "split"` and an
+independent system partition; embedded formal payloads are unsupported. User labels are not
 reserved; `hyper-data` and `hyper-system` are defaults in the board files.
 
 Guest board entries use `disk: {"source": "PARTLABEL=alpine"}` with an optional
@@ -223,11 +222,11 @@ Build outputs have distinct lifetimes:
 | Artifact | Updated by ordinary `make` / `board-build` |
 | --- | --- |
 | Host kernel and bootstrap, including the I/O VM and its client policy | Yes |
-| Generated EROFS `/system` executables and libraries on an existing disk | Yes; only the system volume is refreshed |
+| Generated EROFS root executables and libraries on an existing disk | Yes; only the system volume is refreshed |
 | `/data/vms.json`, `/data/board.json` and guest FITs on an existing disk | No |
 | Alpine's ext4 root, including `/init` and kernel modules | No |
 
-The builder records the generated `/system` payload hashes beside the disk.
+The builder records the generated system payload hashes beside the disk.
 An ordinary build refreshes changed EROFS contents after validating both GPT
 copies and partition capacity. It stages a complete disk with all bytes outside
 the system partition preserved, then publishes it atomically. This needs temporary

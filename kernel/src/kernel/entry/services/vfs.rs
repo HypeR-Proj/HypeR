@@ -22,6 +22,17 @@ impl VfsServices for DeferredProcessServices<'_> {
         super::vfs_namespace::switch_root(self.process, directory, request)
     }
 
+    fn begin_root_switch(
+        &self,
+        directory: HandleValue,
+        request: UserSlice,
+    ) -> Result<HandleValue, VfsServiceError> {
+        super::vfs_namespace::begin_root_switch(self.process, directory, request)
+    }
+    fn finish_root_switch(&self, token: HandleValue, commit: bool) -> Result<(), VfsServiceError> {
+        super::vfs_namespace::finish_root_switch(self.process, token, commit)
+    }
+
     fn directory_scope_create(
         &self,
         root: HandleValue,

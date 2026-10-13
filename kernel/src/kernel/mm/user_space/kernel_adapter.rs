@@ -104,6 +104,7 @@ pub(crate) struct KernelUserPage {
 }
 enum PageStorage {
     Single(PageBlock),
+    Cached(crate::kernel::io_cache::MappedPage<crate::kernel::vfs::file_record::CachePage>),
     Contiguous {
         physical: PhysicalAddress,
         _owner: FallibleArc<ContiguousBlock>,
@@ -117,6 +118,7 @@ impl KernelUserPage {
     fn physical(&self) -> PhysicalAddress {
         match &self.storage {
             PageStorage::Single(page) => page.physical(),
+            PageStorage::Cached(page) => page.value().physical_address(),
             PageStorage::Contiguous { physical, .. } => *physical,
         }
     }
@@ -243,6 +245,9 @@ impl PageBackend for KernelPageBackend {
         length: usize,
     ) -> Result<(), Self::Error> {
         let source_address = page_address(source, source_offset, length)?;
+        if matches!(destination.storage, PageStorage::Cached(_)) {
+            return Err(KernelPageError::Range);
+        }
         let destination_address = page_address(destination, destination_offset, length)?;
         if source.physical() == destination.physical() {
             return Err(KernelPageError::Range);
@@ -291,6 +296,9 @@ impl PageBackend for KernelPageBackend {
         offset: usize,
         source: &[u8],
     ) -> Result<(), Self::Error> {
+        if matches!(page.storage, PageStorage::Cached(_)) {
+            return Err(KernelPageError::Range);
+        }
         let destination = page_address(page, offset, source.len())?;
         if pointer_ranges_overlap(
             source.as_ptr(),
@@ -324,17 +332,50 @@ impl PageBackend for KernelPageBackend {
         mut pages: impl FnMut(&mut dyn FnMut(&mut Self::Page)),
     ) -> Result<(), Self::Error> {
         let mut range_error = None;
-        // SAFETY: Every enumerated PageBlock owns one complete aligned page,
-        // its VMO page lock excludes modification/execution, and repeated
-        // enumeration yields the same immutable set for every cache pass.
+        let mut private_pages = false;
+        pages(&mut |page| {
+            let PageStorage::Cached(cached) = &page.storage else {
+                private_pages = true;
+                return;
+            };
+            if range_error.is_some() {
+                return;
+            }
+            let result = cached.value().publish_instructions(|| {
+                let start = page_address(page, 0, PAGE_SIZE as usize)? as usize;
+                // SAFETY: This canonical page is immutable and retained. Its
+                // first-publication lock prevents any executable mapping from
+                // using it until maintenance completes. Later aliases skip it.
+                unsafe {
+                    crate::hal::cache::publish_instruction_ranges(context, |visit| {
+                        visit(start, PAGE_SIZE as usize);
+                    })
+                }
+                .map_err(|_| KernelPageError::Range)
+            });
+            if let Err(error) = result {
+                range_error = Some(error);
+            }
+        });
+        if let Some(error) = range_error {
+            return Err(error);
+        }
+        if !private_pages {
+            return Ok(());
+        }
+        // SAFETY: The remaining privately owned pages retain the existing
+        // publication exclusion and stable enumeration contract. Canonical
+        // pages were prepared above before any executable exposure.
         let result = unsafe {
             crate::hal::cache::publish_instruction_ranges(context, |visit_range| {
-                pages(
-                    &mut |page| match page_address(page, 0, PAGE_SIZE as usize) {
-                        Ok(start) => visit_range(start as usize, PAGE_SIZE as usize),
-                        Err(error) => range_error = Some(error),
-                    },
-                );
+                pages(&mut |page| {
+                    if !matches!(page.storage, PageStorage::Cached(_)) {
+                        match page_address(page, 0, PAGE_SIZE as usize) {
+                            Ok(start) => visit_range(start as usize, PAGE_SIZE as usize),
+                            Err(error) => range_error = Some(error),
+                        }
+                    }
+                });
             })
         };
         if let Some(error) = range_error {
@@ -379,7 +420,15 @@ fn pointer_ranges_overlap(
     Ok(left < right_end && right < left_end)
 }
 
-impl super::vmo::FilePageSource for crate::kernel::vfs::FileProtection {
+impl super::vmo::FilePageSource<KernelPageBackend> for crate::kernel::vfs::FileProtection {
+    fn shared_page(&self, offset: u64) -> Result<Option<KernelUserPage>, ()> {
+        Ok(self
+            .shared_page(offset)
+            .map_err(|_| ())?
+            .map(|page| KernelUserPage {
+                storage: PageStorage::Cached(page),
+            }))
+    }
     fn size(&self) -> u64 {
         self.size()
     }

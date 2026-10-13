@@ -120,7 +120,6 @@ pub(super) fn shell(
     startup: &Startup<'_>,
     root: &Directory,
     environment: &Directory,
-    boot_environment: &Directory,
     config: &Config,
     group: &OwnedHandle<TaskGroupObject>,
     client: PreparedClient,
@@ -150,10 +149,10 @@ pub(super) fn shell(
         startup::RESOURCE_DOMAIN,
         process::SHELL_RESOURCE_DOMAIN_CONTRACT
     );
-    let loader = process::open_loader(boot_environment, process::LoaderKind::Bootstrap)?;
-    let libraries = process::open_library_directory(boot_environment)?;
+    let loader = process::open_loader(environment, process::LoaderKind::Dynamic)?;
+    let libraries = process::open_library_directory(environment)?;
     process::ShellDelegation {
-        environment: boot_environment.as_handle_ref(),
+        environment: environment.as_handle_ref(),
         loader: loader.as_handle_ref(),
         libraries: libraries.as_handle_ref(),
         tasks: startup.borrow(startup::TASK_INSPECTOR)?,

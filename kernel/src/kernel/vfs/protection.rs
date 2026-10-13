@@ -96,6 +96,19 @@ impl FileProtection {
             .map_err(Into::into)
     }
 
+    pub(crate) fn shared_page(
+        &self,
+        offset: u64,
+    ) -> Result<Option<crate::kernel::io_cache::MappedPage<CachePage>>, Error> {
+        let content = &self.content;
+        content
+            .location
+            .mount()
+            .filesystem()
+            .shared_file_page(content.location.node(), &content.cache, offset)
+            .map_err(Into::into)
+    }
+
     pub(crate) fn matches_file(&self, file: &FileObject) -> bool {
         // Bind mounts and independently opened hard links must agree. Comparing
         // the canonical content gate avoids treating a pathname or mount ID as

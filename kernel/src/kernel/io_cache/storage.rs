@@ -92,6 +92,11 @@ impl PageBytes {
         }
     }
 
+    #[cfg(not(test))]
+    pub(super) fn physical_address(&self) -> hyper::mm::PhysicalAddress {
+        self._page.physical()
+    }
+
     pub(super) fn as_slice(&self) -> &[u8] {
         #[cfg(not(test))]
         {
