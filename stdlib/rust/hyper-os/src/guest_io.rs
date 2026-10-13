@@ -182,7 +182,7 @@ pub(crate) fn adopt_created<T: TypedObject>(
 
 /// Relocate a PCI frontend BAR inside a VM-owned userspace MMIO reservation.
 /// The original base identifies the connection; neither its backend nor its
-/// assigned interrupt can change. Memory decoding and INTx masking publish
+/// assigned interrupt can change. Memory decoding and `INTx` masking publish
 /// atomically with the source state, including an already pending interrupt.
 pub fn configure_pci_frontend(
     machine: HandleRef<'_, VirtualMachineObject>,
