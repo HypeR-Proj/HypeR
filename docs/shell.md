@@ -45,6 +45,9 @@ tools at other paths, receive only their existing command-specific grants.
 
 Arrow keys move the UTF-8 cursor or recall previous commands. Home/End and
 Ctrl-A/E move to either end; Backspace/Delete remove adjacent characters.
+Ordinary Backspace erases the deleted cells or repaints only the shifted suffix,
+preserving the prompt and unchanged prefix. Wrap boundaries and wide characters
+use cursor positioning; combining characters and composite glyphs retain a full redraw.
 Ctrl-U/K kill the prefix/suffix, Ctrl-W kills the preceding word, and Ctrl-Y
 reinserts killed text. Ctrl-L clears/redraws the screen. Ctrl-C cancels the
 input being edited, including unfinished multiline syntax. It does not terminate
