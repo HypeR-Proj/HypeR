@@ -24,6 +24,8 @@ def main():
             if not re.search(expected, output):
                 raise AssertionError(f'{command}: {output!r}')
 
+        run("set --; argc() { echo ARGC=$#; }; argc \"$@\"; argc ''\"$@\"",
+            rb'\nARGC=0\nARGC=1\n')
         run('false; echo STATUS=$?', rb'\nSTATUS=1\n')
         run('absent-shell-command; echo STATUS=$?', rb'\nSTATUS=127\n')
         run('if false; then echo BAD; elif true; then echo IF_OK; fi', rb'\nIF_OK\n')

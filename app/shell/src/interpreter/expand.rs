@@ -46,6 +46,7 @@ impl<B: Backend> Shell<B> {
     ) -> Result<Vec<String>> {
         let mut fields = vec![Field::default()];
         let mut quote = 0;
+        let mut empty_positional_removable = false;
         let mut at = 0;
         let bytes = word.as_bytes();
         if word == "~" || word.starts_with("~/") {
@@ -57,6 +58,7 @@ impl<B: Backend> Shell<B> {
             if b == b'\'' && quote != b'"' || b == b'"' && quote != b'\'' {
                 if quote == 0 {
                     quote = b;
+                    empty_positional_removable = !fields.last().ok_or("empty expansion")?.keep;
                     fields.last_mut().ok_or("empty expansion")?.keep = true;
                 } else {
                     quote = 0;
@@ -92,8 +94,13 @@ impl<B: Backend> Shell<B> {
                 if positional && quoted {
                     // "$@" contributes separate arguments, while prefixes and
                     // suffixes attach to its first and last positional values.
-                    if values.is_empty() && fields.len() == 1 && fields[0].text.is_empty() {
-                        fields[0].keep = false;
+                    if values.is_empty() && empty_positional_removable {
+                        let field = fields.last_mut().ok_or("empty expansion")?;
+                        if field.text.is_empty() {
+                            field.keep = false;
+                        }
+                    } else if !values.is_empty() {
+                        empty_positional_removable = false;
                     }
                     for (i, value) in values.iter().enumerate() {
                         if i != 0 {
@@ -105,6 +112,7 @@ impl<B: Backend> Shell<B> {
                             .append(value, true);
                     }
                 } else {
+                    empty_positional_removable = false;
                     let value = values.join(" ");
                     if quoted {
                         fields

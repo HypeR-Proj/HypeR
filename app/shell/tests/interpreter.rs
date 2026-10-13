@@ -74,7 +74,7 @@ fn common_scripts_match_bash_output_and_status() -> Result<(), String> {
         "false; x=ok; echo $?; x=$(false); echo $?",
         "x=' a b '; printf '<%s>\\n' pre${x}post",
         "IFS=:; x='a::b:'; printf '<%s>\\n' $x",
-        "set --; f() { echo $#; }; f \"$@\"; f ''\"$@\"",
+        "set --; f() { echo $#; }; f \"$@\"",
         "x='two words'; export y=$x; echo \"$y\"",
         "case abc in 'a*') echo bad;; a*) echo good;; esac",
         "false && echo bad || echo good; ! true",
@@ -111,6 +111,18 @@ fn common_scripts_match_bash_output_and_status() -> Result<(), String> {
         assert_eq!(actual, expected_text, "{source}");
         assert_eq!(status, expected.status.code().unwrap_or(-1), "{source}");
     }
+    Ok(())
+}
+
+#[test]
+fn empty_positional_expansion_preserves_explicit_empty_arguments() -> Result<(), String> {
+    // Older host Bash releases drop preceding empty quotes here. Pin the
+    // intended argument semantics rather than inheriting that oracle bug.
+    let (text, status) = output(
+        "set --; f() { echo $#; }; x=; f \"$@\"; f ''\"$@\"; f \"$@\"''; f \"$x$@\"; f \"$@$@\"",
+    )?;
+    assert_eq!(text, "0\n1\n1\n1\n0\n");
+    assert_eq!(status, 0);
     Ok(())
 }
 
