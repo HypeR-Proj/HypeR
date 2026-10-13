@@ -5,9 +5,10 @@ SPDX-License-Identifier: Apache-2.0
 
 # Shell and text filtering
 
-The formal shell is `app/shell`, installed as `/system/bin/sh`. It retains the
-interactive editing, command launch, pipeline and redirection features described
-below. It is not a Bash-compatible shell.
+The formal shell is `app/shell`, installed as `/system/bin/sh`. It provides
+interactive editing and a shell language with common Bourne/Bash constructs,
+using Native process and stream capabilities. It does not implement the full
+Bash language, job control, or Linux process/signal/descriptor ABIs.
 
 `bootstrap/stage1/fallback-sh` is a separate, statically linked recovery service,
 installed as `/svc/fallback-sh` in the initial ramdisk and retained at
@@ -25,15 +26,15 @@ shell. Terminal or shell exit retires the old session and starts a fresh one,
 with bounded retries and a delay. Failures after handoff never select bootstrap
 recovery. See [Native terminals](terminal.md) for ownership and restart behavior.
 
-Both shells open `mount` and `umount` through their fixed boot image environment;
-other bare commands, including `sh`, resolve under `/system/bin`. Explicit paths
-resolve from the live namespace or current directory. In the
+The formal shell searches `PATH`, initially `/system/bin:/boot/bin`. Explicit
+paths resolve against its current directory. The fallback shell keeps its fixed
+boot-environment lookup for `mount` and `umount`. In the
 [default deployment](boot-layout.md), there is no root-level `/bin` alias.
 Launching a boot tool does not open the system library directory, so storage
-failure cannot prevent static recovery commands. Use `help` for builtins and
-`APP --help` for application options.
+failure cannot prevent static recovery commands. Use `help` for shell syntax and
+`APP --help` for ordinary application options.
 
-After repairing storage from recovery, run `/system/bin/sh` to enter the formal
+After repairing storage from recovery, run `/system/bin/sh -i` to enter the formal
 shell; `exit` returns to the recovery shell. Launching that exact trusted path
 also works from another formal shell. It receives the bootstrap environment,
 diagnostic authority and available filesystem/VM client connectors with rights
@@ -42,56 +43,161 @@ tools at other paths, receive only their existing command-specific grants.
 
 ## Editing and history
 
-Up/Down recalls up to 32 commands from this shell instance. Down past the newest
-entry restores the unfinished draft. Editing a recalled line does not change the
-saved entry. Ctrl-U clears the line, Ctrl-L clears/redraws the screen, Ctrl-C
-cancels input, and Backspace removes the last UTF-8 character. Unsupported terminal
-CSI key sequences are discarded instead of becoming command text.
+Arrow keys move the UTF-8 cursor or recall previous commands. Home/End and
+Ctrl-A/E move to either end; Backspace/Delete remove adjacent characters.
+Ctrl-U/K kill the prefix/suffix, Ctrl-W kills the preceding word, and Ctrl-Y
+reinserts killed text. Ctrl-L clears/redraws the screen. Ctrl-C cancels the
+input being edited, including unfinished multiline syntax. It does not terminate
+a running command; process interruption and job control are not implemented. Ctrl-D exits at an empty
+prompt. Unsupported escape sequences do not become executable text.
 
-History is not written to disk and disappears when the session restarts the
-shell. Consecutive duplicates, empty lines, rejected overlong lines and commands
-starting with whitespace are not saved. A leading space can therefore keep a
-sensitive command out of history, though it is still echoed to the terminal.
+Tab completes builtins, functions, commands in `PATH`, and file/directory names,
+quoting inserted paths as needed. Ambiguous completion lists candidates and
+inserts their common prefix. Path candidates show only the next component's name;
+the inserted text retains the full path. `cd` arguments complete directories,
+including symbolic links to directories. Ctrl-R searches history backwards; repeat Ctrl-R
+for an older match, Enter to accept it for editing, or Ctrl-G to restore the
+original draft. Bracketed paste inserts embedded newlines without executing
+until Enter. Incomplete quotes, compound commands, and here-documents continue
+at the `> ` prompt.
 
-## Pipelines and files
+History is bounded to 256 entries and stored **only** in
+`/tmp/hyper-sh.history`, with a 256 KiB file limit. It can survive a shell/session
+restart in the same boot, but the default RAM-backed `/tmp` is cleared on reboot.
+There is no persistent history path or home-directory fallback. Missing/unwritable
+`/tmp` leaves in-memory history usable. Consecutive duplicates, blank lines,
+rejected overlong lines and commands starting with whitespace are omitted.
+`history` lists entries; `history -c` clears them. A leading space keeps a command
+out of history, but does not hide its terminal echo or trace output.
+
+## Commands and execution state
+
+The shell supports interactive use, `sh SCRIPT [ARG...]`,
+`sh -c 'COMMANDS' [NAME [ARG...]]`, and stdin scripts. `sh -n SCRIPT` checks
+syntax without executing. Noninteractive shells emit neither prompts nor
+session-readiness messages. Positional arguments use `$0`, `$1`, `${10}`, `$#`,
+`"$@"` and `"$*"`.
+
+Commands compose with `;`, newlines, `&&`, `||`, `!`, pipelines, `{ ...; }` groups,
+and `( ... )` subshell scopes. Control structures include `if`/`elif`/`else`,
+`for NAME in WORDS`, `while`, `until`, and `case` with `;;` arms. Functions use
+`name() { ...; }`, have positional arguments and `local` variables, and return
+with `return STATUS`. `break` and `continue` accept an optional loop count.
+`source` (or `.`) evaluates a script in the caller's shell state.
+
+```sh
+report() {
+    local path=$1
+    if test -f "$path"; then
+        cat "$path"
+    else
+        printf 'missing: %s\n' "$path" >&2
+        return 1
+    fi
+}
+for file in /tmp/*.txt; do report "$file"; done
+```
+
+Assignments, `export`, `readonly`, `unset`, `shift` and `set --` manage shell
+state. Single quotes are literal; double quotes permit expansion without field
+splitting or pathname expansion. Unquoted substitutions are split by `IFS` and
+then globbed. `*`, `?` and bracket patterns are supported; unmatched pathname
+patterns remain literal. Dotfiles require an explicit leading dot. `$(...)`
+captures stdout and removes trailing newlines. `$((...))` provides integer
+arithmetic, comparisons, bitwise and logical operators. Parameter expansion
+includes `${name:-default}`, `${name:=value}`, `${name:+alternate}`,
+`${name:?error}` and `${#name}`. The colon selects unset-or-empty rather than
+unset-only handling. Comments start with `#` at a word boundary.
+
+`$?` is the previous command's exit status. A pipeline uses its last stage's
+status; `set -o pipefail` selects its rightmost nonzero status instead.
+`${PIPESTATUS[@]}` reports the individual stage statuses. `status` prints the
+last status, elapsed time and pipeline results. `set -x` traces expanded
+commands; `set -u` diagnoses unset parameters. `set +x`, `set +u` and
+`set +o pipefail` turn those options off. `exit N` returns N modulo 256.
+
+## Pipelines and redirection
 
 ```sh
 ls -1 /system/bin | grep '^c'
 cat /data/vms.json | grep -n image
-echo first > /notes
-echo second >> /notes
-grep -i second < /notes > /matches
-cat /missing 2> /errors
-pwd | grep /
+echo first > /tmp/notes
+echo second >> /tmp/notes
+cat /missing > /tmp/all-output 2>&1
+read -r value <<< 'hello world'
+cat <<'END' > /tmp/literal
+A dollar sign here is literal: $value
+END
+exec 3< /tmp/notes
+read -u 3 first
+exec 3<&-
 ```
 
-`|` connects one command's stdout to the next command's stdin. All stages run
-concurrently; stdout data passes directly between their byte channels with
-bounded backpressure. The shell waits for every stage and reports failure
-according to the last stage's exit status.
+`|` connects stdout to the next command's stdin. All stages start before waiting
+for completion. Plain external stages connect directly through byte channels.
+Unredirected standard output retains its inherited transport rather than passing
+through independent relays in every nested shell. Functions, builtins and
+compound stages use isolated shell processes with their
+own variable state. The shell drains output and releases the terminal lease even
+if a later start or I/O operation fails. A downstream early exit closes its pipe
+rather than leaving an upstream producer blocked indefinitely.
 
-`<` reads stdin from a file, `>` creates or truncates stdout's file, and `>>`
-appends. `2>` and `2>>` do the same for stderr. Redirects apply after pipe
-connections and are opened left to right; the last redirect for a stream wins.
-Paths may be quoted, and operators do not require surrounding spaces. File
-transfers use bounded shell buffers and standard filesystem APIs, without
-collecting complete command output in memory. File I/O currently runs on the
-shell's relay thread; this is not an asynchronous disk-I/O implementation.
+| Operator | Meaning |
+| --- | --- |
+| `<`, `>`, `>>` | Read, create/truncate, or append a file. |
+| `<>`, `>|` | Open read/write, or explicitly truncate. |
+| `n>&m`, `n<&m` | Alias descriptor `m`, sharing its open description. |
+| `n>&-`, `n<&-` | Close a shell descriptor. |
+| `n>&m-`, `n<&m-` | Move a shell descriptor. |
+| `&>`, `&>>` | Redirect both stdout and stderr. |
+| `|&` | Pipe stdout and stderr, applying `2>&1` after explicit redirects. |
+| `<<`, `<<-` | Here-document; `<<-` strips leading tabs. Quoted delimiters suppress expansion. |
+| `<<<` | Expanded here-string followed by a newline. |
 
-Single/double quotes and backslash escaping protect literal operators. A `#`
-at the beginning of a word starts a comment. There is no variable expansion,
-command substitution, globbing, background execution, `&&`/`||`, descriptor
-duplication (`2>&1`) or here-document support. Lines are limited to 512 bytes,
-commands to 32 words including the command name, and pipelines to eight stages.
+Redirects apply **left to right**, after pipe wiring. Consequently `>file 2>&1`
+and `2>&1 >file` have different destinations. Earlier file opens/truncations
+still occur when a later redirect replaces that stream. A file target must
+expand to exactly one word. Redirection also applies to builtins, functions and
+compound commands; it is restored after that command. `exec` without a command
+keeps redirections for subsequent shell commands.
 
-`pwd`, `help` and `clear` can run as pipeline stages or redirect their output.
-`cd` and `exit` require a standalone command without redirection. A command with
-unredirected terminal stdin receives a scoped terminal lease; in a pipeline this
-is the first stage. Its default input is canonical. Ctrl-D after a partial line
-makes that line readable, and at an empty line produces one zero-length read;
-it does not permanently close the input stream. Commands that select raw mode
-receive Ctrl-D as an ordinary byte. At an empty shell prompt, Ctrl-D exits the
-shell. This is not Unix terminal job control.
+Descriptors 0 through 63 are shell-local stream names. Native programs inherit
+the three standard streams; this does not introduce Unix fd numbers into the
+kernel or SDK. Extra descriptors inherited by a shell pipeline worker use a
+private request/reply channel, preserving shared file offsets without read-ahead
+by an idle reader. Redirected standard input also uses request-sized stream reads,
+so a program that never reads cannot consume a later command's input.
+File adapters use bounded buffers, not whole-output capture;
+file I/O on the relay thread remains synchronous.
+
+A command reading from the terminal receives a scoped canonical terminal lease.
+`read` temporarily selects canonical input and restores the shell's raw editing
+profile. Ctrl-D after a partial canonical line makes it readable; at an empty
+line it supplies one zero-length read. Commands selecting raw mode receive
+Ctrl-D as a byte. There is no foreground/background job table or signal-driven
+suspend/resume.
+
+## Scope and limits
+
+This is a Native shell with a defined language subset, not a claim of full Bash
+compatibility. Background `&`, `jobs`/`fg`/`bg`, process substitution, arrays,
+backtick substitution, arithmetic assignment/C-style `for`, `[[ ... ]]`, aliases,
+and `exec COMMAND` image replacement are not implemented. Use `$(...)`, `test`,
+and ordinary loops for supported equivalents. `printf` supports strings, bytes,
+quoted words and integer formats, including bounded width/precision, but not
+floating-point formatting.
+
+An editable line is limited to 4 KiB, scripts and command-substitution output to
+1 MiB, expansion results to 4096 words, and pipelines to 32 stages. Parsing,
+expansion and function/source nesting are bounded. Native process arguments and
+environments also retain the SDK's per-entry and aggregate limits. Worker state
+travels over a private channel rather than temporary files, argv, or stdin.
+
+`make app-test APP_TEST_PACKAGE=hyper-shell` checks the parser, evaluator and
+editor, including differential cases against `/bin/bash` on the host.
+`make test-shell ARCH=aarch64` verifies pipelines, script/function state,
+redirection, volatile history and editing through actual Native processes;
+`make test-console` and `make test-terminal` cover terminal ownership/typeahead.
 
 ## echo and cat
 
