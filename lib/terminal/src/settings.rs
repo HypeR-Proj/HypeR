@@ -10,7 +10,8 @@ pub struct InputFlags {
     pub cr_to_lf: bool,
     pub lf_to_cr: bool,
     pub strip_high_bit: bool,
-    pub ascii_lowercase: bool,
+    /// Traditional Latin-1 byte conversion, not Unicode case folding.
+    pub lowercase: bool,
     /// Recognize the peer's STOP/START characters to pause/resume our output.
     pub receive_flow_control: bool,
     /// Generate STOP/START as our own input queue crosses its watermarks.
@@ -26,6 +27,8 @@ pub struct OutputFlags {
     pub expand_tabs: bool,
     pub suppress_cr_at_column_zero: bool,
     pub newline_resets_column: bool,
+    /// Traditional Latin-1 byte conversion, not Unicode case folding.
+    pub uppercase: bool,
 }
 
 /// Disabled controls are `None`; NUL remains a valid configured character.
@@ -73,10 +76,14 @@ pub struct Settings {
     pub echo: bool,
     pub echo_controls: bool,
     pub visual_erase: bool,
-    /// Echo a submitted newline even when general echo is disabled.
+    /// Echo an unquoted canonical newline even when general echo is disabled.
     pub echo_newline: bool,
-    /// Render line kill as a newline rather than repeated visual erases.
+    /// Append a newline after echoing kill, unless visual kill is enabled.
     pub echo_kill_line: bool,
+    /// Erase the killed line when echo, visual erase and kill echo are enabled.
+    pub visual_kill: bool,
+    /// Print erased characters between backslash and slash (hardcopy echo).
+    pub echo_erased: bool,
     /// Canonical erase removes one Unicode scalar rather than one byte.
     /// Grapheme-cluster editing belongs to the application editor.
     pub utf8: bool,
@@ -101,14 +108,16 @@ impl Default for Settings {
             echo_controls: true,
             visual_erase: true,
             echo_newline: false,
-            echo_kill_line: false,
+            echo_kill_line: true,
+            visual_kill: true,
+            echo_erased: false,
             utf8: true,
             input: InputFlags {
                 ignore_cr: false,
                 cr_to_lf: true,
                 lf_to_cr: false,
                 strip_high_bit: false,
-                ascii_lowercase: false,
+                lowercase: false,
                 receive_flow_control: true,
                 send_flow_control: false,
                 resume_on_any: false,
@@ -119,6 +128,7 @@ impl Default for Settings {
                 expand_tabs: false,
                 suppress_cr_at_column_zero: false,
                 newline_resets_column: true,
+                uppercase: false,
             },
             controls: ControlCharacters::default(),
             read_policy: ReadPolicy::AtLeast { minimum: 1 },
@@ -138,7 +148,7 @@ impl Settings {
             && !self.input.cr_to_lf
             && !self.input.lf_to_cr
             && !self.input.strip_high_bit
-            && !self.input.ascii_lowercase
+            && !self.input.lowercase
             && !self.input.receive_flow_control
             && !self.input.send_flow_control
     }
@@ -151,13 +161,16 @@ impl Settings {
             echo: false,
             echo_controls: false,
             visual_erase: false,
+            echo_kill_line: false,
+            visual_kill: false,
+            echo_erased: false,
             utf8: false,
             input: InputFlags {
                 ignore_cr: false,
                 cr_to_lf: false,
                 lf_to_cr: false,
                 strip_high_bit: false,
-                ascii_lowercase: false,
+                lowercase: false,
                 receive_flow_control: false,
                 send_flow_control: false,
                 resume_on_any: false,
@@ -168,6 +181,7 @@ impl Settings {
                 expand_tabs: false,
                 suppress_cr_at_column_zero: false,
                 newline_resets_column: false,
+                uppercase: false,
             },
             ..Self::default()
         }

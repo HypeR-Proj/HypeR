@@ -83,7 +83,7 @@ fn visual_erase_removes_both_columns_of_a_quoted_carriage_return()
     terminal.input(b"a\x16\r\x7f\n", 1);
     let mut output = [0; 32];
     let count = terminal.output(&mut output);
-    assert_eq!(&output[..count], b"a^M\x08 \x08\x08 \x08\r\n");
+    assert_eq!(&output[..count], b"a^\x08^M\x08 \x08\x08 \x08\r\n");
     assert_eq!(read(&mut terminal, 32, 2).1, b"a\n");
     Ok(())
 }
@@ -292,7 +292,7 @@ fn newline_only_echo_and_output_transformations_are_bounded()
         echo_newline: true,
         ..Settings::default()
     };
-    settings.input.ascii_lowercase = true;
+    settings.input.lowercase = true;
     settings.output.expand_tabs = true;
     settings.output.suppress_cr_at_column_zero = true;
     let mut terminal = terminal(settings)?;

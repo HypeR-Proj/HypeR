@@ -73,11 +73,27 @@ scalars and malformed bytes deterministically; it is not a grapheme or terminal
 screen-width implementation.
 
 Input conversion includes ignoring CR, CR/LF mapping, optional high-bit stripping
-and ASCII case conversion. Echo supports control notation, visual erase,
-newline-only echo, line-kill echo and reprint. Output conversion supports CR/LF,
-tab expansion and column tracking. Transformations are applied once; transformed
-bytes are not recursively processed. Echo and application output share one
-ordered bounded queue with space reserved for echo. Echo overflow reports loss.
+and case conversion. Literal-next bypasses CR/LF conversion, delimiters and
+flow recognition, but still applies high-bit stripping and lowercase conversion.
+The supported formatting choices follow Linux N_TTY behavior:
+
+| Native setting/control | Formatting behavior |
+| --- | --- |
+| `visual_erase` | Erase a displayed character with backspace/space/backspace; a tab needs only backspaces. Without it, echo the erase control itself. |
+| `echo_kill_line`, `visual_kill` | With echo, visual erase and both kill options enabled, erase the line visually. Otherwise echo the kill control and append a newline only when `echo_kill_line` is enabled. Empty-line kill is silent. |
+| `echo_erased` | Hardcopy echo: print erased characters between backslash and slash, instead of moving the cursor back. |
+| `echo_newline` | Echo an unquoted canonical newline when ordinary echo is off; it has no effect in noncanonical mode. |
+| Word erase | Remove trailing separators and the last word, retaining its preceding separator. Like N_TTY, classify a UTF-8 scalar by its leading byte using the Latin-1 alphanumeric/underscore class. |
+| Literal-next, reprint | With control notation enabled, literal-next shows caret/backspace. Reprint echoes its control, a newline, then the unfinished line. Reprint is ordinary input when echo is disabled. |
+| `input.lowercase`, `output.uppercase` | Traditional Latin-1 byte case conversion, as in N_TTY. These options are disabled by default and should remain disabled for UTF-8 text. |
+| CR/LF and tabs | Suppress a CR at column zero before CR-to-LF conversion. CR/LF transformations are nonrecursive; tabs use eight-column stops. Invisible controls such as BEL do not advance the tracked column. |
+
+With `echo_controls`, quoted LF echoes as `^J`. Outside canonical mode, a literal
+LF also echoes as `^J`, while a CR converted to LF echoes a line break. UTF-8
+column tracking counts leading bytes, as N_TTY does; display-width and grapheme
+editing belong to the application. Echo and application output share one ordered
+bounded queue with space reserved for echo. Echo overflow reports loss and does
+not advance the column for bytes that were not queued.
 
 `Settings::raw()` makes both directions binary-transparent, including NUL, ESC,
 CR, Ctrl-D, XON and XOFF. It disables canonical processing, echo, transformations
@@ -111,7 +127,9 @@ not resume output. Input and control messages continue to be serviced while
 output is paused or input buffers are full.
 
 Automatic input throttling uses high/low watermarks with headroom for bytes
-already in flight. A separate bounded flow queue bypasses paused/transformed
+already in flight. Canonical input is throttled only while a readable record is
+queued; an unfinished line must still be able to receive its delimiter. A
+separate bounded flow queue bypasses paused/transformed
 output. Before replacing active flow characters, the service sends the old
 START and fences its handoff, then commits the new recovery descriptor to the
 manager before it can send a new STOP. The descriptor has an idempotent
@@ -192,9 +210,15 @@ signal generation or Unix job-control ABI.
 
 `make app-test APP_TEST_PACKAGE=hyper-terminal` exercises the portable discipline,
 including editing, EOF, binary raw data, timing, conversions and flow control.
+The shared byte vectors in `lib/terminal/tests/formatting.tsv` also run against
+real Linux PTYs through `python3 -B lib/terminal/tests/linux-formatting.py` in the
+scripts suite on Linux. This checks observable formatting without adopting the
+Linux termios ABI. Native timeout/error distinctions, bounded overflow handling
+and malformed-UTF-8 recovery remain explicit Native policies.
 `make sdk-test` covers generic stream ownership, cancellation and ordered writes.
 `make test-terminal ARCH=aarch64` runs the development-only `terminal-probe`
-through the actual shell and standard streams, including full reply queues,
+through the actual shell and standard streams, including editing/echo formatting,
+full reply queues,
 cancellation ordering and subtree revocation during flow-profile recovery.
 `make test-console` covers normal shell interaction, std subprocess inheritance
 and interactive command exit.

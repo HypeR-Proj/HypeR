@@ -80,6 +80,9 @@ pub fn encode_settings(settings: Settings) -> [u8; SETTINGS_BYTES] {
         settings.input.resume_on_any,
         settings.output.lf_to_crlf,
         settings.output.cr_to_lf,
+        settings.visual_kill,
+        settings.echo_erased,
+        settings.output.uppercase,
     ];
     for (index, flag) in flags.iter().enumerate() {
         bytes[index] = u8::from(*flag);
@@ -88,7 +91,7 @@ pub fn encode_settings(settings: Settings) -> [u8; SETTINGS_BYTES] {
         settings.echo_newline,
         settings.echo_kill_line,
         settings.input.strip_high_bit,
-        settings.input.ascii_lowercase,
+        settings.input.lowercase,
         settings.output.expand_tabs,
         settings.output.suppress_cr_at_column_zero,
         settings.output.newline_resets_column,
@@ -128,11 +131,10 @@ pub fn encode_settings(settings: Settings) -> [u8; SETTINGS_BYTES] {
 
 pub fn decode_settings(bytes: &[u8]) -> Option<Settings> {
     if bytes.len() != SETTINGS_BYTES
-        || bytes[..13].iter().any(|value| *value > 1)
+        || bytes[..16].iter().any(|value| *value > 1)
         || bytes[56..63].iter().any(|value| *value > 1)
-        || bytes[13..16]
+        || bytes[34..40]
             .iter()
-            .chain(bytes[34..40].iter())
             .chain(bytes[41..44].iter())
             .any(|value| *value != 0)
         || bytes[63] != 0
@@ -165,17 +167,20 @@ pub fn decode_settings(bytes: &[u8]) -> Option<Settings> {
         utf8: bytes[4] != 0,
         echo_newline: bytes[56] != 0,
         echo_kill_line: bytes[57] != 0,
+        visual_kill: bytes[13] != 0,
+        echo_erased: bytes[14] != 0,
         input: InputFlags {
             ignore_cr: bytes[5] != 0,
             cr_to_lf: bytes[6] != 0,
             lf_to_cr: bytes[7] != 0,
             strip_high_bit: bytes[58] != 0,
-            ascii_lowercase: bytes[59] != 0,
+            lowercase: bytes[59] != 0,
             receive_flow_control: bytes[8] != 0,
             send_flow_control: bytes[9] != 0,
             resume_on_any: bytes[10] != 0,
         },
         output: OutputFlags {
+            uppercase: bytes[15] != 0,
             lf_to_crlf: bytes[11] != 0,
             cr_to_lf: bytes[12] != 0,
             expand_tabs: bytes[60] != 0,
