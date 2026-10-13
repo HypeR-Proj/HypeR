@@ -519,19 +519,21 @@ pub(crate) struct MemoryObservation {
     pub(crate) captured_at_ns: u64,
     pub(crate) page_size: u64,
     pub(crate) total_bytes: u64,
-    pub(crate) reserved_bytes: u64,
     pub(crate) managed_bytes: u64,
     pub(crate) free_bytes: u64,
-    pub(crate) used_bytes: u64,
     pub(crate) kernel_bytes: u64,
-    pub(crate) heap_bytes: u64,
+    pub(crate) slab_bytes: u64,
+    pub(crate) large_heap_bytes: u64,
     pub(crate) page_table_bytes: u64,
-    pub(crate) user_bytes: u64,
-    pub(crate) guest_bytes: u64,
-    pub(crate) unattributed_bytes: u64,
-    pub(crate) reclaimable_bytes: u64,
-    pub(crate) cache_sample_complete: u64,
-    pub(crate) buffered_bytes: u64,
+    pub(crate) vmo_bytes: u64,
+    pub(crate) guest_loaned_bytes: u64,
+    pub(crate) guest_private_bytes: u64,
+    pub(crate) file_cache_bytes: u64,
+    pub(crate) slab_reclaimable_bytes: u64,
+    pub(crate) slab_sample_complete: u64,
+    pub(crate) file_cache_reclaimable_bytes: u64,
+    pub(crate) file_cache_sample_complete: u64,
+    pub(crate) ramfs_capacity_bytes: u64,
 }
 
 /// Read-only authority over system physical-memory accounting.
@@ -564,75 +566,36 @@ impl MemoryInspector {
         };
         let runtime = stats.runtime;
         let buddy = runtime.buddy;
-        let total_bytes = pages_to_bytes(stats.boot.ram_pages)?;
-        let managed_bytes = pages_to_bytes(buddy.managed_pages)?;
-        let free_bytes = pages_to_bytes(buddy.free_pages)?;
-        let used_bytes = managed_bytes
-            .checked_sub(free_bytes)
-            .ok_or(Error::InconsistentAccounting)?;
-        let heap_bytes = pages_to_bytes(
-            runtime
-                .slab_pages
-                .checked_add(runtime.large_heap_pages)
-                .ok_or(Error::InconsistentAccounting)?,
-        )?;
-        let kernel_bytes = pages_to_bytes(
-            runtime
-                .kernel_pages
-                .pages
-                .checked_add(runtime.file_cache_pages.pages)
-                .ok_or(Error::InconsistentAccounting)?,
-        )?;
-        let page_table_bytes = pages_to_bytes(runtime.page_table_pages.pages)?;
-        let user_bytes = pages_to_bytes(runtime.user_pages.pages)?;
-        let guest_bytes = pages_to_bytes(runtime.guest_pages.pages)?;
-        let attributed = kernel_bytes
-            .checked_add(heap_bytes)
-            .and_then(|value| value.checked_add(page_table_bytes))
-            .and_then(|value| value.checked_add(user_bytes))
-            .and_then(|value| value.checked_add(guest_bytes))
-            .ok_or(Error::InconsistentAccounting)?;
-        let unattributed_bytes = used_bytes
-            .checked_sub(attributed)
-            .ok_or(Error::InconsistentAccounting)?;
-        let reserved_bytes = total_bytes
-            .checked_sub(managed_bytes)
-            .ok_or(Error::InconsistentAccounting)?;
-        let file_cache_reclaimable =
+        // Physical categories come from one allocator capture. Reclaimability
+        // is sampled independently and carries separate validity for each pool;
+        // neither a partial sample nor userspace presentation policy is summed
+        // into the physical counters here.
+        let file_reclaimable =
             crate::kernel::vfs::file_cache().and_then(|cache| cache.reclaimable_pages());
-        let reclaimable_pages = runtime
-            .cache
-            .reclaimable_pages
-            .unwrap_or(0)
-            .checked_add(
-                file_cache_reclaimable
+        let slab_reclaimable = runtime.cache.reclaimable_pages;
+        Ok(MemoryObservation {
+            captured_at_ns: crate::kernel::time::monotonic_nanoseconds().unwrap_or_default(),
+            page_size,
+            total_bytes: pages_to_bytes(stats.boot.ram_pages)?,
+            managed_bytes: pages_to_bytes(buddy.managed_pages)?,
+            free_bytes: pages_to_bytes(buddy.free_pages)?,
+            kernel_bytes: pages_to_bytes(runtime.kernel_pages.pages)?,
+            slab_bytes: pages_to_bytes(runtime.slab_pages)?,
+            large_heap_bytes: pages_to_bytes(runtime.large_heap_pages)?,
+            page_table_bytes: pages_to_bytes(runtime.page_table_pages.pages)?,
+            vmo_bytes: pages_to_bytes(runtime.user_pages.pages)?,
+            guest_loaned_bytes: pages_to_bytes(runtime.guest_loaned_pages)?,
+            guest_private_bytes: pages_to_bytes(runtime.guest_pages.pages)?,
+            file_cache_bytes: pages_to_bytes(runtime.file_cache_pages.pages)?,
+            slab_reclaimable_bytes: pages_to_bytes(slab_reclaimable.unwrap_or(0))?,
+            slab_sample_complete: u64::from(slab_reclaimable.is_some()),
+            file_cache_reclaimable_bytes: pages_to_bytes(
+                file_reclaimable
                     .unwrap_or(0)
                     .min(runtime.file_cache_pages.pages),
-            )
-            .ok_or(Error::InconsistentAccounting)?;
-        let captured_at_ns = crate::kernel::time::monotonic_nanoseconds().unwrap_or_default();
-        Ok(MemoryObservation {
-            captured_at_ns,
-            page_size,
-            total_bytes,
-            reserved_bytes,
-            managed_bytes,
-            free_bytes,
-            used_bytes,
-            kernel_bytes,
-            heap_bytes,
-            page_table_bytes,
-            user_bytes,
-            guest_bytes,
-            unattributed_bytes,
-            reclaimable_bytes: pages_to_bytes(reclaimable_pages)?,
-            cache_sample_complete: u64::from(
-                runtime.cache.reclaimable_pages.is_some() && file_cache_reclaimable.is_some(),
-            ),
-            // These physical pages are included in kernel ownership above.
-            // Pinned or loading pages remain buffered but are not immediately
-            // reclaimable; metadata allocations remain charged to the heap.
-            buffered_bytes: pages_to_bytes(runtime.file_cache_pages.pages)?,
+            )?,
+            file_cache_sample_complete: u64::from(file_reclaimable.is_some()),
+            ramfs_capacity_bytes: crate::kernel::vfs::ramfs_capacity_bytes(),
         })
     }
 }

@@ -212,11 +212,11 @@ fn render(
     .and_then(|()| {
         writeln!(
             output,
-            "\nMem: {} MiB total, {} MiB used, {} MiB free, {} MiB reserved",
+            "\nMem: {} MiB total, {} MiB allocated (incl. reserved), {} MiB free, {} MiB reserved",
             mib(memory.total_bytes),
-            mib(memory.used_bytes),
+            mib(memory.total_bytes - memory.free_bytes),
             mib(memory.free_bytes),
-            mib(memory.reserved_bytes),
+            mib(memory.total_bytes - memory.managed_bytes),
         )
     })
     .and_then(|()| writeln!(output, "KOID                CPU      THREADS  NAME"))

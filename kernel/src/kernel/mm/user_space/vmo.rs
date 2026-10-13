@@ -73,6 +73,8 @@ type PageRef<Backend, Account> = FallibleArc<
 
 struct VmoState<Backend: PageBackend, Account: MemoryAccount> {
     pages: Vec<Option<PageRef<Backend, Account>>>,
+    resident_pages: usize,
+    guest_loaned: bool,
 }
 
 type VmoLock<Backend, Account> = UserMemoryLock<VmoState<Backend, Account>>;
@@ -288,9 +290,10 @@ impl<Backend: PageBackend, Account: MemoryAccount> WritableVmo<Backend, Account>
             .map_err(map_allocation)?;
             // Local construction owns every slot; no allocation or destructor
             // runs under the page table lock and the VMO has not escaped.
-            vmo.inner
-                .state
-                .with(|state| state.pages[index] = Some(owner));
+            vmo.inner.state.with(|state| {
+                state.pages[index] = Some(owner);
+                state.resident_pages += 1;
+            });
         }
         Ok(vmo)
     }
@@ -312,7 +315,11 @@ impl<Backend: PageBackend, Account: MemoryAccount> WritableVmo<Backend, Account>
             size,
             backend,
             account,
-            state: UserMemoryLock::new(VmoState { pages }),
+            state: UserMemoryLock::new(VmoState {
+                pages,
+                resident_pages: 0,
+                guest_loaned: false,
+            }),
             access_state: AtomicUsize::new(0),
             _metadata_charge: metadata_charge,
         };
@@ -390,6 +397,13 @@ impl<Backend: PageBackend, Account: MemoryAccount> WritableVmo<Backend, Account>
         // The allocation owns admission release even when allocation fails.
         admission.commit();
         let inner = FallibleArc::try_new(lease_inner).map_err(map_allocation)?;
+        // Only the successfully allocated lease starts accounting. Population
+        // can run concurrently: both publication and this transition hold the
+        // VMO state lock, so existing and future pages are each counted once.
+        self.inner.state.with(|state| {
+            self.inner.backend.retain_guest_pages(state.resident_pages);
+            state.guest_loaned = true;
+        });
         Ok(ExclusiveHardwareWriteLease { inner })
     }
 
@@ -590,6 +604,10 @@ impl<Backend: PageBackend, Account: MemoryAccount> WritableVmo<Backend, Account>
                 };
                 if slot.is_none() {
                     *slot = Some(page);
+                    state.resident_pages += 1;
+                    if state.guest_loaned {
+                        self.inner.backend.retain_guest_pages(1);
+                    }
                     None
                 } else {
                     Some(page)
@@ -772,6 +790,12 @@ impl<Backend: PageBackend, Account: MemoryAccount> Drop
     for ExclusiveHardwareWriteLeaseInner<Backend, Account>
 {
     fn drop(&mut self) {
+        self.vmo.state.with(|state| {
+            if state.guest_loaned {
+                self.vmo.backend.release_guest_pages(state.resident_pages);
+                state.guest_loaned = false;
+            }
+        });
         release_exclusive_hardware_admission(&self.vmo);
     }
 }

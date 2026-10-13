@@ -212,6 +212,13 @@ pub(crate) trait PageBackend: Clone {
     /// may use `()` when publication has no processor-local effects.
     type InstructionPublicationContext: ?Sized;
 
+    /// Observe distinct resident pages entering/leaving an exclusive guest lease.
+    /// The VMO state lock serializes these calls with page publication. Adapters
+    /// must not allocate, block, or acquire a VMO lock. Pages remain owned until
+    /// after the matching release; cloning a lease does not repeat the retain.
+    fn retain_guest_pages(&self, pages: usize);
+    fn release_guest_pages(&self, pages: usize);
+
     fn allocate_zeroed(&self) -> Result<Self::Page, Self::Error>;
     fn physical_address(&self, page: &Self::Page) -> PhysicalAddress;
 

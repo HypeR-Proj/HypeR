@@ -191,6 +191,14 @@ impl PageBackend for KernelPageBackend {
     type Error = KernelPageError;
     type InstructionPublicationContext = dyn hyper::cpu::PinnedExecution;
 
+    fn retain_guest_pages(&self, pages: usize) {
+        super::super::allocator::GLOBAL_ALLOCATOR.retain_guest_pages(pages);
+    }
+
+    fn release_guest_pages(&self, pages: usize) {
+        super::super::allocator::GLOBAL_ALLOCATOR.release_guest_pages(pages);
+    }
+
     fn allocate_zeroed(&self) -> Result<Self::Page, Self::Error> {
         let page = PageBlock::allocate_for(0, PageOwner::User)?;
         let address = crate::kernel::mm::memory::linear_address(page.physical().get())

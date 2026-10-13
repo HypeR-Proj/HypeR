@@ -291,6 +291,8 @@ pub struct HeapStats {
     pub page_table_pages: PageOwnerStats,
     pub guest_pages: PageOwnerStats,
     pub user_pages: PageOwnerStats,
+    /// Subset of user pages retained by exclusive guest-memory leases.
+    pub guest_loaned_pages: usize,
     pub file_cache_pages: PageOwnerStats,
 }
 
@@ -682,6 +684,7 @@ pub struct SlabAllocator {
     allocation_requests: u64,
     allocation_failures: u64,
     page_owners: [PageOwnerStats; PageOwner::COUNT],
+    guest_loaned_pages: usize,
 }
 
 impl SlabAllocator {
@@ -715,6 +718,7 @@ impl SlabAllocator {
             allocation_requests: 0,
             allocation_failures: 0,
             page_owners: [PageOwnerStats::default(); PageOwner::COUNT],
+            guest_loaned_pages: 0,
         })
     }
 
@@ -1171,8 +1175,28 @@ impl SlabAllocator {
             page_table_pages: self.page_owners[PageOwner::PageTable.index()],
             guest_pages: self.page_owners[PageOwner::Guest.index()],
             user_pages: self.page_owners[PageOwner::User.index()],
+            guest_loaned_pages: self.guest_loaned_pages,
             file_cache_pages: self.page_owners[PageOwner::FileCache.index()],
         }
+    }
+
+    /// Changes the guest-use subset without changing physical allocation ownership.
+    /// Callers retain the corresponding User pages until after releasing the count.
+    fn retain_guest_pages(&mut self, pages: usize) {
+        let Some(total) = self.guest_loaned_pages.checked_add(pages) else {
+            allocator_fault(AllocatorFault::AllocationCountOverflow);
+        };
+        if total > self.page_owners[PageOwner::User.index()].pages {
+            allocator_fault(AllocatorFault::PageOwnerUnderflow);
+        }
+        self.guest_loaned_pages = total;
+    }
+
+    fn release_guest_pages(&mut self, pages: usize) {
+        let Some(total) = self.guest_loaned_pages.checked_sub(pages) else {
+            allocator_fault(AllocatorFault::PageOwnerUnderflow);
+        };
+        self.guest_loaned_pages = total;
     }
 
     fn allocate_pages(

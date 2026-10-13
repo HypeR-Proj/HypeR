@@ -38,6 +38,39 @@ impl StorageBudget for Budget {
     }
 }
 
+static DATA_CAPACITY_BYTES: AtomicU64 = AtomicU64::new(0);
+
+pub(super) fn capacity_bytes() -> u64 {
+    DATA_CAPACITY_BYTES.load(Ordering::Relaxed)
+}
+
+struct DataBudget<'a>(&'a Budget);
+struct DataCharge {
+    _charge: CommittedCharge,
+    bytes: u64,
+}
+impl StorageBudget for DataBudget<'_> {
+    type Charge = DataCharge;
+    type Error = ResourceError;
+
+    fn reserve(&self, bytes: usize) -> Result<DataCharge, ResourceError> {
+        let charge = self.0.reserve(bytes)?;
+        // This is a diagnostic sum of live payload-capacity reservations, not
+        // allocator backing. Failed allocations and replaced buffers release
+        // their reservation through the same owner.
+        DATA_CAPACITY_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
+        Ok(DataCharge {
+            _charge: charge,
+            bytes: bytes as u64,
+        })
+    }
+}
+impl Drop for DataCharge {
+    fn drop(&mut self) {
+        DATA_CAPACITY_BYTES.fetch_sub(self.bytes, Ordering::Relaxed);
+    }
+}
+
 pub(super) struct Ramfs {
     root: FallibleArc<Node>,
     next_id: AtomicU64,
@@ -68,10 +101,10 @@ pub(super) struct Node {
 }
 
 struct NodeData {
-    contents: FileData<'static, CommittedCharge>,
+    contents: FileData<'static, DataCharge>,
 }
 impl NodeData {
-    const fn new(contents: FileData<'static, CommittedCharge>) -> Self {
+    const fn new(contents: FileData<'static, DataCharge>) -> Self {
         Self { contents }
     }
 }
@@ -556,7 +589,7 @@ impl Ramfs {
         let offset = offset.unwrap_or(data.contents.bytes().len() as u64);
         let actual = data
             .contents
-            .write(offset, input, &self.budget)
+            .write(offset, input, &DataBudget(&self.budget))
             .map_err(map_data_error)?;
         if actual != 0 {
             node.modified(crate::kernel::time::realtime());
@@ -567,7 +600,7 @@ impl Ramfs {
         node.require(NodeKind::File)?;
         let mut data = node.data.lock().map_err(Error::Lock)?;
         data.contents
-            .resize(length, &self.budget)
+            .resize(length, &DataBudget(&self.budget))
             .map_err(map_data_error)?;
         node.modified(crate::kernel::time::realtime());
         drop(data);
@@ -627,7 +660,7 @@ impl Ramfs {
         let now = crate::kernel::time::realtime();
         let mut data = FileData::borrowed(&[]);
         if let Some(target) = target {
-            data.write(0, target, &self.budget)
+            data.write(0, target, &DataBudget(&self.budget))
                 .map_err(map_data_error)?;
         }
         let node = FallibleArc::try_new(Node {

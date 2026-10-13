@@ -361,9 +361,9 @@ while :; do
             fi
             ;;
         free)
-            if grep -Eq "^Mem:([[:space:]]+$memory_value){3}[[:space:]]+($memory_value|—)[[:space:]]+$memory_value$" "$native_output" &&
-                grep -Eq "^Reserved: $memory_value  Reclaimable: ($memory_value|—)$" "$native_output" &&
-                grep -Eq "^Owners:[[:space:]]+kernel=$memory_value heap=$memory_value tables=$memory_value user=$memory_value guest=$memory_value other=$memory_value$" "$native_output"; then
+            if grep -Eq "^Mem:[[:space:]]+${memory_value}[[:space:]]+($memory_value|—)[[:space:]]+${memory_value}([[:space:]]+($memory_value|—)){2}$" "$native_output" &&
+                grep -Eq "^Reserved: $memory_value  Managed: $memory_value  Allocated: $memory_value$" "$native_output" &&
+                grep -Eq "^Owners:[[:space:]]+kernel=($memory_value|—) user=$memory_value guest=$memory_value buffered/cached=($memory_value|—) other=$memory_value$" "$native_output"; then
                 send_commands 1 '/system/bin/top\n'
                 command_phase='top'
             fi
@@ -416,7 +416,7 @@ while :; do
         grep -Fxq 'HYPER_SHELL_BUILTIN_OK' "$native_output" &&
         grep -Fxq 'HYPER_CD_CHILD_OK' "$native_output" &&
         grep -Fxq 'HYPER_CD_PARENT_OK' "$native_output" &&
-        grep -Eq "^Mem:([[:space:]]+$memory_value){3}[[:space:]]+($memory_value|—)[[:space:]]+$memory_value$" "$native_output" &&
+        grep -Eq "^Mem:[[:space:]]+${memory_value}[[:space:]]+($memory_value|—)[[:space:]]+${memory_value}([[:space:]]+($memory_value|—)){2}$" "$native_output" &&
         grep -Fxq 'Press q or Ctrl-C to quit.' "$native_output" &&
         grep -Fxq 'HYPER_NATIVE_ECHO_OK' "$native_output"; then
         if [ "$verify_vm" = 0 ]; then
