@@ -345,7 +345,7 @@ pub unsafe fn guest_memory_transfer(
 /// Accesses one aligned guest word, with acquire-load or release/store-fence ordering.
 ///
 /// # Safety
-/// Retain a GuestMemory handle with the operation's required rights.
+/// Retain a `GuestMemory` handle with the operation's required rights.
 pub unsafe fn guest_memory_scalar(
     memory: u64,
     operation: u32,
@@ -370,7 +370,7 @@ pub unsafe fn guest_memory_scalar(
 /// Reserves a guest level interrupt without assigning a device model to the kernel.
 ///
 /// # Safety
-/// Retain the borrowed VirtualMachine WRITE handle.
+/// Retain the borrowed `VirtualMachine` WRITE handle.
 pub unsafe fn guest_interrupt_create(machine: u64, irq: u32) -> CallResult {
     // SAFETY: The caller supplies the borrowed handle and scalar IRQ identity.
     unsafe {
@@ -389,7 +389,7 @@ pub unsafe fn guest_interrupt_create(machine: u64, irq: u32) -> CallResult {
 /// Changes the level of an exclusively owned guest interrupt.
 ///
 /// # Safety
-/// Retain the borrowed GuestInterrupt WRITE handle.
+/// Retain the borrowed `GuestInterrupt` WRITE handle.
 pub unsafe fn guest_interrupt_set_level(interrupt: u64, asserted: bool) -> CallResult {
     // SAFETY: The caller supplies the borrowed handle; level is a canonical boolean.
     unsafe {
