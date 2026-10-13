@@ -151,7 +151,7 @@ while :; do
             fi
             ;;
         guest_console)
-            if grep -q 'HypeR guest: Linux userspace is running' "$log" &&
+            if grep -q 'HypeR guest: Linux userspace is running' "$guest_output" &&
                 grep -Fq '~ # ' "$guest_output"; then
                 # No Enter yet: a line-buffered relay must not hide guest echo.
                 printf 'echo HYPER_GUEST_CONSOLE_RX' >&3
@@ -426,9 +426,9 @@ while :; do
         if grep -Fq 'HypeR vm-manager: ready' "$native_output" &&
             grep -Fq 'HypeR init: VM fleet configured' "$native_output" &&
             grep -Fq 'HypeR vm-runtime: starting' "$native_output" &&
-            grep -q 'Run /init as init process' "$log" &&
-            grep -q 'HypeR guest: /init reached' "$log" &&
-            grep -q 'HypeR guest: Linux userspace is running' "$log"; then
+            grep -q 'Run /init as init process' "$guest_output" &&
+            grep -q 'HypeR guest: /init reached' "$guest_output" &&
+            grep -q 'HypeR guest: Linux userspace is running' "$guest_output"; then
             echo "verified Native services and userspace-managed Linux VM startup"
             exit 0
         fi
