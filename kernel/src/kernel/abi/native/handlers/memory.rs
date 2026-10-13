@@ -263,3 +263,48 @@ pub(in crate::kernel::abi::native) fn sys_vmo_create_contiguous(
     };
     DeferredAction::Return(handle_result(result))
 }
+
+#[inline(never)]
+pub(in crate::kernel::abi::native) fn sys_vmar_lock_memory(
+    services: &impl MemoryServices,
+    arguments: &Arguments,
+) -> DeferredAction {
+    memory_residency(services, arguments, true)
+}
+
+#[inline(never)]
+pub(in crate::kernel::abi::native) fn sys_vmar_unlock_memory(
+    services: &impl MemoryServices,
+    arguments: &Arguments,
+) -> DeferredAction {
+    memory_residency(services, arguments, false)
+}
+
+fn memory_residency(
+    services: &impl MemoryServices,
+    arguments: &Arguments,
+    lock: bool,
+) -> DeferredAction {
+    let result = (|| {
+        require_zero(&arguments[4..])?;
+        let current = match arguments[3] {
+            0 => false,
+            hyper::abi::native::HYPER_NATIVE_VMAR_MEMORY_CURRENT
+                if arguments[1] == 0 && arguments[2] == 0 =>
+            {
+                true
+            }
+            _ => return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT),
+        };
+        services
+            .set_memory_residency(
+                parse_handle(arguments[0])?,
+                arguments[1],
+                arguments[2],
+                current,
+                lock,
+            )
+            .map_err(status_from_memory_service_error)
+    })();
+    DeferredAction::Return(status_only(result))
+}

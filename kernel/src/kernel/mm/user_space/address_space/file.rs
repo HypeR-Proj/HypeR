@@ -13,14 +13,16 @@ use super::{
 type FileReclaimPlan<'a, B, A> = Option<(PreparedMappingChange<'a, B, A>, usize)>;
 
 impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Account> {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn prepare_file_view(
         &self,
-        source: alloc::boxed::Box<dyn FilePageSource>,
+        source: alloc::boxed::Box<dyn FilePageSource<Backend>>,
         size: u64,
         source_offset: u64,
         source_length: u64,
         data_offset: u64,
         executable: bool,
+        mode: super::PrivateMappingMode,
     ) -> SpaceResult<Backend, Account, FallibleArc<PrivateView<Backend, Account>>> {
         Ok(PrivateView::try_file(
             source,
@@ -29,6 +31,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
             source_length,
             data_offset,
             executable,
+            mode,
             self.backend.clone(),
             self.account.clone(),
         )?)
@@ -39,6 +42,9 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
     pub(crate) fn retire_file_sources(&self) {
         let snapshot = self.snapshot();
         for mapping in &snapshot.mappings.records {
+            if let Some(locks) = &mapping.locks {
+                locks.retire();
+            }
             if let Some(view) = mapping.object.private() {
                 view.retire_file_source();
             }
@@ -204,8 +210,32 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
             let first = ((mapping.snapshot.object_offset + overlap.base().get()
                 - mapping.snapshot.range.base().get())
                 / PAGE_SIZE) as usize;
-            let Some((next, count)) =
-                view.reclaim_clean(first, (overlap.length() / PAGE_SIZE) as usize)?
+            let Some((next, count)) = view.reclaim_clean(
+                first,
+                (overlap.length() / PAGE_SIZE) as usize,
+                |page_index| {
+                    // A private view can span several protection fragments.
+                    // Never evict a page protected by any live fragment.
+                    snapshot.mappings.records.iter().any(|alias| {
+                        if !alias
+                            .object
+                            .private()
+                            .is_some_and(|other| core::ptr::eq(&**other, &**original_view))
+                        {
+                            return false;
+                        }
+                        let offset = page_index as u64 * PAGE_SIZE;
+                        let Some(relative) = offset.checked_sub(alias.snapshot.object_offset)
+                        else {
+                            return false;
+                        };
+                        relative < alias.snapshot.range.length()
+                            && alias.locks.as_ref().is_some_and(|locks| {
+                                locks.contains(alias.snapshot.range.base().get() + relative)
+                            })
+                    })
+                },
+            )?
             else {
                 continue;
             };

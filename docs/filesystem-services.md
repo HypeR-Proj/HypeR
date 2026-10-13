@@ -33,45 +33,86 @@ authoritative format test.
 
 At startup the manager reads only the RAM filesystem's `etc/fstab` and optional
 `etc/hyper/filesystem.json` through its fixed `process.environment-directory`.
-They appear under `/boot` after handoff. Formal init then requests the automatic
-mounts in `/system/etc/fstab`, through the manager's control connector. Mount
+They appear under `/boot` after the root switch. System init adopts the running
+I/O provider, filesystem manager and format workers into independent system
+processes, then requests the automatic mounts in `/etc/fstab` through the
+same manager control connector. Mount
 requests select their table explicitly in the live namespace, as do mount targets.
 Both tables select authorized partitions by `PARTLABEL=` or `PARTUUID=`,
 mountpoints, access modes and order within that environment.
 The JSON selects `worker_directories` (default `[{"environment":"svc"}]`),
 bounded to 16 KiB and eight normalized paths. `environment` entries are relative
-to the fixed boot directory and use its static loader; `namespace` entries are
+to the manager's fixed environment directory: the bootstrap archive before
+adoption, the independent system root in the formal manager. Bootstrap environment workers use the
+static loader; formal workers use the dynamic loader. `namespace` entries are
 absolute paths in the live namespace and use the system loader and libraries. Only a missing executable permits trying the next directory;
 access or I/O failures stop the search. Missing workers fail at runtime, without
 making the format registry depend on which implementations were packaged.
 See [boot and system deployment](boot-layout.md) for the default boot/system layout,
-fstab syntax and the same startup flow with RAM-resident system files.
+fstab syntax and the independent system-root handoff.
 
 The manager gives each worker its exclusive volume, bounded resource domain,
 parent-lifetime channel and transport rendezvous. It retains the child process
 and task group. Workers receive no task factory, device authority or mount-root
 capability. A worker validates its root and offers a byte-channel endpoint and
 shared VMO; the manager publishes that transport at the configured mountpoint.
-The common `hyper-fs-service` library owns this handshake and ordered RPC.
-Format adapters implement media operations. The manager is outside the file
+The formal `hyper-fs-service` library owns this handshake and ordered RPC.
+Bootstrap workers include their manager-owned transport module instead of linking
+a general service library. Format adapters implement media operations. The manager is outside the file
 read/write path, and io-runtime continues forwarding console and power events
 while waiting for the initial mount result.
 
-The default image places both `fs-fat` and `fs-erofs` in the boot RAM filesystem.
-Worker placement is configurable independently of format detection and mount
-phase: formal init still requests the default FAT data mount from its own fstab.
+Bootstrap and formal format workers have independent source owners and
+executables. Bootstrap workers live in the boot archive; replacement providers
+live in `/svc`. Worker placement remains independent of format detection
+and mount phase: system init requests the default FAT data mount from its own
+fstab after adoption.
 `fs-fat` implements writable FAT32. `fs-erofs` implements read-only,
 uncompressed core EROFS, including compact/extended inodes, plain and inline
 data, directories and symlinks. It validates a present superblock CRC32C and
 rejects compression, xattrs, external devices and unsupported inode layouts.
-Its [reader documentation](../bootstrap/stage1/lib/erofs/README.md) gives bounds and
+Its [reader documentation](../app/fs-erofs/README.md) gives bounds and
 supported block sizes. Recognition alone is not a promise that a worker can
 read every extension of that filesystem format.
 
+## Online provider adoption
+
+The private bootstrap handoff channel is distinct from mount administration.
+System init obtains a versioned inventory of attached volumes and mounted
+formats, then starts the formal fs-backend with that inventory. The replacement
+manager prepares every mounted format worker before asking bootstrap to yield.
+Each replacement explicitly locks its current mappings before reporting
+readiness, while its predecessor can still satisfy file faults. This requires a
+delegated `LOCK_MEMORY` right and charges the worker's pinned-page quota. The
+loader supplies no implicit residency policy. Later pageable mappings need a new
+explicit lock before being used on a path that serves their own filesystem.
+
+Each original worker completes its current request, flushes media state and
+stops consuming the request channel. It moves its exclusive `NativeBlock`, the
+same byte-channel server endpoint and shared VMO, and the last completed request
+sequence to the replacement. The manager's client endpoint and shared-buffer
+owner also move; no unmount, remount, namespace replacement or block reactivation
+occurs. Requests queued during the brief transfer remain queued on that endpoint.
+Kernel file identities, open handles, content protection and cached pages remain
+attached to the existing mount. FAT directory cookies encode media positions and
+path identity, and EROFS cookies encode inode positions and path identity; both
+remain valid when a drained parser reopens the same unchanged medium.
+
+Before preparation succeeds, failure retains the old active providers. Once live
+ownership starts moving, a failure belongs to system recovery; it cannot be
+reported as a successful rollback. After adoption, old workers and the old manager
+park without deciding when to retire. The formal manager gives their Process
+supervision capabilities to system init, which chooses and executes retirement.
+A lost final notification does not tear down an adopted mount: the manager keeps
+serving and retains any predecessor supervisors it could not deliver. System init
+treats an unconfirmed outcome as recovery state and does not retire bootstrap.
+See [the bootstrap handoff contract](bootstrap-handoff.md).
+
 `mount` and `umount` send administrative requests to fs-backend using a scoped
 control capability. Init delegates that capability to session and the shell;
-the shell attenuates it to WAIT|WRITE only for the exact mount/umount executable
-paths in `/bin`, `/boot/bin`, or `/system/bin`. Ordinary commands receive neither
+the formal shell attenuates it to WAIT|WRITE only for `/bin/mount` and
+`/bin/umount`. Independent bootstrap recovery commands can operate the
+old manager before adoption. Ordinary commands receive neither
 mount control nor raw volume handles. A copied tool at a different path does
 not gain administration authority.
 
@@ -232,6 +273,27 @@ even if an escaped VMAR keeps the dead address space allocated. Such retained
 pages remain charged to the requester and cannot be refilled. File handle
 transfer does not transfer an active protection grant.
 
+Complete clean pages from cacheable files are shared physically across mappings
+and independent opens. A mapping retains the canonical cache identity as well as
+the page; the cache cannot discard that lookup entry while it is mapped. Private
+writes and partially initialized ELF boundary pages use private storage. If cache
+admission is paused under pressure, a new mapping may fall back to a private
+copy; sharing is an optimization, not a prerequisite for reading the file.
+
+`LOCK_MEMORY` is a separate VMAR right. Explicit range locking, or locking all
+current mappings, populates the selected bytes before success and prevents clean
+mapping reclamation until unlock, unmap or process exit. Current-only locking
+skips unmapped guard ranges and does not affect future mappings. Repeated locking
+is idempotent within one mapping; another process's lock remains independent.
+Each process pays its residency quota even when the physical clean page is
+shared. Private writes still use COW and this is not a physical DMA pin.
+
+The filesystem and I/O services lock their executable/dependency mappings while
+their predecessors can still satisfy reads, before advertising handoff readiness.
+The loader itself does not impose residency policy. File protection stabilizes
+content; residency keeps bytes available. Neither mechanism detaches a mapping
+from the mount which owns the file.
+
 Clean mapping reclamation still needs temporary transaction metadata and page
 tables, charged to the requesting process's domain. At a hard quota without
 headroom it can fail, so pressure handling is best effort rather than a promise
@@ -256,9 +318,10 @@ identity cannot become visible through a recreated file.
 It cannot recursively predict more work. This worker is separate from memory
 reclamation, so a backend waiting for memory cannot deadlock the reclaim path.
 
-Implementation entry points: [manager](../bootstrap/stage1/fs-backend/src/main.rs),
-[common worker](../bootstrap/stage1/lib/fs-service/src/lib.rs), [FAT worker](../bootstrap/stage1/fs-fat/src/main.rs),
-[EROFS worker](../bootstrap/stage1/fs-erofs/src/main.rs),
+Implementation entry points: [formal manager](../app/fs-backend/src/main.rs),
+[bootstrap transfer](../bootstrap/stage1/fs-backend/src/migration.rs),
+[formal worker transport](../lib/fs-service/src/lib.rs),
+[FAT worker](../app/fs-fat/src/main.rs), [EROFS worker](../app/fs-erofs/src/main.rs),
 [wire protocol](../stdlib/rust/hyper-filesystem/src/protocol.rs),
 [kernel adapter](../kernel/src/kernel/vfs/remote.rs), and
 [transport](../kernel/src/kernel/vfs/remote/transport.rs).

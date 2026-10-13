@@ -1,0 +1,298 @@
+<!--
+SPDX-FileCopyrightText: 2026 roolrz
+SPDX-License-Identifier: Apache-2.0
+-->
+
+# Bootstrap handoff
+
+Stage-1 and system init are independent userspace environments. This document
+defines their supervision handoff and the ownership boundary for retirement.
+System init is not a numbered bootstrap stage. The kernel's boot contract
+remains mounting the supplied archive at `/` and starting `/init` through the
+delegated userspace loader; it does not interpret this protocol or its paths.
+
+## Ownership phases
+
+| Phase | Owner and permitted actions |
+| --- | --- |
+| Bootstrap | Stage-1 owns core Process supervisors and recovery policy. |
+| Preparation | Stage-1 provisionally makes the independent system filesystem `/`, then starts a candidate init. It validates its own policy and inventory, without core supervision authority. |
+| Adoption | One capability-channel rendezvous moves all offered Process supervisors to system init. This is the irreversible supervision commit. |
+| Operation | System init commits the prepared root and owns supervision, service replacement and failure handling. Stage-1 init is parked; resident core services continue serving requests. |
+| Retirement | System init chooses the time, quiesces and replaces remaining boot providers, stops their old processes, waits for teardown, releases boot references and requests unmount. |
+
+Adoption does not authorize stage-1 to choose a retirement deadline, exit on
+peer loss, or unmount the boot filesystem. Stage-1 does not run a second
+supervisor after commit. System init receives authority over the old TaskGroup
+and owns both the decision and execution of its eventual retirement.
+
+The candidate has a distinct TaskGroup. Formal services start in that group,
+not in the inherited bootstrap group. Stopping the old group must not stop
+system init or its newly launched services. Provider-created groups, such as
+filesystem worker groups, must also be retired by their explicit owners.
+
+## Candidate launch
+
+Stage-1 selects an independently mounted filesystem and successor using its own
+`etc/hyper/init.json`:
+
+```json
+{"system-root":"/system","put-old":"/boot","system-init":"/svc/init"}
+```
+
+The system image contains existing `/boot`, `/tmp` and ordinary volume mountpoints.
+Stage-1 begins a reversible root transition. The system filesystem becomes `/`;
+the old root appears at `/boot`. After accepting supervision and committing the
+transition, system init mounts a fresh RAMFS at `/tmp` before starting providers.
+Read-only EROFS remains read-only: these are mount-table changes, not directory
+writes. `/system` is only a bootstrap staging path and is not a formal path.
+The system init and loader are opened after this switch, so every mapping refers
+to the independent system mount rather than the archive.
+
+The transition token retains both complete mount-table views. While pending,
+concurrent mount, unmount and root-switch publications fail with `BUSY`. Ordinary
+file access continues. Abort swaps back the original view without allocation or
+backend I/O. It restores mount topology, not file contents written during the
+provisional interval. Token owner loss also aborts. This mechanism supports mounted roots;
+it does not promote or detach a RAM subtree. Stage-1 retains the token until the
+supervision rendezvous transfers it atomically with the Process owners.
+The candidate receives a read-only namespace root, a library directory,
+diagnostic output, a description VMO and a receive endpoint. It receives no
+core Process supervisors or device management capabilities during preparation.
+The candidate explicitly locks its current mappings before declaring readiness.
+Its builder is permitted to give its root VMAR `LOCK_MEMORY`; ordinary services
+and the shell do not inherit that right. Failure to obtain the quota-charged
+residency grant rejects preparation while the old providers are still running.
+
+Private startup purposes are:
+
+| Purpose | Object | Rights |
+| --- | --- | --- |
+| `0x80080001` | CapabilityChannel | `READ \| WAIT` |
+| `0x80080002` | Immutable description VMO | `READ \| INSPECT` |
+
+These are userspace protocol roles, not syscall numbers or sender handle IDs.
+The description contains a little-endian `u64` byte length followed by at most
+32 KiB of UTF-8 JSON. Version 3 has these fields:
+
+```json
+{
+  "version": 3,
+  "root_mount": 7,
+  "boot_root": "/boot",
+  "services": [{"name": "io-runtime", "image": "/svc/io-runtime", "critical": true, "provider": "io"}],
+  "storage_ready": true,
+  "slots": [{"key": 1, "rights": 0}]
+}
+```
+
+This example illustrates the shape, not a valid complete inventory. Each
+service record supplies labels for an already launched process. Its nullable
+`provider` field identifies `console`, `io` or `filesystem` ownership; roles are
+unique and come from typed boot capabilities rather than executable names. Stage-1's
+dependency graph and capability-grant policy are not serialized. System init
+loads its own graph and may depend on these existing service names without
+relaunching them. `storage_ready` reports the bootstrap mount attempt; it says
+nothing about later mounts or whether retirement is safe.
+
+Unknown fields and versions, oversized offers, repeated or reserved slot keys,
+unsupported object roles, and out-of-range service indices are rejected before
+the candidate registers a receive operation. The two implementations need only
+agree on this wire contract; neither links the other's supervisor library.
+
+## Capability inventory
+
+The slot vector gives the exact transfer order. Rights are Native right bits;
+the receiver requires the advertised type and rights in every receive slot.
+Required authority for namespace switching and planned formal services is
+checked before adoption, including the duplication and transfer rights needed
+to delegate each planned grant. Every critical core service must have a Process
+supervisor slot. Each ready provider must also have its supervisor and private
+migration endpoint; a failed optional storage provider may be absent when
+`storage_ready` is false. An incomplete offer is rejected before READY rather
+than failing after the irreversible MOVE.
+
+| Key | Role | Object |
+| --- | --- | --- |
+| 1 | Live namespace root | Directory |
+| 2 | Formal library directory | Directory |
+| 3 | Task creation | TaskFactory |
+| 4 | Bootstrap process group | TaskGroup |
+| 5 | Resource sponsorship | ResourceDomain |
+| 6–9 | Task, object, memory and CPU inspection, respectively | Corresponding inspector |
+| 10 | Service log connector | CapabilityChannel |
+| 11 | Unconsumed physical assignment authority | DeviceAssignmentAuthority |
+| 12–14 | Raw console server, controller and log server, respectively | CapabilityChannel |
+| 16–17 | I/O broker server and client, respectively | CapabilityChannel |
+| 18 | Storage readiness | ByteChannel |
+| 19–22 | Filesystem attach, provider, control server and control client, respectively | CapabilityChannel |
+| 25 | VM creation | VirtualMachineCreationAuthority |
+| 30 | Candidate/formal process group | TaskGroup |
+| 31 | Diagnostic console | Console |
+| 32 | Fixed bootstrap environment | Directory |
+| 33 | Fixed system environment | Directory |
+| 34 | I/O owner transfer endpoint | CapabilityChannel |
+| 35 | Filesystem manager transfer endpoint | CapabilityChannel |
+| 36 | Old console drain control | ByteChannel |
+| 37 | Pending root transition | RootTransition |
+| 100 + index | Existing core service supervisor | Process |
+
+Optional capabilities already consumed by a service are absent. Keys 15, 23,
+24 and 26–29 are reserved and rejected. Business VM fleet groups, budgets and
+connection endpoints are created by formal init and do not cross this boundary.
+The transfer is bounded to 64 capabilities and the configured maximum service
+count. Process keys refer to the corresponding description entry, not a PID.
+
+The candidate registers the complete typed receive only after validation.
+Stage-1 observes receiver readiness while continuing to watch core service and
+candidate termination. It sends the exact bytes `HYPER-INIT-HANDOFF/3`, without
+a terminator, alongside the capability inventory. Process supervisors and the root-transition token use MOVE;
+management leases are duplicated so their active counts cannot transiently
+reach zero. A successful rendezvous commits the whole transfer. A separate
+acknowledgment is unnecessary and cannot turn committed adoption into rollback.
+The predecessor then closes its copies of provider-handoff endpoints, the
+console-drain endpoint and its retained service-log writer before parking.
+Keeping those copies would hide successor death from providers or prevent the
+old console from observing the final log EOF. Candidate launch temporaries,
+including the local candidate-group lease, are also released; the committed
+inventory already owns the successor group lease.
+
+Preparation has a bounded timeout. Candidate failure, validation rejection or
+timeout before commit stops only the candidate group and leaves bootstrap
+recovery in charge. Stage-1 first stops the rejected candidate, aborts the root
+transition and restores its retained bootstrap environment. System init checks
+that `root_mount` matches the candidate's namespace before registering receive.
+After receiving the inventory, it commits the token before any service adoption
+or mount request. After commit, candidate/system failure belongs to formal
+supervision; stage-1 never resumes recovery or guesses that authority returned.
+
+Recovery requires the stage-1 supervisor to remain alive. Its handoff buffers
+use fallible reservations, and descriptor serialization rejects oversized
+offers before allocating the encoded payload. A fatal supervisor fault, allocator
+abort or external stop still closes its transition token and restores the pending
+namespace, but does not recreate the supervisor or its service owners. This
+protocol does not provide supervisor failover.
+
+## Retirement requirements
+
+Supervision transfer alone is insufficient to retire the boot filesystem.
+The currently running boot providers still own resources and executable
+mappings. System init must establish replacement owners before stopping them:
+
+- The I/O VM, vCPUs, physical assignments, mailbox identities and DMA leases
+  must survive the old runtime. Hardware consumers quiesce at completed request
+  boundaries; transferring ownership must not reset the VM or device.
+- Filesystem replacements preserve the mounted transport, shared buffer and
+  request sequence. They complete accepted requests and flush format state
+  before transferring exclusive block access. Unmounting and remounting is not
+  an equivalent handoff for open files or protected executable mappings.
+- No formal interactive session exists before handoff. The new raw console
+  obtains independent controller/log endpoints before formal services start.
+  Old providers retain their log streams until replaced and stopped; the old
+  raw worker drains those streams through EOF before system init stops it.
+  A raw worker with no input sessions must not consume physical input.
+- Files, fixed directories, cwd anchors, loader images and mappings referring
+  to the old filesystem must be released before unmount can succeed.
+
+A replacement filesystem provider must execute while its predecessor is
+quiescent. Providers explicitly lock all current mappings, including existing
+DSOs, before reporting READY or WAITING. Pages are charged against the process
+resource domain's pinned-page limit; partial locking failure publishes no grant.
+This does not create a FUTURE policy: newly loaded DSOs need a new explicit lock
+before they are used on a self-paging path. Ordinary programs remain pageable.
+The dynamic loader has no bootstrap residency environment-variable mode.
+
+System init must distinguish stopping execution from completed teardown. A
+termination signal alone does not prove that handles, address spaces, DMA or
+boot backing have retired. Outstanding references defer retirement; they are
+not bypassed through forced unmount or a guessed timeout. Errors and retries
+after adoption remain system init policy.
+
+System init starts its own raw console, adopts I/O ownership, then adopts the
+filesystem manager and workers before reading its formal fstab. Failed storage
+adoption disables retirement and leaves failure handling with formal init.
+Before resource transfer, original providers remain available. After transfer
+starts, init retains the known owners without claiming that a timeout returned
+resources to their predecessors. Provider readiness alone never requests
+process termination. The current init
+policy requests retirement after formal service launch and fleet provisioning.
+Live core services without a provider-replacement protocol remain supervised
+and defer the entire retirement attempt. The supported console, I/O and
+filesystem replacements do not implicitly replace arbitrary configured core
+services. Only completed noncritical one-shots may be retired without a
+replacement; critical exits remain subject to normal supervision.
+It stops predecessor providers, drains their old console, stops the bootstrap
+TaskGroup and waits for teardown before releasing its fixed boot-directory
+capability. A busy unmount is deferred; no forced detach is used.
+The current policy makes one bounded retirement attempt. If draining or teardown
+times out, or the mount remains busy, init continues supervising the system and
+retains the remaining bootstrap owners. It does not automatically retry
+retirement during that boot.
+
+Interactive recovery is conditional on the system filesystem remaining usable.
+The current sequence starts the formal terminal and shell after provider
+adoption. If a post-commit failure loses the root filesystem provider, resident init
+can still print emergency diagnostics and supervise surviving owners, but it
+may be unable to load the terminal or shell from that filesystem. This first
+version does not promise an interactive recovery shell for that failure. It
+does not restart the bootstrap fallback shell after supervision has committed.
+
+The archive reservation is owned by the RAM filesystem nodes and borrowed
+executable snapshots. Final owner release returns only full archive pages which
+were not also reserved by firmware, the kernel or the DTB. With a separate system
+volume, successful retirement detaches the archive; the `/boot` mountpoint may
+remain as an empty directory.
+
+The system filesystem must have independent backing before its init is launched.
+An embedded system subtree sharing the bootstrap archive is not a production
+layout: deleting `/boot` would not release archive bytes retained by file
+mappings or remaining nodes. The kernel still supports RAMFS; an independently
+constructed RAMFS can serve as the system root using the same handoff contract.
+
+## Running provider transfer
+
+Provider messages use independent versioned protocols. These startup purposes
+are private to the two environments, with no kernel device-specific policy:
+
+| Purpose | Role |
+| --- | --- |
+| `0x80080010` | I/O resource handoff channel |
+| `0x80080011` | Filesystem resource handoff channel |
+| `0x80080012` | I/O description VMO |
+| `0x80080013` | Filesystem description VMO |
+| `0x80080014` | Predecessor raw-console drain channel |
+| `0x80080020` | Replacement readiness writer |
+| `0x80080021` | Old filesystem worker Process supervisors |
+
+The I/O predecessor sends `HYPER-IO-DESCRIBE/1` and a length-prefixed, bounded
+JSON description VMO (32 KiB maximum). The system replacement validates the
+role/type/right inventory before receiving `HYPER-IO-ADOPT/1`. The atomic MOVE
+includes the running VM and vCPUs, physical device assignments, serial consumer
+and ring, DMA memory leases and Native/client mailboxes. The accompanying record
+preserves the serial cursor and partial-line state. Physical MMIO service is
+quiesced at a request boundary and resumed without resetting the hardware or
+rebooting Linux. The broker accepts business clients only in the formal owner.
+`HYPER-IO-READY/1` confirms the resumed owner is serving.
+
+The filesystem predecessor describes volume identities, labels and mounted
+format/target state and kernel mount IDs with `HYPER-FS-DESCRIBE/1` (64 KiB maximum JSON). The formal
+manager validates each mount ID against the live namespace, translating only
+the exact current root mount to `/`. It prepares all resident workers before sending `HYPER-FS-PREPARED/1`.
+Each old worker finishes accepted requests, synchronizes format state and
+transfers its exclusive NativeBlock, unchanged server endpoint, shared VMO and
+request sequence. The new worker reopens that volume and resumes the same
+transport; the kernel mount and open-file identities do not change. Directory
+continuation cookies remain tied to media identity, not process-local handles.
+Unserved volumes and the existing mount-administration endpoint transfer too.
+
+Before PREPARED, failed candidates leave all original providers operational.
+After resource transfer starts, a partial failure belongs to formal init; it
+must not pretend all ownership returned to bootstrap. The new manager exports
+old worker Process supervisors with `HYPER-BOOT-OWNER/1`, terminates that list
+with `HYPER-BOOT-OWNERS-END/1`, then reports `HYPER-SERVICE-ADOPTED/1`. Old
+workers and their manager remain parked until system init requests stop.
+
+The predecessor console accepts `HYPER-CONSOLE-DRAIN/1` only without active
+interactive sessions. It stops log admission, drains the ordered admission
+fence and all existing writers through EOF, then replies
+`HYPER-CONSOLE-DRAINED/1` and parks. It does not choose its own exit time.

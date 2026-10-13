@@ -106,7 +106,8 @@ fn prepare_handles(
             .union(Rights::TRANSFER)
             .union(Rights::INSPECT)
             .union(Rights::CREATE_PROCESS)
-            .union(Rights::CREATE_TASK_GROUP),
+            .union(Rights::CREATE_TASK_GROUP)
+            .union(Rights::LOCK_MEMORY),
     )?);
     let root = crate::kernel::vfs::root_directory(domain).map_err(Error::RootDirectory)?;
     handles[3] = Some(prepare_handle(

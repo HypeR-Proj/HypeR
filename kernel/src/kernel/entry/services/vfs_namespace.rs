@@ -33,6 +33,85 @@ pub(super) fn switch_root(
     root: HandleValue,
     request: UserSlice,
 ) -> Result<(), VfsServiceError> {
+    with_root_request(
+        process,
+        root,
+        request,
+        |directory, new_root, put_old, moves| {
+            directory
+                .switch_root(new_root, put_old, moves, &process.resource_domain())
+                .map_err(Into::into)
+        },
+    )
+}
+
+pub(super) fn begin_root_switch(
+    process: &Process,
+    root: HandleValue,
+    request: UserSlice,
+) -> Result<HandleValue, VfsServiceError> {
+    with_root_request(
+        process,
+        root,
+        request,
+        |directory, new_root, put_old, moves| {
+            use crate::kernel::{
+                capability::{HandleFlags, PreparedHandle},
+                object::{KernelObject, ObjectPublication},
+                process::ProcessError,
+                vfs::RootTransitionObject,
+            };
+            let transition = directory.prepare_root_transition(
+                new_root,
+                put_old,
+                moves,
+                &process.resource_domain(),
+            )?;
+            let transition = hyper::mm::FallibleArc::try_new(transition)
+                .map_err(|_| VfsServiceError::Process(ProcessError::Allocation))?;
+            let object =
+                RootTransitionObject::try_new(transition.clone(), &process.resource_domain())?;
+            let publication = ObjectPublication::try_new(object).map_err(ProcessError::from)?;
+            let prepared = PreparedHandle::try_from_new_object(
+                publication,
+                RootTransitionObject::SUPPORTED_RIGHTS,
+                HandleFlags::NONE,
+            )
+            .map_err(ProcessError::from)?;
+            let reservation = process.reserve_handles::<1>()?;
+            if let Err(error) = transition.activate() {
+                process.abort_handles(reservation);
+                return Err(error.into());
+            }
+            match process.publish_handles(reservation, [prepared]) {
+                Ok([handle]) => Ok(handle),
+                Err(failure) => {
+                    // An operation pin may outlive failed publication. Rollback is
+                    // explicit here, before returning a failed syscall to userspace.
+                    transition.abort();
+                    Err(VfsServiceError::Process(failure.error))
+                }
+            }
+        },
+    )
+}
+
+pub(super) fn finish_root_switch(
+    process: &Process,
+    token: HandleValue,
+    commit: bool,
+) -> Result<(), VfsServiceError> {
+    let token =
+        process.resolve_handle::<crate::kernel::vfs::RootTransitionObject>(token, Rights::WRITE)?;
+    token.object().finish(commit).map_err(Into::into)
+}
+
+fn with_root_request<T>(
+    process: &Process,
+    root: HandleValue,
+    request: UserSlice,
+    operation: impl FnOnce(&DirectoryObject, &str, &str, &[(&str, &str)]) -> Result<T, VfsServiceError>,
+) -> Result<T, VfsServiceError> {
     let directory = process.resolve_handle::<DirectoryObject>(root, NAMESPACE_RIGHTS)?;
     let mut header = [0u8; 48];
     process.copy_from_user(request, &mut header)?;
@@ -66,15 +145,7 @@ pub(super) fn switch_root(
     }
     // All fallible user reads are complete before the VFS prepares or publishes
     // topology. Concurrent userspace writes cannot replace paths after validation.
-    directory
-        .object()
-        .switch_root(
-            &new_root,
-            &put_old,
-            &moves[..count],
-            &process.resource_domain(),
-        )
-        .map_err(Into::into)
+    operation(directory.object(), &new_root, &put_old, &moves[..count])
 }
 
 fn user_slice(address: u64, length: u64) -> Result<UserSlice, VfsServiceError> {

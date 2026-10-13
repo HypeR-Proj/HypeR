@@ -9,19 +9,21 @@ use super::{
     PrivatePage, PrivateView, Vec, VmoError, VmoResult, allocate_page, map_allocation, page_count,
 };
 
-pub(super) struct FileOrigin<A: MemoryAccount> {
-    backing: FallibleArc<FileBacking<A>>,
+pub(super) struct FileOrigin<B: PageBackend, A: MemoryAccount> {
+    backing: FallibleArc<FileBacking<B, A>>,
     offset: u64,
     length: u64,
     data_offset: u64,
+    mode: super::PrivateMappingMode,
 }
-impl<A: MemoryAccount> Clone for FileOrigin<A> {
+impl<B: PageBackend, A: MemoryAccount> Clone for FileOrigin<B, A> {
     fn clone(&self) -> Self {
         Self {
             backing: self.backing.clone(),
             offset: self.offset,
             length: self.length,
             data_offset: self.data_offset,
+            mode: self.mode,
         }
     }
 }
@@ -31,12 +33,13 @@ impl<B: PageBackend, A: MemoryAccount> PrivateView<B, A> {
     /// be reconstructed from the protected source; private writable pages cannot.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn try_file(
-        source: alloc::boxed::Box<dyn FilePageSource>,
+        source: alloc::boxed::Box<dyn FilePageSource<B>>,
         size: u64,
         source_offset: u64,
         source_length: u64,
         data_offset: u64,
         executable: bool,
+        mode: super::PrivateMappingMode,
         backend: B,
         account: A,
     ) -> VmoResult<B, A, FallibleArc<Self>> {
@@ -67,6 +70,7 @@ impl<B: PageBackend, A: MemoryAccount> PrivateView<B, A> {
                 offset: source_offset,
                 length: source_length,
                 data_offset,
+                mode,
             }),
             pages,
             backend,
@@ -153,6 +157,22 @@ impl<B: PageBackend, A: MemoryAccount> PrivateView<B, A> {
                 }
             }
             for page_index in batch_start..index {
+                let page_start = page_index as u64 * PAGE_SIZE;
+                let shared = if page_start >= file.data_offset && page_start + PAGE_SIZE <= data_end
+                {
+                    file.backing
+                        .shared_page(file.offset + page_start)
+                        .map_err(|_| VmoError::BackingIo)?
+                } else {
+                    None
+                };
+                if let Some(page) = shared {
+                    next.pages[page_index] = Some(PrivatePage {
+                        owner: super::super::own_shared_page::<B, A>(page, &self.account)?,
+                        writable: false,
+                    });
+                    continue;
+                }
                 let owner = allocate_page(&self.backend, &self.account)?;
                 let at = (page_index - batch_start) * PAGE_SIZE as usize;
                 owner
@@ -166,6 +186,8 @@ impl<B: PageBackend, A: MemoryAccount> PrivateView<B, A> {
                     .map_err(VmoError::Backend)?;
                 next.pages[page_index] = Some(PrivatePage {
                     owner,
+                    // Population policy does not confer residency authority. Only
+                    // private writes or an explicit memory lock prevent reclaim.
                     writable: false,
                 });
             }
@@ -200,6 +222,7 @@ impl<B: PageBackend, A: MemoryAccount> PrivateView<B, A> {
         &self,
         first: usize,
         count: usize,
+        mut locked: impl FnMut(usize) -> bool,
     ) -> VmoResult<B, A, Option<(FallibleArc<Self>, usize)>> {
         let end = first.checked_add(count).ok_or(VmoError::SizeOverflow)?;
         let candidates = self.pages.get(first..end).ok_or(VmoError::InvalidRange)?;
@@ -208,11 +231,14 @@ impl<B: PageBackend, A: MemoryAccount> PrivateView<B, A> {
         }
         let mut next = self.clone_version()?;
         let mut reclaimed = 0;
-        for page in &mut next.pages[first..end] {
-            if page.as_ref().is_some_and(|p| !p.writable) {
+        for (relative, page) in next.pages[first..end].iter_mut().enumerate() {
+            if !locked(first + relative) && page.as_ref().is_some_and(|p| !p.writable) {
                 *page = None;
                 reclaimed += 1;
             }
+        }
+        if reclaimed == 0 {
+            return Ok(None);
         }
         Ok(Some((
             FallibleArc::try_new(next).map_err(map_allocation)?,

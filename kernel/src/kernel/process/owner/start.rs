@@ -337,7 +337,11 @@ impl PreparedChildProcessStart {
         };
         let root_vmar_object = match PreparedHandle::try_from_new_object(
             root_vmar_publication,
-            VmarObject::ROOT_RIGHTS,
+            if build.memory_lock_allowed() {
+                VmarObject::ROOT_RIGHTS.union(Rights::LOCK_MEMORY)
+            } else {
+                VmarObject::ROOT_RIGHTS
+            },
             HandleFlags::NONE,
         ) {
             Ok(handle) => handle,

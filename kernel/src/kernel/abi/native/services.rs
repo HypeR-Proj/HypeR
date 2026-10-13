@@ -628,6 +628,12 @@ pub(in crate::kernel) trait VfsServices: UserMemoryServices {
         request: UserSlice,
     ) -> Result<(), VfsServiceError>;
 
+    fn begin_root_switch(
+        &self,
+        directory: HandleValue,
+        request: UserSlice,
+    ) -> Result<HandleValue, VfsServiceError>;
+    fn finish_root_switch(&self, token: HandleValue, commit: bool) -> Result<(), VfsServiceError>;
     fn directory_scope_create(
         &self,
         root: HandleValue,
@@ -819,6 +825,14 @@ pub(in crate::kernel) trait MemoryServices {
         size: u64,
         permissions: Permissions,
     ) -> Result<(), MemoryServiceError>;
+    fn set_memory_residency(
+        &self,
+        vmar: HandleValue,
+        address: u64,
+        size: u64,
+        current: bool,
+        lock: bool,
+    ) -> Result<(), MemoryServiceError>;
     fn allocate_vmar(
         &self,
         parent: HandleValue,
@@ -866,6 +880,11 @@ pub(in crate::kernel) trait ProcessBuilderServices {
         builder: HandleValue,
         words: Option<UserSlice>,
         word_count: usize,
+    ) -> Result<(), ProcessBuilderServiceError>;
+    fn set_process_builder_memory_lock(
+        &self,
+        builder: HandleValue,
+        enabled: bool,
     ) -> Result<(), ProcessBuilderServiceError>;
     fn add_process_builder_handle(
         &self,

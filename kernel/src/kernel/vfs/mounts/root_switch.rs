@@ -40,6 +40,108 @@ impl NamespaceLock {
 }
 
 impl MountTable {
+    /// Prepare a reversible switch using mounted roots only. Unlike RAM subtree
+    /// promotion this changes no filesystem dirents, so abort needs only the
+    /// retained old view and cannot allocate or call a filesystem provider.
+    pub(in crate::kernel::vfs) fn prepare_root_transition(
+        &self,
+        old: &View,
+        new_root: Location,
+        put_old: Location,
+        moves: &[(Location, Location)],
+        sponsor: &ResourceDomain,
+    ) -> Result<(View, u64), Error> {
+        if new_root.mount().id() == old.root.mount().id()
+            || !is_mounted_root(old, &new_root)
+            || old.root.node().get() != old.root.mount().root().get()
+            || moves.len() > MAX_ROOT_MOVES
+        {
+            return Err(Error::InvalidInput);
+        }
+        let epoch = new_root.mount().filesystem().epoch();
+        if epoch & 1 != 0 {
+            return Err(Error::Busy);
+        }
+        let budget = ScratchBudget::new(sponsor);
+        let mut replacements = ScratchVec::new(budget.clone());
+        replacements.try_reserve_exact(moves.len() + 1)?;
+        Self::validate_target(old, &new_root, &put_old)?;
+        replacements.push(Attachment::prepare(
+            put_old,
+            old.root.mount().clone(),
+            sponsor,
+        )?)?;
+        for (index, (source, target)) in moves.iter().enumerate() {
+            Self::validate_target(old, &new_root, target)?;
+            if !is_mounted_root(old, source)
+                || source.mount().id() == new_root.mount().id()
+                || replacements.iter().any(|entry| entry.covered == *target)
+                || moves[..index]
+                    .iter()
+                    .any(|(previous, _)| previous == source)
+            {
+                return Err(Error::InvalidInput);
+            }
+            replacements.push(Attachment::prepare(
+                target.clone(),
+                source.mount().clone(),
+                sponsor,
+            )?)?;
+        }
+        let mut entries = ScratchVec::new(budget);
+        entries.try_reserve_exact(old.entries().len() + 1)?;
+        for entry in old.entries() {
+            if entry.mounted.id() != new_root.mount().id()
+                && !replacements
+                    .iter()
+                    .any(|next| next.mounted.id() == entry.mounted.id())
+            {
+                entries.push(entry.clone())?;
+            }
+        }
+        for replacement in replacements {
+            entries.push(replacement)?;
+        }
+        if entries.len() > MAX_MOUNTS {
+            return Err(Error::Busy);
+        }
+        Self::validate_destinations(&new_root, &entries, sponsor)?;
+        Ok((Self::prepare_view(new_root, entries, sponsor)?, epoch))
+    }
+
+    pub(in crate::kernel::vfs) fn activate_root_transition(
+        &self,
+        old: &View,
+        prepared: &mut Option<View>,
+    ) -> Result<View, Error> {
+        self.current.with(|current| {
+            if self.transition_pending.load(super::Ordering::Relaxed) || !current.same(old) {
+                return Err(Error::Busy);
+            }
+            let next = prepared.take().ok_or(Error::InvalidInput)?;
+            self.transition_pending
+                .store(true, super::Ordering::Relaxed);
+            Ok(core::mem::replace(current, next))
+        })
+    }
+
+    /// The active token is the sole topology writer until this call. Swapping
+    /// the saved view restores every mount edge without allocation or I/O.
+    pub(in crate::kernel::vfs) fn finish_root_transition(&self, old: View, commit: bool) -> View {
+        self.current.with(|current| {
+            if !self.transition_pending.load(super::Ordering::Relaxed) {
+                hyper::debug::invariant_failure("VFS root transition lost topology ownership");
+            }
+            self.transition_pending
+                .store(false, super::Ordering::Relaxed);
+            if commit {
+                old
+            } else {
+                core::mem::replace(current, old)
+            }
+        })
+    }
+
     pub(in crate::kernel::vfs) fn switch_root(
         &self,
         old: &View,
@@ -134,7 +236,7 @@ impl MountTable {
         }
         let now = crate::kernel::time::realtime();
         self.current.with(|current| {
-            if !current.same(old) {
+            if self.transition_pending.load(super::Ordering::Relaxed) || !current.same(old) {
                 return Err(Error::Busy);
             }
             let replacement = prepared.take().ok_or(Error::InvalidBackendResult)?;

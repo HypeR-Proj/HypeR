@@ -32,7 +32,7 @@ use file::FileOrigin;
 /// One immutable physical-page version of an address-space-owned private view.
 /// Replacing this value never changes pages in an older mapping or pin.
 pub(crate) struct PrivateView<B: PageBackend, A: MemoryAccount> {
-    file: Option<FileOrigin<A>>,
+    file: Option<FileOrigin<B, A>>,
     pub(super) pages: Vec<Option<PrivatePage<B, A>>>,
     pub(super) backend: B,
     account: A,

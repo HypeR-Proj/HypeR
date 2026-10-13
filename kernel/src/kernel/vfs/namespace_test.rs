@@ -15,6 +15,9 @@ mod protection;
 #[path = "../../../tests/kernel/vfs_namespace/root_switch.rs"]
 mod root_switch;
 
+#[path = "../../../tests/kernel/vfs_namespace/archive_lifetime.rs"]
+mod archive_lifetime;
+
 #[cfg(any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64))]
 #[path = "../../../tests/kernel/vfs_namespace/process_loader.rs"]
 mod process_loader;
@@ -54,6 +57,7 @@ pub(crate) fn run() -> Result<(), TestError> {
     let domain =
         ResourceDomain::try_new_root(ResourceLimits::UNLIMITED).map_err(Error::Resource)?;
     super::remote::test_record_storage(&domain)?;
+    archive_lifetime::run(&domain)?;
     let scratch = ScratchBudget::new(&domain);
     let archive = RamFs::from_newc(EMPTY_ARCHIVE)
         .map_err(|error| Error::Backend(super::instance::Error::RamFs(error)))?;

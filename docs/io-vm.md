@@ -73,8 +73,10 @@ and preserves existing disks. `make run` validates the disk's GPT against the
 selected board configuration, then launches the existing kernel, ramdisk and
 disk. `BOARD_IMAGE` selects another board disk. The diagnostic `RUN_PROFILE=io` instead creates
 `target/app/aarch64/io-disk.img`; `IO_VM_DISK` overrides that diagnostic disk.
-`RUN_PROFILE=native` selects an all-RAM Native/Alpine deployment with the same
-stage-1 and system-init handoff and no I/O appliance. `IO_VM_PACKAGE` can override the downloaded
+`RUN_PROFILE=native` selects a synthetic no-device test fixture: its test-only
+init copies the supplied formal payload into an independent RAMFS before the
+real stage-1 supervisor performs the handoff. It has no I/O appliance and is
+not a product deployment mode. `IO_VM_PACKAGE` can override the downloaded
 package with a complete, locally qualified boot generation. The importer also
 accepts `IO_VM_REFERENCE` for an explicit digest and `IO_VM_ORAS` for ORAS.
 
@@ -154,7 +156,7 @@ eight slots. Each Native data client has its own shared-memory pool and
 mailbox/notification routes. io-runtime activates the connection and moves its
 exclusive block capability plus discovered partition UUID/label to fs-backend.
 The manager first applies only the bootstrap fstab to mount `/system`. After
-handoff and root switching, formal init asks it to apply `/system/etc/fstab`,
+handoff and root switching, formal init asks it to apply `/etc/fstab`,
 loading the FAT worker from `/system` for `/data`. Fleet configuration follows
 these formal mounts; separate workers own each mounted volume.
 Native clients are absent from the business broker's admission table.
@@ -744,8 +746,9 @@ its mapping ownership and enters the backend shutdown/quarantine path.
 
 ### Forwarded appliance logs
 
-The Native I/O runtime prefixes each forwarded guest console line with
-`HypeR IO VM:`, including lines split across serial reads. Native runtime messages
+The bootstrap I/O runtime prefixes forwarded guest console lines with
+`HypeR bootstrap-stage1-io-runtime: IO VM:`. After adoption, the formal runtime
+uses `HypeR IO VM:`. Both preserve prefixes across split serial reads. Native runtime messages
 retain their own service name. Prefixing does not buffer a whole line or alter
 its bytes; a partial line remains visible, so output from other services can
 still interleave before the guest emits its next newline.

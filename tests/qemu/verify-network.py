@@ -351,7 +351,7 @@ def run(args):
             command, args.log, failures=failures,
             output_filter=partial(append_console_output, filter_guest_logs=True)) as session:
         scenario = Scenario(session, url, digest, args.expect_tx_offload)
-        session.await_text(rb'HypeR io-runtime: ready; bootstrap mounts complete\n', timeout=180)
+        session.await_text(rb'HypeR bootstrap-stage1-io-runtime: ready; bootstrap mounts complete\n', timeout=180)
         # Storage readiness precedes formal terminal ownership. Commands sent
         # before the shell prompt can be discarded by the session's input reset.
         session.await_text(rb'hyper-sh\$ ', timeout=180)
@@ -364,13 +364,9 @@ def run(args):
             if time.monotonic() >= deadline:
                 raise TimeoutError('init did not provision both network guests')
             session.pump(0.2)
-        clients = scenario.native('cat /boot/etc/hyper/io-clients.conf')
-        if board.bootstrap_clients().encode() not in clients:
-            raise RuntimeError(f'boot client policy does not match board: {clients!r}')
-        # Owner 0 has management only. FDT and backend-plan tests independently
-        # ensure it does not instantiate a data notification or TAP.
-        if not re.search(rb'^0 - - -$', clients, re.MULTILINE):
-            raise RuntimeError('block owner unexpectedly has a data assignment')
+        # Configuration/FDT tests check owner 0's management-only assignment.
+        # Runtime forwarding and later client reset exercise the adopted policy
+        # without keeping bootstrap configuration files alive for inspection.
 
         for vm in guests:
             scenario.native(f'vmm start {vm["name"]}')

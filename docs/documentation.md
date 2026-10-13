@@ -30,6 +30,9 @@ references into one GitHub Pages artifact. The intended public address is
   SDK workspace members and the ABI are explicitly selected because they
   are dependencies outside the application workspace. Explicit local reference
   roots keep cross-crate links independent of the documentation build order.
+  Bootstrap and formal-system references have separate output trees, including
+  their own SDK view, so independently owned crates with the same name cannot
+  overwrite each other's documentation.
   Executables are also selected explicitly into a separate reference tree:
   Cargo otherwise skips a binary when its library has the same name. Executable
   type links lead back to the matching library/SDK view. Binary selection follows
@@ -58,7 +61,9 @@ Inherited `Iterator::cmp` descriptions contain an unresolved `Ord` section link
 in the pinned Rustdoc version; packaging restores that known upstream URL in
 HTML anchors while preserving source examples and other page content.
 Cross-crate `Source` links with a stale crate-index-relative path are repaired
-only when the exact referenced file exists in that view's source tree.
+only when the exact referenced file exists in that view's source tree or its
+explicitly selected library view. Executable references stay within their own
+architecture and bootstrap/formal environment; unresolved targets remain errors.
 Test-only configurations are not enabled.
 Build scripts and other tools remain accessible through repository source links
 and their existing guides; they are not given synthetic function descriptions.

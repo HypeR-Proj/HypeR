@@ -3,7 +3,7 @@
 
 //! Bounded read-ahead for one validation pass over sparse FIT metadata.
 
-use hyper_vm_image::ReadAt;
+use crate::image::ReadAt;
 use std::cell::RefCell;
 
 const PAGE_BYTES: usize = 4096;

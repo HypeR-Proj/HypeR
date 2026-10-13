@@ -62,10 +62,7 @@ pub fn inspect(
     let input_name = path.file_name().and_then(|name| name.to_str());
     let (path, image) = open_image(path)?;
     let directory = library_directory.map(Path::to_path_buf).unwrap_or_else(|| {
-        PathBuf::from(format!(
-            "/system/lib/{}-hyper-hyper",
-            image.architecture.name()
-        ))
+        PathBuf::from(format!("/lib/{}-hyper-hyper", image.architecture.name()))
     });
     let mut builder = Builder {
         graph: Graph {
@@ -96,15 +93,9 @@ pub fn inspect(
         "<main>"
     };
     builder.names.insert(name.to_owned(), 0);
-    // PT_INTERP identifies the Native linker ABI. Deployment selects its actual
-    // file in /system, independently of the bootstrap /lib64 namespace.
-    let default_loader = interpreter.as_deref().map(|path| {
-        if path == format!("/lib64/ld-hyper-{}.so", root_image.architecture.name()) {
-            PathBuf::from(format!("/system{path}"))
-        } else {
-            PathBuf::from(path)
-        }
-    });
+    // The formal filesystem is the process root. Honor the declared interpreter
+    // literally unless the caller explicitly selects an alternate loader.
+    let default_loader = interpreter.as_deref().map(PathBuf::from);
     if let Some(path) = loader.or(default_loader.as_deref()) {
         let name = if interpreter.is_some() {
             format!("ld-hyper-{}.so", root_image.architecture.name())

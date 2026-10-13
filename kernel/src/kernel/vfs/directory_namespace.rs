@@ -115,6 +115,41 @@ impl DirectoryObject {
         Ok(())
     }
 
+    /// Prepare a reversible switch between existing mounted filesystems.
+    /// The caller allocates the token and handle before activating it.
+    pub(crate) fn prepare_root_transition(
+        &self,
+        new_root: &str,
+        put_old: &str,
+        moves: &[(&str, &str)],
+        sponsor: &ResourceDomain,
+    ) -> Result<super::super::RootTransition, Error> {
+        self.require_namespace_root()?;
+        if moves.len() > MAX_ROOT_MOVES {
+            return Err(Error::InvalidInput);
+        }
+        let old = self.namespace.mounts.snapshot();
+        let new_root = self.namespace_directory(&old, new_root, None, sponsor)?;
+        let put_old = self.namespace_directory(&old, put_old, Some(&new_root), sponsor)?;
+        let mut locations = ScratchVec::new(ScratchBudget::new(sponsor));
+        for (source, target) in moves {
+            locations.push((
+                self.namespace_directory(&old, source, None, sponsor)?,
+                self.namespace_directory(&old, target, Some(&new_root), sponsor)?,
+            ))?;
+        }
+        let (prepared, epoch) = self
+            .namespace
+            .mounts
+            .prepare_root_transition(&old, new_root, put_old, &locations, sponsor)?;
+        Ok(super::super::RootTransition::new(
+            self.namespace.clone(),
+            old,
+            prepared,
+            epoch,
+        ))
+    }
+
     fn require_namespace_root(&self) -> Result<(), Error> {
         if self.root.follows_root() && self.current.follows_root() {
             Ok(())

@@ -14,7 +14,7 @@
 mod directory;
 mod executable;
 mod file_data;
-mod file_record;
+pub(crate) mod file_record;
 pub(crate) mod instance;
 mod lock_state;
 pub(crate) mod locks;
@@ -32,6 +32,9 @@ pub(super) mod remote;
 mod resolve;
 mod resolve_state;
 mod rights_contract;
+mod root_transition;
+mod root_transition_object;
+pub(crate) use root_transition_object::RootTransitionObject;
 mod scratch;
 pub(crate) mod service;
 
@@ -45,6 +48,7 @@ pub(crate) use objects::{
     Error as VfsError, FileInfo, FileObject, FileOpenOptions, Metadata, MetadataUpdate,
 };
 pub(crate) use protection::{FileProtection, FileProtectionObject};
+pub(crate) use root_transition::RootTransition;
 pub(crate) use scratch::{ScratchBudget, ScratchString, ScratchVec};
 pub(crate) use service::{
     ServiceError as VfsServiceError, begin_directory_read, create_directory, create_file,
@@ -112,10 +116,21 @@ pub(crate) fn cache_test_record(
     file_record::FileRecord::try_new(id, domain)
 }
 
-pub(crate) fn initialize(boot: &super::boot::Initialization) -> Result<(), InitializationError> {
-    let ramfs = RamFs::from_newc(boot.initial_ramdisk()).map_err(InitializationError::RamFs)?;
+pub(crate) fn initialize(
+    boot: &mut super::boot::Initialization,
+) -> Result<(), InitializationError> {
+    let archive = FallibleArc::try_new(
+        boot.take_initial_ramdisk()
+            .ok_or(InitializationError::AlreadyInitialized)?,
+    )?;
+    // SAFETY: archive stays owned throughout parsing/construction and every
+    // resulting node retains a clone before publication. No archive slice
+    // escapes except through a node or parser snapshot carrying that owner.
+    let bytes =
+        unsafe { core::slice::from_raw_parts(archive.bytes().as_ptr(), archive.bytes().len()) };
+    let ramfs = RamFs::from_newc(bytes).map_err(InitializationError::RamFs)?;
     let node_count = ramfs.nodes().len();
-    let filesystem = FilesystemInstance::try_from_ramfs(ramfs)?;
+    let filesystem = FilesystemInstance::try_from_owned_archive(ramfs, archive)?;
     // The system cache is a VFS-service resource, not namespace-local state.
     // Injecting its owner prevents future namespace creation from silently
     // multiplying the global clean-page budget.

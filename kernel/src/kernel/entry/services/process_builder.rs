@@ -131,6 +131,18 @@ impl ProcessBuilderServices for DeferredProcessServices<'_> {
         Ok(())
     }
 
+    fn set_process_builder_memory_lock(
+        &self,
+        builder: HandleValue,
+        enabled: bool,
+    ) -> Result<(), ProcessBuilderServiceError> {
+        let builder = self
+            .process
+            .resolve_handle::<ProcessBuilder>(builder, Rights::WRITE.union(Rights::LOCK_MEMORY))?;
+        builder.object().set_memory_lock(enabled)?;
+        Ok(())
+    }
+
     fn add_process_builder_handle(
         &self,
         builder: HandleValue,

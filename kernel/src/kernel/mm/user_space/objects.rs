@@ -521,7 +521,8 @@ impl KernelObject for VmarObject {
     const SUPPORTED_RIGHTS: Rights = Rights::DUPLICATE
         .union(Rights::TRANSFER)
         .union(Rights::INSPECT)
-        .union(Rights::MAP);
+        .union(Rights::MAP)
+        .union(Rights::LOCK_MEMORY);
 }
 
 fn reserve_object_charge<T: KernelObject>(

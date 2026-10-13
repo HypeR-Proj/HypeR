@@ -27,10 +27,9 @@ fn application_main(mut startup: Startup<'_>) -> ExitCode {
 fn run(startup: &mut Startup<'_>) -> Result<(), Box<dyn std::error::Error>> {
     let config = config::Config::load()?;
     let root = startup.take_root_directory()?;
-    let boot_environment = hyper_os::fs::Directory::from_handle(
+    let environment = hyper_os::fs::Directory::from_handle(
         startup.take(hyper_service::process::ENVIRONMENT_DIRECTORY)?,
     );
-    let environment = hyper_service::process::open_environment(&root, "/system")?;
     let controller = startup.take(hyper_service::session::CONSOLE_CONTROLLER)?;
     let logs = startup.take(hyper_service::session::LOG_CONNECTOR)?;
     let mut epoch = 0_u64;
@@ -40,7 +39,6 @@ fn run(startup: &mut Startup<'_>) -> Result<(), Box<dyn std::error::Error>> {
         startup,
         root: &root,
         environment: &environment,
-        boot_environment: &boot_environment,
         config: &config,
         logs: &logs,
     };
@@ -119,7 +117,6 @@ struct SessionServices<'a, 'startup> {
     startup: &'a Startup<'startup>,
     root: &'a hyper_os::fs::Directory,
     environment: &'a hyper_os::fs::Directory,
-    boot_environment: &'a hyper_os::fs::Directory,
     config: &'a config::Config,
     logs: &'a OwnedHandle<hyper_os::handle::CapabilityChannelObject>,
 }
@@ -137,7 +134,6 @@ fn run_session(
         startup,
         root,
         environment,
-        boot_environment,
         config,
         logs,
     } = services;
@@ -180,15 +176,7 @@ fn run_session(
     let mut terminal = Terminal::from_handle(control);
     let client = terminal.prepare_child()?;
     let id = client.id;
-    let shell = launch::shell(
-        startup,
-        root,
-        environment,
-        boot_environment,
-        config,
-        group,
-        client,
-    )?;
+    let shell = launch::shell(startup, root, environment, config, group, client)?;
     terminal.bind_child(id, shell.as_process_supervisor().observe()?)?;
     let observation = wait_many(
         &[

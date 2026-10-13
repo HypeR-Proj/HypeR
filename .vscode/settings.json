@@ -17,9 +17,11 @@
         "kernel/Cargo.toml",
         "sdk/abi/Cargo.toml",
         "stdlib/rust/Cargo.toml",
-        // Formal applications own lib/; bootstrap has an independent workspace.
+        // app also owns lib/ and tests/app/; do not link those members twice.
+        // Bootstrap and standalone Native init fixtures have independent workspaces.
         "app/Cargo.toml",
         "bootstrap/stage1/Cargo.toml",
+        "tests/native/io-smoke/Cargo.toml",
         "sdk/toolchain/tests/rust-smoke/Cargo.toml",
         "sdk/toolchain/tests/std-smoke/Cargo.toml",
         "tools/fit-pack/Cargo.toml"

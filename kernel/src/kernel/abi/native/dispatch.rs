@@ -80,6 +80,12 @@ pub(in crate::kernel) fn dispatch_deferred(
         abi::HYPER_NATIVE_SYS_FILE_PROTECT => {
             handlers::sys_file_protect(services, invocation.arguments())
         }
+        abi::HYPER_NATIVE_SYS_VMAR_LOCK_MEMORY => {
+            handlers::sys_vmar_lock_memory(services, invocation.arguments())
+        }
+        abi::HYPER_NATIVE_SYS_VMAR_UNLOCK_MEMORY => {
+            handlers::sys_vmar_unlock_memory(services, invocation.arguments())
+        }
         abi::HYPER_NATIVE_SYS_VMAR_MAP_FILE => {
             handlers::sys_vmar_map_file(services, invocation.arguments())
         }
@@ -402,6 +408,12 @@ pub(in crate::kernel) fn dispatch_deferred(
         abi::HYPER_NATIVE_SYS_FILESYSTEM_SWITCH_ROOT => {
             handlers::sys_filesystem_switch_root(services, invocation.arguments())
         }
+        abi::HYPER_NATIVE_SYS_FILESYSTEM_BEGIN_ROOT_SWITCH => {
+            handlers::sys_filesystem_begin_root_switch(services, invocation.arguments())
+        }
+        abi::HYPER_NATIVE_SYS_FILESYSTEM_FINISH_ROOT_SWITCH => {
+            handlers::sys_filesystem_finish_root_switch(services, invocation.arguments())
+        }
         abi::HYPER_NATIVE_SYS_FILESYSTEM_UNMOUNT => {
             handlers::sys_filesystem_unmount(services, invocation.arguments())
         }
@@ -466,6 +478,9 @@ pub(in crate::kernel) fn dispatch_deferred(
         }
         abi::HYPER_NATIVE_SYS_PROCESS_BUILDER_SET_AFFINITY => {
             handlers::sys_process_builder_set_affinity(services, invocation.arguments())
+        }
+        abi::HYPER_NATIVE_SYS_PROCESS_BUILDER_SET_MEMORY_LOCK => {
+            handlers::sys_process_builder_set_memory_lock(services, invocation.arguments())
         }
         abi::HYPER_NATIVE_SYS_PROCESS_BUILDER_ADD_HANDLE => {
             handlers::sys_process_builder_add_handle(services, invocation.arguments())

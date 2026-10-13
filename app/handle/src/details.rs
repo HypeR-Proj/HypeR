@@ -25,7 +25,7 @@ pub(crate) fn inspect(
             }
             Err(Error::Status(Status::ACCESS_DENIED)) => {
                 return Err(io::Error::other(
-                    "object details require inspect-details authority and a visible target; launch /system/bin/handle from the system shell",
+                    "object details require inspect-details authority and a visible target; launch /bin/handle from the system shell",
                 ));
             }
             Err(error) => return Err(io::Error::other(error)),

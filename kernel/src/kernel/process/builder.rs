@@ -122,6 +122,7 @@ struct BuilderPlan {
     data: Vec<u8>,
     thread_name: Option<String>,
     affinity: CpuMask,
+    memory_lock_allowed: bool,
     startup: Vec<StoredStartupCapability>,
 }
 
@@ -202,6 +203,10 @@ impl SealedProcessBuild {
 
     pub(super) const fn affinity(&self) -> CpuMask {
         self.plan.affinity
+    }
+
+    pub(super) const fn memory_lock_allowed(&self) -> bool {
+        self.plan.memory_lock_allowed
     }
 
     pub(super) fn startup_capabilities(&self) -> &[StoredStartupCapability] {
@@ -298,6 +303,12 @@ pub(crate) struct ProcessBuilder {
 }
 
 impl ProcessBuilder {
+    const BASE_RIGHTS: Rights = Rights::TRANSFER
+        .union(Rights::INSPECT)
+        .union(Rights::WRITE)
+        .union(Rights::START)
+        .union(Rights::REQUEST_STOP);
+
     pub(crate) fn try_publication(
         _factory: &TaskFactory,
         group: &TaskGroupObject,
@@ -325,6 +336,7 @@ impl ProcessBuilder {
                 data,
                 thread_name: None,
                 affinity: CpuMask::ALL,
+                memory_lock_allowed: false,
                 startup,
             }))),
             abort_requested: AtomicBool::new(false),
@@ -398,6 +410,14 @@ impl ProcessBuilder {
             return self.finish_open_operation(plan, Err(ProcessBuilderError::InvalidAffinity));
         }
         plan.affinity = affinity;
+        self.finish_open_operation(plan, Ok(()))
+    }
+
+    /// Explicitly enables residency authority on the child's root VMAR.
+    /// The syscall adapter must resolve the builder with `LOCK_MEMORY` first.
+    pub(crate) fn set_memory_lock(&self, enabled: bool) -> Result<(), ProcessBuilderError<()>> {
+        let mut plan = self.take_open_plan()?;
+        plan.memory_lock_allowed = enabled;
         self.finish_open_operation(plan, Ok(()))
     }
 
@@ -749,7 +769,7 @@ pub(crate) fn create_process_builder(
     };
     let prepared = match PreparedHandle::try_from_new_object(
         publication,
-        <ProcessBuilder as KernelObject>::SUPPORTED_RIGHTS,
+        ProcessBuilder::BASE_RIGHTS.union(factory.rights().intersection(Rights::LOCK_MEMORY)),
         HandleFlags::NONE,
     ) {
         Ok(prepared) => prepared,
@@ -821,12 +841,7 @@ impl private::UserExportable for ProcessBuilder {}
 
 impl KernelObject for ProcessBuilder {
     const KIND: ObjectKind = ObjectKind::PROCESS_BUILDER;
-    const SUPPORTED_RIGHTS: crate::kernel::authority::Rights =
-        crate::kernel::authority::Rights::TRANSFER
-            .union(crate::kernel::authority::Rights::INSPECT)
-            .union(crate::kernel::authority::Rights::WRITE)
-            .union(crate::kernel::authority::Rights::START)
-            .union(crate::kernel::authority::Rights::REQUEST_STOP);
+    const SUPPORTED_RIGHTS: Rights = Self::BASE_RIGHTS.union(Rights::LOCK_MEMORY);
     const TRANSFER_CLASS: TransferClass = TransferClass::RendezvousOnly;
 
     fn on_zero_active_handles(&self, _retirement: &mut crate::kernel::object::ObjectRetirement) {

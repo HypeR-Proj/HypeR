@@ -47,8 +47,13 @@ pub struct MemoryStats {
 /// counters are coherent observations but do not share one global
 /// linearization point with that topology snapshot.
 pub fn statistics() -> Option<MemoryStats> {
-    let boot = super::boot::try_with_boot_state(|state| state.memory.boot_memory_stats())?;
+    let mut boot = super::boot::try_with_boot_state(|state| state.memory.boot_memory_stats())?;
     let runtime = allocator::GLOBAL_ALLOCATOR.stats()?;
+    // The firmware topology is immutable, but borrowed boot data can retire.
+    // Derive the current reservation split from the same buddy snapshot as
+    // free/allocated counts so admission cannot double-count its pages.
+    boot.available_pages = runtime.buddy.managed_pages;
+    boot.reserved_pages = boot.ram_pages.saturating_sub(boot.available_pages);
     Some(MemoryStats { boot, runtime })
 }
 
