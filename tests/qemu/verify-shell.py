@@ -71,11 +71,12 @@ def main():
             rb'\nBRANCH=branch\n')
         run("IFS=: read -r a b c <<< ':middle::tail:'; printf '<%s><%s><%s>\\n' \"$a\" \"$b\" \"$c\"",
             rb'\n<><middle><:tail:>\n')
-        # All 32 workers sleep together before input arrives. Inherited fd 3
-        # adds enough live descriptor servers to exceed wait-many's 64 items.
+        # All 32 workers sleep together before input arrives. Their descriptor
+        # servers plus the redirected output exceed wait-many's 64 items.
         stages = ['{ read -p "PIPE_BOUNDARY: " value; echo "$value"; }']
         stages += ['{ read value; echo "$value"; }'] * 31
-        session.send(('exec 3<<<held; ' + ' | '.join(stages) + '; exec 3<&-\r').encode())
+        session.send(('exec 3<<<held; { ' + ' | '.join(stages)
+                      + '; } >/tmp/shell-long-pipe; cat /tmp/shell-long-pipe; exec 3<&-\r').encode())
         session.await_text(rb'\nPIPE_BOUNDARY: ', timeout=120)
         session.send(b'LONG_PIPE_OK\r')
         session.await_text(rb'\nLONG_PIPE_OK\nhyper-sh\$ ', timeout=120)
@@ -91,6 +92,18 @@ def main():
         run("printf 'SPACE_FILE\\n' > '/tmp/review spaced'", rb'hyper-sh')
         session.send(b'cat /tmp/review\t\r')
         session.await_text(rb'\nSPACE_FILE\nhyper-sh\$ ')
+        run('mkdir /tmp/complete; mkdir /tmp/complete/alpha; mkdir /tmp/complete/beta; touch /tmp/complete/file',
+            rb'hyper-sh')
+        session.send(b'cat /tmp/complete/\t')
+        choices = session.await_text(rb'\nalpha/  beta/  file  \n')
+        if b'\n/tmp/complete/alpha/' in choices:
+            raise AssertionError('completion repeated the parent path in candidate labels')
+        session.send(b'\x03')
+        session.await_text(rb'\^C\nhyper-sh\$ ')
+        session.send(b'cd /tmp/complete/\t')
+        session.await_text(rb'\nalpha/  beta/  \n')
+        session.send(b'\x03')
+        session.await_text(rb'\^C\nhyper-sh\$ ')
         # A wide character cannot fit in the last column; Home/End must return
         # to the same logical line after that wrap, and Backspace deletes Z.
         session.send(b'echo ' + b'x' * 64 + '界Z'.encode() + b'\x01\x05\x7f\r')
@@ -103,6 +116,8 @@ def main():
             raise AssertionError('cancelled command executed')
         run('echo CANCEL=$?', rb'\nCANCEL=130\n')
         run("echo 'echo STDIN_SCRIPT' | sh", rb'\nSTDIN_SCRIPT\n')
+        run("cat <<'END' >/tmp/shell-order\nfor n in 1 2 3 4; do\nsh -c 'printf ERROR_ >&2; printf \"TAIL\\n\" >&2; echo OUTPUT'\ndone\nEND\nprintf '' | sh /tmp/shell-order",
+            rb'\n(?:ERROR_TAIL\nOUTPUT\n){4}')
         # Bracketed paste never executes embedded newlines before Enter.
         session.send(b'\x1b[200~echo PASTE_ONE\necho PASTE_TWO\x1b[201~')
         session.pump(0.1)

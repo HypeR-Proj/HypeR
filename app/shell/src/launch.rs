@@ -30,6 +30,8 @@ struct Adapters {
 pub(super) struct NativeBackend {
     pub authorities: CommandAuthorities,
     pub input: Inherited,
+    pub output: Inherited,
+    pub error: Inherited,
     pub read_settings: Option<hyper_terminal::Settings>,
 }
 
@@ -290,6 +292,17 @@ impl NativeBackend {
                     .ok_or(Error::Protocol)?
                     .duplicate(hyper_os::stream::CONNECTOR_RIGHTS)?,
             )),
+            // Unredirected output keeps its original transport. Relaying stdout
+            // and stderr independently at every nested shell lets a later
+            // stdout prompt overtake already-written stderr fragments.
+            Port::Standard(1) => self
+                .output
+                .duplicate(StandardStream::Output)
+                .map_err(Into::into),
+            Port::Standard(2) => self
+                .error
+                .duplicate(StandardStream::Error)
+                .map_err(Into::into),
             Port::Closed => {
                 let (child, parent) = channel::create_pair()?;
                 drop(parent);

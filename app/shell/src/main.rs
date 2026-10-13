@@ -25,7 +25,7 @@ use hyper_os::handle::{
     OwnedHandle, ResourceDomainObject, TaskFactoryObject, TaskGroupObject, TaskInspectorObject,
 };
 use hyper_os::startup::{self, Startup};
-use hyper_service::stdio::Inherited;
+use hyper_service::stdio::{Inherited, StandardStream};
 use hyper_service::{filesystem, process, vm};
 use hyper_shell::editor::{Action, Editor};
 use hyper_shell::path::CanonicalPath;
@@ -47,14 +47,9 @@ const WORKING_DIRECTORY_RIGHTS: DirectoryRights = DirectoryRights::READ
 
 fn run(startup: &mut Startup<'_>, args: &hyper_shell::cli::Shell) -> Result<ExitCode, Error> {
     hyper_os::require_core_abi().map_err(Error::from)?;
-    let input = if let Some(stream) = hyper_rt::process::stdin_stream()? {
-        Inherited::Stream(stream.duplicate(hyper_os::stream::CONNECTOR_RIGHTS)?)
-    } else {
-        Inherited::Pipe(
-            hyper_rt::process::stdin()?
-                .duplicate(hyper_service::stdio::STANDARD_INPUT_CONTRACT.required_rights())?,
-        )
-    };
+    let input = inherited_stream(StandardStream::Input)?;
+    let output = inherited_stream(StandardStream::Output)?;
+    let error = inherited_stream(StandardStream::Error)?;
     let terminal = hyper_terminal::Terminal::take(startup)?;
     let root_directory = startup.take_root_directory().map_err(Error::from)?;
     let environment = Directory::from_handle(
@@ -134,6 +129,8 @@ fn run(startup: &mut Startup<'_>, args: &hyper_shell::cli::Shell) -> Result<Exit
         launch::NativeBackend {
             authorities,
             input,
+            output,
+            error,
             read_settings: None,
         },
     );
@@ -219,6 +216,34 @@ fn run(startup: &mut Startup<'_>, args: &hyper_shell::cli::Shell) -> Result<Exit
         terminal.set_settings(settings)?;
     }
     interactive_shell(&mut shell)
+}
+
+fn inherited_stream(which: StandardStream) -> Result<Inherited, Error> {
+    let connector = match which {
+        StandardStream::Input => hyper_rt::process::stdin_stream()?,
+        StandardStream::Output => hyper_rt::process::stdout_stream()?,
+        StandardStream::Error => hyper_rt::process::stderr_stream()?,
+    };
+    if let Some(connector) = connector {
+        return Ok(Inherited::Stream(
+            connector.duplicate(hyper_os::stream::CONNECTOR_RIGHTS)?,
+        ));
+    }
+    let (pipe, rights) = match which {
+        StandardStream::Input => (
+            hyper_rt::process::stdin()?,
+            hyper_service::stdio::STANDARD_INPUT_CONTRACT,
+        ),
+        StandardStream::Output => (
+            hyper_rt::process::stdout()?,
+            hyper_service::stdio::STANDARD_OUTPUT_CONTRACT,
+        ),
+        StandardStream::Error => (
+            hyper_rt::process::stderr()?,
+            hyper_service::stdio::STANDARD_ERROR_CONTRACT,
+        ),
+    };
+    Ok(Inherited::Pipe(pipe.duplicate(rights.required_rights())?))
 }
 
 fn read_script(path: &str) -> Result<String, Error> {

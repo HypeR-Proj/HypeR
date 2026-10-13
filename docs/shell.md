@@ -53,7 +53,9 @@ prompt. Unsupported escape sequences do not become executable text.
 
 Tab completes builtins, functions, commands in `PATH`, and file/directory names,
 quoting inserted paths as needed. Ambiguous completion lists candidates and
-inserts their common prefix. Ctrl-R searches history backwards; repeat Ctrl-R
+inserts their common prefix. Path candidates show only the next component's name;
+the inserted text retains the full path. `cd` arguments complete directories,
+including symbolic links to directories. Ctrl-R searches history backwards; repeat Ctrl-R
 for an older match, Enter to accept it for editing, or Ctrl-G to restore the
 original draft. Bracketed paste inserts embedded newlines without executing
 until Enter. Incomplete quotes, compound commands, and here-documents continue
@@ -132,8 +134,10 @@ exec 3<&-
 ```
 
 `|` connects stdout to the next command's stdin. All stages start before waiting
-for completion. Plain external stages connect directly through byte channels;
-functions, builtins and compound stages use isolated shell processes with their
+for completion. Plain external stages connect directly through byte channels.
+Unredirected standard output retains its inherited transport rather than passing
+through independent relays in every nested shell. Functions, builtins and
+compound stages use isolated shell processes with their
 own variable state. The shell drains output and releases the terminal lease even
 if a later start or I/O operation fails. A downstream early exit closes its pipe
 rather than leaving an upstream producer blocked indefinitely.
