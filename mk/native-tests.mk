@@ -26,12 +26,12 @@ native-fixture-init: app-fetch
 		-p hyper-bootstrap-stage1-init --bin hyper-native-test-init --release --locked --offline
 
 native-initramfs: APP_BUILD_PROFILE = $(NATIVE_IMAGE_PROFILE)
-native-initramfs: app native-fixture-init $(if $(filter development,$(NATIVE_IMAGE_PROFILE)),app-fixtures) $(NEWC_PACK) $(NATIVE_GUEST_PREREQUISITES)
+native-initramfs: app app-boot native-fixture-init $(if $(filter development,$(NATIVE_IMAGE_PROFILE)),app-fixtures) $(NEWC_PACK) $(NATIVE_GUEST_PREREQUISITES)
 	python3 -B scripts/pack-native-system.py \
 		--packer "$(NEWC_PACK)" --strip "$(LLVM_STRIP)" \
 		--output "$(NATIVE_INITRAMFS).deployment" --initramfs "$(NATIVE_INITRAMFS)" \
 		--deployment "$(APP_DEPLOYMENT)" --profile "$(NATIVE_IMAGE_PROFILE)" \
-		--apps "$(APP_OUTPUT)" --boot-apps "$(APP_OUTPUT)" --sdk "$(SDK_OUTPUT)" \
+		--apps "$(APP_OUTPUT)" --boot-apps "$(APP_BOOT_OUTPUT)" --sdk "$(SDK_OUTPUT)" \
 		--std "$(NATIVE_STD_TEST_OUTPUT)" --arch "$(NATIVE_ARCH)" \
 		--boot-components $(APP_BOOT_COMPONENTS) \
 		--services "$(NATIVE_SERVICE_MANIFEST)" \
@@ -185,12 +185,12 @@ test-runtime-crash: image native-initramfs
 		--isolation-only
 
 .PHONY: test-storage-failure
-test-storage-failure: image app native-fixture-init $(NEWC_PACK)
+test-storage-failure: image app app-boot native-fixture-init $(NEWC_PACK)
 	@test "$(ARCH)" = aarch64 || { echo "storage recovery acceptance requires aarch64" >&2; exit 2; }
 	HYPER_ARCH="$(NATIVE_ARCH)" HYPER_SYSROOT="$(SDK_OUTPUT)" \
 		HYPER_CLANG="$(CLANG)" HYPER_LD="$(HYPER_LD)" \
 		python3 -B tests/qemu/verify-storage-failure.py prepare \
-		--apps "$(APP_OUTPUT)" --sdk "$(SDK_OUTPUT)" \
+		--apps "$(APP_OUTPUT)" --boot-apps "$(APP_BOOT_OUTPUT)" --sdk "$(SDK_OUTPUT)" \
 		--fixture-init "$(APP_BOOT_CARGO_OUTPUT)/$(NATIVE_RUST_TARGET)/release/hyper-native-test-init" \
 		--boot-components $(APP_BOOT_COMPONENTS) \
 		--packer "$(NEWC_PACK)" --strip "$(LLVM_STRIP)" \

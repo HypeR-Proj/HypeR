@@ -154,6 +154,31 @@ class EntrypointTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('system requires independent storage', result.stderr)
 
+    def test_native_fixtures_build_and_package_separate_boot_artifacts(self):
+        for target in ('native-initramfs', 'test-storage-failure'):
+            with self.subTest(target=target), tempfile.TemporaryDirectory() as directory:
+                apps = str(Path(directory) / 'apps')
+                boot = str(Path(directory) / 'bootstrap')
+                output = subprocess.check_output([
+                    'make', '--no-print-directory', '-n', '-o', 'image',
+                    '-o', 'app-fetch', '-o', 'native-fixture-init',
+                    '-o', 'app-fixtures', '-o', 'guest-itb', target,
+                    f'APP_OUTPUT={apps}', f'APP_BOOT_OUTPUT={boot}'], cwd=ROOT, text=True)
+                commands = [shlex.split(line) for line in
+                            output.replace('\\\n', '').splitlines()]
+                install = next(command for command in commands
+                               if 'scripts/app-deployment.py' in command
+                               and 'install' in command
+                               and boot in command)
+                self.assertEqual(install[install.index('--output') + 1], boot)
+                self.assertIn('io-runtime', install)
+                pack = next(command for command in commands
+                            if ('scripts/pack-native-system.py' in command or
+                                'tests/qemu/verify-storage-failure.py' in command)
+                            and '--apps' in command)
+                self.assertEqual(pack[pack.index('--apps') + 1], apps)
+                self.assertEqual(pack[pack.index('--boot-apps') + 1], boot)
+
     def test_pi_uses_custom_board_and_extra_volume_artifacts(self):
         for override, expected in (
                 ([], str(ROOT / 'boards/rpi5.json')),
