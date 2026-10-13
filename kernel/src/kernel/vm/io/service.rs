@@ -112,3 +112,33 @@ pub(crate) fn control_notification(
     let notification = process.resolve_handle::<Notification>(notification, Rights::WRITE)?;
     notification.object().control(operation)
 }
+
+/// Reconfigure only the frontend decode of an already admitted connection.
+/// VM WRITE cannot change its backend, interrupt assignment, epoch or DMA lease.
+pub(crate) fn configure_notification(
+    process: &Process,
+    machine: HandleValue,
+    original: u64,
+    base: u64,
+    flags: u32,
+) -> Result<(), Error> {
+    let machine = process.resolve_handle::<VirtualMachineObject>(machine, Rights::WRITE)?;
+    machine
+        .object()
+        .owner()
+        .configure_notification(original, base, flags)
+}
+
+pub(crate) fn access_notification(
+    process: &Process,
+    machine: HandleValue,
+    original: u64,
+    operation: u32,
+    value: u32,
+) -> Result<u32, Error> {
+    process
+        .resolve_handle::<VirtualMachineObject>(machine, Rights::WRITE)?
+        .object()
+        .owner()
+        .access_notification(original, operation, value)
+}

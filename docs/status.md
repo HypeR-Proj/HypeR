@@ -173,7 +173,8 @@ QEMU does not qualify physical cache, interrupt or DMA behavior.
 
 ## Guest virtio-net implementation
 
-The QEMU guest path uses a Native virtio-mmio frontend and Linux vhost-net/TAP,
+The QEMU guest path uses a Native virtio frontend (MMIO by default, or modern
+PCI with INTx) and Linux vhost-net/TAP,
 bridged to an assigned virtio-net uplink and QEMU user networking. A VM can have
 a disk, a network interface, or both. Both devices share one guest-memory grant
 and mailbox, with separate notification bindings and reset epochs. All vhost

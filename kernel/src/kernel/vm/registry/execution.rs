@@ -111,6 +111,27 @@ impl VmBinding {
             .physical
             .with(|physical| physical.owns_userspace_aperture(base, length))
     }
+    pub(crate) fn access_notification(
+        &self,
+        original: u64,
+        operation: u32,
+        value: u32,
+    ) -> Result<u32, crate::kernel::vm::io::Error> {
+        self.machine
+            .io_routes
+            .access_frontend(original, operation, value)
+    }
+
+    pub(crate) fn configure_notification(
+        &self,
+        original: u64,
+        base: u64,
+        flags: u32,
+    ) -> Result<(), crate::kernel::vm::io::Error> {
+        self.machine
+            .io_routes
+            .configure_frontend(original, base, flags)
+    }
     pub(crate) fn io_range_conflicts(&self, base: u64, length: u64) -> bool {
         self.machine.io_routes.conflicts(base, length)
     }

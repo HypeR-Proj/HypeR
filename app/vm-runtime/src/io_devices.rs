@@ -32,6 +32,7 @@ fn backend_failure(stage: &str, error: BackendError) -> Error {
 }
 
 pub(super) struct IoDevices {
+    pci: bool,
     _session: CapabilityChannel,
     channel: Arc<OwnedHandle<ByteChannelObject>>,
     backends: IoBackends<
@@ -49,6 +50,7 @@ pub(super) fn bind(
     base: u64,
     length: u64,
     devices: u32,
+    pci: bool,
 ) -> Result<(OwnedHandle<VirtualMachineObject>, IoDevices), Error> {
     #[cfg(feature = "startup-profile")]
     let started = std::time::Instant::now();
@@ -61,7 +63,12 @@ pub(super) fn bind(
         .map_err(Error::OperatingSystem)?
         .rights;
     let mut machine = Some(machine);
-    let record = io::encode_memory(base, length).ok_or(Error::InvalidControl)?;
+    let record = (if pci {
+        io::encode_pci_memory(base, length)
+    } else {
+        io::encode_memory(base, length)
+    })
+    .ok_or(Error::InvalidControl)?;
     let dispositions = &mut [
         CapabilityDisposition::move_handle(&mut machine, RightsOffer::Exact(rights))
             .map_err(Error::OperatingSystem)?,
@@ -137,16 +144,22 @@ pub(super) fn bind(
         initialize(&mut backend, deadline)?;
         backends.push(backend);
     }
-    let backends =
+    let mut backends =
         IoBackends::new(backends).map_err(|error| backend_failure("publication", error))?;
     #[cfg(feature = "startup-profile")]
     eprintln!(
         "HypeR startup profile: I/O ready at {} us",
         started.elapsed().as_micros()
     );
+    if pci {
+        backends
+            .use_pci()
+            .map_err(|error| backend_failure("PCI transport", error))?;
+    }
     Ok((
         machine,
         IoDevices {
+            pci,
             _session: session,
             channel,
             backends,
@@ -192,7 +205,11 @@ fn initialize(backend: &mut IoBackend, deadline: u64) -> Result<(), Error> {
 }
 
 impl IoDevices {
-    pub(super) fn service(&mut self, cpus: &[OwnedHandle<VirtualCpuObject>]) -> Result<(), Error> {
+    pub(super) fn service(
+        &mut self,
+        machine: &OwnedHandle<VirtualMachineObject>,
+        cpus: &[OwnedHandle<VirtualCpuObject>],
+    ) -> Result<(), Error> {
         if let Some(completion) = self
             .backends
             .progress()
@@ -216,7 +233,33 @@ impl IoDevices {
             }
             if let Some(request) =
                 hyper_os::vm::pending_mmio(cpu.as_handle_ref()).map_err(Error::OperatingSystem)?
-                && let Some(completion) = self.backends.mmio(index, request).map_err(|error| {
+                && let Some(completion) = (if self.pci {
+                    self.backends.pci_mmio(
+                        index,
+                        request,
+                        |original, base, command| {
+                            use hyper_vm_support::pci;
+                            hyper_os::guest_io::configure_pci_frontend(
+                                machine.as_handle_ref(),
+                                original,
+                                base,
+                                command & pci::MEMORY != 0,
+                                command & pci::BUS_MASTER != 0,
+                                command & pci::INTX_DISABLE != 0,
+                            )
+                        },
+                        |original, operation| {
+                            hyper_os::guest_io::access_frontend(
+                                machine.as_handle_ref(),
+                                original,
+                                operation,
+                            )
+                        },
+                    )
+                } else {
+                    self.backends.mmio(index, request)
+                })
+                .map_err(|error| {
                     eprintln!("HypeR vm-runtime: I/O MMIO vCPU={index} request={request:?}");
                     backend_failure("MMIO", error)
                 })?

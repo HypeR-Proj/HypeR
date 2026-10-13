@@ -228,7 +228,8 @@ test-board-network: app image
 	mkdir -p "$(BOARD_TEST_OUTPUT)"
 	@fixture=$$(mktemp -d "$(BOARD_TEST_OUTPUT)/network.XXXXXX") && \
 	python3 -B tests/qemu/verify-network.py prepare \
-		--board "$(CURDIR)/boards/qemu.json" --output "$$fixture/config.json" && \
+		--board "$(CURDIR)/boards/qemu.json" --output "$$fixture/config.json" \
+		--virtio-transport "$(or $(NETWORK_VIRTIO_TRANSPORT),mmio)" && \
 	$(MAKE) -o image -o app board-image BOARD=qemu \
 		BOARD_CONFIG="$$fixture/config.json" BOARD_OUTPUT="$$fixture" \
 		BOARD_IMAGE="$$fixture/disk.img" && \

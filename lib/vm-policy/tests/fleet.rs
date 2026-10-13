@@ -230,6 +230,7 @@ fn affinity_wire_preserves_multiple_allowed_cpus() {
 
 fn configuration() -> Configuration {
     Configuration {
+        virtio_transport: Default::default(),
         vcpus: 2,
         memory_bytes: 128 * 1024 * 1024,
         bootargs: "console=ttyAMA0".into(),
@@ -296,8 +297,8 @@ fn runtime_arguments_preserve_policy_and_long_command_lines() {
     let mut extra = args.to_vec();
     extra.push("unexpected".into());
     assert!(Configuration::from_runtime_arguments(extra).is_err());
-    // No architecture is carried in the runtime's three policy arguments.
-    assert_eq!(args.len(), 3);
+    // No architecture is carried in the runtime's policy arguments.
+    assert_eq!(args.len(), 4);
 }
 
 #[test]
@@ -350,4 +351,24 @@ fn checked_in_vm_configurations_are_complete() {
             );
         }
     }
+}
+
+#[test]
+fn transport_defaults_to_mmio_and_pci_roundtrips_without_bootarg_policy() {
+    let mut value = serde_json::to_value(configuration()).unwrap();
+    value.as_object_mut().unwrap().remove("virtio-transport");
+    assert_eq!(
+        serde_json::from_value::<Configuration>(value.clone())
+            .unwrap()
+            .virtio_transport,
+        VirtioTransport::Mmio
+    );
+    value["virtio-transport"] = serde_json::json!("pci");
+    let config: Configuration = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(
+        Configuration::from_runtime_arguments(config.runtime_arguments().unwrap()).unwrap(),
+        config
+    );
+    value["virtio-transport"] = serde_json::json!("legacy-pci");
+    assert!(serde_json::from_value::<Configuration>(value).is_err());
 }

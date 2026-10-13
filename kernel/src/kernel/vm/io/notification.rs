@@ -33,6 +33,7 @@ pub(crate) struct Shared {
     front: Option<VmId>,
     back: VmId,
     pub(super) front_base: u64,
+    frontend: AtomicU64,
     pub(super) back_base: u64,
     pub(super) front_irq: u32,
     pub(super) back_irq: u32,
@@ -133,33 +134,104 @@ impl Shared {
         }
         self.mutate(model::NotificationState::close);
     }
+    pub(super) fn frontend_base(&self) -> u64 {
+        self.frontend.load(Ordering::Acquire) & !0xfff
+    }
+
+    pub(super) fn frontend_decode_enabled(&self) -> bool {
+        let mapping = self.frontend.load(Ordering::Acquire);
+        mapping & 1 == 0 || mapping & 2 != 0
+    }
+
+    pub(super) fn configure_frontend(&self, base: u64, flags: u32) -> Result<(), Error> {
+        // Called under the frontend VM lifecycle admission lock, after checking
+        // its userspace MMIO reservation and all sibling route reservations.
+        self.mutate(|state| {
+            if state.closed || self.detached.load(Ordering::Acquire) {
+                return Err(Error::BadState);
+            }
+            self.frontend
+                .store(base | u64::from(flags), Ordering::Release);
+            state.interrupt_masked = flags & 4 != 0;
+            Ok(())
+        })
+    }
+
+    /// Userspace transport fallback (for example PCI configuration access).
+    /// This reaches only the admitted frontend, never backend control or DMA.
+    pub(super) fn frontend_access(&self, operation: u32, value: u32) -> Result<u32, Error> {
+        if operation > 2 || (operation != 2 && value != 0) || (operation == 2 && value >= 32) {
+            return Err(Error::InvalidArgument);
+        }
+        self.mutate(|state| {
+            if state.closed || self.detached.load(Ordering::Acquire) {
+                return Err(Error::BadState);
+            }
+            match operation {
+                0 => Ok(state.status),
+                1 => {
+                    let status = state.status;
+                    state.ack(status);
+                    Ok(status)
+                }
+                _ => {
+                    let mapping = self.frontend.load(Ordering::Acquire);
+                    if mapping & 1 == 0 || mapping & 8 != 0 {
+                        state.kick(u64::from(value));
+                    }
+                    Ok(0)
+                }
+            }
+        })
+    }
+
     pub(super) fn front_mmio(&self, access: MmioAccess) -> Option<MmioAction> {
-        let offset = access.address().get() - self.front_base;
+        let offset = access.address().get().checked_sub(self.frontend_base())?;
         if !matches!(offset, 0x50 | 0x60 | 0x64) {
             return None;
         }
-        if access.size() != 4 {
-            return Some(MmioAction::Stop);
+        if offset == 0x60 && access.size() == 4 && matches!(access.operation(), MmioOperation::Read)
+        {
+            // Preserve MMIO's read-only fast path. Unlike PCI ISR, this read
+            // neither acknowledges the interrupt nor needs registry leases.
+            return self.state.with(|state| {
+                let mapping = self.frontend.load(Ordering::Acquire);
+                (mapping & 1 == 0 && access.address().get() == (mapping & !0xfff) + 0x60)
+                    .then_some(MmioAction::CompleteRead(u64::from(state.status)))
+            });
         }
-        if offset == 0x60 && matches!(access.operation(), MmioOperation::Read) {
-            // VM teardown closes the shared route under the same source lock.
-            // A snapshot needs no registry lease or interrupt reconciliation.
-            return Some(
-                self.state
-                    .with(|state| MmioAction::CompleteRead(state.status as u64)),
-            );
-        }
-        Some(self.mutate(|state| match (offset, access.operation()) {
-            (0x50, MmioOperation::Write(queue)) => {
-                state.kick(queue);
-                MmioAction::CompleteWrite
+        self.mutate(|state| {
+            // Recheck under the source lock: a cloned route may predate a BAR
+            // relocation or disabling memory decode. Such accesses must not
+            // reach the old doorbell or consume interrupt status.
+            let mapping = self.frontend.load(Ordering::Acquire);
+            let offset = access.address().get().checked_sub(mapping & !0xfff)?;
+            let pci = mapping & 1 != 0;
+            if pci && mapping & 2 == 0 {
+                return None;
             }
-            (0x64, MmioOperation::Write(mask)) => {
-                state.ack(mask as u32);
-                MmioAction::CompleteWrite
+            match (offset, access.size(), access.operation()) {
+                (0x50, size, MmioOperation::Write(queue)) if size == if pci { 2 } else { 4 } => {
+                    if !pci || mapping & 8 != 0 {
+                        state.kick(queue);
+                    }
+                    Some(MmioAction::CompleteWrite)
+                }
+                (0x60, 1, MmioOperation::Read) if pci => {
+                    let status = state.status;
+                    state.ack(status);
+                    Some(MmioAction::CompleteRead(u64::from(status)))
+                }
+                (0x60, 4, MmioOperation::Read) if !pci => {
+                    Some(MmioAction::CompleteRead(u64::from(state.status)))
+                }
+                (0x64, 4, MmioOperation::Write(mask)) if !pci => {
+                    state.ack(mask as u32);
+                    Some(MmioAction::CompleteWrite)
+                }
+                _ => None,
             }
-            _ => MmioAction::Stop,
-        }))
+        })
     }
     pub(super) fn back_mmio(&self, access: MmioAccess) -> MmioAction {
         let offset = access.address().get() - self.back_base;
@@ -260,6 +332,7 @@ impl Notification {
             front: Some(front),
             back,
             front_base,
+            frontend: AtomicU64::new(front_base),
             back_base,
             front_irq,
             back_irq,
@@ -343,6 +416,7 @@ impl Notification {
             front: None,
             back: back.io_install_id()?,
             front_base: 0,
+            frontend: AtomicU64::new(0),
             back_base,
             front_irq: 0,
             back_irq,

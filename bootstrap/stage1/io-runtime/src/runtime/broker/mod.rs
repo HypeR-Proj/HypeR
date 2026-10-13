@@ -401,6 +401,20 @@ impl Broker {
         let mut stage = "create reply channel";
         let resources = (|| -> hyper_os::Result<_> {
             let channels = hyper_os::channel::create_pair()?;
+            if admission.pci {
+                vm::register_mmio(
+                    admission.machine.as_handle_ref(),
+                    io::PCI_ECAM,
+                    io::PCI_ECAM_BYTES,
+                    NonZeroU64::new(io::PCI_ECAM_ID).ok_or(hyper_os::Error::InvalidResponse)?,
+                )?;
+                vm::register_mmio(
+                    admission.machine.as_handle_ref(),
+                    io::PCI_MEMORY,
+                    io::PCI_MEMORY_BYTES,
+                    NonZeroU64::new(io::PCI_MEMORY_ID).ok_or(hyper_os::Error::InvalidResponse)?,
+                )?;
+            }
             for (index, endpoint) in [description.notification, description.network_notification]
                 .into_iter()
                 .enumerate()
@@ -419,7 +433,9 @@ impl Broker {
                     )
                 };
                 stage = "register frontend MMIO";
-                vm::register_mmio(admission.machine.as_handle_ref(), base, 4096, cookie)?;
+                if !admission.pci {
+                    vm::register_mmio(admission.machine.as_handle_ref(), base, 4096, cookie)?;
+                }
                 stage = "create notification route";
                 notifications[index] = Some(Notification::create(
                     admission.machine.as_handle_ref(),
@@ -429,6 +445,25 @@ impl Broker {
                     irq,
                     endpoint.irq,
                 )?);
+            }
+            if admission.pci {
+                for (index, notification) in notifications.iter().enumerate() {
+                    if notification.is_some() {
+                        let base = if index == 0 {
+                            io::FRONTEND_MMIO
+                        } else {
+                            io::FRONTEND_NET_MMIO
+                        };
+                        hyper_os::guest_io::configure_pci_frontend(
+                            admission.machine.as_handle_ref(),
+                            base,
+                            base,
+                            false,
+                            false,
+                            false,
+                        )?;
+                    }
+                }
             }
             stage = "map backend guest memory";
             let mapping = vm::map_shared_guest_memory(

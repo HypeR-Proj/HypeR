@@ -103,6 +103,7 @@ pub(super) fn run(
         &plan,
         metadata,
         arguments.io_devices,
+        config.virtio_transport == hyper_vm_policy::fleet::VirtioTransport::Pci,
         started,
     )?;
     publish_status(control, vm_contract::InstanceStatus::MemoryPrepared)?;
@@ -158,6 +159,7 @@ pub(super) fn run(
             plan.memory_base(),
             plan.memory_size(),
             arguments.io_devices,
+            config.virtio_transport == hyper_vm_policy::fleet::VirtioTransport::Pci,
         )?;
         (machine, Some(devices))
     } else {

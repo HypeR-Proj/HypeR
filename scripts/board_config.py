@@ -37,8 +37,9 @@ def keys(value, required, optional=()):
         raise ValueError(f'invalid configuration keys: missing={sorted(missing)}, unknown={sorted(extra)}')
 
 
-def vm_configuration(value):
-    keys(value, ('memory-bytes', 'vcpus', 'bootargs'), ('affinity',))
+def vm_configuration(value, *, guest=False):
+    keys(value, ('memory-bytes', 'vcpus', 'bootargs'),
+         ('affinity', 'virtio-transport') if guest else ('affinity',))
     integer(value['vcpus'], 1, 8)
     memory = integer(value['memory-bytes'], 64 * MIB, 1 << 63)
     if memory & (memory - 1):
@@ -46,6 +47,8 @@ def vm_configuration(value):
     args = value['bootargs']
     if not isinstance(args, str) or len(args.encode()) > 2048 or '\0' in args:
         raise ValueError('VM bootargs must contain at most 2048 bytes and no NUL')
+    if value.get('virtio-transport', 'mmio') not in ('mmio', 'pci'):
+        raise ValueError('virtio-transport must be mmio or pci')
     affinity = value.get('affinity', [])
     if not isinstance(affinity, list) or len(affinity) > value['vcpus']:
         raise ValueError('VM affinity must be a list with at most one entry per vCPU')
@@ -271,7 +274,7 @@ class Board:
         for vm in vms:
             keys(vm, ('name', 'image', 'autostart', 'configuration'),
                  ('disk', 'network'))
-            vm_configuration(vm['configuration'])
+            vm_configuration(vm['configuration'], guest=True)
             vm_name = name(vm['name'])
             if vm_name in seen:
                 raise ValueError('duplicate or reserved VM name')

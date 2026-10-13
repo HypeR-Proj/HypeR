@@ -9773,6 +9773,66 @@ pub const SYSCALLS: &[Syscall] = &[
         failure_results: &[],
     },
     Syscall {
+        number: 161,
+        name: "guest_notification_configure",
+        feature: FeatureGate::Core,
+        arguments: &[
+            Argument {
+                name: "machine",
+                kind: ValueKind::Handle,
+                handle: Some(HandleArgument {
+                    object: ObjectConstraint::Kind("virtual_machine"),
+                    required_rights: RIGHT_WRITE,
+                    disposition: HandleDisposition::Borrow,
+                }),
+                memory: None,
+            },
+            scalar_argument("original_base", ValueKind::U64),
+            scalar_argument("base", ValueKind::U64),
+            scalar_argument("flags", ValueKind::U32),
+        ],
+        results: &[],
+        blocking: BlockingClass::Never,
+        cancellation: CancellationClass::None,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
+        number: 162,
+        name: "guest_notification_access",
+        feature: FeatureGate::Core,
+        arguments: &[
+            Argument {
+                name: "machine",
+                kind: ValueKind::Handle,
+                handle: Some(HandleArgument {
+                    object: ObjectConstraint::Kind("virtual_machine"),
+                    required_rights: RIGHT_WRITE,
+                    disposition: HandleDisposition::Borrow,
+                }),
+                memory: None,
+            },
+            scalar_argument("original_base", ValueKind::U64),
+            scalar_argument("operation", ValueKind::U32),
+            scalar_argument("value", ValueKind::U32),
+        ],
+        results: &[ResultValue {
+            name: "value",
+            kind: ValueKind::U32,
+            handle: None,
+        }],
+        blocking: BlockingClass::Never,
+        cancellation: CancellationClass::None,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
         number: 496,
         name: "native_block_transfer",
         feature: FeatureGate::Core,
@@ -9891,6 +9951,8 @@ pub const SEMANTIC_RULES: &[&str] = &[
     "A PendingVirtualMachine is mutable until seal. It must own at least one explicitly backed, non-overlapping writable region inside the configured IPA envelope and one bootstrap record for boot vCPU 0. Bootstrap entry and stack must lie in admitted backing; sparse envelope gaps remain unbacked and never become anonymous RAM. The configured vcpu_count fixes immutable topology; architecture power-on protocols supply secondary-vCPU runtime entry state, and virtual_machine_open_vcpu exposes their control handles. A guest serial route is optional and exists only when a caller transfers a VirtualSerial handle with assign-device authority before seal. Successful binding consumes the supplied handle and commits a VM-owned reference until VM retirement; a rejected binding leaves the handle unchanged. Guest output is published to a read-only shared VMO consumed by the owning runtime, and VM retirement disconnects the input route without invalidating existing output mappings. Seal is irreversible; install consumes the pending handle only on ok and publishes the installed VirtualMachine and dormant boot VirtualCpu handles together. VirtualCpu start is a separate operation after handle publication. The started VirtualCpu phase means that start committed successfully; it is not an observation that the scheduler currently considers the vCPU runnable or executing. AArch64 reference guests accept 1..8 vCPUs; RISC-V reference guests currently accept one.",
     "VirtualSerial handles are process-local; device assignment consumes a same-process handle. register_output borrows a caller-allocated writable VMO of exactly 69632 bytes and registers it once before assignment. An exclusive write lease rejects existing writable mappings, direct accesses, snapshots, and further writers until port retirement; read-only mappings may coexist. Offset 0 is an atomic u64 produced count, offset 8 a saturating dropped-byte count, and offset 4096 begins 65536 atomic byte slots. Registration initializes counters; callers must not access contents during registration. The producer release-publishes bytes; the runtime acquire-loads production and reads a batch. acknowledge_output requires READ and submits the absolute consumed position after reading. Regressing or future positions return invalid_argument without mutation. Publication, acknowledgement, and closure serialize on the port: READABLE means unacknowledged output, WRITABLE means a connected input route has queue space, and PEER_CLOSED means no future output or input. WAIT authorizes object waits and WaitSet subscriptions. Acknowledgement clears READABLE only when caught up; new output reasserts it, without lost wakeups or periodic polling. Full output never overwrites unconsumed slots. The AArch64 SBSA UART retains pending bytes in its TX FIFO and exposes TXFF until runtime acknowledgement frees transport space; other producers discard new bytes and count loss when full. Counters never wrap. Last active handle closure synchronizes with writers and closes publication; registered pages remain pinned through final VM/object retirement. The SDK maps output read-only and acknowledges batches by syscall without copying payload through the syscall. Write remains nonblocking input injection: busy means the queue is full, bad_state means disconnected. Runtime policy owns retention and client transport.",
     "The creating process retains its guest VMO handle, but attaching it to a PendingVirtualMachine acquires exclusive hardware-write ownership and rejects any active Native writable mapping or direct VMO operation. Direct VMO access, snapshots, and writable Native mappings remain closed until VM retirement removes and invalidates every stage-2 mapping and releases the independent backing reference; read-only Native mappings may coexist.",
+    "guest_notification_access requires frontend VirtualMachine WRITE and addresses an existing connection by original_base. Operation 0 reads pending interrupt status without acknowledgement, 1 reads and acknowledges that status atomically, and 2 submits a queue-index notification (value < 32). For operations 0 and 1 value must be zero; unknown operations are rejected. It shares the direct MMIO source state and serialization. PCI bus-master disable suppresses notifications; PCI memory-decode disable does not suppress this explicit transport fallback. Closure rejects accesses. No backend identity, control operation, DMA lease or epoch can be changed through this call.",
+    "guest_notification_configure requires frontend VirtualMachine WRITE. original_base identifies an existing connection by its creation address; base is a page-aligned 4 KiB window wholly contained in an installed userspace MMIO reservation and, while decoding is enabled, may not overlap another enabled I/O route. Flags 0 select the original virtio-MMIO register layout; bit 0 selects modern virtio-PCI, bit 1 enables memory decoding, bit 2 masks INTx, and bit 3 enables queue notifications (bus master). Unknown flags or PCI flags without bit 0 are rejected. PCI uses a 16-bit queue-index write at BAR+0x50 and a read-to-clear 8-bit ISR at BAR+0x60. Relocation, decode, and IRQ-mask changes serialize with source state and VM retirement. The operation cannot change the admitted backend, IRQs, DMA ownership, or epoch; disabling decode is not proof of backend quiescence.",
 ];
 
 const _: () = assert!(SYSCALL_ARGUMENT_REGISTERS == 6);

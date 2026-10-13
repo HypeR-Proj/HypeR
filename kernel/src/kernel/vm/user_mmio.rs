@@ -15,6 +15,42 @@ pub(super) struct Region {
 }
 
 impl InstalledMachine {
+    pub(in crate::kernel::vm) fn access_notification(
+        &self,
+        original: u64,
+        operation: u32,
+        value: u32,
+    ) -> Result<u32, crate::kernel::vm::io::Error> {
+        self.with_io_update(|id| {
+            crate::kernel::vm::registry::acquire_binding(id)
+                .map_err(|_| crate::kernel::vm::io::Error::BadState)?
+                .access_notification(original, operation, value)
+        })
+    }
+
+    pub(in crate::kernel::vm) fn configure_notification(
+        &self,
+        original: u64,
+        base: u64,
+        flags: u32,
+    ) -> Result<(), crate::kernel::vm::io::Error> {
+        use crate::kernel::vm::io::Error;
+        self.with_io_update(|id| {
+            let end = base.checked_add(4096).ok_or(Error::InvalidArgument)?;
+            if !self.mmio_regions.with(|regions| {
+                regions
+                    .iter()
+                    .flatten()
+                    .any(|region| region.base <= base && region.end >= end)
+            }) {
+                return Err(Error::InvalidArgument);
+            }
+            crate::kernel::vm::registry::acquire_binding(id)
+                .map_err(|_| Error::BadState)?
+                .configure_notification(original, base, flags)
+        })
+    }
+
     pub(in crate::kernel::vm) fn register_mmio(
         &self,
         base: u64,
@@ -144,8 +180,8 @@ impl InstalledMachine {
                 base < region.end
                     && region.base < base + 4096
                     && !(route.deferred_overlay()
-                        && region.base == base
-                        && region.end == base + 4096)
+                        && region.base <= base
+                        && region.end >= base + 4096)
             }) {
                 Err(crate::kernel::vm::io::Error::Busy)
             } else {

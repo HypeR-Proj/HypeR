@@ -408,6 +408,12 @@ pub(in crate::kernel) fn dispatch_deferred(
         abi::HYPER_NATIVE_SYS_FILESYSTEM_MOUNT => {
             handlers::sys_filesystem_mount(services, invocation.arguments())
         }
+        abi::HYPER_NATIVE_SYS_GUEST_NOTIFICATION_ACCESS => {
+            handlers::sys_guest_notification_access(services, invocation.arguments())
+        }
+        abi::HYPER_NATIVE_SYS_GUEST_NOTIFICATION_CONFIGURE => {
+            handlers::sys_guest_notification_configure(services, invocation.arguments())
+        }
         abi::HYPER_NATIVE_SYS_GUEST_NOTIFICATION_CONTROL => {
             handlers::sys_guest_notification_control(services, invocation.arguments())
         }

@@ -210,8 +210,43 @@ never authorizes memory reuse.
 
 ## Device protocol and control ownership
 
-The guest-facing devices use modern virtio-mmio with standard virtio-scsi and
-virtio-net. Linux vhost-scsi/LIO and vhost-net consume the shared virtqueues.
+The guest-facing devices use standard virtio-scsi and virtio-net. A business VM's
+`configuration.virtio-transport` selects `mmio` (default) or `pci` on AArch64.
+The two transports share feature negotiation, queue validation and backend
+activation/reset state. For example:
+
+```json
+{
+  "configuration": {
+    "memory-bytes": 268435456,
+    "vcpus": 2,
+    "bootargs": "console=ttyAMA0 earlycon hyper.root=/dev/sda",
+    "virtio-transport": "pci"
+  }
+}
+```
+
+The PCI profile is modern-only: one ECAM bus at `0x0a800000`, a 1 MiB memory
+aperture at `0x0a000000`, and one relocatable 4 KiB memory BAR per endpoint.
+SCSI is `00:01.0` and networking is `00:02.0`; absent endpoints read as absent
+PCI functions. Vendor capabilities describe common configuration, the queue
+notification register, the read-to-clear ISR, device configuration and the
+PCI_CFG indirect-access window. Both register access paths share state. INTx
+uses the guest GIC, including mask/unmask with retained pending status; MSI-X,
+legacy/transitional virtio, PCI root-port hotplug and online runtime ownership
+handoff are not implemented. The virtual bus is independent of physical RP1
+assignment and cannot address host PCI resources.
+
+Queue notifications remain direct kernel routes. Only ECAM, BAR configuration
+and virtio configuration enter userspace. BAR relocation is confined to the
+VM's registered MMIO aperture and cannot change the backend connection or its
+IRQ. Clearing bus master on an active endpoint drains its backend before the
+configuration write completes and requests a virtio reset; live queue
+suspend/resume is not supported. Memory decoding and interrupt masking alone
+do not prove DMA retirement. No change to the I/O VM protocol or image is
+required; the Alpine guest image includes both transport drivers.
+
+Linux vhost-scsi/LIO and vhost-net consume the shared virtqueues.
 Neither vm-runtime nor the Linux management service forwards individual disk
 requests or packets.
 
@@ -272,7 +307,8 @@ network are independent options: a network-only VM does not receive a hidden
 storage endpoint or LIO target. The shared Ethernet segment does not provide
 anti-spoofing or per-VM network isolation policy.
 
-The guest device uses modern virtio-mmio, RX queue 0 and TX queue 1, with at most
+The guest device uses modern virtio over the selected MMIO or PCI transport,
+RX queue 0 and TX queue 1, with at most
 128 descriptors per queue, with MTU 1500. It offers `VIRTIO_F_VERSION_1` and
 `VIRTIO_NET_F_MAC`. Guest TX checksum completion (`VIRTIO_NET_F_CSUM`) and TCP
 segmentation (`VIRTIO_NET_F_HOST_TSO4/HOST_TSO6`) are offered only when the
@@ -720,3 +756,10 @@ to its storage target; it is not a VM ID, memory address, or disk capacity.
 The appliance constructs target names from the authorized client ID (client
 one uses the suffix `000000001`; client zero has no storage target). These locally generated
 names do not assert a globally assigned hardware identity.
+
+### PCI transport acceptance
+
+Run `make test-board-network NETWORK_VIRTIO_TRANSPORT=pci QEMU_CPUS=4` for
+PCI enumeration, guest disk read/write, networking, driver rebind and repeated
+VM retirement. The default `make test-board-network` covers MMIO. Both use
+fresh disposable disks and functional checks, without performance thresholds.

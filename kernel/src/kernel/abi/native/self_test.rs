@@ -1030,6 +1030,26 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             self.calls.set(self.calls.get().saturating_add(1));
             Err(crate::kernel::vm::service::Error::NotSupported)
         }
+        fn access_guest_notification(
+            &self,
+            _: HandleValue,
+            _: u64,
+            _: u32,
+            _: u32,
+        ) -> Result<u32, crate::kernel::vm::service::Error> {
+            self.calls.set(self.calls.get().saturating_add(1));
+            Err(crate::kernel::vm::service::Error::NotSupported)
+        }
+        fn configure_guest_notification(
+            &self,
+            _: HandleValue,
+            _: u64,
+            _: u64,
+            _: u32,
+        ) -> Result<(), crate::kernel::vm::service::Error> {
+            self.calls.set(self.calls.get().saturating_add(1));
+            Err(crate::kernel::vm::service::Error::NotSupported)
+        }
         fn control_guest_notification(
             &self,
             _: HandleValue,

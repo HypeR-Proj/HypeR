@@ -368,6 +368,20 @@ pub(in crate::kernel) trait GuestIoServices: UserMemoryServices {
         frontend_irq: u32,
         backend_irq: u32,
     ) -> Result<HandleValue, crate::kernel::vm::service::Error>;
+    fn access_guest_notification(
+        &self,
+        machine: HandleValue,
+        original: u64,
+        operation: u32,
+        value: u32,
+    ) -> Result<u32, crate::kernel::vm::service::Error>;
+    fn configure_guest_notification(
+        &self,
+        machine: HandleValue,
+        original: u64,
+        base: u64,
+        flags: u32,
+    ) -> Result<(), crate::kernel::vm::service::Error>;
     fn control_guest_notification(
         &self,
         notification: HandleValue,

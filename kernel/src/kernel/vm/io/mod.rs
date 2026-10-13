@@ -91,9 +91,18 @@ impl Route {
     pub(super) fn base(&self) -> u64 {
         match self {
             Self::Mailbox(value) => value.base,
-            Self::NotificationFront(value) => value.front_base,
+            Self::NotificationFront(value) => value.frontend_base(),
             Self::NotificationBack(value) => value.back_base,
         }
+    }
+    fn decode_enabled(&self) -> bool {
+        match self {
+            Self::NotificationFront(value) => value.frontend_decode_enabled(),
+            _ => true,
+        }
+    }
+    fn same_frontend_identity(&self, other: &Self) -> bool {
+        matches!((self, other), (Self::NotificationFront(left), Self::NotificationFront(right)) if left.front_base == right.front_base)
     }
     pub(crate) fn irq(&self) -> u32 {
         match self {
@@ -134,11 +143,11 @@ impl Routes {
     }
     pub(crate) fn can_insert(&self, route: &Route) -> Result<(), Error> {
         self.entries.with(|entries| {
-            if entries
-                .iter()
-                .flatten()
-                .any(|other| other.base() == route.base() || other.irq() == route.irq())
-                || entries.iter().all(Option::is_some)
+            if entries.iter().flatten().any(|other| {
+                other.base() == route.base()
+                    || other.irq() == route.irq()
+                    || other.same_frontend_identity(route)
+            }) || entries.iter().all(Option::is_some)
             {
                 Err(Error::Busy)
             } else {
@@ -149,11 +158,11 @@ impl Routes {
     /// VM lifecycle admission holds across preflight and this infallible commit.
     pub(crate) fn insert(&self, route: Route) -> Result<(), Error> {
         self.entries.with(|entries| {
-            if entries
-                .iter()
-                .flatten()
-                .any(|other| other.base() == route.base() || other.irq() == route.irq())
-            {
+            if entries.iter().flatten().any(|other| {
+                other.base() == route.base()
+                    || other.irq() == route.irq()
+                    || other.same_frontend_identity(&route)
+            }) {
                 return Err(Error::Busy);
             }
             let slot = entries
@@ -164,6 +173,70 @@ impl Routes {
             Ok(())
         })
     }
+    pub(crate) fn access_frontend(
+        &self,
+        original: u64,
+        operation: u32,
+        value: u32,
+    ) -> Result<u32, Error> {
+        let shared = self
+            .entries
+            .with(|entries| {
+                entries.iter().flatten().find_map(|route| match route {
+                    Route::NotificationFront(shared) if shared.front_base == original => {
+                        Some(shared.clone())
+                    }
+                    _ => None,
+                })
+            })
+            .ok_or(Error::BadState)?;
+        // Drop the route lock before mutating the source/controller.
+        shared.frontend_access(operation, value)
+    }
+
+    pub(crate) fn configure_frontend(
+        &self,
+        original: u64,
+        base: u64,
+        flags: u32,
+    ) -> Result<(), Error> {
+        let shared = self.entries.with(|entries| {
+            let shared = entries
+                .iter()
+                .flatten()
+                .find_map(|route| match route {
+                    Route::NotificationFront(shared) if shared.front_base == original => {
+                        Some(shared.clone())
+                    }
+                    _ => None,
+                })
+                .ok_or(Error::BadState)?;
+            if !valid_location(base, shared.front_irq)
+                || flags & !15 != 0
+                || (flags & 1 == 0 && flags != 0)
+            {
+                return Err(Error::InvalidArgument);
+            }
+            // Resource reassignment can temporarily give disabled functions
+            // the same BAR. Only simultaneous decoding would be ambiguous.
+            let enabled = flags & 1 == 0 || flags & 2 != 0;
+            if enabled
+                && entries.iter().flatten().any(|route| {
+                    let same = matches!(route, Route::NotificationFront(value)
+                    if value.route_id == shared.route_id);
+                    !same && route.decode_enabled() && route.base() == base
+                })
+            {
+                return Err(Error::InvalidArgument);
+            }
+            Ok(shared)
+        })?;
+        // No route lock across source/controller mutation (disconnect takes the
+        // reverse ownership path). Lifecycle admission excludes installations
+        // and other relocations; concurrent removal only frees reservations.
+        shared.configure_frontend(base, flags)
+    }
+
     pub(crate) fn remove_notification(&self, route_id: u64) -> Option<Route> {
         self.entries.with(|entries| {
             entries
@@ -183,7 +256,9 @@ impl Routes {
             entries.iter().flatten().any(|route| {
                 base < route.base() + 4096
                     && route.base() < base.saturating_add(length)
-                    && !(route.deferred_overlay() && base == route.base() && length == 4096)
+                    && !(route.deferred_overlay()
+                        && base <= route.base()
+                        && base.saturating_add(length) >= route.base() + 4096)
             })
         })
     }
@@ -193,7 +268,11 @@ impl Routes {
             entries
                 .iter()
                 .flatten()
-                .find(|route| address >= route.base() && address < route.base() + 4096)
+                .find(|route| {
+                    route.decode_enabled()
+                        && address >= route.base()
+                        && address < route.base() + 4096
+                })
                 .cloned()
         })?;
         route.route(access)

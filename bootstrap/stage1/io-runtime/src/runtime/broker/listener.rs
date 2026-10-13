@@ -24,6 +24,7 @@ pub(super) enum Request {
 }
 
 pub(super) struct Admission {
+    pub pci: bool,
     pub(super) client: u32,
     pub(super) volume: Option<String>,
     pub(super) network: Option<String>,
@@ -107,6 +108,7 @@ fn receive(endpoint: &CapabilityChannel) -> hyper_os::Result<Option<Request>> {
             return Err(hyper_os::Error::InvalidResponse);
         }
         Ok(Admission {
+            pci: &message.bytes()[..8] == io::PCI_MEMORY_MESSAGE,
             client,
             volume,
             network,

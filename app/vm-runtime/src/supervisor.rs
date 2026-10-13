@@ -33,7 +33,7 @@ pub(super) fn supervise_guest(
     let mut control_consumed = false;
     loop {
         if let Some(devices) = devices.as_mut() {
-            devices.service(vcpus)?;
+            devices.service(machine, vcpus)?;
             devices.prepare_wait(&waits, vcpus)?;
         }
         console.service().map_err(Error::OperatingSystem)?;

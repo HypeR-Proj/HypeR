@@ -42,6 +42,7 @@ def prepare(args):
         raise ValueError('prepare requires a QEMU board with one disk+network guest')
     if args.output.resolve() == args.board.resolve():
         raise ValueError('the network fixture must not replace the input board')
+    guests[0]['configuration']['virtio-transport'] = args.virtio_transport
     guests[0]['autostart'] = False
     peer = copy.deepcopy(guests[0])
     peer['name'] = 'alpine-net'
@@ -219,8 +220,14 @@ class Scenario:
                    'done; test -n "$netif" && test "$netif" != lo')
 
     def configure(self, vm):
-        self.guest('modprobe virtio_mmio && modprobe virtio_net')
+        self.guest('modprobe virtio_mmio && modprobe virtio_pci && modprobe virtio_net')
         self.interface(vm)
+        if vm['configuration'].get('virtio-transport', 'mmio') == 'pci':
+            self.guest('test "$(cat "/sys/class/net/$netif/device/../vendor")" = 0x1af4 && '
+                       'test "$(cat "/sys/class/net/$netif/device/../device")" = 0x1041')
+            if 'disk' in vm:
+                self.guest('test "$(cat /sys/bus/pci/devices/0000:00:01.0/device)" = 0x1048')
+
         self.guest('ip link set dev "$netif" up && '
                    'udhcpc -n -q -t 10 -T 3 -i "$netif"')
 
@@ -401,6 +408,7 @@ def main():
     fixture = actions.add_parser('prepare', help='derive the two-guest acceptance configuration')
     fixture.add_argument('--board', type=Path, required=True)
     fixture.add_argument('--output', type=Path, required=True)
+    fixture.add_argument('--virtio-transport', choices=('mmio', 'pci'), default='mmio')
     fixture.set_defaults(handler=prepare)
     execute = actions.add_parser('run', help='verify a built acceptance fixture')
     execute.add_argument('--qemu', default='qemu-system-aarch64')

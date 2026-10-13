@@ -415,7 +415,9 @@ flowchart TB
 ```
 
 Read [vm-runtime I/O setup](../app/vm-runtime/src/io_devices.rs),
-[virtio-mmio device model](../lib/vm-support/src/virtio_mmio.rs),
+[shared virtio state](../lib/vm-support/src/virtio.rs),
+[MMIO registers](../lib/vm-support/src/virtio_mmio.rs),
+[modern PCI registers](../lib/vm-support/src/virtio_pci.rs),
 [network configuration](../lib/vm-support/src/virtio_net.rs), and
 [asynchronous backend control](../lib/vm-support/src/io_backend.rs).
 [The runtime supervisor](../app/vm-runtime/src/supervisor.rs) services deferred

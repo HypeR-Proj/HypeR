@@ -307,3 +307,47 @@ pub(in crate::kernel::abi::native) fn sys_guest_mapping_release(
     })();
     DeferredAction::Return(status_only(result))
 }
+
+#[inline(never)]
+pub(in crate::kernel::abi::native) fn sys_guest_notification_configure(
+    services: &impl GuestIoServices,
+    arguments: &Arguments,
+) -> DeferredAction {
+    let result = (|| {
+        require_zero(&arguments[4..])?;
+        services
+            .configure_guest_notification(
+                parse_handle(arguments[0])?,
+                arguments[1],
+                arguments[2],
+                parse_u32(arguments[3])?,
+            )
+            .map_err(status_from_vm_service_error)
+    })();
+    DeferredAction::Return(match result {
+        Ok(()) => success([0, 0]),
+        Err(status) => failure(status),
+    })
+}
+
+#[inline(never)]
+pub(in crate::kernel::abi::native) fn sys_guest_notification_access(
+    services: &impl GuestIoServices,
+    arguments: &Arguments,
+) -> DeferredAction {
+    let result = (|| {
+        require_zero(&arguments[4..])?;
+        services
+            .access_guest_notification(
+                parse_handle(arguments[0])?,
+                arguments[1],
+                parse_u32(arguments[2])?,
+                parse_u32(arguments[3])?,
+            )
+            .map_err(status_from_vm_service_error)
+    })();
+    DeferredAction::Return(match result {
+        Ok(value) => success([u64::from(value), 0]),
+        Err(status) => failure(status),
+    })
+}
