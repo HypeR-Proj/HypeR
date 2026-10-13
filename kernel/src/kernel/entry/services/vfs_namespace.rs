@@ -7,7 +7,9 @@ use crate::kernel::capability::{HandleValue, Rights};
 use crate::kernel::mm::user_space::{UserAddress, UserSlice};
 use crate::kernel::process::Process;
 use crate::kernel::vfs::service::copy_path;
-use crate::kernel::vfs::{DirectoryObject, VfsServiceError};
+use crate::kernel::vfs::{
+    DirectoryObject, Error as VfsError, ScratchBudget, ScratchVec, VfsServiceError,
+};
 use hyper::abi::native as abi;
 
 const NAMESPACE_RIGHTS: Rights = Rights::MANAGE_NAMESPACE
@@ -130,17 +132,21 @@ fn with_root_request<T>(
             &mut wire_moves[..bytes],
         )?;
     }
-    let mut owned = core::array::from_fn::<_, MAX_MOVES, _>(|_| None);
-    for (slot, record) in owned.iter_mut().zip(wire_moves[..bytes].chunks_exact(32)) {
+    // Path owners include quota bookkeeping. Keep the variable-sized set off
+    // the syscall stack, which remains live while remote lookup can block.
+    let mut owned = ScratchVec::new(ScratchBudget::new(&process.resource_domain()));
+    owned.try_reserve_exact(count).map_err(VfsError::from)?;
+    for record in wire_moves[..bytes].chunks_exact(32) {
         let fields = decode_words::<4>(record)?;
-        *slot = Some((
-            copy_path(process, user_slice(fields[0], fields[1])?)?,
-            copy_path(process, user_slice(fields[2], fields[3])?)?,
-        ));
+        owned
+            .push((
+                copy_path(process, user_slice(fields[0], fields[1])?)?,
+                copy_path(process, user_slice(fields[2], fields[3])?)?,
+            ))
+            .map_err(VfsError::from)?;
     }
     let mut moves = [("", ""); MAX_MOVES];
-    for (output, value) in moves.iter_mut().zip(owned.iter()).take(count) {
-        let (source, target) = value.as_ref().ok_or(VfsServiceError::InvalidInput)?;
+    for (output, (source, target)) in moves.iter_mut().zip(owned.iter()) {
         *output = (source.as_str(), target.as_str());
     }
     // All fallible user reads are complete before the VFS prepares or publishes
