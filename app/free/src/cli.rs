@@ -4,7 +4,10 @@
 use clap::Parser;
 
 #[derive(Debug, Parser)]
-#[command(about = "Display physical memory usage")]
+#[command(
+    about = "Display physical memory usage",
+    after_help = "used = total - free - reclaimable; available = free + reclaimable (estimate).\nOwners partition managed allocations; kernel combines direct pages, heap and page tables\nminus reclaimable slab. buffered/cached combines file cache and reclaimable slab;\nits pinned file pages are not reclaimable. guest includes VMO backing loaned to guests.\nRamfs capacity is logical payload capacity within kernel, not additional physical RAM.\nAn unavailable census is shown as —; it does not mean zero."
+)]
 pub struct Free {
     /// Report exact bytes instead of human-readable units.
     #[arg(short = 'b', long)]

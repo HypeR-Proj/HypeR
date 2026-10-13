@@ -134,7 +134,8 @@ make board-run BOARD=qemu
 ```
 
 Plain AArch64 `make` creates the complete board image only when missing;
-otherwise it updates the host-side kernel/bootstrap and preserves disk contents.
+otherwise it updates the host-side kernel/bootstrap and the generated EROFS
+system volume, preserving data and guest partitions.
 `make rebuild` atomically repacks the full disk, resetting its data.
 `make run` only starts existing artifacts.
 The Alpine volume is initialized from the pinned base rootfs as an ext4 disk.
@@ -222,14 +223,19 @@ Build outputs have distinct lifetimes:
 | Artifact | Updated by ordinary `make` / `board-build` |
 | --- | --- |
 | Host kernel and bootstrap, including the I/O VM and its client policy | Yes |
-| `/system` executables and libraries on an existing disk | No; a changed payload requires explicit replacement |
+| Generated EROFS `/system` executables and libraries on an existing disk | Yes; only the system volume is refreshed |
 | `/data/vms.json`, `/data/board.json` and guest FITs on an existing disk | No |
 | Alpine's ext4 root, including `/init` and kernel modules | No |
 
 The builder records the generated `/system` payload hashes beside the disk.
-Build and run reject a disk that no longer matches the staged system payload;
-they do not update it in place. Use `make rebuild` for a disposable deployment,
-or a new `BOARD_OUTPUT` directory to retain the previous disk.
+An ordinary build refreshes changed EROFS contents after validating both GPT
+copies and partition capacity. It stages a complete disk with all bytes outside
+the system partition preserved, then publishes it atomically. This needs temporary
+disk space for the replacement image. Stop QEMU before refreshing its disk.
+An unchanged payload leaves the disk untouched. `make run` only checks the
+payload record and asks for `make` when stale. Custom writable FAT system
+volumes and changed GPT layouts require explicit replacement or a new output
+directory; they are never overwritten by an automatic system refresh.
 
 Changing a board's device policy also requires a matching disk deployment.
 For example, adding networking to Alpine changes the bootstrap client table;

@@ -1179,19 +1179,21 @@ pub(super) fn encode_memory_observation(
     field!(captured_at_ns);
     field!(page_size);
     field!(total_bytes);
-    field!(reserved_bytes);
     field!(managed_bytes);
     field!(free_bytes);
-    field!(used_bytes);
     field!(kernel_bytes);
-    field!(heap_bytes);
+    field!(slab_bytes);
+    field!(large_heap_bytes);
     field!(page_table_bytes);
-    field!(user_bytes);
-    field!(guest_bytes);
-    field!(unattributed_bytes);
-    field!(reclaimable_bytes);
-    field!(cache_sample_complete);
-    field!(buffered_bytes);
+    field!(vmo_bytes);
+    field!(guest_loaned_bytes);
+    field!(guest_private_bytes);
+    field!(file_cache_bytes);
+    field!(slab_reclaimable_bytes);
+    field!(slab_sample_complete);
+    field!(file_cache_reclaimable_bytes);
+    field!(file_cache_sample_complete);
+    field!(ramfs_capacity_bytes);
     record
 }
 

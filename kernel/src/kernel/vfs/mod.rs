@@ -136,3 +136,9 @@ pub(crate) fn root_directory(
     let namespace = SYSTEM_NAMESPACE.get().ok_or(Error::Missing)?;
     DirectoryObject::try_root(namespace.clone(), sponsor)
 }
+
+/// Logical capacities of live writable ramfs payload reservations. These bytes
+/// are backed by the heap; archive data and directory metadata are excluded.
+pub(crate) fn ramfs_capacity_bytes() -> u64 {
+    ramfs::capacity_bytes()
+}

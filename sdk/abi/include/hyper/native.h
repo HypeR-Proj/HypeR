@@ -1028,43 +1028,47 @@ HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_task_thread_t, reserved) == 28, "t
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_task_thread_t, runtime_ticks) == 32, "task_thread.runtime_ticks offset");
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_task_thread_t, name) == 40, "task_thread.name offset");
 
-#define HYPER_NATIVE_MEMORY_OBSERVATION_MIN_SIZE UINT64_C(128)
+#define HYPER_NATIVE_MEMORY_OBSERVATION_MIN_SIZE UINT64_C(144)
 typedef struct hyper_native_memory_observation_t {
     uint64_t captured_at_ns;
     uint64_t page_size;
     uint64_t total_bytes;
-    uint64_t reserved_bytes;
     uint64_t managed_bytes;
     uint64_t free_bytes;
-    uint64_t used_bytes;
     uint64_t kernel_bytes;
-    uint64_t heap_bytes;
+    uint64_t slab_bytes;
+    uint64_t large_heap_bytes;
     uint64_t page_table_bytes;
-    uint64_t user_bytes;
-    uint64_t guest_bytes;
-    uint64_t unattributed_bytes;
-    uint64_t reclaimable_bytes;
-    uint64_t cache_sample_complete;
-    uint64_t buffered_bytes;
+    uint64_t vmo_bytes;
+    uint64_t guest_loaned_bytes;
+    uint64_t guest_private_bytes;
+    uint64_t file_cache_bytes;
+    uint64_t slab_reclaimable_bytes;
+    uint64_t slab_sample_complete;
+    uint64_t file_cache_reclaimable_bytes;
+    uint64_t file_cache_sample_complete;
+    uint64_t ramfs_capacity_bytes;
 } hyper_native_memory_observation_t;
-HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_memory_observation_t) == 128, "memory_observation size");
+HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_memory_observation_t) == 144, "memory_observation size");
 HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_memory_observation_t) == 8, "memory_observation alignment");
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, captured_at_ns) == 0, "memory_observation.captured_at_ns offset");
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, page_size) == 8, "memory_observation.page_size offset");
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, total_bytes) == 16, "memory_observation.total_bytes offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, reserved_bytes) == 24, "memory_observation.reserved_bytes offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, managed_bytes) == 32, "memory_observation.managed_bytes offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, free_bytes) == 40, "memory_observation.free_bytes offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, used_bytes) == 48, "memory_observation.used_bytes offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, kernel_bytes) == 56, "memory_observation.kernel_bytes offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, heap_bytes) == 64, "memory_observation.heap_bytes offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, page_table_bytes) == 72, "memory_observation.page_table_bytes offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, user_bytes) == 80, "memory_observation.user_bytes offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, guest_bytes) == 88, "memory_observation.guest_bytes offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, unattributed_bytes) == 96, "memory_observation.unattributed_bytes offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, reclaimable_bytes) == 104, "memory_observation.reclaimable_bytes offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, cache_sample_complete) == 112, "memory_observation.cache_sample_complete offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, buffered_bytes) == 120, "memory_observation.buffered_bytes offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, managed_bytes) == 24, "memory_observation.managed_bytes offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, free_bytes) == 32, "memory_observation.free_bytes offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, kernel_bytes) == 40, "memory_observation.kernel_bytes offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, slab_bytes) == 48, "memory_observation.slab_bytes offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, large_heap_bytes) == 56, "memory_observation.large_heap_bytes offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, page_table_bytes) == 64, "memory_observation.page_table_bytes offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, vmo_bytes) == 72, "memory_observation.vmo_bytes offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, guest_loaned_bytes) == 80, "memory_observation.guest_loaned_bytes offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, guest_private_bytes) == 88, "memory_observation.guest_private_bytes offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, file_cache_bytes) == 96, "memory_observation.file_cache_bytes offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, slab_reclaimable_bytes) == 104, "memory_observation.slab_reclaimable_bytes offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, slab_sample_complete) == 112, "memory_observation.slab_sample_complete offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, file_cache_reclaimable_bytes) == 120, "memory_observation.file_cache_reclaimable_bytes offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, file_cache_sample_complete) == 128, "memory_observation.file_cache_sample_complete offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_observation_t, ramfs_capacity_bytes) == 136, "memory_observation.ramfs_capacity_bytes offset");
 
 #define HYPER_NATIVE_CPU_OBSERVATION_MIN_SIZE UINT64_C(64)
 typedef struct hyper_native_cpu_observation_t {

@@ -8,6 +8,8 @@ use alloc::vec::Vec;
 
 use crate::settings::{ReadPolicy, Settings, SettingsError};
 
+mod characters;
+mod editing;
 mod input;
 mod output;
 mod read;
@@ -75,6 +77,7 @@ pub struct Discipline {
     input_generation: u64,
     column: usize,
     edit_start_column: usize,
+    erasing: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -115,6 +118,7 @@ impl Discipline {
             input_generation: 0,
             column: 0,
             edit_start_column: 0,
+            erasing: false,
         };
         this.input
             .try_reserve_exact(limits.input_bytes)
@@ -146,6 +150,7 @@ impl Discipline {
     /// change, it must first complete `resume_peer` and the recovery transaction.
     pub fn configure(&mut self, settings: Settings) -> Result<(), SettingsError> {
         settings.validate()?;
+        self.finish_erasing();
         if self.settings.canonical && !settings.canonical && !self.edit.is_empty() {
             self.commit_line(false);
         }
@@ -170,6 +175,7 @@ impl Discipline {
         self.input.clear();
         self.records.clear();
         self.edit.clear();
+        self.finish_erasing();
         self.literal = false;
         self.discard_line = false;
         self.input_generation = self.input_generation.wrapping_add(1);
@@ -236,7 +242,11 @@ impl Discipline {
         if !self.settings.input.send_flow_control || self.flow_suspended {
             return;
         }
-        if self.buffered_input() >= self.limits.high_water
+        // A canonical reader cannot drain an unfinished line. Throttling that
+        // line would prevent the peer from sending its terminating newline.
+        let can_drain = !self.settings.canonical || self.has_read_record();
+        if can_drain
+            && self.buffered_input() >= self.limits.high_water
             && !self.peer_stopped
             && self.flow.len() < 8
         {
@@ -244,7 +254,7 @@ impl Discipline {
                 self.flow.push_back(stop);
                 self.peer_stopped = true;
             }
-        } else if self.buffered_input() <= self.limits.low_water {
+        } else if !can_drain || self.buffered_input() <= self.limits.low_water {
             self.resume_peer();
         }
     }
@@ -253,6 +263,7 @@ impl Discipline {
     /// It must run before another input/read/configuration mutation in the owner.
     pub fn commit_read(&mut self, decision: ReadDecision) {
         match decision {
+            ReadDecision::Data(0) => {}
             ReadDecision::Data(count) => {
                 self.input.drain(..count.min(self.input.len()));
                 if let Some(record) = self.records.front_mut() {

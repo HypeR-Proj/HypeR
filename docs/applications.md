@@ -361,32 +361,65 @@ development images. `QEMU_CPUS` selects the CPU count;
 
 ### Memory cache reporting
 
-`free` retains the physical accounting identity `total = reserved + used + free`.
-Its `cache` column combines unpinned clean VFS file pages and complete physical
-pages recoverable by draining the allocator's CPU-local magazines. A magazine
-page counts only when all outstanding central reservations are cached tokens:
-a live caller or an in-flight token excludes it. Tokens distributed across
-CPUs are combined and physical pages are counted once. These bytes are already
-included in `used`; they are a reclaimability estimate, not additional memory.
+The kernel observation exposes raw physical allocations, without choosing the
+`free` presentation policy: total RAM, allocator-managed RAM, free pages,
+direct kernel pages, slab backing, large heap backing, page tables, VMO backing,
+private guest backing, and file-cache backing. The physical allocation
+categories are disjoint and captured under the allocator lock. Consumers derive
+reserved RAM as `total - managed` and allocated RAM as `managed - free`.
 
-The census uses bounded preallocated scratch storage, preserves the caches and
-adds no global atomic operation to allocation fast paths. Magazine epochs,
-updated under their existing locks, validate a coherent capture. If concurrent
-mutation prevents validation after bounded retries, `cache` and `reclaimable`
-show `—` rather than claiming a zero or counting a partial observation. Physical
-`free` remains available independently. The snapshot is not a reservation against
-subsequent allocations and does not guarantee contiguous allocation success.
+`free` computes its main row in userspace:
 
-`buffers` reports physical VFS cache payloads, including pages being loaded or
-still pinned after eviction. These bytes overlap used kernel memory and the
-unpinned subset reported as `cache`; the columns must not be summed. Cache
-metadata remains ordinary heap memory. FAT uses the common clean file-page
-cache, which grows with demand below managed-memory watermarks and reclaims
-old pages asynchronously under pressure. Ramfs content is authoritative data,
-not discardable cache, and bypasses this layer. The VFS census scans in bounded
-lock intervals and rejects a sample if table replacement invalidates it;
-concurrent reader pins may change after any observation.
-Default units retain small KiB quantities; `free --bytes` avoids rounding.
+- `reclaimable = file-reclaimable + slab-reclaimable`;
+- `available = free + reclaimable`;
+- `used = total - available`, including reserved RAM;
+- consequently `total = used + free + reclaimable`.
+
+`available` estimates recoverable space, without reserving pages or promising
+contiguous allocations. File and slab censuses have independent validity. If
+either cannot complete, the dependent main-row estimates show `—`. If the slab
+census is unavailable, `kernel` and `buffered/cached` also show `—`, since their
+boundary depends on reclaimable slab. Total, free, reserved, allocated, user,
+guest and other remain available. A successful empty census is zero. Cache
+reader pins can change after any observation.
+
+The `Owners` row partitions managed allocations without double counting:
+
+- `kernel = direct kernel pages + slab + large heap + page tables - slab-reclaimable`;
+- `buffered/cached = file-cache backing + slab-reclaimable`;
+- `user` and `guest` separate Native and guest backing as described below;
+- `other` covers any allocated pages outside the raw ownership counters.
+
+`kernel` represents allocations not eligible for cache reclamation at sampling
+time; it does not imply permanent allocation. Kernel stacks, heap objects and
+page tables can still be released when their owners exit or drop them. The
+kernel image and early boot reservations remain in `reserved`.
+
+VMO backing retained by an exclusive guest-memory lease is counted once in
+`guest`, even when a backend aliases it or the lease is cloned. It is removed
+from `user`; that field describes remaining VMO backing, not summed process
+RSS. Guest accounting includes loaned transport buffers, not just advertised
+RAM. Sparse uncommitted guest RAM counts as zero. Final lease release removes
+guest use even if Native handles still retain the underlying VMO pages.
+
+`Cache` separates unpinned clean file pages from complete slab pages recoverable
+by draining CPU-local magazines. File-cache ownership also includes loading or
+pinned pages, which cannot immediately be reclaimed. A slab page is recoverable
+only if all its outstanding central reservations are cached tokens. The bounded
+census validates magazine epochs and never drains caches to measure them.
+Neither cache detail is an additional physical pool to add to `Owners`.
+
+`Ramfs` shows a logical capacity metric within `kernel`. It sums writable ramfs
+payload-capacity reservations, including transient replacement reservations.
+It excludes allocator rounding, directory metadata, and borrowed boot-archive
+contents. It overlaps heap backing and must not be added to physical totals.
+Ramfs data is authoritative
+and cannot be discarded as cache. Borrowed boot-archive storage remains in
+reserved RAM. File cache metadata is ordinary heap memory.
+
+`top` reports total, allocated (including reserved), free and reserved bytes;
+its allocated count includes reclaimable caches. Default units retain small
+KiB quantities; `free --bytes` avoids rounding.
 
 ## Console and storage visibility
 

@@ -3,8 +3,8 @@
 
 use super::{Discipline, Settings};
 
-/// Tracks an emitted byte, after output conversion. Echo editing uses the same
-/// rules when calculating the columns to erase from its buffered line.
+/// Tracks a byte after output conversion. Output and echo update the column
+/// only after the complete byte/sequence has been queued successfully.
 pub(super) fn column_after_byte(column: usize, byte: u8, settings: Settings) -> usize {
     match byte {
         b'\r' => 0,
@@ -12,6 +12,7 @@ pub(super) fn column_after_byte(column: usize, byte: u8, settings: Settings) -> 
         b'\n' => column,
         b'\t' => (column / 8 + 1).saturating_mul(8),
         8 => column.saturating_sub(1),
+        0..=31 | 127 => column,
         0x80..=0xbf if settings.utf8 => column,
         _ => column.saturating_add(1),
     }
@@ -43,18 +44,23 @@ impl Discipline {
 
     pub(super) fn write_with_limit(&mut self, bytes: &[u8], limit: usize) -> usize {
         let mut accepted = 0;
-        for &byte in bytes {
-            let pair = byte == b'\n' && self.settings.output.lf_to_crlf;
-            let byte = if byte == b'\r' && self.settings.output.cr_to_lf {
-                b'\n'
-            } else {
-                byte
-            };
-            if byte == b'\r' && self.settings.output.suppress_cr_at_column_zero && self.column == 0
+        for &original in bytes {
+            // Suppression applies to the original CR, before CR-to-LF.
+            if original == b'\r'
+                && self.settings.output.suppress_cr_at_column_zero
+                && self.column == 0
             {
                 accepted += 1;
                 continue;
             }
+            let pair = original == b'\n' && self.settings.output.lf_to_crlf;
+            let byte = if original == b'\r' && self.settings.output.cr_to_lf {
+                b'\n'
+            } else if self.settings.output.uppercase {
+                super::characters::uppercase(original)
+            } else {
+                original
+            };
             let tab = byte == b'\t' && self.settings.output.expand_tabs;
             let needed = if tab {
                 8 - self.column % 8
@@ -76,6 +82,13 @@ impl Discipline {
                 self.output.push_back(byte);
             }
             self.column = column_after_byte(self.column, byte, self.settings);
+            if original == b'\n'
+                || (original == b'\r'
+                    && (!self.settings.output.cr_to_lf
+                        || self.settings.output.newline_resets_column))
+            {
+                self.edit_start_column = self.column;
+            }
             accepted += 1;
         }
         accepted

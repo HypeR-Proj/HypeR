@@ -5,6 +5,7 @@
 extern crate hyper_tool_args_shared as hyper_tool_args;
 
 pub mod cli;
+pub mod report;
 
 /// Retain sub-MiB cache observations in the default human-readable output.
 pub fn format_bytes(bytes: u64, exact: bool) -> String {

@@ -2096,69 +2096,79 @@ const MEMORY_OBSERVATION_FIELDS: &[Field] = &[
         offset: 16,
     },
     Field {
-        name: "reserved_bytes",
+        name: "managed_bytes",
         kind: FieldKind::U64,
         offset: 24,
     },
     Field {
-        name: "managed_bytes",
+        name: "free_bytes",
         kind: FieldKind::U64,
         offset: 32,
     },
     Field {
-        name: "free_bytes",
+        name: "kernel_bytes",
         kind: FieldKind::U64,
         offset: 40,
     },
     Field {
-        name: "used_bytes",
+        name: "slab_bytes",
         kind: FieldKind::U64,
         offset: 48,
     },
     Field {
-        name: "kernel_bytes",
+        name: "large_heap_bytes",
         kind: FieldKind::U64,
         offset: 56,
     },
     Field {
-        name: "heap_bytes",
+        name: "page_table_bytes",
         kind: FieldKind::U64,
         offset: 64,
     },
     Field {
-        name: "page_table_bytes",
+        name: "vmo_bytes",
         kind: FieldKind::U64,
         offset: 72,
     },
     Field {
-        name: "user_bytes",
+        name: "guest_loaned_bytes",
         kind: FieldKind::U64,
         offset: 80,
     },
     Field {
-        name: "guest_bytes",
+        name: "guest_private_bytes",
         kind: FieldKind::U64,
         offset: 88,
     },
     Field {
-        name: "unattributed_bytes",
+        name: "file_cache_bytes",
         kind: FieldKind::U64,
         offset: 96,
     },
     Field {
-        name: "reclaimable_bytes",
+        name: "slab_reclaimable_bytes",
         kind: FieldKind::U64,
         offset: 104,
     },
     Field {
-        name: "cache_sample_complete",
+        name: "slab_sample_complete",
         kind: FieldKind::U64,
         offset: 112,
     },
     Field {
-        name: "buffered_bytes",
+        name: "file_cache_reclaimable_bytes",
         kind: FieldKind::U64,
         offset: 120,
+    },
+    Field {
+        name: "file_cache_sample_complete",
+        kind: FieldKind::U64,
+        offset: 128,
+    },
+    Field {
+        name: "ramfs_capacity_bytes",
+        kind: FieldKind::U64,
+        offset: 136,
     },
 ];
 
@@ -3435,8 +3445,8 @@ pub const RECORDS: &[Record] = &[
     Record {
         name: "memory_observation",
         fields: MEMORY_OBSERVATION_FIELDS,
-        minimum_size: 128,
-        size: 128,
+        minimum_size: 144,
+        size: 144,
         alignment: 8,
     },
     Record {

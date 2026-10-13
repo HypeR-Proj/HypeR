@@ -35,40 +35,48 @@ fn snapshot(
     output: &mut impl Write,
 ) -> std::io::Result<()> {
     let quantity = |bytes| args.quantity(bytes);
-    let cache = if observation.cache_sample_complete {
-        quantity(observation.reclaimable_bytes)
-    } else {
-        String::from("—")
-    };
+    let summary = hyper_free::report::Summary::from_observation(&observation);
+    let estimate = |bytes: Option<u64>| bytes.map_or_else(|| String::from("—"), quantity);
     writeln!(
         output,
         "          {:>11}  {:>11}  {:>11}  {:>11}  {:>11}",
-        "total", "used", "free", "cache", "buffers"
+        "total", "used", "free", "reclaimable", "available"
     )?;
     writeln!(
         output,
         "Mem:      {:>11}  {:>11}  {:>11}  {:>11}  {:>11}",
         quantity(observation.total_bytes),
-        quantity(observation.used_bytes),
+        estimate(summary.used),
         quantity(observation.free_bytes),
-        cache,
-        quantity(observation.buffered_bytes),
+        estimate(summary.reclaimable),
+        estimate(summary.available),
     )?;
     writeln!(
         output,
-        "Reserved: {}  Reclaimable: {}",
-        quantity(observation.reserved_bytes),
-        cache
+        "Reserved: {}  Managed: {}  Allocated: {}",
+        quantity(summary.reserved),
+        quantity(observation.managed_bytes),
+        quantity(summary.allocated),
     )?;
     writeln!(
         output,
-        "Owners:   kernel={} heap={} tables={} user={} guest={} other={}",
-        quantity(observation.kernel_bytes),
-        quantity(observation.heap_bytes),
-        quantity(observation.page_table_bytes),
-        quantity(observation.user_bytes),
-        quantity(observation.guest_bytes),
-        quantity(observation.unattributed_bytes)
+        "Owners:   kernel={} user={} guest={} buffered/cached={} other={}",
+        estimate(summary.kernel),
+        quantity(summary.user),
+        quantity(summary.guest),
+        estimate(summary.buffered_cached),
+        quantity(summary.other),
+    )?;
+    writeln!(
+        output,
+        "Cache:    file-reclaimable={} slab-reclaimable={}",
+        estimate(observation.file_cache_reclaimable_bytes),
+        estimate(observation.slab_reclaimable_bytes),
+    )?;
+    writeln!(
+        output,
+        "Ramfs:    capacity={} (logical; included in kernel)",
+        quantity(observation.ramfs_capacity_bytes),
     )?;
     Ok(())
 }

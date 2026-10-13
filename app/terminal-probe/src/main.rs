@@ -9,6 +9,7 @@ use std::process::ExitCode;
 use hyper_terminal::{ReadPolicy, Settings, Terminal};
 
 mod backpressure;
+mod formatting;
 mod lease_tree;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -66,6 +67,7 @@ fn run() -> Result<()> {
             require(&bytes[..count] == b"next\n", "read after EOF")?;
             println!("TERMINAL_CANONICAL_OK");
         }
+        Some("formatting") => formatting::run(&mut terminal)?,
         Some("timing") => {
             let mut settings = Settings::raw();
             settings.read_policy = ReadPolicy::Available;
@@ -144,7 +146,7 @@ fn run() -> Result<()> {
         }
         _ => {
             return Err(io::Error::other(
-                "usage: terminal-probe raw|canonical|timing|metadata|flow|raw-exit|control-drop|backpressure|lease-tree",
+                "usage: terminal-probe raw|canonical|formatting|timing|metadata|flow|raw-exit|control-drop|backpressure|lease-tree",
             )
             .into());
         }

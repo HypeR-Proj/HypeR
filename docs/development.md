@@ -191,8 +191,11 @@ suite, also included in Native CI.
 Plain `make` (or `make all`) builds the kernel and the selected profile's ramdisk.
 The default AArch64 board profile creates a disk only if missing; subsequent
 builds preserve `/data` and guest disks while updating the host-side kernel and
-bootstrap loaded by QEMU. A changed `/system` payload makes the preserved disk
-stale and requires explicit replacement or a fresh output directory.
+bootstrap loaded by QEMU and refreshing the generated EROFS `/system` volume.
+The refresh validates the existing GPT and stages a complete image, preserving
+all bytes outside `/system`, before atomic publication. Stop QEMU before updating
+its system volume. Changed partition layouts still require an explicit rebuild
+or a fresh output directory; ordinary builds never repartition existing data.
 `make run` only starts existing artifacts and fails if
 any are missing; it never builds or packages them.
 

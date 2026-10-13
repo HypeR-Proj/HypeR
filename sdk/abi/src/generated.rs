@@ -1070,48 +1070,57 @@ const _: () = assert!(core::mem::offset_of!(HyperNativeTaskThread, reserved) == 
 const _: () = assert!(core::mem::offset_of!(HyperNativeTaskThread, runtime_ticks) == 32);
 const _: () = assert!(core::mem::offset_of!(HyperNativeTaskThread, name) == 40);
 
-pub const HYPER_NATIVE_MEMORY_OBSERVATION_MIN_SIZE: usize = 128;
+pub const HYPER_NATIVE_MEMORY_OBSERVATION_MIN_SIZE: usize = 144;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HyperNativeMemoryObservation {
     pub captured_at_ns: u64,
     pub page_size: u64,
     pub total_bytes: u64,
-    pub reserved_bytes: u64,
     pub managed_bytes: u64,
     pub free_bytes: u64,
-    pub used_bytes: u64,
     pub kernel_bytes: u64,
-    pub heap_bytes: u64,
+    pub slab_bytes: u64,
+    pub large_heap_bytes: u64,
     pub page_table_bytes: u64,
-    pub user_bytes: u64,
-    pub guest_bytes: u64,
-    pub unattributed_bytes: u64,
-    pub reclaimable_bytes: u64,
-    pub cache_sample_complete: u64,
-    pub buffered_bytes: u64,
+    pub vmo_bytes: u64,
+    pub guest_loaned_bytes: u64,
+    pub guest_private_bytes: u64,
+    pub file_cache_bytes: u64,
+    pub slab_reclaimable_bytes: u64,
+    pub slab_sample_complete: u64,
+    pub file_cache_reclaimable_bytes: u64,
+    pub file_cache_sample_complete: u64,
+    pub ramfs_capacity_bytes: u64,
 }
-const _: () = assert!(core::mem::size_of::<HyperNativeMemoryObservation>() == 128);
+const _: () = assert!(core::mem::size_of::<HyperNativeMemoryObservation>() == 144);
 const _: () = assert!(core::mem::align_of::<HyperNativeMemoryObservation>() == 8);
 const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, captured_at_ns) == 0);
 const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, page_size) == 8);
 const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, total_bytes) == 16);
-const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, reserved_bytes) == 24);
-const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, managed_bytes) == 32);
-const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, free_bytes) == 40);
-const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, used_bytes) == 48);
-const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, kernel_bytes) == 56);
-const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, heap_bytes) == 64);
-const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, page_table_bytes) == 72);
-const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, user_bytes) == 80);
-const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, guest_bytes) == 88);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, managed_bytes) == 24);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, free_bytes) == 32);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, kernel_bytes) == 40);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, slab_bytes) == 48);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, large_heap_bytes) == 56);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, page_table_bytes) == 64);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, vmo_bytes) == 72);
 const _: () =
-    assert!(core::mem::offset_of!(HyperNativeMemoryObservation, unattributed_bytes) == 96);
+    assert!(core::mem::offset_of!(HyperNativeMemoryObservation, guest_loaned_bytes) == 80);
 const _: () =
-    assert!(core::mem::offset_of!(HyperNativeMemoryObservation, reclaimable_bytes) == 104);
+    assert!(core::mem::offset_of!(HyperNativeMemoryObservation, guest_private_bytes) == 88);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, file_cache_bytes) == 96);
 const _: () =
-    assert!(core::mem::offset_of!(HyperNativeMemoryObservation, cache_sample_complete) == 112);
-const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryObservation, buffered_bytes) == 120);
+    assert!(core::mem::offset_of!(HyperNativeMemoryObservation, slab_reclaimable_bytes) == 104);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryObservation, slab_sample_complete) == 112);
+const _: () = assert!(
+    core::mem::offset_of!(HyperNativeMemoryObservation, file_cache_reclaimable_bytes) == 120
+);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryObservation, file_cache_sample_complete) == 128);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryObservation, ramfs_capacity_bytes) == 136);
 
 pub const HYPER_NATIVE_CPU_OBSERVATION_MIN_SIZE: usize = 64;
 #[repr(C)]
