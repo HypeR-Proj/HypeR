@@ -300,9 +300,15 @@ QEMU outputs default to `target/board/qemu/`; Pi 5 outputs default to
 is checked staging, and `disk.img` contains the independent Native/guest
 volumes. A build-side `disk.img.system.json` records system payload hashes.
 It detects a stale disk paired with a rebuilt system payload; it is not runtime
-integrity verification. Existing disks are preserved. A changed system payload
-requires an explicit disk replacement or a fresh output directory before it can
-run. `make rebuild` (or `make board-rebuild`) replaces the entire disk, including
+integrity verification. Ordinary `make` / `board-build` refreshes a changed
+generated EROFS system volume, preserving every byte outside that partition.
+The updater validates both GPT copies, builds a sibling image and publishes it
+atomically; formatting or copy failures leave the previous disk intact. Unchanged payloads
+leave the disk untouched. Stop QEMU before refreshing a disk it is using.
+Custom FAT system volumes are not refreshed automatically, since they can hold
+writable state. Changed partition layouts also require a fresh disk or explicit
+replacement. `make run` checks the payload record without packaging anything.
+`make rebuild` (or `make board-rebuild`) replaces the entire disk, including
 data and guest volumes. Pi image replacement requires the existing `BOARD_IMAGE_REPLACE=--replace` option.
 
 For the same namespace with system programs resident in RAM, select
