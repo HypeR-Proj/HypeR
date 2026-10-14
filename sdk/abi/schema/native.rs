@@ -1079,6 +1079,38 @@ const DIRECTORY_ENTRY_RECORD_SIZE: u16 = 24 + DIRECTORY_ENTRY_NAME_CAPACITY as u
 
 pub const CONSTANTS: &[AbiConstant] = &[
     AbiConstant {
+        name: "memory_statistics_heap",
+        value: 1,
+    },
+    AbiConstant {
+        name: "memory_statistics_buddy",
+        value: 2,
+    },
+    AbiConstant {
+        name: "memory_statistics_owner",
+        value: 3,
+    },
+    AbiConstant {
+        name: "memory_statistics_file_cache",
+        value: 4,
+    },
+    AbiConstant {
+        name: "memory_statistics_heap_class",
+        value: 5,
+    },
+    AbiConstant {
+        name: "memory_statistics_buddy_order_count",
+        value: 19,
+    },
+    AbiConstant {
+        name: "memory_statistics_owner_count",
+        value: 5,
+    },
+    AbiConstant {
+        name: "memory_statistics_heap_class_count",
+        value: 18,
+    },
+    AbiConstant {
         name: "vmar_memory_current",
         value: 1,
     },
@@ -2805,6 +2837,331 @@ const RESOURCE_LIMITS_FIELDS: &[Field] = &[
 ];
 
 pub const RECORDS: &[Record] = &[
+    Record {
+        name: "memory_heap_statistics",
+        fields: &[
+            Field {
+                name: "captured_at_ns",
+                kind: FieldKind::U64,
+                offset: 0,
+            },
+            Field {
+                name: "live_objects",
+                kind: FieldKind::U64,
+                offset: 8,
+            },
+            Field {
+                name: "live_slab_objects",
+                kind: FieldKind::U64,
+                offset: 16,
+            },
+            Field {
+                name: "live_large_objects",
+                kind: FieldKind::U64,
+                offset: 24,
+            },
+            Field {
+                name: "requested_bytes",
+                kind: FieldKind::U64,
+                offset: 32,
+            },
+            Field {
+                name: "peak_objects",
+                kind: FieldKind::U64,
+                offset: 40,
+            },
+            Field {
+                name: "peak_requested_bytes",
+                kind: FieldKind::U64,
+                offset: 48,
+            },
+            Field {
+                name: "allocations",
+                kind: FieldKind::U64,
+                offset: 56,
+            },
+            Field {
+                name: "failures",
+                kind: FieldKind::U64,
+                offset: 64,
+            },
+            Field {
+                name: "cached_objects",
+                kind: FieldKind::U64,
+                offset: 72,
+            },
+            Field {
+                name: "cache_hits",
+                kind: FieldKind::U64,
+                offset: 80,
+            },
+            Field {
+                name: "cache_misses",
+                kind: FieldKind::U64,
+                offset: 88,
+            },
+            Field {
+                name: "cache_refills",
+                kind: FieldKind::U64,
+                offset: 96,
+            },
+            Field {
+                name: "cache_drains",
+                kind: FieldKind::U64,
+                offset: 104,
+            },
+            Field {
+                name: "pressure_reclaims",
+                kind: FieldKind::U64,
+                offset: 112,
+            },
+            Field {
+                name: "reclaimed_objects",
+                kind: FieldKind::U64,
+                offset: 120,
+            },
+            Field {
+                name: "cache_cpus",
+                kind: FieldKind::U64,
+                offset: 128,
+            },
+            Field {
+                name: "profiling_enabled",
+                kind: FieldKind::U64,
+                offset: 136,
+            },
+            Field {
+                name: "page_allocations",
+                kind: FieldKind::U64,
+                offset: 144,
+            },
+            Field {
+                name: "page_failures",
+                kind: FieldKind::U64,
+                offset: 152,
+            },
+            Field {
+                name: "page_deallocations",
+                kind: FieldKind::U64,
+                offset: 160,
+            },
+            Field {
+                name: "peak_allocated_pages",
+                kind: FieldKind::U64,
+                offset: 168,
+            },
+        ],
+        minimum_size: 176,
+        size: 176,
+        alignment: 8,
+    },
+    Record {
+        name: "memory_buddy_statistics",
+        fields: &[
+            Field {
+                name: "captured_at_ns",
+                kind: FieldKind::U64,
+                offset: 0,
+            },
+            Field {
+                name: "order",
+                kind: FieldKind::U64,
+                offset: 8,
+            },
+            Field {
+                name: "free_blocks",
+                kind: FieldKind::U64,
+                offset: 16,
+            },
+        ],
+        minimum_size: 24,
+        size: 24,
+        alignment: 8,
+    },
+    Record {
+        name: "memory_owner_statistics",
+        fields: &[
+            Field {
+                name: "captured_at_ns",
+                kind: FieldKind::U64,
+                offset: 0,
+            },
+            Field {
+                name: "resident_pages",
+                kind: FieldKind::U64,
+                offset: 8,
+            },
+            Field {
+                name: "peak_pages",
+                kind: FieldKind::U64,
+                offset: 16,
+            },
+            Field {
+                name: "allocations",
+                kind: FieldKind::U64,
+                offset: 24,
+            },
+            Field {
+                name: "failures",
+                kind: FieldKind::U64,
+                offset: 32,
+            },
+            Field {
+                name: "deallocations",
+                kind: FieldKind::U64,
+                offset: 40,
+            },
+        ],
+        minimum_size: 48,
+        size: 48,
+        alignment: 8,
+    },
+    Record {
+        name: "memory_file_cache_statistics",
+        fields: &[
+            Field {
+                name: "captured_at_ns",
+                kind: FieldKind::U64,
+                offset: 0,
+            },
+            Field {
+                name: "payload_pages",
+                kind: FieldKind::U64,
+                offset: 8,
+            },
+            Field {
+                name: "metadata_slab_pages",
+                kind: FieldKind::U64,
+                offset: 16,
+            },
+            Field {
+                name: "metadata_large_pages",
+                kind: FieldKind::U64,
+                offset: 24,
+            },
+            Field {
+                name: "index_capacity",
+                kind: FieldKind::U64,
+                offset: 32,
+            },
+            Field {
+                name: "clean_entries",
+                kind: FieldKind::U64,
+                offset: 40,
+            },
+            Field {
+                name: "loading_entries",
+                kind: FieldKind::U64,
+                offset: 48,
+            },
+            Field {
+                name: "live_payloads",
+                kind: FieldKind::U64,
+                offset: 56,
+            },
+            Field {
+                name: "metadata_budget_pages",
+                kind: FieldKind::U64,
+                offset: 64,
+            },
+            Field {
+                name: "table_present",
+                kind: FieldKind::U64,
+                offset: 72,
+            },
+            Field {
+                name: "admission_enabled",
+                kind: FieldKind::U64,
+                offset: 80,
+            },
+            Field {
+                name: "admission_paused",
+                kind: FieldKind::U64,
+                offset: 88,
+            },
+            Field {
+                name: "maintenance_pending",
+                kind: FieldKind::U64,
+                offset: 96,
+            },
+            Field {
+                name: "maintenance_running",
+                kind: FieldKind::U64,
+                offset: 104,
+            },
+            Field {
+                name: "growth_requested",
+                kind: FieldKind::U64,
+                offset: 112,
+            },
+        ],
+        minimum_size: 120,
+        size: 120,
+        alignment: 8,
+    },
+    Record {
+        name: "memory_heap_class_statistics",
+        fields: &[
+            Field {
+                name: "captured_at_ns",
+                kind: FieldKind::U64,
+                offset: 0,
+            },
+            Field {
+                name: "pool",
+                kind: FieldKind::U64,
+                offset: 8,
+            },
+            Field {
+                name: "object_size",
+                kind: FieldKind::U64,
+                offset: 16,
+            },
+            Field {
+                name: "pages",
+                kind: FieldKind::U64,
+                offset: 24,
+            },
+            Field {
+                name: "capacity",
+                kind: FieldKind::U64,
+                offset: 32,
+            },
+            Field {
+                name: "reserved",
+                kind: FieldKind::U64,
+                offset: 40,
+            },
+            Field {
+                name: "cached",
+                kind: FieldKind::U64,
+                offset: 48,
+            },
+            Field {
+                name: "live",
+                kind: FieldKind::U64,
+                offset: 56,
+            },
+            Field {
+                name: "requested_bytes",
+                kind: FieldKind::U64,
+                offset: 64,
+            },
+            Field {
+                name: "allocations",
+                kind: FieldKind::U64,
+                offset: 72,
+            },
+            Field {
+                name: "deallocations",
+                kind: FieldKind::U64,
+                offset: 80,
+            },
+        ],
+        minimum_size: 88,
+        size: 88,
+        alignment: 8,
+    },
     Record {
         name: "filesystem_root_switch",
         fields: &[
@@ -10126,6 +10483,49 @@ pub const SYSCALLS: &[Syscall] = &[
         failure_results: &[],
     },
     Syscall {
+        number: 172,
+        name: "memory_inspector_read_statistics",
+        feature: FeatureGate::Core,
+        arguments: &[
+            Argument {
+                name: "inspector",
+                kind: ValueKind::Handle,
+                handle: Some(HandleArgument {
+                    object: ObjectConstraint::Kind("memory_inspector"),
+                    required_rights: RIGHT_INSPECT,
+                    disposition: HandleDisposition::Borrow,
+                }),
+                memory: None,
+            },
+            scalar_argument("topic", ValueKind::U32),
+            scalar_argument("index", ValueKind::U32),
+            Argument {
+                name: "statistics",
+                kind: ValueKind::UserAddress,
+                handle: None,
+                memory: Some(UserMemory {
+                    direction: MemoryDirection::Write,
+                    length: MemoryLength::Bytes {
+                        argument: "statistics_size",
+                        maximum_bytes: EXTENSIBLE_RECORD_MAX_BYTES,
+                    },
+                    record: None,
+                    handles: None,
+                    validation_order: 0,
+                }),
+            },
+            scalar_argument("statistics_size", ValueKind::ByteCount),
+        ],
+        results: INFO_RECORD_RESULTS,
+        blocking: BlockingClass::Never,
+        cancellation: CancellationClass::None,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Object,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
         number: 496,
         name: "native_block_transfer",
         feature: FeatureGate::Core,
@@ -10184,6 +10584,8 @@ pub const NATIVE_ABI: AbiSchema = AbiSchema {
 };
 
 pub const SEMANTIC_RULES: &[&str] = &[
+    "memory_inspector_read_statistics requires MemoryInspector INSPECT; it is observational and never drains caches or initiates reclaim. Topic selects a typed extensible record: heap (index 0), buddy (orders 0..18), owner (0 kernel, 1 page tables, 2 guest, 3 user, 4 file cache), file_cache (index 0), or heap_class (0..8 kernel, 9..17 file-cache pool; eight slab sizes 16..2048 then large allocations). Unknown topic/index and a nonzero unused argument are INVALID_ARGUMENT. Heap-class records require CONFIG_HEAP_PROFILING, otherwise NOT_SUPPORTED. Other records are always available after allocator initialization.",
+    "Memory statistics are independently sampled, including fields sourced from atomic counters; they are not a transaction across topics, CPUs, or logical and physical accounting. Page counts use memory_observation.page_size. Heap-class reserved slots include live objects, magazine objects and in-flight transfers; large buckets report zero capacity/reserved/cached and object_size=0. File-cache metadata physical pages and reservations overlap other accounting and must not be added twice. Cumulative heap-class allocation/deallocation counters saturate and reset only on reboot. No address or allocation authority is exposed.",
     "object_inspector_read_details requires INSPECT and INSPECT_DETAILS on an ObjectInspector. With process_koid zero, target is a KOID and only system scope is allowed. Otherwise target is a generation-qualified handle in the named, scope-visible process. Inspection takes a diagnostic reference under the lookup lock, releases that lock, and copies object-local metadata only; it does not grant operation authority. Cursor zero starts a query; next_cursor zero finishes it. Empty records may advance a bounded scan without yielding a mapping. Concurrent mutation makes pages weakly consistent. Unsupported object kinds return NOT_SUPPORTED; inaccessible or expired identities return NOT_FOUND. Inspector derivation continues to produce only the original basic rights, never implicitly acquiring INSPECT_DETAILS.",
     "Object-details payload consists of eight little-endian u64 words. All unused words are zero. Record 0 is empty. Thread (1): scheduler TID (zero is a valid bootstrap TID), role (task_thread role values), user lifecycle phase (0 unavailable, 1 prepared, 2 dormant, 3 runnable, 4 stop-requested, 5 detached), TID present (0/1; absent TID word is zero). VMAR (2): base, length, live (0/1). Mapping (3): base, length, current R/W/X bits, maximum R/W/X bits. Channel (4): peer KOID (zero until pair publication), local open (0/1), peer open (0/1), queued messages or receivers, queued bytes, byte-queue counters present (0/1). Device (5): profile, virtio device ID, PCI vendor/device word, host IRQ domain, first host interrupt, interrupt count, lifecycle (1 claimed, 2 attached, 3 active, 4 retired, 5 quarantined), resource count. Device resource (6): resource kind, host physical base, length, guest aperture offset, attributes. Addresses never contain kernel virtual pointers. Device details read metadata without MMIO/config-space probes; host interrupt identities are not guest IRQs.",
     "Device firmware inspection reads one immutable boot snapshot. Field PROPERTY_NAMES (5) returns every property name as a NUL-separated list, without granting ownership or exposing mapping capabilities; field PROPERTY (4) reads a named property's original bytes. Other fields report node identity, compatible strings, translated registers and interrupt metadata. Empty output queries the required byte length. The caller supplies a name only for PROPERTY; all other fields require an empty name. Inspection cannot substitute for an atomic device claim.",

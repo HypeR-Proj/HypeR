@@ -109,6 +109,7 @@ pub(super) fn status_from_inspection_error(
 ) -> HyperNativeStatus {
     match error {
         crate::kernel::inspect::Error::AccessDenied => HYPER_NATIVE_STATUS_ACCESS_DENIED,
+        crate::kernel::inspect::Error::Unsupported => HYPER_NATIVE_STATUS_NOT_SUPPORTED,
         crate::kernel::inspect::Error::Details(error) => match error {
             crate::kernel::object::diagnostics::DetailError::Unsupported => {
                 HYPER_NATIVE_STATUS_NOT_SUPPORTED

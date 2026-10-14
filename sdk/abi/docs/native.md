@@ -118,6 +118,14 @@ ABI revision: `0`.
 
 | Name | Value |
 | --- | ---: |
+| `memory_statistics_heap` | `1` |
+| `memory_statistics_buddy` | `2` |
+| `memory_statistics_owner` | `3` |
+| `memory_statistics_file_cache` | `4` |
+| `memory_statistics_heap_class` | `5` |
+| `memory_statistics_buddy_order_count` | `19` |
+| `memory_statistics_owner_count` | `5` |
+| `memory_statistics_heap_class_count` | `18` |
 | `vmar_memory_current` | `1` |
 | `filesystem_switch_root_max_moves` | `16` |
 | `native_block_transfer_bytes` | `524288` |
@@ -319,6 +327,8 @@ ABI revision: `0`.
 
 ## Semantic rules
 
+- memory_inspector_read_statistics requires MemoryInspector INSPECT; it is observational and never drains caches or initiates reclaim. Topic selects a typed extensible record: heap (index 0), buddy (orders 0..18), owner (0 kernel, 1 page tables, 2 guest, 3 user, 4 file cache), file_cache (index 0), or heap_class (0..8 kernel, 9..17 file-cache pool; eight slab sizes 16..2048 then large allocations). Unknown topic/index and a nonzero unused argument are INVALID_ARGUMENT. Heap-class records require CONFIG_HEAP_PROFILING, otherwise NOT_SUPPORTED. Other records are always available after allocator initialization.
+- Memory statistics are independently sampled, including fields sourced from atomic counters; they are not a transaction across topics, CPUs, or logical and physical accounting. Page counts use memory_observation.page_size. Heap-class reserved slots include live objects, magazine objects and in-flight transfers; large buckets report zero capacity/reserved/cached and object_size=0. File-cache metadata physical pages and reservations overlap other accounting and must not be added twice. Cumulative heap-class allocation/deallocation counters saturate and reset only on reboot. No address or allocation authority is exposed.
 - object_inspector_read_details requires INSPECT and INSPECT_DETAILS on an ObjectInspector. With process_koid zero, target is a KOID and only system scope is allowed. Otherwise target is a generation-qualified handle in the named, scope-visible process. Inspection takes a diagnostic reference under the lookup lock, releases that lock, and copies object-local metadata only; it does not grant operation authority. Cursor zero starts a query; next_cursor zero finishes it. Empty records may advance a bounded scan without yielding a mapping. Concurrent mutation makes pages weakly consistent. Unsupported object kinds return NOT_SUPPORTED; inaccessible or expired identities return NOT_FOUND. Inspector derivation continues to produce only the original basic rights, never implicitly acquiring INSPECT_DETAILS.
 - Object-details payload consists of eight little-endian u64 words. All unused words are zero. Record 0 is empty. Thread (1): scheduler TID (zero is a valid bootstrap TID), role (task_thread role values), user lifecycle phase (0 unavailable, 1 prepared, 2 dormant, 3 runnable, 4 stop-requested, 5 detached), TID present (0/1; absent TID word is zero). VMAR (2): base, length, live (0/1). Mapping (3): base, length, current R/W/X bits, maximum R/W/X bits. Channel (4): peer KOID (zero until pair publication), local open (0/1), peer open (0/1), queued messages or receivers, queued bytes, byte-queue counters present (0/1). Device (5): profile, virtio device ID, PCI vendor/device word, host IRQ domain, first host interrupt, interrupt count, lifecycle (1 claimed, 2 attached, 3 active, 4 retired, 5 quarantined), resource count. Device resource (6): resource kind, host physical base, length, guest aperture offset, attributes. Addresses never contain kernel virtual pointers. Device details read metadata without MMIO/config-space probes; host interrupt identities are not guest IRQs.
 - Device firmware inspection reads one immutable boot snapshot. Field PROPERTY_NAMES (5) returns every property name as a NUL-separated list, without granting ownership or exposing mapping capabilities; field PROPERTY (4) reads a named property's original bytes. Other fields report node identity, compatible strings, translated registers and interrupt metadata. Empty output queries the required byte length. The caller supplies a name only for PROPERTY; all other fields require an empty name. Inspection cannot substitute for an atomic device claim.
@@ -561,12 +571,18 @@ element size before any user-memory access.
 | 169 | `guest_memory_scalar` | `memory: handle`, `operation: u32`, `offset: u64`, `width: u32`, `value: u64` | `value: u64` | `memory: Borrow, kind=guest_memory, rights=0x0` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
 | 170 | `guest_interrupt_create` | `machine: handle`, `irq: u32` | `interrupt: handle` | `machine: Borrow, kind=virtual_machine, rights=0x20`, `interrupt: produce, kind=guest_interrupt, fixed=0x2a` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
 | 171 | `guest_interrupt_set_level` | `interrupt: handle`, `asserted: u32` | — | `interrupt: Borrow, kind=guest_interrupt, rights=0x20` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
+| 172 | `memory_inspector_read_statistics` | `inspector: handle`, `topic: u32`, `index: u32`, `statistics: user_address`, `statistics_size: byte_count` | `supported_size: byte_count` | `inspector: Borrow, kind=memory_inspector, rights=0x8` | `statistics: Write, len=statistics_size bytes, max-bytes=4096; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Object` |
 | 496 | `native_block_transfer` | `block: handle`, `operation: u32`, `first_sector: u64`, `buffer: user_address`, `length: byte_count` | — | `block: Borrow, kind=native_block, rights=0x0` | `buffer: ReadWrite, len=length bytes, max-bytes=524352; order=0` | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` | `Capability` |
 
 ## Public records
 
 | Name | Minimum prefix | Size | Alignment | Fields |
 | --- | ---: | ---: | ---: | --- |
+| `memory_heap_statistics` | 176 | 176 | 8 | `captured_at_ns: u64 @ 0`, `live_objects: u64 @ 8`, `live_slab_objects: u64 @ 16`, `live_large_objects: u64 @ 24`, `requested_bytes: u64 @ 32`, `peak_objects: u64 @ 40`, `peak_requested_bytes: u64 @ 48`, `allocations: u64 @ 56`, `failures: u64 @ 64`, `cached_objects: u64 @ 72`, `cache_hits: u64 @ 80`, `cache_misses: u64 @ 88`, `cache_refills: u64 @ 96`, `cache_drains: u64 @ 104`, `pressure_reclaims: u64 @ 112`, `reclaimed_objects: u64 @ 120`, `cache_cpus: u64 @ 128`, `profiling_enabled: u64 @ 136`, `page_allocations: u64 @ 144`, `page_failures: u64 @ 152`, `page_deallocations: u64 @ 160`, `peak_allocated_pages: u64 @ 168` |
+| `memory_buddy_statistics` | 24 | 24 | 8 | `captured_at_ns: u64 @ 0`, `order: u64 @ 8`, `free_blocks: u64 @ 16` |
+| `memory_owner_statistics` | 48 | 48 | 8 | `captured_at_ns: u64 @ 0`, `resident_pages: u64 @ 8`, `peak_pages: u64 @ 16`, `allocations: u64 @ 24`, `failures: u64 @ 32`, `deallocations: u64 @ 40` |
+| `memory_file_cache_statistics` | 120 | 120 | 8 | `captured_at_ns: u64 @ 0`, `payload_pages: u64 @ 8`, `metadata_slab_pages: u64 @ 16`, `metadata_large_pages: u64 @ 24`, `index_capacity: u64 @ 32`, `clean_entries: u64 @ 40`, `loading_entries: u64 @ 48`, `live_payloads: u64 @ 56`, `metadata_budget_pages: u64 @ 64`, `table_present: u64 @ 72`, `admission_enabled: u64 @ 80`, `admission_paused: u64 @ 88`, `maintenance_pending: u64 @ 96`, `maintenance_running: u64 @ 104`, `growth_requested: u64 @ 112` |
+| `memory_heap_class_statistics` | 88 | 88 | 8 | `captured_at_ns: u64 @ 0`, `pool: u64 @ 8`, `object_size: u64 @ 16`, `pages: u64 @ 24`, `capacity: u64 @ 32`, `reserved: u64 @ 40`, `cached: u64 @ 48`, `live: u64 @ 56`, `requested_bytes: u64 @ 64`, `allocations: u64 @ 72`, `deallocations: u64 @ 80` |
 | `filesystem_root_switch` | 48 | 48 | 8 | `new_root: u64 @ 0`, `new_root_length: u64 @ 8`, `put_old: u64 @ 16`, `put_old_length: u64 @ 24`, `moves: u64 @ 32`, `move_count: u64 @ 40` |
 | `filesystem_mount_move` | 32 | 32 | 8 | `source: u64 @ 0`, `source_length: u64 @ 8`, `target: u64 @ 16`, `target_length: u64 @ 24` |
 | `object_details` | 88 | 88 | 8 | `koid: u64 @ 0`, `object_kind: u32 @ 8`, `record_kind: u32 @ 12`, `next_cursor: u64 @ 16`, `payload: bytes[64] @ 24` |

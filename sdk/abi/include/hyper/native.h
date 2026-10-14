@@ -208,6 +208,14 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
 #define HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_WRITABLE (UINT64_C(1) << 1)
 #define HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_PEER_CLOSED (UINT64_C(1) << 2)
 
+#define HYPER_NATIVE_MEMORY_STATISTICS_HEAP UINT64_C(1)
+#define HYPER_NATIVE_MEMORY_STATISTICS_BUDDY UINT64_C(2)
+#define HYPER_NATIVE_MEMORY_STATISTICS_OWNER UINT64_C(3)
+#define HYPER_NATIVE_MEMORY_STATISTICS_FILE_CACHE UINT64_C(4)
+#define HYPER_NATIVE_MEMORY_STATISTICS_HEAP_CLASS UINT64_C(5)
+#define HYPER_NATIVE_MEMORY_STATISTICS_BUDDY_ORDER_COUNT UINT64_C(19)
+#define HYPER_NATIVE_MEMORY_STATISTICS_OWNER_COUNT UINT64_C(5)
+#define HYPER_NATIVE_MEMORY_STATISTICS_HEAP_CLASS_COUNT UINT64_C(18)
 #define HYPER_NATIVE_VMAR_MEMORY_CURRENT UINT64_C(1)
 #define HYPER_NATIVE_FILESYSTEM_SWITCH_ROOT_MAX_MOVES UINT64_C(16)
 #define HYPER_NATIVE_NATIVE_BLOCK_TRANSFER_BYTES UINT64_C(524288)
@@ -575,6 +583,7 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
 #define HYPER_NATIVE_SYS_GUEST_MEMORY_SCALAR UINT64_C(169)
 #define HYPER_NATIVE_SYS_GUEST_INTERRUPT_CREATE UINT64_C(170)
 #define HYPER_NATIVE_SYS_GUEST_INTERRUPT_SET_LEVEL UINT64_C(171)
+#define HYPER_NATIVE_SYS_MEMORY_INSPECTOR_READ_STATISTICS UINT64_C(172)
 #define HYPER_NATIVE_SYS_NATIVE_BLOCK_TRANSFER UINT64_C(496)
 
 static inline uint64_t hyper_native_failure_result_mask(
@@ -598,6 +607,150 @@ static inline uint64_t hyper_native_failure_result_mask(
     }
     return UINT64_C(0);
 }
+
+#define HYPER_NATIVE_MEMORY_HEAP_STATISTICS_MIN_SIZE UINT64_C(176)
+typedef struct hyper_native_memory_heap_statistics_t {
+    uint64_t captured_at_ns;
+    uint64_t live_objects;
+    uint64_t live_slab_objects;
+    uint64_t live_large_objects;
+    uint64_t requested_bytes;
+    uint64_t peak_objects;
+    uint64_t peak_requested_bytes;
+    uint64_t allocations;
+    uint64_t failures;
+    uint64_t cached_objects;
+    uint64_t cache_hits;
+    uint64_t cache_misses;
+    uint64_t cache_refills;
+    uint64_t cache_drains;
+    uint64_t pressure_reclaims;
+    uint64_t reclaimed_objects;
+    uint64_t cache_cpus;
+    uint64_t profiling_enabled;
+    uint64_t page_allocations;
+    uint64_t page_failures;
+    uint64_t page_deallocations;
+    uint64_t peak_allocated_pages;
+} hyper_native_memory_heap_statistics_t;
+HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_memory_heap_statistics_t) == 176, "memory_heap_statistics size");
+HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_memory_heap_statistics_t) == 8, "memory_heap_statistics alignment");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, captured_at_ns) == 0, "memory_heap_statistics.captured_at_ns offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, live_objects) == 8, "memory_heap_statistics.live_objects offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, live_slab_objects) == 16, "memory_heap_statistics.live_slab_objects offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, live_large_objects) == 24, "memory_heap_statistics.live_large_objects offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, requested_bytes) == 32, "memory_heap_statistics.requested_bytes offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, peak_objects) == 40, "memory_heap_statistics.peak_objects offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, peak_requested_bytes) == 48, "memory_heap_statistics.peak_requested_bytes offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, allocations) == 56, "memory_heap_statistics.allocations offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, failures) == 64, "memory_heap_statistics.failures offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, cached_objects) == 72, "memory_heap_statistics.cached_objects offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, cache_hits) == 80, "memory_heap_statistics.cache_hits offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, cache_misses) == 88, "memory_heap_statistics.cache_misses offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, cache_refills) == 96, "memory_heap_statistics.cache_refills offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, cache_drains) == 104, "memory_heap_statistics.cache_drains offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, pressure_reclaims) == 112, "memory_heap_statistics.pressure_reclaims offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, reclaimed_objects) == 120, "memory_heap_statistics.reclaimed_objects offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, cache_cpus) == 128, "memory_heap_statistics.cache_cpus offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, profiling_enabled) == 136, "memory_heap_statistics.profiling_enabled offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, page_allocations) == 144, "memory_heap_statistics.page_allocations offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, page_failures) == 152, "memory_heap_statistics.page_failures offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, page_deallocations) == 160, "memory_heap_statistics.page_deallocations offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_statistics_t, peak_allocated_pages) == 168, "memory_heap_statistics.peak_allocated_pages offset");
+
+#define HYPER_NATIVE_MEMORY_BUDDY_STATISTICS_MIN_SIZE UINT64_C(24)
+typedef struct hyper_native_memory_buddy_statistics_t {
+    uint64_t captured_at_ns;
+    uint64_t order;
+    uint64_t free_blocks;
+} hyper_native_memory_buddy_statistics_t;
+HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_memory_buddy_statistics_t) == 24, "memory_buddy_statistics size");
+HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_memory_buddy_statistics_t) == 8, "memory_buddy_statistics alignment");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_buddy_statistics_t, captured_at_ns) == 0, "memory_buddy_statistics.captured_at_ns offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_buddy_statistics_t, order) == 8, "memory_buddy_statistics.order offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_buddy_statistics_t, free_blocks) == 16, "memory_buddy_statistics.free_blocks offset");
+
+#define HYPER_NATIVE_MEMORY_OWNER_STATISTICS_MIN_SIZE UINT64_C(48)
+typedef struct hyper_native_memory_owner_statistics_t {
+    uint64_t captured_at_ns;
+    uint64_t resident_pages;
+    uint64_t peak_pages;
+    uint64_t allocations;
+    uint64_t failures;
+    uint64_t deallocations;
+} hyper_native_memory_owner_statistics_t;
+HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_memory_owner_statistics_t) == 48, "memory_owner_statistics size");
+HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_memory_owner_statistics_t) == 8, "memory_owner_statistics alignment");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_owner_statistics_t, captured_at_ns) == 0, "memory_owner_statistics.captured_at_ns offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_owner_statistics_t, resident_pages) == 8, "memory_owner_statistics.resident_pages offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_owner_statistics_t, peak_pages) == 16, "memory_owner_statistics.peak_pages offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_owner_statistics_t, allocations) == 24, "memory_owner_statistics.allocations offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_owner_statistics_t, failures) == 32, "memory_owner_statistics.failures offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_owner_statistics_t, deallocations) == 40, "memory_owner_statistics.deallocations offset");
+
+#define HYPER_NATIVE_MEMORY_FILE_CACHE_STATISTICS_MIN_SIZE UINT64_C(120)
+typedef struct hyper_native_memory_file_cache_statistics_t {
+    uint64_t captured_at_ns;
+    uint64_t payload_pages;
+    uint64_t metadata_slab_pages;
+    uint64_t metadata_large_pages;
+    uint64_t index_capacity;
+    uint64_t clean_entries;
+    uint64_t loading_entries;
+    uint64_t live_payloads;
+    uint64_t metadata_budget_pages;
+    uint64_t table_present;
+    uint64_t admission_enabled;
+    uint64_t admission_paused;
+    uint64_t maintenance_pending;
+    uint64_t maintenance_running;
+    uint64_t growth_requested;
+} hyper_native_memory_file_cache_statistics_t;
+HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_memory_file_cache_statistics_t) == 120, "memory_file_cache_statistics size");
+HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_memory_file_cache_statistics_t) == 8, "memory_file_cache_statistics alignment");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_file_cache_statistics_t, captured_at_ns) == 0, "memory_file_cache_statistics.captured_at_ns offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_file_cache_statistics_t, payload_pages) == 8, "memory_file_cache_statistics.payload_pages offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_file_cache_statistics_t, metadata_slab_pages) == 16, "memory_file_cache_statistics.metadata_slab_pages offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_file_cache_statistics_t, metadata_large_pages) == 24, "memory_file_cache_statistics.metadata_large_pages offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_file_cache_statistics_t, index_capacity) == 32, "memory_file_cache_statistics.index_capacity offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_file_cache_statistics_t, clean_entries) == 40, "memory_file_cache_statistics.clean_entries offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_file_cache_statistics_t, loading_entries) == 48, "memory_file_cache_statistics.loading_entries offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_file_cache_statistics_t, live_payloads) == 56, "memory_file_cache_statistics.live_payloads offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_file_cache_statistics_t, metadata_budget_pages) == 64, "memory_file_cache_statistics.metadata_budget_pages offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_file_cache_statistics_t, table_present) == 72, "memory_file_cache_statistics.table_present offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_file_cache_statistics_t, admission_enabled) == 80, "memory_file_cache_statistics.admission_enabled offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_file_cache_statistics_t, admission_paused) == 88, "memory_file_cache_statistics.admission_paused offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_file_cache_statistics_t, maintenance_pending) == 96, "memory_file_cache_statistics.maintenance_pending offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_file_cache_statistics_t, maintenance_running) == 104, "memory_file_cache_statistics.maintenance_running offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_file_cache_statistics_t, growth_requested) == 112, "memory_file_cache_statistics.growth_requested offset");
+
+#define HYPER_NATIVE_MEMORY_HEAP_CLASS_STATISTICS_MIN_SIZE UINT64_C(88)
+typedef struct hyper_native_memory_heap_class_statistics_t {
+    uint64_t captured_at_ns;
+    uint64_t pool;
+    uint64_t object_size;
+    uint64_t pages;
+    uint64_t capacity;
+    uint64_t reserved;
+    uint64_t cached;
+    uint64_t live;
+    uint64_t requested_bytes;
+    uint64_t allocations;
+    uint64_t deallocations;
+} hyper_native_memory_heap_class_statistics_t;
+HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_memory_heap_class_statistics_t) == 88, "memory_heap_class_statistics size");
+HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_memory_heap_class_statistics_t) == 8, "memory_heap_class_statistics alignment");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_class_statistics_t, captured_at_ns) == 0, "memory_heap_class_statistics.captured_at_ns offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_class_statistics_t, pool) == 8, "memory_heap_class_statistics.pool offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_class_statistics_t, object_size) == 16, "memory_heap_class_statistics.object_size offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_class_statistics_t, pages) == 24, "memory_heap_class_statistics.pages offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_class_statistics_t, capacity) == 32, "memory_heap_class_statistics.capacity offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_class_statistics_t, reserved) == 40, "memory_heap_class_statistics.reserved offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_class_statistics_t, cached) == 48, "memory_heap_class_statistics.cached offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_class_statistics_t, live) == 56, "memory_heap_class_statistics.live offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_class_statistics_t, requested_bytes) == 64, "memory_heap_class_statistics.requested_bytes offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_class_statistics_t, allocations) == 72, "memory_heap_class_statistics.allocations offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_memory_heap_class_statistics_t, deallocations) == 80, "memory_heap_class_statistics.deallocations offset");
 
 #define HYPER_NATIVE_FILESYSTEM_ROOT_SWITCH_MIN_SIZE UINT64_C(48)
 typedef struct hyper_native_filesystem_root_switch_t {

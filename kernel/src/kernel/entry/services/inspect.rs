@@ -12,6 +12,17 @@ use crate::kernel::object::KernelObject;
 use crate::kernel::process::{ProcessObject, ProcessSnapshot, TaskGroupObject};
 
 impl SystemInspectServices for DeferredProcessServices<'_> {
+    fn memory_statistics(
+        &self,
+        inspector: HandleValue,
+        query: crate::kernel::inspect::memory::Query,
+    ) -> Result<crate::kernel::inspect::memory::Statistics, crate::kernel::inspect::Error> {
+        let inspector = self
+            .process
+            .resolve_handle::<MemoryInspector>(inspector, Rights::INSPECT)
+            .map_err(crate::kernel::inspect::Error::Process)?;
+        inspector.object().statistics(query)
+    }
     fn memory_observation(
         &self,
         inspector: HandleValue,

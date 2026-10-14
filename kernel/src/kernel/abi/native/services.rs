@@ -558,6 +558,11 @@ pub(in crate::kernel) trait VmServices: UserMemoryServices {
 }
 
 pub(in crate::kernel) trait SystemInspectServices: UserMemoryServices {
+    fn memory_statistics(
+        &self,
+        inspector: HandleValue,
+        query: crate::kernel::inspect::memory::Query,
+    ) -> Result<crate::kernel::inspect::memory::Statistics, crate::kernel::inspect::Error>;
     fn memory_observation(
         &self,
         inspector: HandleValue,

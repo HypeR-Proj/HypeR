@@ -21,6 +21,8 @@ use crate::kernel::process::{
 };
 use crate::kernel::task::{ThreadObjectRegistryPhase, ThreadObjectScanCursor, ThreadRole};
 
+pub(crate) mod memory;
+
 // Keep capture pages deliberately small: scans execute on 16-KiB kernel
 // stacks, and source directory snapshots coexist with ABI encoding frames.
 pub(crate) const PROCESS_PAGE_CAPACITY: usize = 8;
@@ -105,6 +107,7 @@ impl ObjectVisibility {
 
 #[derive(Debug)]
 pub(crate) enum Error {
+    Unsupported,
     AccessDenied,
     Details(crate::kernel::object::diagnostics::DetailError),
     Allocation,

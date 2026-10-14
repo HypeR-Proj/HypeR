@@ -13,6 +13,8 @@ mod handles;
 mod inspect;
 mod ipc;
 mod memory;
+mod memory_statistics;
+pub(super) use memory_statistics::sys_memory_inspector_read_statistics;
 mod object;
 mod process_builder;
 mod system;

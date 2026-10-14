@@ -1322,6 +1322,15 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
     }
 
     impl SystemInspectServices for RejectingServices {
+        fn memory_statistics(
+            &self,
+            _: HandleValue,
+            _: crate::kernel::inspect::memory::Query,
+        ) -> Result<crate::kernel::inspect::memory::Statistics, crate::kernel::inspect::Error>
+        {
+            self.calls.set(self.calls.get().saturating_add(1));
+            Err(crate::kernel::inspect::Error::AccessDenied)
+        }
         fn memory_observation(
             &self,
             _: HandleValue,
@@ -1456,6 +1465,49 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
     let services = RejectingServices {
         calls: Cell::new(0),
     };
+    // Diagnostic reads validate selectors and bounded records before invoking
+    // privileged services. Valid requests still require inspector authority.
+    {
+        use hyper::abi::native::*;
+        let diagnostic_services = RejectingServices {
+            calls: Cell::new(0),
+        };
+        let number = HYPER_NATIVE_SYS_MEMORY_INSPECTOR_READ_STATISTICS;
+        let size = core::mem::size_of::<HyperNativeMemoryHeapStatistics>() as u64;
+        let valid = [
+            1_u64 << 24 | 1,
+            HYPER_NATIVE_MEMORY_STATISTICS_HEAP,
+            0,
+            0x2000,
+            size,
+            0,
+        ];
+        for (argument, value) in [(1, 0), (1, u64::MAX), (2, 1), (4, 0), (4, size - 1), (5, 1)] {
+            let mut args = valid;
+            args[argument] = value;
+            let DeferredAction::Return(result) =
+                dispatch_deferred(&diagnostic_services, invoke(number, args))
+            else {
+                return Err(SelfTestError::InvalidRecordSize);
+            };
+            if result.status() != HYPER_NATIVE_STATUS_INVALID_ARGUMENT
+                || diagnostic_services.calls.get() != 0
+            {
+                return Err(SelfTestError::InvalidRecordSize);
+            }
+        }
+        let DeferredAction::Return(result) =
+            dispatch_deferred(&diagnostic_services, invoke(number, valid))
+        else {
+            return Err(SelfTestError::InvalidRecordSize);
+        };
+        if result.status() != HYPER_NATIVE_STATUS_ACCESS_DENIED
+            || diagnostic_services.calls.get() != 1
+        {
+            return Err(SelfTestError::InvalidRecordSize);
+        }
+    }
+
     let query = dispatch_immediate(&services, invoke(HYPER_NATIVE_SYS_ABI_QUERY, [u64::MAX; 6]));
     if query.status() != HYPER_NATIVE_STATUS_OK
         || query.values() != &[HYPER_NATIVE_ABI_REVISION, HYPER_NATIVE_FEATURE_CORE]
