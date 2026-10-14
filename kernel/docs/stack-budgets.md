@@ -103,5 +103,11 @@ without copying the payload through constructor return values or syscall
 frames. Allocation failure releases the physical claim and its resource charge;
 the number and accounting of the final object allocations are unchanged.
 
+Filesystem RPC returns only a scalar operation result through the blocking
+transport. A separate decode frame validates the complete reply and fills the
+volume's existing metadata scratch when requested. The reply's filename buffer
+is not retained in each caller or across the scheduler wait path; the wire
+format and validation remain unchanged.
+
 `make test-stack ARCH=riscv64` runs the same workload and watermark checks.
 Both architectures use the same runtime limits rather than per-function ceilings.

@@ -101,11 +101,31 @@ impl Transport {
         offset: u64,
         length: u64,
         times: [Option<Timestamp>; 2],
-    ) -> Result<Response, Error> {
+    ) -> Result<u64, Error> {
+        self.exchange(
+            Request {
+                sequence: 0,
+                operation,
+                path,
+                target,
+                offset,
+                length,
+                accessed: times[0],
+                modified: times[1],
+                cursor: DirectoryCursor::START,
+            },
+            None,
+        )
+    }
+    fn exchange(
+        &mut self,
+        request: Request<'_>,
+        metadata: Option<&mut Entry>,
+    ) -> Result<u64, Error> {
         self.health.check()?;
         if self.read_only
             && matches!(
-                operation,
+                request.operation,
                 Operation::Write
                     | Operation::Create
                     | Operation::Remove
@@ -116,23 +136,17 @@ impl Transport {
         {
             return Err(Error::ReadOnly);
         }
-        let result = self.exchange(Request {
-            sequence: 0,
-            operation,
-            path,
-            target,
-            offset,
-            length,
-            accessed: times[0],
-            modified: times[1],
-            cursor: DirectoryCursor::START,
-        });
+        let result = self.transact(request, metadata);
         if result.as_ref().err().is_some_and(|error| error.terminal()) {
             self.health.fail();
         }
         result
     }
-    fn exchange(&mut self, mut request: Request<'_>) -> Result<Response, Error> {
+    fn transact(
+        &mut self,
+        mut request: Request<'_>,
+        metadata: Option<&mut Entry>,
+    ) -> Result<u64, Error> {
         self.sequence = self.sequence.checked_add(1).ok_or(Error::Closed)?;
         request.sequence = self.sequence;
         let operation = request.operation;
@@ -161,11 +175,10 @@ impl Transport {
             match channel.peek() {
                 Ok(info) => {
                     let claim = channel.claim(info).map_err(|_| Error::Closed)?;
-                    let response = Response::decode(claim.bytes(), self.sequence, operation);
+                    let response =
+                        decode_response(claim.bytes(), self.sequence, operation, metadata);
                     claim.commit().release();
-                    let response = response.ok_or(Error::Corrupt)?;
-                    response.result?;
-                    return Ok(response);
+                    return response;
                 }
                 Err(ByteChannelError::WouldBlock) => {}
                 Err(_) => return Err(Error::Closed),
@@ -191,8 +204,21 @@ impl Transport {
         }
     }
     pub(super) fn stat_into(&mut self, path: &str, entry: &mut Entry) -> Result<(), Error> {
-        *entry = self.call(Operation::Stat, path, "", 0, 0, [None; 2])?.entry;
-        Ok(())
+        self.exchange(
+            Request {
+                sequence: 0,
+                operation: Operation::Stat,
+                path,
+                target: "",
+                offset: 0,
+                length: 0,
+                accessed: None,
+                modified: None,
+                cursor: DirectoryCursor::START,
+            },
+            Some(entry),
+        )
+        .map(|_| ())
     }
     /// Directory checkpoints originate in a validated backend batch and stay in
     /// the kernel-owned stream. Native cookies never enter this request.
@@ -204,18 +230,21 @@ impl Transport {
     ) -> Result<usize, Error> {
         self.health.check()?;
         let result = (|| {
-            let response = self.exchange(Request {
-                sequence: 0,
-                operation: Operation::ReadDirectory,
-                path,
-                target: "",
-                offset: 0,
-                length: output.len() as u64,
-                accessed: None,
-                modified: None,
-                cursor,
-            })?;
-            let actual = usize::try_from(response.result?).map_err(|_| Error::Corrupt)?;
+            let response = self.exchange(
+                Request {
+                    sequence: 0,
+                    operation: Operation::ReadDirectory,
+                    path,
+                    target: "",
+                    offset: 0,
+                    length: output.len() as u64,
+                    accessed: None,
+                    modified: None,
+                    cursor,
+                },
+                None,
+            )?;
+            let actual = usize::try_from(response).map_err(|_| Error::Corrupt)?;
             let destination = output.get_mut(..actual).ok_or(Error::Corrupt)?;
             self.buffer
                 .read_exposed(0, destination)
@@ -243,7 +272,7 @@ impl Transport {
             output.len() as u64,
             [None; 2],
         )?;
-        let actual = usize::try_from(response.result?).map_err(|_| Error::Corrupt)?;
+        let actual = usize::try_from(response).map_err(|_| Error::Corrupt)?;
         if actual > output.len() {
             self.health.fail();
             return Err(Error::Corrupt);
@@ -269,7 +298,7 @@ impl Transport {
                 chunk.len() as u64,
                 [None; 2],
             )?;
-            let actual = usize::try_from(response.result?).map_err(|_| Error::Corrupt)?;
+            let actual = usize::try_from(response).map_err(|_| Error::Corrupt)?;
             if actual > chunk.len() {
                 self.health.fail();
                 return Err(Error::Corrupt);
@@ -302,7 +331,7 @@ impl Transport {
                 chunk.len() as u64,
                 [None; 2],
             )?;
-            let actual = usize::try_from(response.result?).map_err(|_| Error::Corrupt)?;
+            let actual = usize::try_from(response).map_err(|_| Error::Corrupt)?;
             if actual > chunk.len() {
                 self.health.fail();
                 return Err(Error::Corrupt);
@@ -350,4 +379,22 @@ impl Transport {
         self.call(Operation::SetMetadata, path, "", 0, 0, [accessed, modified])
             .map(|_| ())
     }
+}
+
+/// Keep the full metadata reply off the blocking transaction's stack. Most
+/// operations only need its scalar result; stat fills the volume's existing
+/// metadata scratch directly. All reply fields remain validated in both cases.
+#[inline(never)]
+fn decode_response(
+    bytes: &[u8],
+    sequence: u64,
+    operation: Operation,
+    metadata: Option<&mut Entry>,
+) -> Result<u64, Error> {
+    let response = Response::decode(bytes, sequence, operation).ok_or(Error::Corrupt)?;
+    let actual = response.result?;
+    if let Some(metadata) = metadata {
+        *metadata = response.entry;
+    }
+    Ok(actual)
 }
