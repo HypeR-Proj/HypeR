@@ -866,6 +866,24 @@ Ordinary shared writable VMOs and exclusive hardware backing retain
 their stable-page lease contract. This is not a live address-space clone or a
 snapshot of concurrently hardware-written guest memory.
 
+Explicit `GuestMemory` READ and WRITE rights allow a userspace device backend
+to copy up to 4096 guest bytes per call. They do not reopen direct VMO writes
+or writable Native mappings. `guest_memory_scalar` provides naturally aligned
+1/2/4/8-byte acquire loads and release stores; stores include a full memory
+fence so used-ring publication precedes notification-suppression checks.
+Concurrent Native payload operations return `BUSY` instead of mixing scalar
+and byte accesses. Dedicating a grant to a `NativeBlock` permanently closes
+these payload operations, including through retained duplicate handles.
+
+`guest_interrupt_create` takes VirtualMachine WRITE and reserves one exclusive
+AArch64 device interrupt line while the VM is installed or running. It returns
+a `GuestInterrupt` with WRITE, TRANSFER and INSPECT rights. Built-in serial,
+physical-device and notification lines cannot be reused. The owner controls a
+level through `guest_interrupt_set_level`; the last active handle deasserts it.
+Closing a source does not release its reservation before VM retirement, and
+level updates fail once retirement starts. Device-register and queue semantics
+remain in userspace.
+
 A COW transition prepares replacement page ownership and an immutable machine
 root, then commits through the existing address-space epoch and acknowledged
 cross-CPU replacement protocol. Old mapping versions retain concrete backing
@@ -922,7 +940,7 @@ contracts. These are representative implemented families; consult the
 | Wait | Object wait-one/wait-many; WaitSet create/add/rearm/remove/wait; atomic wait/wake |
 | Filesystem | Capability-relative Directory operations, File data/metadata/sync, content protection and advisory locks; authorized ramfs mount and atomic root switching |
 | Virtualization | Creation leases, PendingVirtualMachine construction/install/abort, VM stop and power completion, vCPU start/affinity/MMIO completion, VirtualSerial |
-| Physical devices and I/O | DeviceAssignmentAuthority, PhysicalDevice claims/MMIO/IRQ, GuestMemory, GuestMapping, GuestMailbox, GuestNotification and NativeBlock |
+| Physical devices and I/O | DeviceAssignmentAuthority, PhysicalDevice claims/MMIO/IRQ, GuestMemory, GuestMapping, GuestMailbox, GuestNotification, GuestInterrupt and NativeBlock |
 
 Device claims require explicit assignment authority and validate the selected
 resource profile. Userspace device drivers use bounded `device_mmio` operations

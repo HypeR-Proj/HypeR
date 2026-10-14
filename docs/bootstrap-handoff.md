@@ -264,15 +264,30 @@ are private to the two environments, with no kernel device-specific policy:
 | `0x80080020` | Replacement readiness writer |
 | `0x80080021` | Old filesystem worker Process supervisors |
 
-The I/O predecessor sends `HYPER-IO-DESCRIBE/1` and a length-prefixed, bounded
+The I/O predecessor sends `HYPER-IO-DESCRIBE/2` and a length-prefixed, bounded
 JSON description VMO (32 KiB maximum). The system replacement validates the
-role/type/right inventory before receiving `HYPER-IO-ADOPT/1`. The atomic MOVE
-includes the running VM and vCPUs, physical device assignments, serial consumer
-and ring, DMA memory leases and Native/client mailboxes. The accompanying record
-preserves the serial cursor and partial-line state. Physical MMIO service is
-quiesced at a request boundary and resumed without resetting the hardware or
-rebooting Linux. The broker accepts business clients only in the formal owner.
-`HYPER-IO-READY/1` confirms the resumed owner is serving.
+role/type/right inventory and ordinary guest-RAM bounds before receiving
+`HYPER-IO-ADOPT/2`. The atomic MOVE includes the running VM and vCPUs, physical
+device assignments, serial consumer and ring, ordinary guest-memory access,
+an exclusive PCIe hotplug interrupt source, DMA memory leases and
+Native/client mailboxes. The ordinary guest-memory capability admits only the
+I/O VM's RAM; imported business-VM aliases are not device buffer authority.
+
+The accompanying record preserves the serial cursor, partial-line state and
+32-byte root-port register state. One MMIO consumer serves physical-device exits
+and the empty PCIe slot during bootstrap. It joins at a request boundary before
+MOVE, so no configuration update can occur between capture and adoption. Pending
+vCPU exits stay in the kernel and are completed by the successor. A rejected
+MOVE restarts the predecessor consumer with the same captured root-port state.
+No physical device reset, Linux reboot or PCI host-bus re-enumeration occurs.
+
+The formal runtime resumes that bus, creates its endpoint interrupt source and
+may insert a virtio-console endpoint by publishing its configuration and a
+standard PCIe presence-change interrupt.
+Bootstrap provides an empty slot, without a console device or agent protocol.
+The broker accepts business clients only in the formal owner.
+`HYPER-IO-READY/2` confirms the resumed owner is serving. This adoption readiness
+record is separate from the unchanged bootstrap storage-readiness protocol.
 
 The filesystem predecessor describes volume identities, labels and mounted
 format/target state and kernel mount IDs with `HYPER-FS-DESCRIBE/1` (64 KiB maximum JSON). The formal

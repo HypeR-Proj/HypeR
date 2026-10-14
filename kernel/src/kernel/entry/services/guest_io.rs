@@ -8,6 +8,53 @@ use crate::kernel::capability::HandleValue;
 use crate::kernel::mm::user_space::UserSlice;
 
 impl crate::kernel::abi::native::GuestIoServices for DeferredProcessServices<'_> {
+    fn transfer_guest_memory(
+        &self,
+        memory: HandleValue,
+        write: bool,
+        offset: u64,
+        buffer: UserSlice,
+    ) -> Result<(), crate::kernel::vm::service::Error> {
+        crate::kernel::vm::objects::guest_memory_access::transfer(
+            self.process,
+            memory,
+            write,
+            offset,
+            buffer,
+        )
+    }
+    fn scalar_guest_memory(
+        &self,
+        memory: HandleValue,
+        write: bool,
+        offset: u64,
+        width: u32,
+        value: u64,
+    ) -> Result<u64, crate::kernel::vm::service::Error> {
+        crate::kernel::vm::objects::guest_memory_access::scalar(
+            self.process,
+            memory,
+            write,
+            offset,
+            width,
+            value,
+        )
+    }
+    fn create_guest_interrupt(
+        &self,
+        machine: HandleValue,
+        irq: u32,
+    ) -> Result<HandleValue, crate::kernel::vm::service::Error> {
+        crate::kernel::vm::io::service::create_interrupt(self.process, machine, irq)
+    }
+    fn set_guest_interrupt_level(
+        &self,
+        interrupt: HandleValue,
+        asserted: bool,
+    ) -> Result<(), crate::kernel::vm::service::Error> {
+        crate::kernel::vm::io::service::set_interrupt_level(self.process, interrupt, asserted)
+    }
+
     fn create_guest_mapping(
         &self,
         backend: HandleValue,

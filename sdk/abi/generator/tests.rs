@@ -798,6 +798,7 @@ fn object_transfer_classes_match_the_audited_contract() {
         ("file_protection", TransferClass::Forbidden),
         ("directory_stream", TransferClass::General),
         ("root_transition", TransferClass::RendezvousOnly),
+        ("guest_interrupt", TransferClass::RendezvousOnly),
     ];
     assert_eq!(schema::OBJECT_KINDS.len(), expected.len());
     for (kind, expected) in schema::OBJECT_KINDS.iter().zip(expected) {

@@ -8,10 +8,15 @@ use crate::kernel::accounting::{CommittedCharge, ResourceDomain};
 use crate::kernel::authority::Rights;
 use crate::kernel::mm::user_space::{GuestMemoryBacking, VmoObject};
 use crate::kernel::object::{KernelObject, ObjectKind, TransferClass, private};
+use core::sync::atomic::{AtomicUsize, Ordering};
+
+const IDLE: usize = 0;
+const KERNEL_INITIATOR: usize = 1;
+const NATIVE_ACCESS: usize = 2;
 
 pub(crate) struct GuestMemoryObject {
     backing: GuestMemoryBacking,
-    native_initiator: core::sync::atomic::AtomicBool,
+    native_access: AtomicUsize,
     _charge: CommittedCharge,
 }
 
@@ -20,19 +25,24 @@ impl GuestMemoryObject {
         let charge = reserve_object_charge::<Self>(domain)?;
         Ok(Self {
             backing: GuestMemoryBacking::try_from_vmo(vmo)?,
-            native_initiator: core::sync::atomic::AtomicBool::new(false),
+            native_access: AtomicUsize::new(IDLE),
             _charge: charge,
         })
     }
     pub(crate) fn claim_native_initiator(&self) -> bool {
-        self.native_initiator
-            .compare_exchange(
-                false,
-                true,
-                core::sync::atomic::Ordering::AcqRel,
-                core::sync::atomic::Ordering::Acquire,
-            )
+        self.native_access
+            .compare_exchange(IDLE, KERNEL_INITIATOR, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
+    }
+    pub(crate) fn native_access(
+        &self,
+    ) -> Result<NativeAccess<'_>, crate::kernel::vm::service::Error> {
+        // Even readers exclude other Native operations: mixed-width atomic
+        // words and byte copies must never overlap inside the Rust kernel.
+        self.native_access
+            .compare_exchange(IDLE, NATIVE_ACCESS, Ordering::Acquire, Ordering::Relaxed)
+            .map_err(|_| crate::kernel::vm::service::Error::Busy)?;
+        Ok(NativeAccess(&self.native_access))
     }
     pub(crate) fn backing(&self) -> GuestMemoryBacking {
         self.backing.clone()
@@ -45,6 +55,16 @@ impl KernelObject for GuestMemoryObject {
     const TRANSFER_CLASS: TransferClass = TransferClass::RendezvousOnly;
     const SUPPORTED_RIGHTS: Rights = Rights::TRANSFER
         .union(Rights::DUPLICATE)
+        .union(Rights::READ)
+        .union(Rights::WRITE)
         .union(Rights::MAP)
         .union(Rights::INSPECT);
+}
+
+/// Serializes Native payload accesses and excludes kernel-initiator dedication.
+pub(crate) struct NativeAccess<'a>(&'a AtomicUsize);
+impl Drop for NativeAccess<'_> {
+    fn drop(&mut self) {
+        self.0.store(IDLE, Ordering::Release);
+    }
 }

@@ -142,3 +142,26 @@ pub(crate) fn access_notification(
         .owner()
         .access_notification(original, operation, value)
 }
+
+/// Reserves a line until VM retirement, even after its userspace owner closes.
+pub(crate) fn create_interrupt(
+    process: &Process,
+    machine: HandleValue,
+    irq: u32,
+) -> Result<HandleValue, Error> {
+    let machine = process.resolve_handle::<VirtualMachineObject>(machine, Rights::WRITE)?;
+    let interrupt =
+        super::Interrupt::prepare(machine.object().owner(), irq, &process.resource_domain())?;
+    let installer = interrupt.clone();
+    publish(process, interrupt, || installer.install())
+}
+pub(crate) fn set_interrupt_level(
+    process: &Process,
+    interrupt: HandleValue,
+    asserted: bool,
+) -> Result<(), Error> {
+    process
+        .resolve_handle::<super::Interrupt>(interrupt, Rights::WRITE)?
+        .object()
+        .set_level(asserted)
+}

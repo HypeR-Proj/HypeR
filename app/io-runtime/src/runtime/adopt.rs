@@ -5,12 +5,15 @@
 
 use super::broker::Broker;
 use super::{Result, show};
+use hyper_io_runtime_system::devices::{
+    Devices,
+    worker::{self, Worker},
+};
 use hyper_io_runtime_system::guest::install::InstalledGuest;
 use hyper_io_runtime_system::guest_log::GuestLog;
 use hyper_io_runtime_system::handoff::{self, Description, Kind, WorkerMode};
-use hyper_io_runtime_system::sdhci::worker::{self, Worker};
 use hyper_os::capability_channel::{CapabilityChannel, CapabilityReceiveSlot};
-use hyper_os::guest_io::Mailbox;
+use hyper_os::guest_io::{Interrupt, Mailbox};
 use hyper_os::handle::*;
 use hyper_os::memory::SnapshotVmo;
 use hyper_os::startup::{Startup, StartupPurpose};
@@ -82,7 +85,7 @@ pub(super) fn receive(startup: &mut Startup<'_>) -> Result<Adopted> {
     if message.capability_count() != slots.len() {
         return Err("incomplete I/O capability inventory".into());
     }
-    let (cursor, line_start) = handoff::decode_commit(message.bytes())
+    let (cursor, line_start, bridge) = handoff::decode_commit(message.bytes())
         .map_err(|error| stage("decode committed state", error))?;
     let mut slots = slots.into_iter();
     let machine = Arc::new(take::<VirtualMachineObject>(&mut slots)?);
@@ -92,6 +95,8 @@ pub(super) fn receive(startup: &mut Startup<'_>) -> Result<Adopted> {
     }
     let serial = take::<VirtualSerialObject>(&mut slots)?;
     let memory = take::<VmoObject>(&mut slots)?;
+    let own_memory = take::<GuestMemoryObject>(&mut slots)?;
+    let hotplug_irq = take::<GuestInterruptObject>(&mut slots)?;
     let physical = take::<PhysicalDeviceObject>(&mut slots)?;
     let network = if description.network {
         Some(take::<PhysicalDeviceObject>(&mut slots)?)
@@ -139,20 +144,24 @@ pub(super) fn receive(startup: &mut Startup<'_>) -> Result<Adopted> {
         cpus,
         output,
     };
-    let worker = match description.worker {
-        WorkerMode::None => None,
-        WorkerMode::Sdhci => Some(
-            worker::resume(&physical, &guest)
-                .map_err(|error| stage("resume SDHCI worker", error))?,
-        ),
-        #[cfg(feature = "userspace-device-test")]
-        WorkerMode::VirtioTest => Some(
-            worker::resume_virtio_test(&physical, &guest)
-                .map_err(|error| stage("resume test device worker", error))?,
-        ),
-        #[cfg(not(feature = "userspace-device-test"))]
-        WorkerMode::VirtioTest => return Err("test device consumer unavailable".into()),
-    };
+    let console_irq = Interrupt::create(
+        guest.machine.as_handle_ref(),
+        hyper_vm_support::pcie::ENDPOINT_IRQ,
+    )
+    .map_err(|error| stage("create console interrupt", error))?;
+    let devices = Devices::new(
+        bridge,
+        own_memory,
+        description.memory_base,
+        description.memory_size,
+        hotplug_irq,
+        console_irq.into_handle(),
+    )
+    .map_err(|error| stage("prepare userspace devices", error))?;
+    let worker = Some(
+        worker::resume(&physical, &guest, description.worker, devices)
+            .map_err(|error| stage("resume I/O device consumer", error))?,
+    );
     let broker = broker_endpoint
         .map(|endpoint| Broker::adopt(endpoint, description.clients, broker_mailboxes))
         .transpose()?;
@@ -182,7 +191,10 @@ fn receive_slot(slot: &handoff::Slot) -> Result<CapabilityReceiveSlot> {
             CapabilityReceiveSlot::new::<PhysicalDeviceObject>(rights)
         }
         Kind::Broker => CapabilityReceiveSlot::new::<CapabilityChannelObject>(rights),
-        Kind::NativeMemory => CapabilityReceiveSlot::new::<GuestMemoryObject>(rights),
+        Kind::OwnMemory | Kind::NativeMemory => {
+            CapabilityReceiveSlot::new::<GuestMemoryObject>(rights)
+        }
+        Kind::HotplugInterrupt => CapabilityReceiveSlot::new::<GuestInterruptObject>(rights),
         Kind::NativeMailbox | Kind::BrokerMailbox => {
             CapabilityReceiveSlot::new::<GuestMailboxObject>(rights)
         }

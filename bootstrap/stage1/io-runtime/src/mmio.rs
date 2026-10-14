@@ -1,10 +1,12 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Independently scheduled MMIO/IRQ service: the main I/O runtime may block
-//! waiting for Linux storage without blocking Linux's physical device exits.
+//! One owner for physical-device and empty `PCIe` root-port exits.
+//! Storage waits cannot block Linux device discovery, and no two consumers
+//! race on the same vCPU MMIO endpoint.
 
 use crate::guest::install::{InstalledGuest, PHYSICAL_MMIO};
+use crate::pcie::{self, RootPort};
 use hyper_os::handle::{
     ByteChannelObject, OwnedHandle, PhysicalDeviceObject, VirtualCpuObject, VirtualMachineObject,
 };
@@ -13,8 +15,8 @@ use hyper_os::{Error, Result, Status, channel, device, vm};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
-pub use super::registers::DEVICE_COOKIE;
-use super::registers::{line_asserted, request_offset};
+pub use crate::sdhci::registers::DEVICE_COOKIE;
+use crate::sdhci::registers::{line_asserted, request_offset};
 
 pub struct Worker {
     // Closing this endpoint is a durable stop notification, even if the worker
@@ -41,7 +43,7 @@ impl Worker {
     /// Joins the MMIO consumer at a request boundary without stopping the VM.
     /// Pending exits and IRQ levels remain in their kernel objects for the
     /// successor. A failure still follows the normal stop-on-error path.
-    pub fn quiesce(mut self) -> Result<()> {
+    pub fn quiesce(mut self) -> Result<RootPort> {
         self.stop
             .as_ref()
             .ok_or(Error::MissingHandle)?
@@ -52,7 +54,7 @@ impl Worker {
             .join()
             .map_err(|_| Error::Status(Status::INTERNAL))??
         {
-            Exit::Quiesced => Ok(()),
+            Exit::Quiesced(pcie) => Ok(pcie),
             Exit::Stopped => Err(Error::Status(Status::PEER_CLOSED)),
         }
     }
@@ -68,7 +70,7 @@ impl Drop for Worker {
 const QUIESCE: u8 = 1;
 enum Exit {
     Stopped,
-    Quiesced,
+    Quiesced(RootPort),
 }
 
 struct MachineGuard {
@@ -84,14 +86,15 @@ impl Drop for MachineGuard {
 }
 
 struct Pump {
-    physical: OwnedHandle<PhysicalDeviceObject>,
+    physical: Option<OwnedHandle<PhysicalDeviceObject>>,
     machine: MachineGuard,
     cpus: Vec<Arc<OwnedHandle<VirtualCpuObject>>>,
     _stop: OwnedHandle<ByteChannelObject>,
     waits: WaitSet,
     stop_id: RegistrationId,
     machine_id: RegistrationId,
-    irq_id: RegistrationId,
+    irq_id: Option<RegistrationId>,
+    pcie: RootPort,
     cpu_ids: Vec<RegistrationId>,
     irq_armed: bool,
     mode: Mode,
@@ -103,7 +106,13 @@ pub fn start(
     physical: &OwnedHandle<PhysicalDeviceObject>,
     guest: &InstalledGuest,
 ) -> Result<Worker> {
-    start_mode(physical, guest, Mode::Sdhci, true)
+    start_mode(
+        Some(physical),
+        guest,
+        Mode::Sdhci,
+        true,
+        RootPort::default(),
+    )
 }
 
 /// Starts a new consumer for an already assigned, running SDHCI device.
@@ -112,8 +121,9 @@ pub fn start(
 pub fn resume(
     physical: &OwnedHandle<PhysicalDeviceObject>,
     guest: &InstalledGuest,
+    pcie: RootPort,
 ) -> Result<Worker> {
-    start_mode(physical, guest, Mode::Sdhci, false)
+    start_mode(Some(physical), guest, Mode::Sdhci, false, pcie)
 }
 
 #[cfg(feature = "userspace-device-test")]
@@ -121,19 +131,35 @@ pub fn start_virtio_test(
     physical: &OwnedHandle<PhysicalDeviceObject>,
     guest: &InstalledGuest,
 ) -> Result<Worker> {
-    start_mode(physical, guest, Mode::VirtioTest, true)
+    start_mode(
+        Some(physical),
+        guest,
+        Mode::VirtioTest,
+        true,
+        RootPort::default(),
+    )
 }
 
 #[cfg(feature = "userspace-device-test")]
 pub fn resume_virtio_test(
     physical: &OwnedHandle<PhysicalDeviceObject>,
     guest: &InstalledGuest,
+    pcie: RootPort,
 ) -> Result<Worker> {
-    start_mode(physical, guest, Mode::VirtioTest, false)
+    start_mode(Some(physical), guest, Mode::VirtioTest, false, pcie)
+}
+
+/// The empty `PCIe` slot also needs an independent consumer during disk waits.
+pub fn start_bus(guest: &InstalledGuest) -> Result<Worker> {
+    resume_bus(guest, RootPort::default())
+}
+pub fn resume_bus(guest: &InstalledGuest, pcie: RootPort) -> Result<Worker> {
+    start_mode(None, guest, Mode::BusOnly, false, pcie)
 }
 
 #[derive(Clone, Copy)]
 enum Mode {
+    BusOnly,
     Sdhci,
     #[cfg(feature = "userspace-device-test")]
     VirtioTest,
@@ -141,6 +167,7 @@ enum Mode {
 impl Mode {
     fn validate(self, physical: &OwnedHandle<PhysicalDeviceObject>) -> Result<()> {
         let valid = match self {
+            Self::BusOnly => false,
             Self::Sdhci => device::mmio_read(physical.as_handle_ref(), 0x40, 4)? & (1 << 28) != 0,
             #[cfg(feature = "userspace-device-test")]
             Self::VirtioTest => {
@@ -158,6 +185,7 @@ impl Mode {
     }
     fn asserted(self, physical: &OwnedHandle<PhysicalDeviceObject>) -> Result<bool> {
         match self {
+            Self::BusOnly => Ok(false),
             Self::Sdhci => {
                 let status = device::mmio_read(physical.as_handle_ref(), 0x30, 4)? as u32;
                 let enable = device::mmio_read(physical.as_handle_ref(), 0x38, 4)? as u32;
@@ -170,15 +198,18 @@ impl Mode {
 }
 
 fn start_mode(
-    physical: &OwnedHandle<PhysicalDeviceObject>,
+    physical: Option<&OwnedHandle<PhysicalDeviceObject>>,
     guest: &InstalledGuest,
     mode: Mode,
     validate: bool,
+    pcie: RootPort,
 ) -> Result<Worker> {
     if guest.cpus.is_empty() || guest.cpus.len() > 8 {
         return Err(Error::Status(Status::NOT_SUPPORTED));
     }
-    let physical = physical.duplicate(physical.info()?.rights)?;
+    let physical = physical
+        .map(|physical| physical.duplicate(physical.info()?.rights))
+        .transpose()?;
     // Share the same process-local capabilities. Installed VM/vCPU handles
     // intentionally cannot be duplicated through the Native capability API.
     let machine = MachineGuard {
@@ -188,7 +219,7 @@ fn start_mode(
     // Even a read may have device side effects. Only inspect capabilities after
     // installation has retained the VM backing and activated the DMA lease.
     if validate {
-        mode.validate(&physical)?;
+        mode.validate(physical.as_ref().ok_or(Error::MissingHandle)?)?;
     }
     let mut cpus = Vec::new();
     cpus.try_reserve_exact(guest.cpus.len())
@@ -207,10 +238,15 @@ fn start_mode(
         machine.machine.as_handle_ref(),
         ObjectSignals::<VirtualMachineObject>::TERMINATED,
     )?;
-    let irq_id = waits.add(
-        physical.as_handle_ref(),
-        ObjectSignals::<PhysicalDeviceObject>::READABLE,
-    )?;
+    let irq_id = physical
+        .as_ref()
+        .map(|physical| {
+            waits.add(
+                physical.as_handle_ref(),
+                ObjectSignals::<PhysicalDeviceObject>::READABLE,
+            )
+        })
+        .transpose()?;
     let mut cpu_ids = Vec::new();
     cpu_ids
         .try_reserve_exact(cpus.len())
@@ -230,12 +266,13 @@ fn start_mode(
         stop_id,
         machine_id,
         irq_id,
+        pcie,
         cpu_ids,
         irq_armed: true,
         mode,
     };
     let thread = thread::Builder::new()
-        .name("sdhci".into())
+        .name("io-mmio".into())
         .stack_size(64 * 1024)
         .spawn(move || pump.run())
         .map_err(|_| Error::Status(Status::NO_MEMORY))?;
@@ -254,10 +291,13 @@ enum Line {
 
 impl Pump {
     fn reconcile(&self) -> Result<Line> {
+        let Some(physical) = self.physical.as_ref() else {
+            return Ok(Line::Idle);
+        };
         for _ in 0..2 {
-            let sequence = device::irq_pending(self.physical.as_handle_ref())?;
-            let asserted = self.mode.asserted(&self.physical)?;
-            match device::irq_complete(self.physical.as_handle_ref(), sequence, asserted) {
+            let sequence = device::irq_pending(physical.as_handle_ref())?;
+            let asserted = self.mode.asserted(physical)?;
+            match device::irq_complete(physical.as_handle_ref(), sequence, asserted) {
                 Ok(()) => return Ok(if asserted { Line::Asserted } else { Line::Idle }),
                 Err(Error::Status(Status::BUSY)) => {}
                 Err(error) => return Err(error),
@@ -269,7 +309,9 @@ impl Pump {
     fn update_irq(&mut self) -> Result<()> {
         let line = self.reconcile()?;
         if !self.irq_armed && line != Line::Asserted {
-            self.waits.rearm(self.irq_id)?;
+            if let Some(id) = self.irq_id {
+                self.waits.rearm(id)?;
+            }
             self.irq_armed = true;
         }
         Ok(())
@@ -277,25 +319,52 @@ impl Pump {
 
     fn mmio(&mut self, index: usize) -> Result<()> {
         if let Some(request) = vm::pending_mmio(self.cpus[index].as_handle_ref())? {
-            let offset = request_offset(request, PHYSICAL_MMIO)?;
-            let completion = match request.operation {
-                vm::MmioOperation::Read => vm::MmioCompletion::Read(device::mmio_read(
-                    self.physical.as_handle_ref(),
-                    offset,
-                    request.width,
-                )?),
-                vm::MmioOperation::Write(value) => {
-                    device::mmio_write(
-                        self.physical.as_handle_ref(),
+            let completion = if request.device.get() == pcie::ECAM_COOKIE {
+                let (bus, device, function, offset) =
+                    pcie::decode_ecam(request.address).ok_or(Error::InvalidResponse)?;
+                let root = bus == 0 && device == 0 && function == 0;
+                match request.operation {
+                    vm::MmioOperation::Read => vm::MmioCompletion::Read(
+                        if root {
+                            self.pcie.read(offset, request.width as u8)
+                        } else {
+                            pcie::absent(request.width as u8)
+                        }
+                        .ok_or(Error::InvalidResponse)?,
+                    ),
+                    vm::MmioOperation::Write(value) => {
+                        if root {
+                            self.pcie
+                                .write(offset, request.width as u8, value)
+                                .ok_or(Error::InvalidResponse)?;
+                        }
+                        vm::MmioCompletion::Write
+                    }
+                }
+            } else if request.device.get() == pcie::MEMORY_COOKIE {
+                // Bootstrap never installs an endpoint. Absent memory decodes
+                // are harmless, and the successor retains the same aperture.
+                match request.operation {
+                    vm::MmioOperation::Read => vm::MmioCompletion::Read(
+                        pcie::absent(request.width as u8).ok_or(Error::InvalidResponse)?,
+                    ),
+                    vm::MmioOperation::Write(_) => vm::MmioCompletion::Write,
+                }
+            } else {
+                let physical = self.physical.as_ref().ok_or(Error::InvalidResponse)?;
+                let offset = request_offset(request, PHYSICAL_MMIO)?;
+                match request.operation {
+                    vm::MmioOperation::Read => vm::MmioCompletion::Read(device::mmio_read(
+                        physical.as_handle_ref(),
                         offset,
                         request.width,
-                        value,
-                    )?;
-                    vm::MmioCompletion::Write
+                    )?),
+                    vm::MmioOperation::Write(value) => {
+                        device::mmio_write(physical.as_handle_ref(), offset, request.width, value)?;
+                        vm::MmioCompletion::Write
+                    }
                 }
             };
-            // Resample after every access, including partial-width W1C writes,
-            // before allowing the trapped instruction to resume.
             self.update_irq()?;
             vm::complete_mmio(self.cpus[index].as_handle_ref(), request.id, completion)?;
         }
@@ -304,7 +373,7 @@ impl Pump {
 
     fn run(mut self) -> Result<Exit> {
         let result = self.service();
-        if matches!(result, Ok(Exit::Quiesced)) {
+        if matches!(result, Ok(Exit::Quiesced(_))) {
             // All register accesses and MMIO completions have finished. Only
             // this path disarms retirement; an error or unwind still stops VM.
             self.machine.stop_on_drop = false;
@@ -325,13 +394,13 @@ impl Pump {
                 }
                 let mut command = [0; 1];
                 return match self._stop.as_byte_channel().try_receive(&mut command) {
-                    Ok(1) if command[0] == QUIESCE => Ok(Exit::Quiesced),
+                    Ok(1) if command[0] == QUIESCE => Ok(Exit::Quiesced(self.pcie.clone())),
                     Ok(_) => Err(Error::InvalidResponse),
                     Err(Error::Status(Status::PEER_CLOSED)) => Ok(Exit::Stopped),
                     Err(error) => Err(error),
                 };
             }
-            if event.registration == self.irq_id {
+            if Some(event.registration) == self.irq_id {
                 self.irq_armed = false;
                 self.update_irq()?;
             } else if let Some(index) = self.cpu_ids.iter().position(|id| *id == event.registration)

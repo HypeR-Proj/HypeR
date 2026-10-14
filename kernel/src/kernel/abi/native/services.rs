@@ -280,6 +280,40 @@ pub(in crate::kernel) trait DeviceServices: UserMemoryServices {
 }
 
 pub(in crate::kernel) trait GuestIoServices: UserMemoryServices {
+    fn transfer_guest_memory(
+        &self,
+        _memory: HandleValue,
+        _write: bool,
+        _offset: u64,
+        _buffer: UserSlice,
+    ) -> Result<(), crate::kernel::vm::service::Error> {
+        Err(crate::kernel::vm::service::Error::NotSupported)
+    }
+    fn scalar_guest_memory(
+        &self,
+        _memory: HandleValue,
+        _write: bool,
+        _offset: u64,
+        _width: u32,
+        _value: u64,
+    ) -> Result<u64, crate::kernel::vm::service::Error> {
+        Err(crate::kernel::vm::service::Error::NotSupported)
+    }
+    fn create_guest_interrupt(
+        &self,
+        _machine: HandleValue,
+        _irq: u32,
+    ) -> Result<HandleValue, crate::kernel::vm::service::Error> {
+        Err(crate::kernel::vm::service::Error::NotSupported)
+    }
+    fn set_guest_interrupt_level(
+        &self,
+        _interrupt: HandleValue,
+        _asserted: bool,
+    ) -> Result<(), crate::kernel::vm::service::Error> {
+        Err(crate::kernel::vm::service::Error::NotSupported)
+    }
+
     fn create_guest_mapping(
         &self,
         _backend: HandleValue,

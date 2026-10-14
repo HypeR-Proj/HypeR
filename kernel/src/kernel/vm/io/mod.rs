@@ -3,7 +3,9 @@
 
 //! VM-owned control mailboxes and prevalidated cross-VM notification routes.
 
+mod interrupt;
 mod mailbox;
+pub(crate) use interrupt::Interrupt;
 mod model;
 mod notification;
 pub(crate) mod service;
@@ -46,10 +48,12 @@ fn charge<T: KernelObject, S>(domain: &ResourceDomain) -> Result<CommittedCharge
 }
 
 pub(super) fn valid_location(base: u64, irq: u32) -> bool {
+    (0x0a00_0000..0x0b00_0000).contains(&base) && base.is_multiple_of(4096) && valid_irq(irq)
+}
+
+pub(super) fn valid_irq(irq: u32) -> bool {
     use hyper::abi::native as abi;
     crate::hal::vm::supports_io_notifications()
-        && (0x0a00_0000..0x0b00_0000).contains(&base)
-        && base.is_multiple_of(4096)
         && (abi::HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_DEVICE_INTERRUPT_BASE as u32
             ..abi::HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_INTERRUPT_COUNT as u32)
             .contains(&irq)
@@ -83,16 +87,18 @@ pub(in crate::kernel) fn with_irq_binding<R>(
 
 #[derive(Clone)]
 pub(crate) enum Route {
+    Interrupt(FallibleArc<interrupt::Shared>),
     Mailbox(FallibleArc<mailbox::Shared>),
     NotificationFront(FallibleArc<notification::Shared>),
     NotificationBack(FallibleArc<notification::Shared>),
 }
 impl Route {
-    pub(super) fn base(&self) -> u64 {
+    pub(super) fn base(&self) -> Option<u64> {
         match self {
-            Self::Mailbox(value) => value.base,
-            Self::NotificationFront(value) => value.frontend_base(),
-            Self::NotificationBack(value) => value.back_base,
+            Self::Interrupt(_) => None,
+            Self::Mailbox(value) => Some(value.base),
+            Self::NotificationFront(value) => Some(value.frontend_base()),
+            Self::NotificationBack(value) => Some(value.back_base),
         }
     }
     fn decode_enabled(&self) -> bool {
@@ -106,6 +112,7 @@ impl Route {
     }
     pub(crate) fn irq(&self) -> u32 {
         match self {
+            Self::Interrupt(value) => value.irq,
             Self::Mailbox(value) => value.irq,
             Self::NotificationFront(value) => value.front_irq,
             Self::NotificationBack(value) => value.back_irq,
@@ -116,6 +123,7 @@ impl Route {
     }
     fn route(&self, access: MmioAccess) -> Option<MmioAction> {
         match self {
+            Self::Interrupt(_) => None,
             Self::Mailbox(value) => Some(value.mmio(access)),
             Self::NotificationFront(value) => value.front_mmio(access),
             Self::NotificationBack(value) => Some(value.back_mmio(access)),
@@ -123,6 +131,7 @@ impl Route {
     }
     fn close(&self) {
         match self {
+            Self::Interrupt(value) => value.close(),
             Self::Mailbox(value) => value.close(),
             Self::NotificationFront(value) | Self::NotificationBack(value) => value.close(),
         }
@@ -144,7 +153,7 @@ impl Routes {
     pub(crate) fn can_insert(&self, route: &Route) -> Result<(), Error> {
         self.entries.with(|entries| {
             if entries.iter().flatten().any(|other| {
-                other.base() == route.base()
+                (route.base().is_some() && other.base() == route.base())
                     || other.irq() == route.irq()
                     || other.same_frontend_identity(route)
             }) || entries.iter().all(Option::is_some)
@@ -159,7 +168,7 @@ impl Routes {
     pub(crate) fn insert(&self, route: Route) -> Result<(), Error> {
         self.entries.with(|entries| {
             if entries.iter().flatten().any(|other| {
-                other.base() == route.base()
+                (route.base().is_some() && other.base() == route.base())
                     || other.irq() == route.irq()
                     || other.same_frontend_identity(&route)
             }) {
@@ -224,7 +233,7 @@ impl Routes {
                 && entries.iter().flatten().any(|route| {
                     let same = matches!(route, Route::NotificationFront(value)
                     if value.route_id == shared.route_id);
-                    !same && route.decode_enabled() && route.base() == base
+                    !same && route.decode_enabled() && route.base() == Some(base)
                 })
             {
                 return Err(Error::InvalidArgument);
@@ -254,11 +263,13 @@ impl Routes {
     pub(crate) fn conflicts(&self, base: u64, length: u64) -> bool {
         self.entries.with(|entries| {
             entries.iter().flatten().any(|route| {
-                base < route.base() + 4096
-                    && route.base() < base.saturating_add(length)
-                    && !(route.deferred_overlay()
-                        && base <= route.base()
-                        && base.saturating_add(length) >= route.base() + 4096)
+                route.base().is_some_and(|start| {
+                    base < start + 4096
+                        && start < base.saturating_add(length)
+                        && !(route.deferred_overlay()
+                            && base <= start
+                            && base.saturating_add(length) >= start + 4096)
+                })
             })
         })
     }
@@ -270,8 +281,9 @@ impl Routes {
                 .flatten()
                 .find(|route| {
                     route.decode_enabled()
-                        && address >= route.base()
-                        && address < route.base() + 4096
+                        && route
+                            .base()
+                            .is_some_and(|base| address >= base && address < base + 4096)
                 })
                 .cloned()
         })?;

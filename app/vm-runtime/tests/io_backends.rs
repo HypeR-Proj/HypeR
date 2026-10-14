@@ -90,6 +90,7 @@ type TestBackend = Backend<Transport, RemoteNotification<Transport>>;
 
 fn backend(transport: &Transport, kind: DeviceKind) -> Result<TestBackend, Error> {
     match kind {
+        DeviceKind::Console => Err(Error::InvalidState),
         DeviceKind::Scsi => Backend::new(
             transport.clone(),
             RemoteNotification::new(transport.clone()),
@@ -124,6 +125,7 @@ fn initialized(transport: &Transport, kind: DeviceKind) -> Result<TestBackend, E
 
 fn mmio(kind: DeviceKind, offset: u64, operation: MmioOperation) -> Result<MmioRequest, Error> {
     let (id, address) = match kind {
+        DeviceKind::Console => return Err(Error::InvalidState),
         DeviceKind::Scsi => (1, io::FRONTEND_MMIO),
         DeviceKind::Network => (io::NETWORK_DEVICE_ID_BIT | 1, io::FRONTEND_NET_MMIO),
     };

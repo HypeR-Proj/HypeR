@@ -174,7 +174,9 @@ impl InstalledMachine {
         &self,
         route: &crate::kernel::vm::io::Route,
     ) -> Result<(), crate::kernel::vm::io::Error> {
-        let base = route.base();
+        let Some(base) = route.base() else {
+            return Ok(());
+        };
         self.mmio_regions.with(|regions| {
             if regions.iter().flatten().any(|region| {
                 base < region.end
