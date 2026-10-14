@@ -61,7 +61,7 @@
     "name": "io",
     "image": "/vm/io.itb",
     "configuration": {
-      "memory-bytes": 134217728,
+      "memory-bytes": 67108864,
       "vcpus": 1,
       "bootargs": "console=ttyAMA0 earlycon rdinit=/init loglevel=4 hyper.role=io hyper.mode=standby"
     },

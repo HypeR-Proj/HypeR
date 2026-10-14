@@ -127,9 +127,10 @@ Final boot images follow the [image release contract](image-distribution.md).
 The import command also accepts `IO_VM_REFERENCE` explicitly. The qualified QEMU
 fixture consumes the imported generation. Without an override, the ordinary
 AArch64 `make` build also selects the committed protocol version 3 lock.
-The committed package must also provide the owner block-management extension
-required by the board bootstrap (see below). `make run` starts the artifacts from the
-last build and does not fetch or rebuild the appliance.
+The committed package also provides the owner block-management extension and
+the v5 client table for per-client SCSI/network resources required by board
+deployment (see below). `make run` starts the artifacts from the last build and
+does not fetch or rebuild the appliance.
 
 The I/O VM repository owns the pinned upstream LTS version and builds each
 external module against the exact kernel configuration and release. HypeR
@@ -180,10 +181,42 @@ see [the QEMU board](../boards/qemu.json) for the source format.
 `vmm create NAME --config FILE` reads disk/network assignments and runtime settings from
 the named definition in the configuration file; `--from SOURCE` selects a template.
 
-The resident I/O VM has 128 MiB of ordinary RAM for Linux, services and
+The resident I/O VM has 64 MiB of ordinary RAM for Linux, services and
 vhost queue allocations; shared business-guest pages are additional mappings,
 not allocator memory for Linux. The isolated two-VM fixture below retains its
 64 MiB per-VM layout.
+
+The HypeR board's per-VM disk node also owns backend resource sizing:
+
+```json
+"disk": {
+  "source": "PARTLABEL=alpine",
+  "backend": {"request-queues": 4, "sg-prealloc": 128}
+}
+```
+
+`request-queues` is 1–4 (default 4), excluding the SCSI control and event queues.
+`sg-prealloc` is 2–2048 (default 128) scatterlist entries per request. Larger
+requests allocate additional chained entries as needed; this setting does not
+reduce the advertised transfer limit. Lower preallocation saves resident memory
+at the cost of possible allocation work during larger transfers.
+
+The build projects these values into the Linux `hyper.clients.v5` table; they
+remain deployment policy, not fields interpreted by the HypeR kernel. Native
+storage clients use 4/128. Linux applies the settings to each newly opened
+vhost-scsi instance before acquiring its owner, without changing global module
+parameters. The SCSI HELLO reply reports the selected capacity; both MMIO and PCI
+frontends expose that number of queues. The activation record retains six wire
+slots and requires unused slots to be zero. Device reset retains the policy;
+reopening the backend reapplies it. Board policy changes require rebuilding the
+deployment and restarting the I/O VM; editing `/data/vms.json` does not override
+the board's backend allocation policy.
+
+This requires an I/O appliance supporting the v5 client table and its per-instance
+vhost-scsi resource extension. The image build checks the appliance's client-table
+version and rejects older packages before constructing a storage deployment.
+The updated appliance still accepts v3 tables from older HypeR deployments,
+using the 4/128 defaults and the original six-slot wire layout.
 
 The business fleet has a finite allowance for eight VMs and manager overhead;
 the resident I/O VM remains in the core-services domain outside that fleet. Board I/O client slots can
@@ -325,6 +358,32 @@ network are independent options: a network-only VM does not receive a hidden
 storage endpoint or LIO target. The shared Ethernet segment does not provide
 anti-spoofing or per-VM network isolation policy.
 
+The board's per-VM network node can also specify backend buffering:
+
+```json
+"network": {
+  "network": "default",
+  "mac": "02:48:59:00:00:01",
+  "backend": {"rx-backlog-packets": 1000, "tx-buffer-bytes": 0}
+}
+```
+
+`rx-backlog-packets` limits the TAP backlog headed toward guest RX to 1–65536
+packets (default 1000). `tx-buffer-bytes` sets the TAP socket accounting threshold
+for guest TX: zero preserves Linux's unlimited default; nonzero settings accept
+65536–2147483647 bytes. This threshold includes packet allocation overhead and
+can be exceeded by an allocation; neither setting is a hard cap on all network
+memory attributable to the VM. Physical uplink and bridge resources are shared.
+
+These are per-client deployment settings, projected only into the I/O VM's
+seven-field `hyper.clients.v5` table, after the SCSI resource fields. They do not
+enter the editable fleet file or change negotiated virtio features. A compatible
+appliance is required; rebuild the deployment and restart it to change policy.
+Each TAP activation reapplies the settings before attaching vhost queues.
+Defaults preserve existing behavior. In the pinned Linux implementation, a
+`tx-buffer-bytes` value below `INT_MAX` disables some vhost/TAP batching fast paths;
+measure throughput and CPU cost before selecting a tighter production budget.
+
 The guest device uses modern virtio over the selected MMIO or PCI transport,
 RX queue 0 and TX queue 1, with at most
 128 descriptors per queue, with MTU 1500. It offers `VIRTIO_F_VERSION_1` and
@@ -428,7 +487,7 @@ for that guest, even if stage-2 entries are subsequently installed on faults.
 Guests without this backend admission can retain sparse backing; their actual
 resident footprint still depends on image loading and guest accesses.
 
-The resident I/O VM has a separate allocation policy: its own 128 MiB RAM is
+The resident I/O VM has a separate allocation policy: its own 64 MiB RAM is
 allocated eagerly as one physically contiguous VMO for the current physical
 device DMA layout. Each Native volume client also eagerly allocates its
 1 MiB pool. Imported business-guest pages are shared data, not free RAM that
@@ -475,17 +534,18 @@ cancellation/reset handling.
   exhaustive census of dynamically imported device mappings or a system-wide
   exclusive-memory accounting value.
 
-For the default resident I/O VM, 128 MiB RAM plus the 1 MiB management pool
-and two 1 MiB Native data pools account for 131 MiB (137,363,456 bytes) of
+For the default resident I/O VM, 64 MiB RAM plus the 1 MiB management pool
+and two 1 MiB Native data pools account for 67 MiB (70,254,592 bytes) of
 backing. The ramfs system layout needs only the data volume pool plus management,
-for 130 MiB (136,314,880 bytes). A disk-backed 256 MiB Alpine guest can therefore
-require roughly 387 MiB of combined VM backing before Native and kernel overhead.
+for 66 MiB (69,206,016 bytes). A disk-backed 256 MiB Alpine guest can therefore
+require roughly 323 MiB of combined VM backing before Native and kernel overhead.
 
 Virtio-scsi permits multiple request queues but does not require one per guest
-CPU. The guest driver chooses how many to use within the advertised limit of
-four. The pinned Linux vhost-scsi backend defaults to 2,048 preallocated data
-scatterlist entries per command. At a queue depth of 128 and a 32-byte entry,
-that alone is approximately 8 MiB per enabled request queue, excluding command
+CPU. The guest driver chooses how many to use within the advertised per-client
+limit (four by default). HypeR configures 128 preallocated scatterlist entries
+per command by default, without changing Linux's global module defaults. At a
+queue depth of 128 and a 32-byte entry, those entries alone account for
+approximately 512 KiB per request queue, excluding command
 metadata and other allocations. This is an implementation-dependent estimate,
 not a fixed per-vCPU cost or measured peak. Queue depth, enabled queue count and
 concurrent clients must all inform the I/O VM's RAM budget. These kernel

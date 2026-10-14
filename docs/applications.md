@@ -479,9 +479,10 @@ staging, then rejects a preserved disk whose system payload is stale.
 `vmm list` and `vmm status NAME` distinguish RAM capacity from **allocated VM
 backing**. Allocation is a live kernel snapshot of resident primary backing:
 RAM, uploaded image pages not yet accessed by the guest, and explicitly admitted
-shared pools. The I/O VM currently has 128 MiB of boot RAM plus a separate 1 MiB
-Native storage initiator pool for each Native volume. The default split layout
-has two pools, for `hyper-data` and `hyper-system`, so its allocated backing is 130 MiB;
+shared pools. The I/O VM currently has 64 MiB of boot RAM, a 1 MiB management pool, and a
+separate 1 MiB Native storage initiator pool for each Native volume. The default
+split layout has two data pools, for `hyper-data` and `hyper-system`, so its
+allocated backing is 67 MiB;
 each additional Native volume adds a separate shared pool. Dynamically
 attached alias windows are not primary backing. The
 metric excludes

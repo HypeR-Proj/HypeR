@@ -7,7 +7,7 @@ use hyper_os::handle::{OwnedHandle, VirtualCpuObject, VirtualMachineObject};
 use hyper_os::virtual_serial::Output;
 use std::sync::Arc;
 
-pub const RAM_BYTES: u64 = 128 * 1024 * 1024;
+pub use super::RAM_BYTES;
 pub const PHYSICAL_MMIO: u64 = 0x0b00_0000;
 pub struct InstalledGuest {
     pub name: String,

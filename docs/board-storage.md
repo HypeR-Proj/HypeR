@@ -383,7 +383,7 @@ The resident I/O VM has its own `io-vm` node, outside `virtual-machines`:
   "name": "oi",
   "image": "/vm/storage/oi.itb",
   "configuration": {
-    "memory-bytes": 134217728,
+    "memory-bytes": 67108864,
     "vcpus": 1,
     "bootargs": "console=ttyAMA0 rdinit=/init hyper.role=io hyper.mode=standby",
     "affinity": [{"vcpu": 0, "cpus": [1, 3]}]
@@ -397,7 +397,7 @@ The resident I/O VM has its own `io-vm` node, outside `virtual-machines`:
 
 `runtime` assigns this node to io-runtime. Its `configuration` uses the same
 schema as an ordinary VM; the resident runtime currently supports exactly
-128 MiB and one vCPU. `name` is an ordinary VM name. `image` selects a canonical
+64 MiB and one vCPU. `name` is an ordinary VM name. `image` selects a canonical
 absolute `.itb` path beneath `/vm/` in the bootstrap archive, available before
 `/data` mounts. The packer places the generated ITB at this path, and io-runtime
 opens that same path from `/etc/hyper/board.json`. No separate I/O VM fleet
