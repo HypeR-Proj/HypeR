@@ -177,7 +177,9 @@ vmm delete test
 
 `vmm` without a subcommand lists definitions. Every control operation requires
 an explicit name from that list. Console attachment applies to that VM alone;
-Ctrl-] opens the detach menu. Guest input uses nonblocking sends and a bounded
+Ctrl-] opens the detach menu; `d`, `q`, or another Ctrl-] detaches. Any other
+key prints an invalid-command notice and resumes the console without forwarding
+that key to the guest. Guest input uses nonblocking sends and a bounded
 64 KiB pending buffer. If the guest stops consuming input, excess keyboard data
 is discarded with a warning; the detach controls remain responsive. Detaching
 discards input still buffered locally. Delete requires the VM to be stopped and removes
