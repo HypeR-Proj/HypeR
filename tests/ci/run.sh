@@ -166,9 +166,16 @@ case "${1:-}" in
         cp target/app/aarch64/guest-smp.log target/app/aarch64/native-gicv3-guest-smp.log
         ;;
     native-smp-gicv2)
+        sh tests/ci/run.sh native-smp-gicv2-guest
+        sh tests/ci/run.sh native-smp-gicv2-retirement
+        ;;
+    native-smp-gicv2-guest)
         make test-guest-smp ARCH=aarch64 \
             QEMU_MACHINE=virt,virtualization=on,gic-version=2 QEMU_CPUS=4
         cp target/app/aarch64/guest-smp.log target/app/aarch64/native-gicv2-guest-smp.log
+        ;;
+    native-smp-gicv2-retirement)
+        make image guest-smp-initramfs ARCH=aarch64
         # Reuse the abrupt runtime-exit fixture with the SMP topology. It may
         # exit before every secondary has booted; retirement must include all
         # configured dormant and running CPU Threads in either case.

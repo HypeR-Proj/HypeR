@@ -154,8 +154,10 @@ jobs:
             name: VM authority and GICv3 traps
           - suite: native-smp-gicv3
             name: Guest SMP / GICv3
-          - suite: native-smp-gicv2
-            name: Guest SMP and retirement / GICv2
+          - suite: native-smp-gicv2-guest
+            name: Guest SMP / GICv2
+          - suite: native-smp-gicv2-retirement
+            name: SMP runtime retirement / GICv2
           - suite: native-smp-overcommit
             name: Guest SMP / host overcommit
           - suite: native-retirement-stack

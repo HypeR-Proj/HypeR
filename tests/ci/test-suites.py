@@ -72,6 +72,15 @@ if 'scripts/fetch-io-vm.py' in sys.argv:
         calls = self.run_suite('native-shell')
         self.assertEqual(calls, [['make', 'test-shell', 'ARCH=aarch64']])
 
+    def test_gicv2_smp_keeps_topology_and_retirement_coverage(self):
+        calls = [call for call in self.run_suite('native-smp-gicv2') if call[0] == 'make']
+        self.assertEqual(len(calls), 3)
+        self.assertIn('test-guest-smp', calls[0])
+        self.assertIn('guest-smp-initramfs', calls[1])
+        self.assertIn('test-runtime-crash', calls[2])
+        self.assertIn('QEMU_CPUS=4', calls[2])
+        self.assertTrue(any(arg.endswith('/vms-smp-4.json') for arg in calls[2]))
+
 
 if __name__ == '__main__':
     unittest.main()

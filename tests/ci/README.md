@@ -50,7 +50,9 @@ and the one-time Pages/required-check setup.
 | `native-gicv2` | GICv2 Native boot on one/four CPUs, console and runtime-crash recovery |
 | `native-smp-stack` | Serial aggregate of the three SMP suites and `native-retirement-stack` |
 | `native-smp-gicv3` | Guest SMP on GICv3 with four host CPUs |
-| `native-smp-gicv2` | Guest SMP on GICv2 with four host CPUs and abrupt runtime-exit retirement |
+| `native-smp-gicv2` | Serial aggregate of the following two GICv2 suites |
+| `native-smp-gicv2-guest` | Guest SMP on GICv2 with four host CPUs |
+| `native-smp-gicv2-retirement` | GICv2 SMP topology with abrupt runtime-exit retirement |
 | `native-smp-overcommit` | Guest SMP with one host CPU |
 | `native-retirement-stack` | Power-crash retirement in dormant/pending/powered-off states and stack limits |
 | `native-stack-16k` | Native userspace boot on one/four CPUs with 16 KiB kernel thread stacks, independent RAMFS test root, root/supervision handoff, shell commands, static/dynamic std and application startup |
