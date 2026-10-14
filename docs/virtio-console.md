@@ -35,6 +35,7 @@ event-index suppression, packed rings, resize or emergency-write support.
 The I/O Linux kernel must enable `CONFIG_PCIEPORTBUS`, `CONFIG_HOTPLUG_PCI`,
 `CONFIG_HOTPLUG_PCI_PCIE` and `CONFIG_VIRTIO_CONSOLE`, in addition to the existing
 PCI/virtio drivers. These are appliance configuration changes in HypeR-io-vm.
+The committed QEMU and Pi 5 appliance pins include these drivers.
 An older appliance can keep using its existing storage/network devices, but
 cannot discover/use this new serial endpoint without those drivers.
 
@@ -78,7 +79,7 @@ On an AArch64 Linux build host:
 clang -static -O2 -Wall -Wextra -Werror \
   tests/qemu/guest/console-hotplug.c -o /tmp/console-hotplug
 make test-io-console-hotplug \
-  IO_VM_PACKAGE=/path/to/qualified/boot-generation \
+  IO_VM_PACKAGE="$(python3 -B scripts/fetch-io-vm.py --platform qemu)" \
   CONSOLE_HOTPLUG_PROBE=/tmp/console-hotplug
 ```
 
