@@ -110,13 +110,33 @@ impl<T> FallibleArc<T> {
 
     /// Allocates one shared owner while preserving `value` on failure.
     pub fn try_new_or_return(value: T) -> Result<Self, (AllocationError, T)> {
-        let inner = try_box_or_return(SharedInner {
-            strong: AtomicUsize::new(1),
-            // One implicit weak reference keeps the allocation alive while
-            // any strong owner exists.
-            weak: AtomicUsize::new(1),
-            value: ManuallyDrop::new(value),
-        })
+        // SAFETY: The installed global allocator satisfies its own deallocation contract.
+        unsafe { Self::try_new_or_return_in(value, |layout| alloc::alloc::alloc(layout)) }
+    }
+
+    /// Allocates through a specialized pool of the installed global allocator.
+    ///
+    /// # Safety
+    /// A non-null callback result must satisfy `layout` and be releasable by
+    /// the installed global allocator with that exact layout. Ownership moves
+    /// here; no other pointer owner may access or release the allocation.
+    pub unsafe fn try_new_or_return_in(
+        value: T,
+        allocate: impl FnOnce(Layout) -> *mut u8,
+    ) -> Result<Self, (AllocationError, T)> {
+        // SAFETY: The callback inherits the global-deallocation contract above.
+        let inner = unsafe {
+            try_box_or_return_in(
+                SharedInner {
+                    strong: AtomicUsize::new(1),
+                    // One implicit weak reference keeps the allocation alive while
+                    // any strong owner exists.
+                    weak: AtomicUsize::new(1),
+                    value: ManuallyDrop::new(value),
+                },
+                allocate,
+            )
+        }
         .map_err(|(error, inner)| (error, ManuallyDrop::into_inner(inner.value)))?;
         // SAFETY: Box never contains a null pointer. FallibleArc assumes the
         // allocation and becomes responsible for reconstructing the Box after
@@ -427,6 +447,14 @@ pub fn try_box_uninit<T>() -> Result<Box<MaybeUninit<T>>, AllocationError> {
 
 /// Allocates one owned value while preserving it on allocation failure.
 pub fn try_box_or_return<T>(value: T) -> Result<Box<T>, (AllocationError, T)> {
+    // SAFETY: Matching allocation and destruction both use the global allocator.
+    unsafe { try_box_or_return_in(value, |layout| alloc::alloc::alloc(layout)) }
+}
+
+unsafe fn try_box_or_return_in<T>(
+    value: T,
+    allocate: impl FnOnce(Layout) -> *mut u8,
+) -> Result<Box<T>, (AllocationError, T)> {
     let layout = Layout::new::<T>();
     if layout.size() == 0 {
         // Box does not allocate storage for a zero-sized type. Using the safe
@@ -436,7 +464,7 @@ pub fn try_box_or_return<T>(value: T) -> Result<Box<T>, (AllocationError, T)> {
         return Ok(Box::new(value));
     }
     // SAFETY: A successful allocation has the exact layout required by T.
-    let Some(pointer) = NonNull::new(unsafe { alloc::alloc::alloc(layout) } as *mut T) else {
+    let Some(pointer) = NonNull::new(allocate(layout) as *mut T) else {
         return Err((AllocationError, value));
     };
     // SAFETY: pointer is aligned, writable, and uniquely owned for one T.

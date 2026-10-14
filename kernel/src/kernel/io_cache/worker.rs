@@ -121,9 +121,15 @@ extern "C" fn worker_entry(_: usize) {
     let mut draining = false;
     let mut demand = None;
     let mut mapped_cursor = crate::kernel::process::FilePageReclaimCursor::start();
+    let mut compaction = None;
     loop {
         WORK.begin_batch();
-        let more = service_batch(&mut draining, &mut demand, &mut mapped_cursor);
+        let more = service_batch(
+            &mut draining,
+            &mut demand,
+            &mut mapped_cursor,
+            &mut compaction,
+        );
         match WORK.finish_batch(more) {
             WorkDisposition::Continue => {
                 if let Err(error) = scheduler::cond_resched() {
@@ -138,10 +144,11 @@ extern "C" fn worker_entry(_: usize) {
                         "HypeR: I/O reclaim wait failed: {error:?}"
                     ));
                 }
-                // A new external prompt may justify another finite sweep. Do
-                // not restart while batching: hot refaults must not prevent a
-                // pressure request from reaching its end.
-                mapped_cursor = crate::kernel::process::FilePageReclaimCursor::start();
+                // Keep the finite mapping sweep across wakeups until pressure
+                // clears. Refaulting a reclaimed executable page also prompts
+                // this worker: restarting here would evict the same hot code
+                // repeatedly and prevent its allocating process from making
+                // progress. Explicit allocation requests have their own sweep.
             }
         }
     }
@@ -158,6 +165,7 @@ fn service_batch(
     draining: &mut bool,
     demand: &mut Option<Demand>,
     mapped_cursor: &mut crate::kernel::process::FilePageReclaimCursor,
+    compaction: &mut Option<(usize, usize, usize)>,
 ) -> bool {
     let Some(cache) = crate::kernel::vfs::file_cache() else {
         return false;
@@ -185,6 +193,10 @@ fn service_batch(
     cache.set_admission(!*draining);
     let retired_records = crate::kernel::vfs::reclaim_file_records(RECLAIM_BATCH);
     let usage = cache.usage();
+    // Failed resize allocations generate their own pressure/release prompts.
+    // Retry only after occupancy, capacity or available memory changes, rather
+    // than looping on an unchanged set of pinned keys or hash collisions.
+    let shape = (usage.capacity, usage.clean, free_pages);
     if *draining {
         cache.acknowledge_growth();
         cache.cancel_maintenance();
@@ -200,7 +212,8 @@ fn service_batch(
             return true;
         }
         let target = MINIMUM_SLOTS;
-        if target < usage.capacity {
+        if target < usage.capacity && usage.loading == 0 && *compaction != Some(shape) {
+            *compaction = Some(shape);
             let _ = cache.maintain_capacity(target);
         }
         return false;
@@ -209,6 +222,21 @@ fn service_batch(
     // next pressure episode begins.
     *mapped_cursor = crate::kernel::process::FilePageReclaimCursor::start();
     if usage.admission_paused {
+        return false;
+    }
+    // Payload reclaim can lift pressure before table maintenance is reached.
+    // Compact sparse metadata even after the high watermark has been restored.
+    let compact = usage
+        .clean
+        .max(usage.loading)
+        .max(MINIMUM_SLOTS)
+        .checked_next_power_of_two()
+        .unwrap_or(usage.capacity);
+    if compact < usage.capacity / 2 && usage.loading == 0 && !usage.growth_requested {
+        if *compaction != Some(shape) {
+            *compaction = Some(shape);
+            let _ = cache.maintain_capacity(compact);
+        }
         return false;
     }
     if usage.growth_requested {

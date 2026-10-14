@@ -94,10 +94,7 @@ impl State {
     pub(super) fn try_new(capacity: usize) -> Result<Self, Error> {
         let index = index::Index::try_new(capacity)?;
         let eviction = EvictionHeap::try_new(capacity)?;
-        let mut slots = Vec::new();
-        slots
-            .try_reserve_exact(capacity)
-            .map_err(|_| Error::Allocation)?;
+        let mut slots = super::memory::vector(capacity)?;
         slots.resize(capacity, Slot::Vacant);
         Ok(Self {
             slots,
@@ -294,6 +291,12 @@ impl State {
     }
 
     pub(super) fn remove_clean(&mut self, slot: usize) {
+        self.detach_clean(slot);
+        self.evictions = self.evictions.saturating_add(1);
+    }
+
+    /// Migration removes membership without counting an eviction.
+    pub(super) fn detach_clean(&mut self, slot: usize) {
         let Some(Slot::Clean { key, .. }) = self.slots.get(slot).copied() else {
             index::invariant_failure();
         };
@@ -302,7 +305,6 @@ impl State {
         self.slots[slot] = Slot::Vacant;
         self.index.release(slot);
         self.clean -= 1;
-        self.evictions = self.evictions.saturating_add(1);
     }
 
     /// Only maintenance uses these entries, with the entire table detached
@@ -320,9 +322,7 @@ impl State {
         if !self.index.can_insert(key) {
             return None;
         }
-        let Some(slot) = self.index.vacant() else {
-            index::invariant_failure();
-        };
+        let slot = self.index.vacant()?;
         self.index.take_vacant(slot);
         self.index.insert(key, slot);
         self.eviction.insert(slot, last_access);

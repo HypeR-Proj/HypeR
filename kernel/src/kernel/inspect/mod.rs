@@ -580,13 +580,19 @@ impl MemoryInspector {
             managed_bytes: pages_to_bytes(buddy.managed_pages)?,
             free_bytes: pages_to_bytes(buddy.free_pages)?,
             kernel_bytes: pages_to_bytes(runtime.kernel_pages.pages)?,
-            slab_bytes: pages_to_bytes(runtime.slab_pages)?,
-            large_heap_bytes: pages_to_bytes(runtime.large_heap_pages)?,
+            slab_bytes: pages_to_bytes(runtime.slab_pages - runtime.file_cache_slab_pages)?,
+            large_heap_bytes: pages_to_bytes(
+                runtime.large_heap_pages - runtime.file_cache_large_pages,
+            )?,
             page_table_bytes: pages_to_bytes(runtime.page_table_pages.pages)?,
             vmo_bytes: pages_to_bytes(runtime.user_pages.pages)?,
             guest_loaned_bytes: pages_to_bytes(runtime.guest_loaned_pages)?,
             guest_private_bytes: pages_to_bytes(runtime.guest_pages.pages)?,
-            file_cache_bytes: pages_to_bytes(runtime.file_cache_pages.pages)?,
+            file_cache_bytes: pages_to_bytes(
+                runtime.file_cache_pages.pages
+                    + runtime.file_cache_slab_pages
+                    + runtime.file_cache_large_pages,
+            )?,
             slab_reclaimable_bytes: pages_to_bytes(slab_reclaimable.unwrap_or(0))?,
             slab_sample_complete: u64::from(slab_reclaimable.is_some()),
             file_cache_reclaimable_bytes: pages_to_bytes(

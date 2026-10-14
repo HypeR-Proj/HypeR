@@ -417,6 +417,13 @@ queue records in a 112-byte request. Only the shared memory owner may acknowledg
 RELEASE_MEMORY, after both backends have drained. A failed drain retains the
 mapping and withholds the retirement proof.
 
+After that proof, HypeR removes the retired alias mappings and detaches empty
+stage-2 child tables from the still-running I/O VM. Detached table pages and
+their quota charges are released only after every CPU acknowledges translation
+invalidation. Faults retry without rebuilding detached parent slots until that
+barrier completes. Spare table-owner metadata is then compacted when allocation
+permits; live mappings and the I/O VM's own page-table root remain owned.
+
 The Pi 5 profile uses the same guest/frontend/backend contract with RP1 GEM as
 the physical uplink. `boards/rpi5.json` combines SDIO1 storage with RP1
 Ethernet. The Linux bridge forwards guest MAC addresses onto the attached LAN;

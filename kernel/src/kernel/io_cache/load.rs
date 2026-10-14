@@ -131,8 +131,7 @@ impl<'cache, Page> LoadReservation<'cache, Page> {
         let page = create()?;
         #[cfg(test)]
         self.cache.payload_creations.fetch_add(1, Ordering::Relaxed);
-        let shared = FallibleArc::try_new(OwnedPage::new(page, permit))
-            .map_err(|_| CacheError::Allocation)?;
+        let shared = super::memory::shared(OwnedPage::new(page, permit))?;
         drop(reservation);
         Ok(shared)
     }

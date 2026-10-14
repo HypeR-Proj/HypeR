@@ -416,9 +416,12 @@ Neither cache detail is an additional physical pool to add to `Owners`.
 payload-capacity reservations, including transient replacement reservations.
 It excludes allocator rounding, directory metadata, and borrowed boot-archive
 contents. It overlaps heap backing and must not be added to physical totals.
-Ramfs data is authoritative
-and cannot be discarded as cache. Borrowed boot-archive storage remains in
-reserved RAM. File cache metadata is ordinary heap memory.
+Ramfs data is authoritative and cannot be discarded as cache. Borrowed
+boot-archive storage remains in reserved RAM. File-cache index arrays and page
+descriptors use a separate heap pool; their
+physical backing is included in `buffered/cached`, not `kernel`. Cache totals
+include mapped or pinned data and metadata; `file-reclaimable` remains a
+conservative estimate of immediately discardable payload pages.
 
 `top` reports total, allocated (including reserved), free and reserved bytes;
 its allocated count includes reclaimable caches. Default units retain small

@@ -75,7 +75,9 @@ pub(in crate::kernel) fn prepare_live_synchronization(
 impl LiveSynchronization<'_> {
     /// Complete after revoking software lookup and clearing the retained leaves.
     /// No address-space lock may remain held while a remote CPU acknowledges.
-    pub(in crate::kernel) fn execute(mut self) {
+    /// Keep this guard until detached ownership has been removed from the pool;
+    /// another retirement must not publish unacknowledged pages into that pool.
+    pub(in crate::kernel) fn execute(&mut self) {
         crate::hal::vm::publish_guest_stage2_changes(&self.capability);
         let mut targets = [false; hyper::cpu::MAX_CPUS];
         targets[..self.count].fill(true);
