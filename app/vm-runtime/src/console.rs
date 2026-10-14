@@ -184,7 +184,11 @@ impl Console {
             && let Some(client) = &self.client
         {
             match client.as_byte_channel().try_receive(&mut bytes) {
-                Ok(count) => self.input.extend(&bytes[..count]),
+                Ok(count) => {
+                    #[cfg(feature = "test-runtime-crash")]
+                    crash::after_input(&bytes[..count]);
+                    self.input.extend(&bytes[..count]);
+                }
                 Err(Error::Status(Status::WOULD_BLOCK)) => {}
                 Err(Error::Status(Status::PEER_CLOSED)) => {
                     self.client = None;
