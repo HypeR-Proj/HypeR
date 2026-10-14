@@ -789,4 +789,28 @@ The formal runtime can insert a named virtio serial port into the running I/O
 VM after ownership transfer. Stage1 supplies only the empty PCIe slot. See
 [virtio-console](virtio-console.md) for the Linux kernel requirements, bounded
 byte-stream interface, reset semantics and explicit hotplug acceptance target.
-This does not add a guest-agent daemon or change the appliance's SBSA console.
+The appliance runs upstream `qemu-ga` on `org.qemu.guest_agent.0` once that port
+appears. Its SBSA boot/log console remains unchanged. The formal runtime samples
+Linux CPU counters and memory accounting asynchronously every five seconds;
+`vmm list` and `vmm status NAME` read the cached observation through the existing
+read-only broker. Neither tool receives the serial port or VM control authority.
+
+CPU busy and I/O wait are deltas of `guest-get-cpustats`, normalized across all
+guest CPUs to 0–100%. Linux guest/guestnice counters are already included in
+user/nice and are not added twice. Memory comes from the stateless, read-only
+`guest-hyper-get-memory-stats` appliance extension: used is `MemTotal` minus
+`MemAvailable`, with free, buffers, cached and reclaimable slab shown separately.
+These are guest-reported Linux statistics, not the hypervisor's allocated VM
+backing or a trusted resource-accounting boundary.
+
+The first CPU sample establishes a baseline. Counter reset or CPU membership
+change establishes a new baseline. RPCs have a two-second deadline, records are
+bounded to 16 KiB, and each reactor turn consumes at most four channel chunks.
+Disconnects/timeouts clear the sample; samples older than 15 seconds are marked
+stale. The client reconnects without restarting storage, networking or the VM.
+An older agent lacking these commands is reported as unsupported.
+
+The appliance enables only synchronization, ping, version/command discovery and
+these two statistics commands. Generic execution, file access and guest shutdown
+RPCs are disabled. `qemu-ga` is a separate GPL executable in the Linux appliance;
+HypeR's Native client implements only the wire protocol.

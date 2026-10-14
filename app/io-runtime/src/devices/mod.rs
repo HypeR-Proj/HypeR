@@ -68,7 +68,7 @@ impl Devices {
         })
     }
 
-    /// Attach one local byte-stream consumer before starting the device worker.
+    /// Attach one local byte-stream consumer from the device worker.
     /// A reset after activation invalidates this session; a new consumer must
     /// explicitly attach to the replacement device session.
     pub fn attach_port(&mut self, port: port::Port) -> Result<()> {

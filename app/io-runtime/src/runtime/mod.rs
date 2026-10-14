@@ -4,6 +4,8 @@
 //! System ownership of an existing I/O VM and business-client policy.
 
 mod adopt;
+#[cfg(not(feature = "console-test"))]
+mod agent;
 mod broker;
 
 use hyper_io_runtime_system::guest::install::InstalledGuest;
@@ -76,13 +78,34 @@ pub(super) fn main() -> ExitCode {
     }
 }
 fn serve(owner: &mut adopt::Adopted) -> Result<()> {
+    #[cfg(not(feature = "console-test"))]
+    let mut agent = agent::Agent::new(hyper_io_runtime_system::guest::install::RAM_BYTES);
     loop {
         if !pump_guest(&mut owner.guest, &mut owner.log)? {
             return Ok(());
         }
-        if let Some(broker) = &mut owner.broker
-            && broker.service(&mut owner.guest)?
-        {
+        #[cfg(not(feature = "console-test"))]
+        let now = hyper_os::time::monotonic_now()
+            .map_err(show)?
+            .as_nanoseconds()
+            / 1_000_000;
+        #[cfg(not(feature = "console-test"))]
+        let agent_progress = owner
+            .worker
+            .as_ref()
+            .is_some_and(|worker| agent.poll(worker, now));
+        #[cfg(feature = "console-test")]
+        let agent_progress = false;
+        #[cfg(not(feature = "console-test"))]
+        let metrics = agent.metrics(now);
+        #[cfg(feature = "console-test")]
+        let metrics = hyper_service::io::metrics::GuestMetrics::default();
+        let broker_progress = if let Some(broker) = &mut owner.broker {
+            broker.service(&mut owner.guest, metrics)?
+        } else {
+            false
+        };
+        if agent_progress || broker_progress {
             continue;
         }
         let mut items = vec![
@@ -105,10 +128,16 @@ fn serve(owner: &mut adopt::Adopted) -> Result<()> {
         if let Some(broker) = &owner.broker {
             items.extend(broker.wait_items());
         }
+        #[cfg(not(feature = "console-test"))]
+        if let Some(item) = agent.wait_item() {
+            items.push(item);
+        }
         let limit = owner
             .broker
             .as_ref()
             .map_or(hyper_os::DEADLINE_INFINITE, |broker| broker.next_deadline());
+        #[cfg(not(feature = "console-test"))]
+        let limit = limit.min(agent.deadline());
         match wait::wait_many(&items, limit) {
             Ok(event) if event.index == 2 => {
                 return Err("unexpected idle backend control event".into());

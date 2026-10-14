@@ -4,6 +4,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::panic))]
 
 pub mod admission_policy;
+pub mod agent;
 pub mod broker_exchange;
 pub mod clients;
 pub mod deadline;

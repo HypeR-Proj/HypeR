@@ -39,9 +39,8 @@ The committed QEMU and Pi 5 appliance pins include these drivers.
 An older appliance can keep using its existing storage/network devices, but
 cannot discover/use this new serial endpoint without those drivers.
 
-SBSA remains the I/O VM's boot and log console. This transport does not install
-a QEMU guest agent or implement JSON commands, metrics collection or their
-authorization policy.
+SBSA remains the I/O VM's boot and log console. Agent protocol and authorization
+live above this transport; see [I/O VM statistics](io-vm.md#hotplugged-agent-transport).
 
 ## Buffering and authority
 
@@ -61,15 +60,16 @@ do not terminate the storage backend VM.
 A host consumer explicitly attaches a bounded byte-channel port. Until then the
 serial port is host-closed. Host closure discards its buffered session data;
 guest port closure or reset after activation invalidates the old host session.
-A future guest-agent client belongs in the formal environment and can attach
-through this transport without adding device or agent policy to stage1.
+The formal runtime attaches its read-only QGA client through this transport.
+Neither device nor agent policy is added to stage1.
 
 ## Acceptance
 
 The explicit `test-io-console-hotplug` scenario uses a separate test-only Native
 runtime and a Linux helper. It verifies absence before takeover, automatic port
 discovery, binary round trips, driver unbind/rebind, and continued Native disk
-access. It does not include an agent daemon or change the normal image's stdout.
+access. Its overlay disables the normal agent supervisor so the echo helper is
+the sole port consumer. It does not change the normal image's stdout.
 The test requires an I/O appliance with the kernel options above and an AArch64
 Linux build of `tests/qemu/guest/console-hotplug.c`.
 

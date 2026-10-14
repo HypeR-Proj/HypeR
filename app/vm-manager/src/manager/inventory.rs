@@ -86,6 +86,7 @@ impl FleetManager {
         let definition = &self.machines[vm].definition;
         let state = self.fleet_state(vm);
         fleet::Summary {
+            guest_metrics: None,
             placement,
             read_only: false,
             vcpus: observation.map(|value| value.vcpus),
@@ -145,6 +146,7 @@ impl ObservedVm {
 
     pub(super) fn summary(&self, deadline: u64) -> fleet::Summary {
         let mut summary = fleet::Summary {
+            guest_metrics: Some(io::metrics::GuestMetrics::default()),
             name: self.name.clone(),
             image: self.image.clone(),
             autostart: true,
@@ -166,6 +168,7 @@ impl ObservedVm {
             summary.vcpus = Some(info.vcpus);
             summary.memory_bytes = Some(info.ram_bytes);
             summary.resident_memory_bytes = info.resident_bytes;
+            summary.guest_metrics = Some(info.metrics);
             if info.vcpus != 0 {
                 summary.placement.push(fleet::VcpuPlacement {
                     vcpu: 0,

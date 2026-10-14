@@ -8,3 +8,6 @@ pub mod cli;
 pub mod completion;
 
 pub mod console;
+
+#[cfg(test)]
+mod output;

@@ -76,8 +76,79 @@ pub(crate) fn write_response(
                 } else if !matches!(machine.state, fleet::State::Stopped | fleet::State::Failed) {
                     writeln!(output, "  VM metrics: unavailable")?;
                 }
+                if let Some(metrics) = machine.guest_metrics {
+                    write_guest_metrics(output, metrics)?;
+                }
             }
         }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "../tests/output.rs"]
+mod tests;
+
+fn write_guest_metrics(
+    output: &mut impl Write,
+    metrics: hyper_service::io::metrics::GuestMetrics,
+) -> std::io::Result<()> {
+    use hyper_service::io::metrics::AgentState;
+    if !metrics.valid() {
+        return Err(std::io::Error::other("invalid guest usage reply"));
+    }
+    match metrics.state {
+        AgentState::Unavailable => {
+            return writeln!(
+                output,
+                "  guest usage: unavailable (agent disconnected or timed out)"
+            );
+        }
+        AgentState::Unsupported => {
+            return writeln!(
+                output,
+                "  guest usage: unavailable (agent metrics unsupported)"
+            );
+        }
+        AgentState::Stale => {
+            return writeln!(
+                output,
+                "  guest usage: unavailable (stale sample, {} ms old)",
+                metrics.sample_age_ms.unwrap_or(0)
+            );
+        }
+        AgentState::Sampling | AgentState::Ready => (),
+    }
+    if let Some(cpu) = metrics.cpu {
+        writeln!(
+            output,
+            "  guest CPU: {}.{:02}% busy; {}.{:02}% I/O wait ({} ms interval, all vCPUs)",
+            cpu.busy_basis_points / 100,
+            cpu.busy_basis_points % 100,
+            cpu.iowait_basis_points / 100,
+            cpu.iowait_basis_points % 100,
+            cpu.interval_ms
+        )?;
+    } else {
+        writeln!(output, "  guest CPU: sampling")?;
+    }
+    if let Some(memory) = metrics.memory {
+        writeln!(
+            output,
+            "  guest memory: {} KiB used / {} KiB total; {} KiB available; {} KiB free",
+            (memory.total_bytes - memory.available_bytes) / 1024,
+            memory.total_bytes / 1024,
+            memory.available_bytes / 1024,
+            memory.free_bytes / 1024
+        )?;
+        writeln!(
+            output,
+            "  guest cache: {} KiB buffers; {} KiB cached; {} KiB reclaimable slab; sample age {} ms",
+            memory.buffers_bytes / 1024,
+            memory.cached_bytes / 1024,
+            memory.reclaimable_slab_bytes / 1024,
+            metrics.sample_age_ms.unwrap_or(0)
+        )?;
     }
     Ok(())
 }
