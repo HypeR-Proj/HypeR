@@ -62,7 +62,9 @@ def main():
             send(b'vmm console alpine')
             await_text(rb'Connected to alpine\. Press Ctrl-\] for the control menu\.')
             session.send(b'\x1e\n')
-            await_text(rb'\[vmm\] virtual machine disconnected')
+            # Exit can race either the input write or the output read; both
+            # report a closed attached session. Retirement is checked below.
+            await_text(rb'\[vmm\] (?:virtual machine disconnected|console write failed: disconnected)')
             await_text(rb'hyper-sh\$ ')
             wait_state(b'alpine', b'failed')
 
