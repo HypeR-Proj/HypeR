@@ -199,3 +199,23 @@ impl Buffers {
 #[cfg(test)]
 #[path = "../../tests/console_port.rs"]
 mod tests;
+
+impl crate::agent::Transport for HostPort {
+    fn send(&self, bytes: &[u8]) -> std::result::Result<bool, crate::agent::Failure> {
+        match self.try_send(bytes) {
+            Ok(()) => Ok(true),
+            Err(Error::Status(Status::WOULD_BLOCK)) => Ok(false),
+            Err(_) => Err(crate::agent::Failure::Transport),
+        }
+    }
+    fn receive(
+        &self,
+        bytes: &mut [u8],
+    ) -> std::result::Result<Option<usize>, crate::agent::Failure> {
+        match self.try_receive(bytes) {
+            Ok(length) => Ok(Some(length)),
+            Err(Error::Status(Status::WOULD_BLOCK)) => Ok(None),
+            Err(_) => Err(crate::agent::Failure::Transport),
+        }
+    }
+}

@@ -232,7 +232,11 @@ impl Broker {
             .unwrap_or(hyper_os::DEADLINE_INFINITE)
     }
     /// One bounded turn for each client; no client owns the supervisor thread.
-    pub(super) fn service(&mut self, guest: &mut InstalledGuest) -> Result<bool> {
+    pub(super) fn service(
+        &mut self,
+        guest: &mut InstalledGuest,
+        metrics: io::metrics::GuestMetrics,
+    ) -> Result<bool> {
         use hyper_io_runtime_system::admission_policy::{self, Poll};
         let mut progress = false;
         match admission_policy::poll(&mut self.listener, listener::Listener::receive) {
@@ -255,7 +259,7 @@ impl Broker {
             ),
         }
         if !self.observations.is_empty() {
-            match Self::observe(guest) {
+            match Self::observe(guest, metrics) {
                 Ok(snapshot) => {
                     self.observations.retain(|(endpoint, limit)| {
                         let keep = check_deadline(*limit).is_ok()
@@ -310,7 +314,10 @@ impl Broker {
         Ok(progress)
     }
 
-    fn observe(guest: &InstalledGuest) -> hyper_os::Result<[u8; io::OBSERVATION_BYTES]> {
+    fn observe(
+        guest: &InstalledGuest,
+        metrics: io::metrics::GuestMetrics,
+    ) -> hyper_os::Result<[u8; io::OBSERVATION_BYTES]> {
         let info = vm::machine_info(guest.machine.as_handle_ref())?;
         let boot_host_cpu = guest
             .cpus
@@ -322,6 +329,7 @@ impl Broker {
             info,
             hyper_io_runtime_system::guest::install::RAM_BYTES,
             boot_host_cpu,
+            metrics,
         )
         .ok_or(hyper_os::Error::InvalidResponse)
     }

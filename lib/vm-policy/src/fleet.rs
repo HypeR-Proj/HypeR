@@ -354,6 +354,8 @@ impl std::fmt::Display for State {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Summary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guest_metrics: Option<hyper_service::io::metrics::GuestMetrics>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub placement: Vec<VcpuPlacement>,
     #[serde(default)]

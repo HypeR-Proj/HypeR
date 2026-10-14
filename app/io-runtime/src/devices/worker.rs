@@ -11,6 +11,7 @@ use hyper_os::handle::{
 use hyper_os::wait::{ObjectSignals, RegistrationId, WaitSet};
 use hyper_os::{Error, Result, Status, channel, device, vm};
 use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread::{self, JoinHandle};
 
 use super::Devices;
@@ -22,8 +23,29 @@ pub struct Worker {
     // is between servicing a request and entering WaitSet::wait.
     stop: Option<OwnedHandle<ByteChannelObject>>,
     thread: Option<JoinHandle<Result<Exit>>>,
+    connections: SyncSender<super::port::Port>,
 }
 impl Worker {
+    /// Replace the sole internal serial consumer. A bounded mailbox and its
+    /// durable wake byte keep reconnection out of physical-device servicing.
+    pub fn connect_console(&self) -> Result<super::port::HostPort> {
+        let (host, port) = super::port::HostPort::pair()?;
+        self.connections
+            .try_send(port)
+            .map_err(|error| match error {
+                mpsc::TrySendError::Full(_) => Error::Status(Status::BUSY),
+                mpsc::TrySendError::Disconnected(_) => Error::Status(Status::PEER_CLOSED),
+            })?;
+        let wake = self
+            .stop
+            .as_ref()
+            .ok_or(Error::Status(Status::PEER_CLOSED))?;
+        match wake.as_byte_channel().try_send(b"connect") {
+            Ok(()) | Err(Error::Status(Status::WOULD_BLOCK)) => Ok(host),
+            Err(error) => Err(error),
+        }
+    }
+
     /// Stop accepting exits, request VM shutdown, and join the worker. No VM
     /// lifecycle lock may be held by the caller while joining this thread.
     pub fn stop(mut self) -> Result<()> {
@@ -65,7 +87,7 @@ struct Pump {
     devices: Devices,
     _machine: MachineGuard,
     cpus: Vec<Arc<OwnedHandle<VirtualCpuObject>>>,
-    _stop: OwnedHandle<ByteChannelObject>,
+    control: OwnedHandle<ByteChannelObject>,
     waits: WaitSet,
     stop_id: RegistrationId,
     machine_id: RegistrationId,
@@ -74,6 +96,7 @@ struct Pump {
     host_id: Option<RegistrationId>,
     irq_armed: bool,
     mode: WorkerMode,
+    connections: Receiver<super::port::Port>,
 }
 
 pub fn resume(
@@ -101,6 +124,7 @@ pub fn resume(
         cpus.push(Arc::clone(cpu));
     }
     let (stop, receiver) = channel::create_pair()?;
+    let (connections, requests) = mpsc::sync_channel(1);
     let waits = WaitSet::new(cpus.len() + 4)?;
     let stop_id = waits.add(
         receiver.as_handle_ref(),
@@ -135,7 +159,7 @@ pub fn resume(
         devices,
         _machine: machine,
         cpus,
-        _stop: receiver,
+        control: receiver,
         waits,
         stop_id,
         machine_id,
@@ -144,6 +168,7 @@ pub fn resume(
         host_id: None,
         irq_armed: true,
         mode,
+        connections: requests,
     };
     let thread = thread::Builder::new()
         .name("io-devices".into())
@@ -153,6 +178,7 @@ pub fn resume(
     Ok(Worker {
         stop: Some(stop),
         thread: Some(thread),
+        connections,
     })
 }
 
@@ -260,7 +286,20 @@ impl Pump {
                 if ObjectSignals::<ByteChannelObject>::PEER_CLOSED.is_present_in(event.signals) {
                     return Ok(Exit::Stopped);
                 }
-                return Err(Error::InvalidResponse);
+                let mut message = [0; 16];
+                match self.control.as_byte_channel().try_receive(&mut message) {
+                    Ok(_) | Err(Error::Status(Status::WOULD_BLOCK)) => (),
+                    Err(error) => return Err(error),
+                }
+                if let Ok(port) = self.connections.try_recv() {
+                    self.devices.host_event(true);
+                    if let Err(error) = self.devices.attach_port(port) {
+                        // Telemetry attachment must not stop physical I/O.
+                        eprintln!("HypeR io-runtime: agent port unavailable: {error:?}");
+                    }
+                }
+                self.waits.rearm(self.stop_id)?;
+                continue;
             }
             if Some(event.registration) == self.host_id {
                 self.devices.host_event(
