@@ -28,18 +28,11 @@ impl Index {
 
     pub(super) fn try_new(capacity: usize) -> Result<Self, Error> {
         let buckets = bucket_count(capacity)?;
-        let mut heads = Vec::new();
-        heads
-            .try_reserve_exact(buckets)
-            .map_err(|_| Error::Allocation)?;
+        let mut heads = super::memory::vector(buckets)?;
         heads.resize(buckets, NONE);
-        let mut next = Vec::new();
-        next.try_reserve_exact(capacity)
-            .map_err(|_| Error::Allocation)?;
+        let mut next = super::memory::vector(capacity)?;
         next.resize(capacity, NONE);
-        let mut free = Vec::new();
-        free.try_reserve_exact(capacity)
-            .map_err(|_| Error::Allocation)?;
+        let mut free = super::memory::vector(capacity)?;
         free.extend((0..capacity).rev());
         Ok(Self { heads, next, free })
     }

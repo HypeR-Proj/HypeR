@@ -261,6 +261,7 @@ impl GuestAddressSpace {
         pin: &dyn hyper::cpu::PinnedExecution,
         snapshot: &ResidentInstructionSnapshot,
     ) -> Result<(), Error> {
+        self.ensure_table_writable()?;
         if snapshot.pages.len() != self.instruction_ready_pages.len() {
             return Err(Error::InvalidRange);
         }
@@ -394,6 +395,12 @@ impl GuestAddressSpace {
         pin: &dyn hyper::cpu::PinnedExecution,
     ) -> Result<bool, Error> {
         self.ensure_healthy()?;
+        if self.table_rebuild_blocked {
+            // Retry the instruction without creating tables in detached parent
+            // slots. Re-entering the guest permits host IRQ delivery; do not
+            // spin under this lock while the retiring CPU waits for IPIs.
+            return Ok(true);
+        }
         let Some(page_index) = self.page_index(fault.address().get()) else {
             return self.resolve_live_fault(fault);
         };
@@ -441,7 +448,7 @@ impl GuestAddressSpace {
         publication: LeafPublication<'_>,
         requested_permissions: Stage2PagePermissions,
     ) -> Result<(), Error> {
-        self.ensure_healthy()?;
+        self.ensure_table_writable()?;
         if self.mapped_pages.get(page_index).is_none() {
             return Err(Error::InvalidRange);
         }
@@ -689,6 +696,7 @@ impl GuestAddressSpace {
         page_index: usize,
         pin: &dyn hyper::cpu::PinnedExecution,
     ) -> Result<(), Error> {
+        self.ensure_table_writable()?;
         let physical = self.backing_physical_page(page_index)?;
         self.publish_instruction_page_bytes(physical, pin)?;
         let cpu = crate::kernel::cpu::current_index().ok_or(Error::InvalidCpu)?;
@@ -915,6 +923,44 @@ impl GuestAddressSpace {
         } else {
             Ok(())
         }
+    }
+
+    pub(super) fn ensure_table_writable(&self) -> Result<(), Error> {
+        self.ensure_healthy()?;
+        if self.table_rebuild_blocked {
+            Err(Error::TableMaintenance)
+        } else {
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "kernel-self-test")]
+    pub(crate) fn verify_table_maintenance_for_test(&mut self) -> Result<(), &'static str> {
+        let tables = self.table_pages.pages.len();
+        let committed = self.committed_pages;
+        let pin = crate::kernel::task::scheduler::preempt_disable()
+            .map_err(|_| "table maintenance pin")?;
+        self.table_rebuild_blocked = true;
+        let fault = GuestMemoryFault::new(
+            hyper::vm::exit::GuestPhysicalAddress::new(self.ipa_base),
+            MemoryAccess::Write,
+            false,
+        );
+        let retry = self.resolve_guest_memory_fault(fault, &pin);
+        let write = self.commit_page(
+            0,
+            LeafPublication::Inactive,
+            Stage2PagePermissions::ReadWrite,
+        );
+        self.table_rebuild_blocked = false;
+        if retry != Ok(true)
+            || write != Err(Error::TableMaintenance)
+            || self.table_pages.pages.len() != tables
+            || self.committed_pages != committed
+        {
+            return Err("table maintenance allowed a replacement before invalidation");
+        }
+        Ok(())
     }
 }
 

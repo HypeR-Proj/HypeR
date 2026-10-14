@@ -312,6 +312,7 @@ const fn classify_registry_error(error: super::registry::Error) -> Error {
 
 const fn classify_guest_memory_error(error: super::memory::Error) -> Error {
     match error {
+        super::memory::Error::TableMaintenance => Error::WouldBlock,
         super::memory::Error::Identifier(crate::kernel::mm::translation_id::Error::Busy) => {
             Error::Busy
         }

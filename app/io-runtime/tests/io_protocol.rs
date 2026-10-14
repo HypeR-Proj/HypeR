@@ -120,7 +120,7 @@ fn hello_rejects_incompatible_queue_contract() -> Result<(), Error> {
     bytes[56..60].copy_from_slice(&(QUEUES as u32).to_le_bytes());
     bytes[60..64].copy_from_slice(&QUEUE_MAX.to_le_bytes());
     assert_eq!(Reply::decode(&bytes, request)?.features, Some(VERSION_1));
-    bytes[56] = 4;
+    bytes[56] = 7;
     assert_eq!(
         Reply::decode(&bytes, request),
         Err(Error::UnsupportedBackend)

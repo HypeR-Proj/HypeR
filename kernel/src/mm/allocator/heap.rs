@@ -278,6 +278,9 @@ pub struct HeapStats {
     pub free_pages: usize,
     pub slab_pages: usize,
     pub large_heap_pages: usize,
+    /// Subsets of heap backing owned exclusively by file-cache metadata.
+    pub file_cache_slab_pages: usize,
+    pub file_cache_large_pages: usize,
     pub live_allocations: usize,
     pub live_slab_allocations: usize,
     pub live_large_allocations: usize,
@@ -323,7 +326,8 @@ struct SlabHeader {
     capacity: u16,
     class: u8,
     list_state: u8,
-    _reserved: [u8; 2],
+    pool: u8,
+    _reserved: u8,
 }
 
 const _: () = assert!(core::mem::size_of::<SlabHeader>() == 48);
@@ -335,7 +339,44 @@ struct LargeHeader {
     magic: u64,
     physical: u64,
     order: u8,
-    _reserved: [u8; 7],
+    pool: u8,
+    _reserved: [u8; 6],
+}
+
+/// Separate slab topology prevents cache metadata from stranding pages occupied
+/// by long-lived ordinary kernel objects. Both pools use the same buddy owner.
+#[derive(Clone, Copy, Eq, PartialEq)]
+#[repr(u8)]
+enum HeapPool {
+    Kernel = 0,
+    FileCache = 1,
+}
+impl HeapPool {
+    fn from_raw(value: u8) -> Self {
+        match value {
+            0 => Self::Kernel,
+            1 => Self::FileCache,
+            _ => allocator_fault(AllocatorFault::InvalidSlabHeader),
+        }
+    }
+}
+
+/// # Safety
+/// The pointer/layout must identify a live allocation in this heap. Only the
+/// immutable pool byte is read; mutable slab header fields are not borrowed.
+unsafe fn allocation_pool(pointer: *mut u8, layout: Layout) -> HeapPool {
+    let pool = if slab_class_for_layout(layout).is_some() {
+        let header = ((pointer as usize) & !(PAGE_SIZE as usize - 1)) as *const SlabHeader;
+        // SAFETY: The live slab object retains its initialized, immutable tag.
+        unsafe { core::ptr::addr_of!((*header).pool).read() }
+    } else {
+        // SAFETY: Large allocations have the exact header immediately before them.
+        let header =
+            unsafe { pointer.sub(core::mem::size_of::<LargeHeader>()) }.cast::<LargeHeader>();
+        // SAFETY: The caller owns this live allocation and its immutable tag.
+        unsafe { core::ptr::addr_of!((*header).pool).read() }
+    };
+    HeapPool::from_raw(pool)
 }
 
 /// Linear ownership of one object reserved from the central slab topology.
@@ -672,7 +713,9 @@ impl<'a> PreparedRemove<'a> {
 
 pub struct SlabAllocator {
     buddy: BuddyAllocator,
-    partial: PartialSlabLists<SLAB_CLASS_COUNT>,
+    partial: [PartialSlabLists<SLAB_CLASS_COUNT>; 2],
+    file_cache_slab_pages: usize,
+    file_cache_large_pages: usize,
     slab_pages: usize,
     large_heap_pages: usize,
     live_allocations: usize,
@@ -706,7 +749,9 @@ impl SlabAllocator {
             // SAFETY: This constructor inherits and preserves its caller's
             // permanent writable direct-map contract for the buddy lifetime.
             buddy: unsafe { BuddyAllocator::from_handoff(handoff, direct_map_base)? },
-            partial: PartialSlabLists::new(),
+            partial: [PartialSlabLists::new(), PartialSlabLists::new()],
+            file_cache_slab_pages: 0,
+            file_cache_large_pages: 0,
             slab_pages: 0,
             large_heap_pages: 0,
             live_allocations: 0,
@@ -786,11 +831,21 @@ impl SlabAllocator {
     }
 
     fn reserve_slab_object(&mut self, class: HeapSlabClass) -> Option<CachedObject> {
-        if self.partial.head(class).is_none() && self.create_slab(class).is_err() {
+        self.reserve_slab_object_in(class, HeapPool::Kernel)
+    }
+
+    fn reserve_slab_object_in(
+        &mut self,
+        class: HeapSlabClass,
+        pool: HeapPool,
+    ) -> Option<CachedObject> {
+        if self.partial[pool as usize].head(class).is_none()
+            && self.create_slab(class, pool).is_err()
+        {
             return None;
         }
 
-        let page = match self.partial.head(class) {
+        let page = match self.partial[pool as usize].head(class) {
             Some(page) => page,
             None => allocator_fault(AllocatorFault::InvalidPartialList),
         };
@@ -799,7 +854,10 @@ impl SlabAllocator {
             Some(slab) => slab,
             None => allocator_fault(AllocatorFault::InvalidPartialList),
         };
-        if slab.class != class || slab.header.list_state != SLAB_LINKED {
+        if slab.class != class
+            || slab.header.list_state != SLAB_LINKED
+            || HeapPool::from_raw(slab.header.pool) != pool
+        {
             allocator_fault(AllocatorFault::SlabClassMismatch);
         }
         let pointer = slab.header.free_head;
@@ -816,10 +874,11 @@ impl SlabAllocator {
             allocator_fault(AllocatorFault::InvalidPartialList);
         }
         let removal = if becomes_full {
-            let permit = match self
-                .partial
-                .preflight_remove(&SlabTopology { headers }, class, page)
-            {
+            let permit = match self.partial[pool as usize].preflight_remove(
+                &SlabTopology { headers },
+                class,
+                page,
+            ) {
                 Ok(permit) => permit,
                 Err(_) => allocator_fault(AllocatorFault::InvalidPartialList),
             };
@@ -880,6 +939,7 @@ impl SlabAllocator {
         if slab.class != class {
             allocator_fault(AllocatorFault::SlabClassMismatch);
         }
+        let pool = HeapPool::from_raw(slab.header.pool);
         let pointer_address = pointer as usize;
         if !headers.valid_free_object(slab, pointer_address) {
             allocator_fault(AllocatorFault::InvalidSlabPointer);
@@ -891,10 +951,11 @@ impl SlabAllocator {
         let was_full = slab.header.list_state == SLAB_DETACHED;
         let capacity_one_empty = was_full && slab.header.capacity == 1;
         let transition = if was_full && !capacity_one_empty {
-            let permit = match self
-                .partial
-                .preflight_insert(&SlabTopology { headers }, class, page)
-            {
+            let permit = match self.partial[pool as usize].preflight_insert(
+                &SlabTopology { headers },
+                class,
+                page,
+            ) {
                 Ok(permit) => permit,
                 Err(_) => allocator_fault(AllocatorFault::InvalidPartialList),
             };
@@ -903,10 +964,11 @@ impl SlabAllocator {
                 None => allocator_fault(AllocatorFault::InvalidPartialList),
             }
         } else if !was_full && in_use == 0 {
-            let permit = match self
-                .partial
-                .preflight_remove(&SlabTopology { headers }, class, page)
-            {
+            let permit = match self.partial[pool as usize].preflight_remove(
+                &SlabTopology { headers },
+                class,
+                page,
+            ) {
                 Ok(permit) => permit,
                 Err(_) => allocator_fault(AllocatorFault::InvalidPartialList),
             };
@@ -936,6 +998,9 @@ impl SlabAllocator {
             // this allocator until the buddy deallocation below.
             unsafe { (*slab.pointer.as_ptr()).magic = 0 };
             self.slab_pages -= 1;
+            if pool == HeapPool::FileCache {
+                self.file_cache_slab_pages -= 1;
+            }
             // SAFETY: The empty slab page is exclusively owned by this heap.
             if unsafe {
                 self.buddy
@@ -948,15 +1013,13 @@ impl SlabAllocator {
         }
     }
 
-    fn create_slab(&mut self, class: HeapSlabClass) -> Result<(), BuddyError> {
+    fn create_slab(&mut self, class: HeapSlabClass, pool: HeapPool) -> Result<(), BuddyError> {
         let headers = SlabHeaderAccess { buddy: &self.buddy };
-        let head_permit = match self
-            .partial
-            .preflight_head(&SlabTopology { headers }, class)
-        {
-            Ok(permit) => permit,
-            Err(_) => allocator_fault(AllocatorFault::InvalidPartialList),
-        };
+        let head_permit =
+            match self.partial[pool as usize].preflight_head(&SlabTopology { headers }, class) {
+                Ok(permit) => permit,
+                Err(_) => allocator_fault(AllocatorFault::InvalidPartialList),
+            };
         let old_head = head_permit.head();
         let old_head_pointer = match old_head {
             Some(head) => match headers.validated_slab(head) {
@@ -1024,7 +1087,8 @@ impl SlabAllocator {
                 capacity: capacity as u16,
                 class: class.raw(),
                 list_state: SLAB_LINKED,
-                _reserved: [0; 2],
+                pool: pool as u8,
+                _reserved: 0,
             })
         };
         if let Some(old_head) = old_head_pointer {
@@ -1035,15 +1099,26 @@ impl SlabAllocator {
         permit.commit();
         let _ = pending.publish();
         self.slab_pages = slab_pages;
+        if pool == HeapPool::FileCache {
+            self.file_cache_slab_pages += 1;
+        }
         Ok(())
     }
 
     fn slab_class_for(&self, layout: Layout) -> Option<HeapSlabClass> {
         let class = slab_class_for_layout(layout)?;
-        self.partial.class(class.index())
+        self.partial[HeapPool::Kernel as usize].class(class.index())
     }
 
     fn allocate_large(&mut self, layout: Layout) -> Result<*mut u8, LargeAllocationError> {
+        self.allocate_large_in(layout, HeapPool::Kernel)
+    }
+
+    fn allocate_large_in(
+        &mut self,
+        layout: Layout,
+        pool: HeapPool,
+    ) -> Result<*mut u8, LargeAllocationError> {
         let header_size = core::mem::size_of::<LargeHeader>();
         let power_of_two_pages =
             large_allocation_pages(layout).ok_or(LargeAllocationError::UnsupportedLayout)?;
@@ -1087,7 +1162,8 @@ impl SlabAllocator {
                 magic: LARGE_MAGIC,
                 physical,
                 order: order as u8,
-                _reserved: [0; 7],
+                pool: pool as u8,
+                _reserved: [0; 6],
             })
         };
         let _ = pending.publish();
@@ -1095,6 +1171,9 @@ impl SlabAllocator {
             Some(pages) => pages,
             None => allocator_fault(AllocatorFault::AllocationCountOverflow),
         };
+        if pool == HeapPool::FileCache {
+            self.file_cache_large_pages += 1usize << order;
+        }
         Ok(user as *mut u8)
     }
 
@@ -1146,6 +1225,9 @@ impl SlabAllocator {
             allocator_fault(AllocatorFault::BuddyDeallocation);
         }
         self.large_heap_pages -= pages;
+        if HeapPool::from_raw(header.pool) == HeapPool::FileCache {
+            self.file_cache_large_pages -= pages;
+        }
     }
 
     fn virtual_address(&self, physical: u64) -> Option<usize> {
@@ -1162,6 +1244,8 @@ impl SlabAllocator {
             free_pages: buddy.free_pages,
             slab_pages: self.slab_pages,
             large_heap_pages: self.large_heap_pages,
+            file_cache_slab_pages: self.file_cache_slab_pages,
+            file_cache_large_pages: self.file_cache_large_pages,
             live_allocations: self.live_allocations,
             live_slab_allocations: self.live_slab_allocations,
             live_large_allocations: self.live_large_allocations,

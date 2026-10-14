@@ -172,19 +172,33 @@ impl<Page> FileDataCache<Page> {
             return Ok(Maintenance::Unchanged);
         };
         let mut maintenance = ParkedTable { cache: self, table };
-        // Scan only while the table is detached, never under the IRQ-safe
-        // cache lock. Existing owners may disappear, but no new lookup can
-        // create a pin after a unique entry has been observed.
-        if maintenance.table.as_ref().is_some_and(|cache| {
-            capacity < cache.model.capacity()
-                && cache
-                    .pages
-                    .iter()
-                    .flatten()
-                    .any(|page| page.mapping_pinned())
-        }) {
-            return Ok(Maintenance::Busy);
+        // Parking excludes new mapping pins. Existing pins may disappear, but
+        // every remaining canonical key must survive the replacement table.
+        let pinned = maintenance.table.as_ref().map_or(0, |cache| {
+            cache
+                .pages
+                .iter()
+                .flatten()
+                .filter(|page| page.mapping_pinned())
+                .count()
+        });
+        let mut capacity = capacity.max(
+            pinned
+                .max(1)
+                .checked_next_power_of_two()
+                .ok_or(CacheError::InvalidCapacity)?,
+        );
+        let old_capacity = maintenance
+            .table
+            .as_ref()
+            .map_or(0, |cache| cache.model.capacity());
+        if capacity == old_capacity {
+            // Mapped pages already require the complete old index. Do not
+            // allocate an identical replacement during a pressure episode.
+            self.acknowledge_growth();
+            return Ok(Maintenance::Unchanged);
         }
+        let shrinking = capacity < old_capacity;
 
         // Empty metadata must remain reclaimable even when the pressure floor
         // rejects replacement allocation. If rebuilding fails, Drop publishes
@@ -201,25 +215,58 @@ impl<Page> FileDataCache<Page> {
         if self.fail_maintenance.swap(false, Ordering::AcqRel) {
             return Err(CacheError::Allocation);
         }
-        let mut replacement = CacheState::try_new(capacity)?;
+        let mut replacement = loop {
+            let mut candidate = CacheState::try_new_for_resize(capacity, shrinking)?;
+            let mut fits = true;
+            if let Some(old) = maintenance.table.as_ref() {
+                for slot in 0..old.model.capacity() {
+                    if old.pages[slot]
+                        .as_ref()
+                        .is_some_and(|page| page.mapping_pinned())
+                    {
+                        let Some((key, sequence)) = old.model.clean_entry(slot) else {
+                            cache_invariant_violation();
+                        };
+                        if candidate.model.restore_clean(key, sequence).is_none() {
+                            fits = false;
+                            break;
+                        }
+                    }
+                }
+            }
+            if fits {
+                break candidate;
+            }
+            // Bounded hash chains may need more buckets than the pin count.
+            // Never evict a mapped key or destroy the old index on failure.
+            if !shrinking || capacity >= old_capacity / 2 {
+                return Ok(Maintenance::Busy);
+            }
+            capacity *= 2;
+        };
         if let Some(old) = maintenance.table.as_mut() {
-            while old.model.clean() > capacity {
+            // Move canonical mapped keys first, leaving only evictable entries
+            // in the old LRU. No fallible operation follows this commit point.
+            for slot in 0..old.model.capacity() {
+                if let Some((key, _)) = old.model.clean_entry(slot)
+                    && let Some(new_slot) = replacement.model.peek_clean(key)
+                {
+                    replacement.pages[new_slot] = old.pages[slot].take();
+                    old.model.detach_clean(slot);
+                }
+            }
+            while old.model.clean() > capacity - replacement.model.clean() {
                 let Some(slot) = old.model.oldest_clean() else {
                     cache_invariant_violation();
                 };
                 old.model.remove_clean(slot);
                 drop(old.pages[slot].take());
             }
-            // Validate complete index migration before moving any owner. Losing
-            // a mapped key would permit a second canonical page for the file.
             for slot in 0..old.model.capacity() {
                 if let Some((key, sequence)) = old.model.clean_entry(slot)
-                    && replacement.model.restore_clean(key, sequence).is_none()
-                    && old.pages[slot]
-                        .as_ref()
-                        .is_some_and(|page| page.mapping_pinned())
+                    && replacement.model.peek_clean(key).is_none()
                 {
-                    return Err(CacheError::InvalidCapacity);
+                    let _ = replacement.model.restore_clean(key, sequence);
                 }
             }
             for slot in 0..old.model.capacity() {

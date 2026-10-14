@@ -152,7 +152,9 @@ Victim lookup is constant time and heap updates are logarithmic in capacity.
 Hash chains contain at most 64 entries, bounding index work while interrupts
 are masked. A colliding miss bypasses retention once that limit is reached.
 Shrinking metadata may discard entries that would exceed a merged bucket's
-limit; growth preserves resident entries.
+limit; growth preserves resident entries. Mapped canonical keys are migrated
+first and never discarded: their count and bucket occupancy bound the smallest
+replacement. A live mapping does not otherwise prevent metadata compaction.
 
 The same cache also owns immutable directory batches and exact-name attribute
 records for remote filesystems. Key kinds distinguish file data, directory
@@ -173,7 +175,12 @@ for existing loaders, and parks the table with a constant-time ownership move.
 Allocation, migration and destruction happen outside the cache lock. Reads
 bypass retention while the table is parked. Failed growth restores the old
 table; pressure can release empty oversized metadata before attempting a small
-replacement, leaving a disabled cache if even that allocation fails.
+replacement, leaving a disabled cache if even that allocation fails. Sparse
+metadata is also compacted after reclaim lifts memory pressure. Smaller
+replacements may use the admission reserve to release a larger old table;
+allocation remains fallible. Index arrays and shared page descriptors have
+dedicated slab/large-allocation ownership, counted as file-cache backing and
+released without retaining empty CPU-magazine objects.
 
 Admission uses allocator-managed RAM, excluding firmware and other unmanaged
 regions. Normally the high watermark stops admission at 90% utilization and
@@ -184,6 +191,10 @@ Live non-cache allocations may still consume that headroom. Loading and
 reader-pinned pages remain charged until their final release, and load
 completion or memory release wakes a pressure-blocked worker. Cache admission
 never waits for reclamation: a miss falls back to ordinary backend I/O.
+The background mapping sweep remains finite across those wakeups until free
+memory reaches the resume watermark. Refaults do not restart the sweep and
+continually evict a running application's code; an explicit allocation request
+can still initiate its own bounded pass.
 
 Ordinary allocation failure also permits a bounded, nonblocking attempt to
 reclaim at most 64 unpinned clean pages before retrying once. This runs outside

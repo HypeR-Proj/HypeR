@@ -70,9 +70,14 @@ pub(super) struct AdmittedAddressSpaceMetadata {
     pub(super) table_capacity: usize,
     pub(super) charge: CommittedCharge,
 }
+pub(super) struct TablePage {
+    page: PageBlock,
+    detached: bool,
+}
+
 pub(super) struct Stage2PagePool {
     initial_capacity: usize,
-    pub(super) pages: Vec<PageBlock>,
+    pub(super) pages: Vec<TablePage>,
     domain: ResourceDomain,
     charge: Option<CommittedCharge>,
     error: Option<Error>,
@@ -126,11 +131,11 @@ impl Stage2PagePool {
         if additional_capacity == 0 {
             return Ok(());
         }
-        let layout = Layout::array::<PageBlock>(target).map_err(|_| Error::MetadataAllocation)?;
+        let layout = Layout::array::<TablePage>(target).map_err(|_| Error::MetadataAllocation)?;
         let allocation_pages = crate::kernel::mm::cache_memory::allocation_page_bound(layout)
             .ok_or(Error::MetadataAllocation)?;
         let bytes = additional_capacity
-            .checked_mul(core::mem::size_of::<PageBlock>())
+            .checked_mul(core::mem::size_of::<TablePage>())
             .ok_or(Error::MetadataAllocation)?;
         let reservation = self
             .domain
@@ -203,9 +208,72 @@ impl Stage2PagePool {
         };
         // SAFETY: This new table page is exclusive and permanently mapped.
         unsafe { write_bytes(virtual_address as *mut u8, 0, byte_count) };
-        self.pages.push(page);
+        self.pages.push(TablePage {
+            page,
+            detached: false,
+        });
         accumulate_charge(&mut self.charge, reservation.commit());
         Some(physical)
+    }
+
+    /// Withdraws a table from future walks; physical ownership remains here.
+    pub(super) fn detach(&mut self, physical: PhysicalAddress) {
+        let Some(owner) = self
+            .pages
+            .iter_mut()
+            .find(|owner| owner.page.physical() == physical)
+        else {
+            crate::kernel::crash::fatal(format_args!("HypeR: detached stage-2 table has no owner"));
+        };
+        if owner.detached {
+            crate::kernel::crash::fatal(format_args!("HypeR: stage-2 table detached twice"));
+        }
+        owner.detached = true;
+    }
+
+    /// # Safety
+    /// All detached descriptors must have passed an acknowledged all-CPU
+    /// invalidation. The returned storage and charge are dropped outside locks.
+    pub(super) unsafe fn take_retired(&mut self) -> Option<(PageBlock, CommittedCharge)> {
+        let index = self.pages.iter().position(|owner| owner.detached)?;
+        let owner = self.pages.swap_remove(index);
+        let pages = 1u64 << owner.page.order();
+        let Some(charge) = self.charge.as_mut() else {
+            crate::kernel::crash::fatal(format_args!("HypeR: stage-2 table charge missing"));
+        };
+        let charge = charge.split_off(
+            ResourceAmount::ZERO
+                .with(ResourceKind::KernelMemoryBytes, pages * PAGE_SIZE)
+                .with(ResourceKind::CommittedPages, pages)
+                .with(ResourceKind::PinnedPages, pages),
+        );
+        Some((owner.page, charge))
+    }
+
+    /// Trim spare owner slots after a live grant retires. Failure preserves the
+    /// current pool; it must never turn completed DMA retirement into an error.
+    /// The returned empty allocation and charge are destroyed outside the lock.
+    pub(super) fn compact_live(
+        &mut self,
+        live_capacity: usize,
+    ) -> Option<(Vec<TablePage>, CommittedCharge)> {
+        let target = self.live_capacity_target(live_capacity).ok()?;
+        let old_capacity = self.pages.capacity();
+        if target >= old_capacity {
+            return None;
+        }
+        // Allocation under the address-space lock is nonblocking and fallible;
+        // no scheduled reclaim may run here. Preserve all fault reservations.
+        let mut replacement = try_exact_capacity_vec(target).ok()?;
+        replacement.append(&mut self.pages);
+        core::mem::swap(&mut self.pages, &mut replacement);
+        let bytes = (old_capacity - target) * core::mem::size_of::<TablePage>();
+        let Some(charge) = self.charge.as_mut() else {
+            crate::kernel::crash::fatal(format_args!("HypeR: stage-2 metadata charge missing"));
+        };
+        let charge = charge
+            .split_off(ResourceAmount::ZERO.with(ResourceKind::KernelMemoryBytes, bytes as u64));
+        Some((replacement, charge))
     }
 
     pub(super) fn take_error(&mut self) -> Option<Error> {
@@ -240,7 +308,7 @@ pub(super) fn metadata_for_capacity(
         .and_then(|bytes| bytes.checked_mul(2))
         .ok_or(Error::MetadataAllocation)?;
     let table_owner_bytes = table_capacity
-        .checked_mul(core::mem::size_of::<PageBlock>())
+        .checked_mul(core::mem::size_of::<TablePage>())
         .ok_or(Error::MetadataAllocation)?;
     let bytes = bitmap_bytes
         .checked_add(table_owner_bytes)

@@ -275,7 +275,11 @@ impl Reply {
                 let features = u64_at(bytes, 48)?;
                 if status != Status::Success
                     || features & VERSION_1 == 0
-                    || u32_at(bytes, 56)? != request.command.device_kind().queue_count() as u32
+                    || if request.command == Command::Hello {
+                        !(3..=QUEUES as u32).contains(&u32_at(bytes, 56)?)
+                    } else {
+                        u32_at(bytes, 56)? != request.command.device_kind().queue_count() as u32
+                    }
                     || u32_at(bytes, 60)? != QUEUE_MAX
                 {
                     return Err(Error::UnsupportedBackend);

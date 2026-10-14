@@ -117,6 +117,24 @@ impl Stage2AddressSpace {
         Ok(())
     }
 
+    /// Detaches empty child tables without freeing their physical storage.
+    ///
+    /// # Safety
+    /// The caller serializes all hierarchy writers and retains every detached
+    /// page until a subsequent all-consumer translation invalidation completes.
+    /// Detached parent slots must not be rebuilt before that invalidation.
+    /// `retire` must not free pages or re-enter hierarchy mutation.
+    pub unsafe fn detach_empty_tables(
+        &mut self,
+        retire: &mut impl FnMut(PhysicalAddress),
+    ) -> Result<(), Error> {
+        // SAFETY: The outer contract retains the complete tree and detached children.
+        unsafe {
+            detach_empty(self.root, 0, self.present_flags(), retire)?;
+        }
+        Ok(())
+    }
+
     pub fn required_table_pages(ipa: u64, size: u64) -> Result<usize, Error> {
         validate_range(ipa, ipa, size)?;
         let pages = size.div_ceil(1 << 21);
@@ -449,4 +467,36 @@ unsafe fn write_entry(table: PhysicalAddress, slot: usize, value: u64) -> Result
     // SAFETY: The caller guarantees exclusive table mutation and an in-range slot.
     unsafe { write_volatile((table_pointer(table)? as *mut u64).add(slot), value) };
     Ok(())
+}
+
+unsafe fn detach_empty(
+    table: PhysicalAddress,
+    level: usize,
+    present: u64,
+    retire: &mut impl FnMut(PhysicalAddress),
+) -> Result<bool, Error> {
+    let pointer = table_pointer(table)? as *mut u64;
+    let mut empty = true;
+    for slot in 0..512 {
+        // SAFETY: Every retained table contains 512 aligned descriptors.
+        let entry = unsafe { pointer.add(slot) };
+        // SAFETY: Serialized software mutation; hardware accesses retained pages.
+        let descriptor = unsafe { read_volatile(entry) };
+        if descriptor == 0 {
+            continue;
+        }
+        // Bit 7 denotes a large leaf in both EPT and NPT.
+        if level < 3 && descriptor & present != 0 && descriptor & (1 << 7) == 0 {
+            let child = PhysicalAddress::new(descriptor & EPT_ADDRESS_MASK);
+            // SAFETY: A valid non-leaf points to a retained subordinate table.
+            if unsafe { detach_empty(child, level + 1, present, retire)? } {
+                // SAFETY: The caller retains this detached table through invalidation.
+                unsafe { write_volatile(entry, 0) };
+                retire(child);
+                continue;
+            }
+        }
+        empty = false;
+    }
+    Ok(empty)
 }

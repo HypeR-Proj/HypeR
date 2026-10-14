@@ -151,17 +151,20 @@ struct CacheState<Page> {
 
 impl<Page> CacheState<Page> {
     fn try_new(capacity: usize) -> Result<Self, CacheError> {
+        Self::try_new_for_resize(capacity, false)
+    }
+
+    fn try_new_for_resize(capacity: usize, shrinking: bool) -> Result<Self, CacheError> {
         let [slots, heads, next, free, entries, positions] =
             state::State::allocation_layouts(capacity)?;
         let pages_layout = Layout::array::<Option<FallibleArc<OwnedPage<Page>>>>(capacity)
             .map_err(|_| CacheError::InvalidCapacity)?;
-        let (reservation, metadata_pages) =
-            memory::reserve(&[slots, heads, next, free, entries, positions, pages_layout])?;
+        let (reservation, metadata_pages) = memory::reserve_table(
+            &[slots, heads, next, free, entries, positions, pages_layout],
+            shrinking,
+        )?;
         let model = state::State::try_new(capacity)?;
-        let mut pages = Vec::new();
-        pages
-            .try_reserve_exact(capacity)
-            .map_err(|_| CacheError::Allocation)?;
+        let mut pages = memory::vector(capacity)?;
         pages.resize_with(capacity, || None);
         // Every backing allocation is now reflected in physical free memory.
         // Release pending admission only after construction or full rollback.
@@ -221,8 +224,7 @@ impl<Page> FileDataCache<Page> {
                 // Caching is optional. Failure to provision its initial arrays
                 // must not prevent VFS startup; demand can enable it later.
                 // This small control owner is still conventionally fallible.
-                let budget =
-                    FallibleArc::try_new(Budget::new(0)).map_err(|_| CacheError::Allocation)?;
+                let budget = memory::shared(Budget::new(0))?;
                 Ok(Self::from_parts(None, budget))
             }
             Err(error) => Err(error),
@@ -232,8 +234,7 @@ impl<Page> FileDataCache<Page> {
     pub(crate) fn try_new(capacity: usize) -> Result<Self, CacheError> {
         let table = CacheState::try_new(capacity)?;
         let (reservation, _) = memory::reserve(&[budget_layout()])?;
-        let budget =
-            FallibleArc::try_new(Budget::new(capacity)).map_err(|_| CacheError::Allocation)?;
+        let budget = memory::shared(Budget::new(capacity))?;
         drop(reservation);
         Ok(Self::from_parts(Some(table), budget))
     }

@@ -64,6 +64,24 @@ impl Stage2AddressSpace {
         Ok(())
     }
 
+    /// Detaches empty child tables without freeing their physical storage.
+    ///
+    /// # Safety
+    /// The caller serializes all hierarchy writers and retains every detached
+    /// page until a subsequent all-consumer translation invalidation completes.
+    /// Detached parent slots must not be rebuilt before that invalidation.
+    /// `retire` must not free pages or re-enter hierarchy mutation.
+    pub unsafe fn detach_empty_tables(
+        &mut self,
+        retire: &mut impl FnMut(PhysicalAddress),
+    ) -> Result<(), Error> {
+        // SAFETY: The outer contract retains the complete tree and detached children.
+        unsafe {
+            detach_empty(self.root, 0, retire)?;
+        }
+        Ok(())
+    }
+
     pub fn required_table_pages(ipa: u64, size: u64) -> Result<usize, Error> {
         validate_ipa_range(ipa, size)?;
         let end = ipa.checked_add(size).ok_or(Error::AddressOverflow)?;
@@ -1028,4 +1046,39 @@ pub fn invalidate_namespace_local() {
             options(nostack, preserves_flags)
         );
     }
+}
+
+/// Postorder traversal leaves the root and every nonempty subtree intact.
+unsafe fn detach_empty(
+    table: PhysicalAddress,
+    level: usize,
+    retire: &mut impl FnMut(PhysicalAddress),
+) -> Result<bool, Error> {
+    let pointer = table_pointer(table)?;
+    let mut empty = true;
+    for slot in 0..registers::TRANSLATION_TABLE_ENTRY_COUNT_4K {
+        // SAFETY: Serialized access to this retained table's complete descriptor array.
+        let entry = unsafe { pointer.add(slot) };
+        // SAFETY: Hardware may read descriptors; all software writers are excluded.
+        let descriptor = unsafe { read_volatile(entry) };
+        if descriptor == 0 {
+            continue;
+        }
+        if level < 2
+            && descriptor & registers::TRANSLATION_DESC_TYPE_MASK
+                == registers::STAGE2_DESC_TABLE_OR_PAGE
+        {
+            let child =
+                PhysicalAddress::new(descriptor & registers::TRANSLATION_DESC_ADDRESS_MASK_48BIT);
+            // SAFETY: This valid table descriptor names owned, retained child storage.
+            if unsafe { detach_empty(child, level + 1, retire)? } {
+                // SAFETY: Child storage remains owned until the caller's invalidation.
+                unsafe { write_volatile(entry, 0) };
+                retire(child);
+                continue;
+            }
+        }
+        empty = false;
+    }
+    Ok(empty)
 }

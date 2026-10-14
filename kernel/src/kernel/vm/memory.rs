@@ -46,6 +46,7 @@ pub(crate) enum Error {
     MetadataAllocation,
     InvalidCpu,
     Poisoned,
+    TableMaintenance,
     Resource(ResourceError),
     Residency(ResidencyError),
     Registry(super::registry::Error),
@@ -134,6 +135,9 @@ pub(crate) struct GuestAddressSpace {
     repeated_faults: u64,
     failed_faults: u64,
     poisoned: bool,
+    // Protected by the address-space lock. Detached parent slots must remain
+    // invalid until every CPU completes the break-before-make invalidation.
+    table_rebuild_blocked: bool,
     translation_epoch: u64,
     residency: AddressSpaceResidency<{ hyper::cpu::MAX_CPUS }>,
     instruction_epoch: AtomicU64,

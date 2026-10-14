@@ -209,6 +209,17 @@ impl LiveMappings {
             .find(|mapping| mapping.token == token)
             .map(|mapping| mapping.as_mut())
     }
+
+    pub(super) fn table_capacity(&self) -> Result<usize, Error> {
+        self.slots
+            .iter()
+            .flatten()
+            .try_fold(0usize, |total, mapping| {
+                total
+                    .checked_add(mapping.table_capacity)
+                    .ok_or(Error::MetadataAllocation)
+            })
+    }
 }
 
 impl super::GuestAddressSpace {
@@ -240,14 +251,11 @@ impl super::GuestAddressSpace {
             .ipa_base
             .checked_add(self.size)
             .ok_or(Error::InvalidRange)?;
-        let capacity = self.live.slots.iter().flatten().try_fold(
-            candidate.table_capacity,
-            |total, mapping| {
-                total
-                    .checked_add(mapping.table_capacity)
-                    .ok_or(Error::MetadataAllocation)
-            },
-        )?;
+        let capacity = self
+            .live
+            .table_capacity()?
+            .checked_add(candidate.table_capacity)
+            .ok_or(Error::MetadataAllocation)?;
         for extent in &candidate.extents {
             if extent.alias < self.ipa_base || extent.alias + extent.length > end {
                 return Err(Error::InvalidRange);
@@ -272,6 +280,7 @@ impl super::GuestAddressSpace {
         &mut self,
         fault: hyper::vm::exit::GuestMemoryFault,
     ) -> Result<bool, Error> {
+        self.ensure_table_writable()?;
         if fault.access() == hyper::vm::exit::MemoryAccess::Execute {
             return Ok(false);
         }

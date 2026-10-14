@@ -141,7 +141,7 @@ pub(crate) fn release(process: &Process, handle: HandleValue) -> Result<(), Erro
     let mapping = process.resolve_handle::<GuestMapping>(handle, Rights::WRITE)?;
     let mapping = mapping.object();
     let binding = registry::acquire_binding(mapping.backend).map_err(|_| Error::BadState)?;
-    let synchronization =
+    let mut synchronization =
         super::prepare_live_synchronization(&binding).map_err(|error| match error {
             super::SynchronizationError::Unsupported => Error::NotSupported,
             super::SynchronizationError::TransportBusy => Error::WouldBlock,
@@ -189,9 +189,38 @@ pub(crate) fn release(process: &Process, handle: HandleValue) -> Result<(), Erro
                 ));
             }
         }
+        // Faults may retry, but must not rebuild an invalid parent slot before
+        // the break-before-make barrier has completed on every CPU.
+        space.table_rebuild_blocked = true;
+        // SAFETY: The address-space lock excludes software writers. Detached
+        // owners remain in the pool through the following all-CPU rendezvous.
+        if unsafe {
+            space
+                .stage2
+                .detach_empty_tables(&mut |page| space.table_pages.detach(page))
+        }
+        .is_err()
+        {
+            crate::kernel::crash::fatal(format_args!("HypeR: stage-2 table detachment failed"));
+        }
         Ok(())
     })?;
     synchronization.execute();
+    loop {
+        let retired = binding.with_address_space(|space| {
+            // SAFETY: The serialized invalidation completed on every frozen
+            // CPU. LiveSynchronization excludes a second retirement until
+            // this pool's acknowledged owners have all been removed.
+            unsafe { space.table_pages.take_retired() }
+        });
+        let Some((page, charge)) = retired else {
+            break;
+        };
+        drop(page);
+        drop(charge);
+    }
+    binding.with_address_space(|space| space.table_rebuild_blocked = false);
+    drop(synchronization);
     let retired = binding.with_address_space(|space| {
         space
             .live
@@ -204,5 +233,10 @@ pub(crate) fn release(process: &Process, handle: HandleValue) -> Result<(), Erro
             .and_then(Option::take)
     });
     drop(retired);
+    let spare = binding.with_address_space(|space| {
+        let capacity = space.live.table_capacity().ok()?;
+        space.table_pages.compact_live(capacity)
+    });
+    drop(spare);
     Ok(())
 }

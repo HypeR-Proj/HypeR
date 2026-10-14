@@ -134,6 +134,7 @@ impl GuestAddressSpace {
             repeated_faults: 0,
             failed_faults: 0,
             poisoned: false,
+            table_rebuild_blocked: false,
             // Epoch zero is reserved for per-CPU residency slots which have
             // never activated or synchronized a guest address space.
             translation_epoch: 1,
@@ -175,7 +176,7 @@ impl GuestAddressSpace {
             .table_pages
             .pages
             .capacity()
-            .checked_mul(core::mem::size_of::<PageBlock>())
+            .checked_mul(core::mem::size_of::<super::storage::TablePage>())
             .ok_or(Error::MetadataAllocation)?;
         let backing_owner_bytes = match &self.backing {
             GuestMemoryBacking::KernelOwned(pages) => pages

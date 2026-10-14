@@ -42,14 +42,8 @@ impl EvictionHeap {
         // Check both array layouts before allocating either one. The positions
         // array also records the configured limit, independent of Vec capacity.
         Self::allocation_layouts(capacity)?;
-        let mut entries = Vec::new();
-        entries
-            .try_reserve_exact(capacity)
-            .map_err(|_| Error::Allocation)?;
-        let mut positions = Vec::new();
-        positions
-            .try_reserve_exact(capacity)
-            .map_err(|_| Error::Allocation)?;
+        let entries = super::super::memory::vector(capacity)?;
+        let mut positions = super::super::memory::vector(capacity)?;
         positions.resize(capacity, NONE);
         Ok(Self { entries, positions })
     }

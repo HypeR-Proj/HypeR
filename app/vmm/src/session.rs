@@ -81,8 +81,8 @@ pub(crate) fn console_session(
         for byte in bytes[..count].iter().copied() {
             match keyboard.push(byte) {
                 InputAction::Continue => {}
-                InputAction::Menu => output.write_all(b"\r\n[vmm] d/q: detach, any other key: resume\r\n")?,
-                InputAction::Resume => output.write_all(b"\r\n[vmm] resumed\r\n")?,
+                InputAction::Menu => output.write_all(b"\r\n[vmm] d/q/Ctrl-]: detach\r\n")?,
+                InputAction::Resume => output.write_all(b"\r\n[vmm] invalid command; resuming console\r\n")?,
                 InputAction::Overflow => output.write_all(b"\r\n[vmm] guest input buffer full; excess input discarded (Ctrl-] still works)\r\n")?,
                 InputAction::Detach => {
                     output.write_all(b"\r\n[vmm] detached\r\n")?;

@@ -198,6 +198,24 @@ impl Stage2AddressSpace {
         Ok(())
     }
 
+    /// Detaches empty child tables without freeing their physical storage.
+    ///
+    /// # Safety
+    /// The caller serializes all hierarchy writers and retains every detached
+    /// page until a subsequent all-consumer translation invalidation completes.
+    /// Detached parent slots must not be rebuilt before that invalidation.
+    /// `retire` must not free pages or re-enter hierarchy mutation.
+    pub unsafe fn detach_empty_tables(
+        &mut self,
+        retire: &mut impl FnMut(PhysicalAddress),
+    ) -> Result<(), Error> {
+        // SAFETY: The outer contract retains the complete tree and detached children.
+        unsafe {
+            detach_empty(self.root, 0, retire)?;
+        }
+        Ok(())
+    }
+
     pub fn required_table_pages(ipa: u64, size: u64) -> Result<usize, Error> {
         validate_range(ipa, ipa, size)?;
         let end = ipa.checked_add(size).ok_or(Error::AddressOverflow)?;
@@ -704,4 +722,43 @@ pub fn invalidate_namespace_local() {
             options(nostack)
         );
     }
+}
+
+unsafe fn detach_empty(
+    table: PhysicalAddress,
+    level: usize,
+    retire: &mut impl FnMut(PhysicalAddress),
+) -> Result<bool, Error> {
+    let pointer = table_pointer(table)? as *mut u64;
+    let count = if level == 0 {
+        ROOT_ENTRIES as usize
+    } else {
+        512
+    };
+    let mut empty = true;
+    for slot in 0..count {
+        // SAFETY: The root owns 2048 entries; subordinate tables each own 512.
+        let entry = unsafe { pointer.add(slot) };
+        // SAFETY: Serialized software mutation, with all table owners retained.
+        let descriptor = unsafe { read_volatile(entry) };
+        if descriptor == 0 {
+            continue;
+        }
+        if level < 2
+            && descriptor & registers::PTE_VALID != 0
+            && descriptor & (registers::PTE_READ | registers::PTE_WRITE | registers::PTE_EXECUTE)
+                == 0
+        {
+            let child = PhysicalAddress::new(pte_address(descriptor));
+            // SAFETY: The valid non-leaf descriptor names a retained child table.
+            if unsafe { detach_empty(child, level + 1, retire)? } {
+                // SAFETY: Retire only detaches; no backing is freed before HFENCE completion.
+                unsafe { write_volatile(entry, 0) };
+                retire(child);
+                continue;
+            }
+        }
+        empty = false;
+    }
+    Ok(empty)
 }
