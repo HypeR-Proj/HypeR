@@ -241,7 +241,7 @@ future work. Commands continue to get fresh handle-backed standard I/O, with
 blocking multi-object waits rather than polling.
 
 The shell also receives one persistent manager connector with exactly
-`WAIT|WRITE`. It cannot duplicate that authority. Each `/system/bin/vmm` launch
+`WAIT|WRITE`. It cannot duplicate that authority. Each `/bin/vmm` launch
 creates private control and capability-channel pairs, transfers only their
 manager endpoints through the connector, and gives the client endpoints to the
 new process. Consequently an attached guest console cannot monopolize the
@@ -315,7 +315,7 @@ initramfs, and verifies that init loads the manifest, starts the session and
 shell Processes, launches `ps` and `handle` through scoped inspection handles,
 executes a constructor-bearing shared-object fixture through `dlopen`, runs an
 external echo command through the complete physical Console path, and attaches
-`/system/bin/vmm` to the separately buffered guest serial stream. The VM portion must
+`/bin/vmm` to the separately buffered guest serial stream. The VM portion must
 observe Linux userspace startup, deliver guest-console input, and detach
 through the local Ctrl-] menu.
 

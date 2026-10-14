@@ -156,6 +156,7 @@ impl MailboxState {
 }
 
 pub(crate) struct NotificationState {
+    pub(crate) interrupt_masked: bool,
     pub(crate) epoch: u32,
     pub(crate) enabled: bool,
     pub(crate) closed: bool,
@@ -167,6 +168,7 @@ pub(crate) const QUEUE_COUNT: u64 = hyper::abi::native::HYPER_NATIVE_NATIVE_BLOC
 impl NotificationState {
     pub(crate) const fn new() -> Self {
         Self {
+            interrupt_masked: false,
             epoch: 1,
             enabled: false,
             closed: false,
@@ -219,7 +221,8 @@ impl NotificationState {
         self.status &= !(mask & 3);
     }
     pub(crate) fn front_irq(&self) -> bool {
-        (self.status & 2 != 0) || (!self.closed && self.enabled && self.status & 1 != 0)
+        !self.interrupt_masked
+            && ((self.status & 2 != 0) || (!self.closed && self.enabled && self.status & 1 != 0))
     }
     pub(crate) fn back_irq(&self) -> bool {
         self.enabled && !self.closed && self.kicks != 0

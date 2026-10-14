@@ -188,6 +188,13 @@ fn describe_produced_handle(name: &str, handle: schema::ProducedHandle) -> Strin
         ProducedObject::Kind(kind) => format!("kind={kind}"),
     };
     let rights = match handle.rights {
+        ProducedRights::FixedAndInherited {
+            fixed_rights,
+            authority_source,
+            inherited_rights,
+        } => format!(
+            "fixed=0x{fixed_rights:x}, inherited-from({authority_source}), mask=0x{inherited_rights:x}"
+        ),
         ProducedRights::RequestedSubsetOf(argument) => format!("subset-from({argument})"),
         ProducedRights::InheritedSubset {
             authority_source,

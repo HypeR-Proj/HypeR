@@ -7,7 +7,9 @@ use crate::kernel::capability::{HandleValue, Rights};
 use crate::kernel::mm::user_space::{UserAddress, UserSlice};
 use crate::kernel::process::Process;
 use crate::kernel::vfs::service::copy_path;
-use crate::kernel::vfs::{DirectoryObject, VfsServiceError};
+use crate::kernel::vfs::{
+    DirectoryObject, Error as VfsError, ScratchBudget, ScratchVec, VfsServiceError,
+};
 use hyper::abi::native as abi;
 
 const NAMESPACE_RIGHTS: Rights = Rights::MANAGE_NAMESPACE
@@ -33,6 +35,85 @@ pub(super) fn switch_root(
     root: HandleValue,
     request: UserSlice,
 ) -> Result<(), VfsServiceError> {
+    with_root_request(
+        process,
+        root,
+        request,
+        |directory, new_root, put_old, moves| {
+            directory
+                .switch_root(new_root, put_old, moves, &process.resource_domain())
+                .map_err(Into::into)
+        },
+    )
+}
+
+pub(super) fn begin_root_switch(
+    process: &Process,
+    root: HandleValue,
+    request: UserSlice,
+) -> Result<HandleValue, VfsServiceError> {
+    with_root_request(
+        process,
+        root,
+        request,
+        |directory, new_root, put_old, moves| {
+            use crate::kernel::{
+                capability::{HandleFlags, PreparedHandle},
+                object::{KernelObject, ObjectPublication},
+                process::ProcessError,
+                vfs::RootTransitionObject,
+            };
+            let transition = directory.prepare_root_transition(
+                new_root,
+                put_old,
+                moves,
+                &process.resource_domain(),
+            )?;
+            let transition = hyper::mm::FallibleArc::try_new(transition)
+                .map_err(|_| VfsServiceError::Process(ProcessError::Allocation))?;
+            let object =
+                RootTransitionObject::try_new(transition.clone(), &process.resource_domain())?;
+            let publication = ObjectPublication::try_new(object).map_err(ProcessError::from)?;
+            let prepared = PreparedHandle::try_from_new_object(
+                publication,
+                RootTransitionObject::SUPPORTED_RIGHTS,
+                HandleFlags::NONE,
+            )
+            .map_err(ProcessError::from)?;
+            let reservation = process.reserve_handles::<1>()?;
+            if let Err(error) = transition.activate() {
+                process.abort_handles(reservation);
+                return Err(error.into());
+            }
+            match process.publish_handles(reservation, [prepared]) {
+                Ok([handle]) => Ok(handle),
+                Err(failure) => {
+                    // An operation pin may outlive failed publication. Rollback is
+                    // explicit here, before returning a failed syscall to userspace.
+                    transition.abort();
+                    Err(VfsServiceError::Process(failure.error))
+                }
+            }
+        },
+    )
+}
+
+pub(super) fn finish_root_switch(
+    process: &Process,
+    token: HandleValue,
+    commit: bool,
+) -> Result<(), VfsServiceError> {
+    let token =
+        process.resolve_handle::<crate::kernel::vfs::RootTransitionObject>(token, Rights::WRITE)?;
+    token.object().finish(commit).map_err(Into::into)
+}
+
+fn with_root_request<T>(
+    process: &Process,
+    root: HandleValue,
+    request: UserSlice,
+    operation: impl FnOnce(&DirectoryObject, &str, &str, &[(&str, &str)]) -> Result<T, VfsServiceError>,
+) -> Result<T, VfsServiceError> {
     let directory = process.resolve_handle::<DirectoryObject>(root, NAMESPACE_RIGHTS)?;
     let mut header = [0u8; 48];
     process.copy_from_user(request, &mut header)?;
@@ -51,30 +132,26 @@ pub(super) fn switch_root(
             &mut wire_moves[..bytes],
         )?;
     }
-    let mut owned = core::array::from_fn::<_, MAX_MOVES, _>(|_| None);
-    for (slot, record) in owned.iter_mut().zip(wire_moves[..bytes].chunks_exact(32)) {
+    // Path owners include quota bookkeeping. Keep the variable-sized set off
+    // the syscall stack, which remains live while remote lookup can block.
+    let mut owned = ScratchVec::new(ScratchBudget::new(&process.resource_domain()));
+    owned.try_reserve_exact(count).map_err(VfsError::from)?;
+    for record in wire_moves[..bytes].chunks_exact(32) {
         let fields = decode_words::<4>(record)?;
-        *slot = Some((
-            copy_path(process, user_slice(fields[0], fields[1])?)?,
-            copy_path(process, user_slice(fields[2], fields[3])?)?,
-        ));
+        owned
+            .push((
+                copy_path(process, user_slice(fields[0], fields[1])?)?,
+                copy_path(process, user_slice(fields[2], fields[3])?)?,
+            ))
+            .map_err(VfsError::from)?;
     }
     let mut moves = [("", ""); MAX_MOVES];
-    for (output, value) in moves.iter_mut().zip(owned.iter()).take(count) {
-        let (source, target) = value.as_ref().ok_or(VfsServiceError::InvalidInput)?;
+    for (output, (source, target)) in moves.iter_mut().zip(owned.iter()) {
         *output = (source.as_str(), target.as_str());
     }
     // All fallible user reads are complete before the VFS prepares or publishes
     // topology. Concurrent userspace writes cannot replace paths after validation.
-    directory
-        .object()
-        .switch_root(
-            &new_root,
-            &put_old,
-            &moves[..count],
-            &process.resource_domain(),
-        )
-        .map_err(Into::into)
+    operation(directory.object(), &new_root, &put_old, &moves[..count])
 }
 
 fn user_slice(address: u64, length: u64) -> Result<UserSlice, VfsServiceError> {

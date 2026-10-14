@@ -75,6 +75,7 @@ impl Rights {
     pub(crate) const LOCK_FILE: Self = Self(native::HYPER_NATIVE_RIGHT_LOCK_FILE);
     pub(crate) const MANAGE_NAMESPACE: Self = Self(native::HYPER_NATIVE_RIGHT_MANAGE_NAMESPACE);
     pub(crate) const PROTECT: Self = Self(native::HYPER_NATIVE_RIGHT_PROTECT);
+    pub(crate) const LOCK_MEMORY: Self = Self(native::HYPER_NATIVE_RIGHT_LOCK_MEMORY);
     pub(crate) const KNOWN: Self = Self(native::HYPER_NATIVE_RIGHTS_MASK);
     const PROPAGATION_MASK: u64 = Self::DUPLICATE.0 | Self::TRANSFER.0;
 

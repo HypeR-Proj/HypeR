@@ -55,20 +55,19 @@ virtio-scsi. Guest networking uses virtio-net through the same trusted Linux
 I/O VM, which automatically bridges each guest TAP to the configured uplink.
 Native io-runtime owns the shared-memory bindings and delegates named volumes
 to fs-backend. That manager mounts `/system` from the bootstrap fstab; formal
-init then requests the mounts in `/system/etc/fstab`, including `/data`. Separate
+init then requests the mounts in `/etc/fstab`, including `/data`. Separate
 FAT or EROFS workers own each mount; file operations reach the worker directly through kernel VFS, while
 cache hits stay in the kernel.
 HypeR Native reserves a future network endpoint without establishing a link.
 
-The default [boot/system layout](docs/boot-layout.md) keeps static core services
-and a recovery shell in RAM at `/boot`, with ordinary programs on a read-only
-EROFS `/system` volume. The RAM archive is the initial root; after adopting
-core supervision, system init switches to a new ramfs root and retains the
-original root at `/boot`. The formal root contains `/boot`, `/system`, `/data`
-and `/tmp`, without root-level aliases. `BOARD_SYSTEM_LAYOUT=ramfs` keeps
-`/system` in RAM with the same root switch and supervision handoff. These paths and the
-handoff are userspace policy: the kernel mounts the RAM archive as `/` and
-bootstraps `/init` through `/lib/userspace-loader-hyper-<arch>`.
+The default [boot/system layout](docs/boot-layout.md) keeps only static bootstrap
+and recovery services in the initial RAM archive. Stage-1 mounts the independent
+EROFS system volume temporarily at `/system`, switches it to `/`, then starts
+formal init. Formal tools, services and shared libraries live in `/bin`, `/svc`
+and `/lib64`. System init replaces bootstrap providers, then retires their
+processes and the old archive at `/boot`. `/tmp` is writable RAM and `/data`
+contains persistent files. These paths and the handoff are userspace policy,
+not additional kernel boot conventions.
 
 Both business guests and the Linux I/O VM execute under the HypeR kernel.
 Native VM management services control their lifecycles through capabilities;
@@ -250,7 +249,7 @@ for package requirements and the `boards/qemu.json` deployment.
 This boots the AArch64 system with the HypeR shell and a resident Linux I/O VM
 in QEMU. The first build downloads pinned assets and creates a persistent board
 disk; `make run` launches those existing artifacts without building them.
-HypeR mounts its read-only system volume at `/system` and its writable
+HypeR uses its read-only system volume as `/` and mounts its writable
 persistent data volume at `/data`. System init adopts the existing core services
 and launches VM management. Start the default guest with
 `vmm start alpine`; Alpine enables its network interface and starts DHCP

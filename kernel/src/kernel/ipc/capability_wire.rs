@@ -250,6 +250,17 @@ mod tests {
     }
 
     #[test]
+    fn virtual_serial_handoff_is_admitted_by_both_wire_directions() {
+        let kind = hyper::abi::native::HYPER_NATIVE_OBJECT_VIRTUAL_SERIAL;
+        let rights = hyper::abi::native::HYPER_NATIVE_RIGHT_TRANSFER
+            | hyper::abi::native::HYPER_NATIVE_RIGHT_READ
+            | hyper::abi::native::HYPER_NATIVE_RIGHT_WAIT;
+        let operation = hyper::abi::native::HYPER_NATIVE_CAPABILITY_DISPOSITION_MOVE as u32;
+        assert!(decode_send(&record(7, rights, kind, operation)).is_ok());
+        assert!(decode_receive(&record(0, rights, kind, 0)).is_ok());
+    }
+
+    #[test]
     fn duplicate_source_handles_are_rejected_as_one_structural_batch() {
         let disposition = SendDisposition {
             handle: 3,

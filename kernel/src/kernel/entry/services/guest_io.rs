@@ -121,6 +121,36 @@ impl crate::kernel::abi::native::GuestIoServices for DeferredProcessServices<'_>
             backend_irq,
         )
     }
+    fn access_guest_notification(
+        &self,
+        machine: HandleValue,
+        original: u64,
+        operation: u32,
+        value: u32,
+    ) -> Result<u32, crate::kernel::vm::service::Error> {
+        crate::kernel::vm::io::service::access_notification(
+            self.process,
+            machine,
+            original,
+            operation,
+            value,
+        )
+    }
+    fn configure_guest_notification(
+        &self,
+        machine: HandleValue,
+        original: u64,
+        base: u64,
+        flags: u32,
+    ) -> Result<(), crate::kernel::vm::service::Error> {
+        crate::kernel::vm::io::service::configure_notification(
+            self.process,
+            machine,
+            original,
+            base,
+            flags,
+        )
+    }
     fn control_guest_notification(
         &self,
         notification: HandleValue,

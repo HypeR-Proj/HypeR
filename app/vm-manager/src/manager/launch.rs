@@ -16,7 +16,7 @@ use hyper_service::stdio as stdio_contract;
 use hyper_service::vm as vm_contract;
 use hyper_vm_manager::InstancePolicy;
 
-const RUNTIME_ARGUMENT: &str = "/system/svc/vm-runtime";
+const RUNTIME_ARGUMENT: &str = "/svc/vm-runtime";
 
 impl FleetManager {
     pub(super) fn start_instance(&mut self, vm: usize) -> Result<(), String> {

@@ -6,6 +6,7 @@ use super::*;
 #[test]
 fn admission_rejects_foreign_itb_architecture_with_diagnostic() {
     let config = Configuration {
+        virtio_transport: Default::default(),
         memory_bytes: 128 * 1024 * 1024,
         vcpus: 1,
         bootargs: String::new(),

@@ -368,6 +368,18 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             Err(VfsServiceError::InvalidInput)
         }
 
+        fn begin_root_switch(
+            &self,
+            _: HandleValue,
+            _: UserSlice,
+        ) -> Result<HandleValue, VfsServiceError> {
+            self.calls.set(self.calls.get().saturating_add(1));
+            Err(VfsServiceError::InvalidInput)
+        }
+        fn finish_root_switch(&self, _: HandleValue, _: bool) -> Result<(), VfsServiceError> {
+            self.calls.set(self.calls.get().saturating_add(1));
+            Err(VfsServiceError::InvalidInput)
+        }
         fn directory_scope_create(
             &self,
             _root: HandleValue,
@@ -598,6 +610,17 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
     }
 
     impl MemoryServices for RejectingServices {
+        fn set_memory_residency(
+            &self,
+            _: HandleValue,
+            _: u64,
+            _: u64,
+            _: bool,
+            _: bool,
+        ) -> Result<(), MemoryServiceError> {
+            self.calls.set(self.calls.get().saturating_add(1));
+            Err(MemoryServiceError::Process(ProcessError::Allocation))
+        }
         fn create_contiguous_vmo(&self, _: u64) -> Result<HandleValue, MemoryServiceError> {
             self.calls.set(self.calls.get().saturating_add(1));
             Err(MemoryServiceError::Process(ProcessError::Allocation))
@@ -741,6 +764,17 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             _: HandleValue,
             _: Option<UserSlice>,
             _: usize,
+        ) -> Result<(), ProcessBuilderServiceError> {
+            self.calls.set(self.calls.get().saturating_add(1));
+            Err(ProcessBuilderServiceError::Process(
+                ProcessError::Allocation,
+            ))
+        }
+
+        fn set_process_builder_memory_lock(
+            &self,
+            _: HandleValue,
+            _: bool,
         ) -> Result<(), ProcessBuilderServiceError> {
             self.calls.set(self.calls.get().saturating_add(1));
             Err(ProcessBuilderServiceError::Process(
@@ -1027,6 +1061,26 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             _: u32,
             _: u32,
         ) -> Result<HandleValue, crate::kernel::vm::service::Error> {
+            self.calls.set(self.calls.get().saturating_add(1));
+            Err(crate::kernel::vm::service::Error::NotSupported)
+        }
+        fn access_guest_notification(
+            &self,
+            _: HandleValue,
+            _: u64,
+            _: u32,
+            _: u32,
+        ) -> Result<u32, crate::kernel::vm::service::Error> {
+            self.calls.set(self.calls.get().saturating_add(1));
+            Err(crate::kernel::vm::service::Error::NotSupported)
+        }
+        fn configure_guest_notification(
+            &self,
+            _: HandleValue,
+            _: u64,
+            _: u64,
+            _: u32,
+        ) -> Result<(), crate::kernel::vm::service::Error> {
             self.calls.set(self.calls.get().saturating_add(1));
             Err(crate::kernel::vm::service::Error::NotSupported)
         }

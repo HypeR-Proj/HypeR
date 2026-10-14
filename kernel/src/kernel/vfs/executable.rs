@@ -18,6 +18,7 @@ use super::instance::Error;
 pub(crate) struct ExecutableSnapshot {
     bytes: Cow<'static, [u8]>,
     _charge: Option<crate::kernel::accounting::CommittedCharge>,
+    _archive: Option<hyper::mm::FallibleArc<crate::kernel::boot::Archive>>,
 }
 
 impl ExecutableSnapshot {
@@ -33,10 +34,14 @@ impl ExecutableSnapshot {
         Ok(Self::owned(bytes, charge))
     }
 
-    pub(super) fn borrowed(bytes: &'static [u8]) -> Self {
+    pub(super) fn borrowed(
+        bytes: &'static [u8],
+        archive: Option<hyper::mm::FallibleArc<crate::kernel::boot::Archive>>,
+    ) -> Self {
         Self {
             bytes: Cow::Borrowed(bytes),
             _charge: None,
+            _archive: archive,
         }
     }
 
@@ -47,6 +52,7 @@ impl ExecutableSnapshot {
         Self {
             bytes: Cow::Owned(bytes),
             _charge: Some(charge),
+            _archive: None,
         }
     }
 

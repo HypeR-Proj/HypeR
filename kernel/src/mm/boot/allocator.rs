@@ -63,6 +63,51 @@ impl BootAllocator {
             .map_err(|_| BootAllocatorError::TooManyReservations)
     }
 
+    /// Reserves borrowed boot data and records the complete pages that belong
+    /// exclusively to this reservation. Partial boundary pages and all earlier
+    /// reservations remain permanent. Later boot allocations skip the entire
+    /// covering reservation as usual.
+    pub fn reserve_temporary(
+        &mut self,
+        range: PhysicalRange,
+    ) -> Result<RegionList<MAX_BOOT_RESERVATIONS>, BootAllocatorError> {
+        if !self
+            .memory
+            .as_slice()
+            .iter()
+            .any(|memory| memory.start() <= range.start() && range.end() <= memory.end())
+        {
+            return Err(BootAllocatorError::InvalidRequest);
+        }
+        let mut owned = RegionList::new();
+        let mut cursor = align_up(range.start(), PAGE_SIZE)?;
+        let end = range.end() & !(PAGE_SIZE - 1);
+        for previous in self.reservations() {
+            if previous.end() <= cursor || previous.start() >= end {
+                continue;
+            }
+            if previous.start() > cursor {
+                owned
+                    .insert(
+                        PhysicalRange::new(cursor, previous.start() - cursor)
+                            .ok_or(BootAllocatorError::InvalidRequest)?,
+                    )
+                    .map_err(|_| BootAllocatorError::TooManyReservations)?;
+            }
+            cursor = previous.end().min(end);
+        }
+        if cursor < end {
+            owned
+                .insert(
+                    PhysicalRange::new(cursor, end - cursor)
+                        .ok_or(BootAllocatorError::InvalidRequest)?,
+                )
+                .map_err(|_| BootAllocatorError::TooManyReservations)?;
+        }
+        self.reserve(range)?;
+        Ok(owned)
+    }
+
     pub fn allocate_pages(
         &mut self,
         page_count: usize,

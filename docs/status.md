@@ -116,7 +116,7 @@ The current foundation includes:
 - a capability-scoped Native VM manager contained by a bounded fleet resource
   domain, plus isolated per-VM runtimes which parse FIT images, own guest VMOs,
   construct Linux firmware data, and supervise installed VMs from userspace;
-- a multi-client VM control plane and `/system/bin/vmm` lifecycle client, with one
+- a multi-client VM control plane and `/bin/vmm` lifecycle client, with one
   exclusive runtime-provided console connection per VM, caller-allocated shared
   output pages, and userspace retention independent of the physical Console;
 - boot-relative, severity-tagged kernel log buffering, lock-independent Thread
@@ -153,7 +153,8 @@ Linux build, modules, services, rootfs assembly and source packaging live in
 [HypeR-io-vm](https://github.com/roolrz/HypeR-io-vm). HypeR owns Native deployment,
 DT generation and digest-pinned import. Default AArch64 `make run` keeps the
 Native shell and starts the resident I/O VM, whose shared queues back separate
-EROFS system and FAT configuration volumes, mounted at `/system` and `/data`.
+EROFS system and FAT configuration volumes. Stage-1 switches the independent
+system filesystem from its temporary `/system` mount to `/`; formal init mounts `/data`.
 The manager loads `/data/vms.json`;
 `vmm start alpine` boots its configured disk-backed guest. `make` prepares these
 artifacts, while `make run` only launches them. The optional `RUN_PROFILE=io`
@@ -173,7 +174,8 @@ QEMU does not qualify physical cache, interrupt or DMA behavior.
 
 ## Guest virtio-net implementation
 
-The QEMU guest path uses a Native virtio-mmio frontend and Linux vhost-net/TAP,
+The QEMU guest path uses a Native virtio frontend (MMIO by default, or modern
+PCI with INTx) and Linux vhost-net/TAP,
 bridged to an assigned virtio-net uplink and QEMU user networking. A VM can have
 a disk, a network interface, or both. Both devices share one guest-memory grant
 and mailbox, with separate notification bindings and reset epochs. All vhost

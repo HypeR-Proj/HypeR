@@ -6,7 +6,7 @@ use hyper_os::vm::{MmioCompletion, MmioOperation, MmioRequest};
 use hyper_service::io;
 use hyper_vm_support::io_backend::{Backend, ControlTransport, Error, RemoteNotification};
 use hyper_vm_support::io_protocol::{self, Command, Request};
-use hyper_vm_support::virtio_mmio::{self, DeviceKind};
+use hyper_vm_support::virtio::{self, DeviceKind};
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::num::NonZeroU64;
@@ -71,11 +71,11 @@ impl Transport {
         bytes[12..16].copy_from_slice(&1u32.to_le_bytes());
         bytes[40..48].fill(0);
         if matches!(request.command, Command::Hello | Command::NetworkHello) {
-            bytes[48..56].copy_from_slice(&virtio_mmio::VERSION_1.to_le_bytes());
+            bytes[48..56].copy_from_slice(&virtio::VERSION_1.to_le_bytes());
             bytes[56..60].copy_from_slice(
                 &(request.command.device_kind().queue_count() as u32).to_le_bytes(),
             );
-            bytes[60..64].copy_from_slice(&virtio_mmio::QUEUE_MAX.to_le_bytes());
+            bytes[60..64].copy_from_slice(&virtio::QUEUE_MAX.to_le_bytes());
         }
         if request.command == Command::NetworkHello {
             bytes[64..70].copy_from_slice(&[2, 0x48, 0x59, 0, 0, 1]);
@@ -253,5 +253,153 @@ fn actual_unsolicited_reply_or_closed_idle_channel_is_terminal() -> Result<(), E
             hyper_os::Status::PEER_CLOSED
         )))
     ));
+    Ok(())
+}
+
+#[test]
+fn pci_ecam_enumeration_and_indirect_access_share_live_state() -> Result<(), Error> {
+    use hyper_os::guest_io::FrontendOperation;
+    use hyper_vm_support::virtio_pci::CONFIG_DATA;
+    let transport = Transport::default();
+    let disk = initialized(&transport, DeviceKind::Scsi)?;
+    let network = initialized(&transport, DeviceKind::Network)?;
+    let mut devices = IoBackends::new(vec![disk, network])?;
+    devices.use_pci()?;
+    let accesses = RefCell::new(Vec::new());
+    let routes = RefCell::new(Vec::new());
+    let mut call = |slot: u64, offset, width, operation| {
+        let request = MmioRequest {
+            address: io::PCI_ECAM + (slot << 15) + offset,
+            width,
+            ..mmio(DeviceKind::Scsi, 0, operation)?
+        };
+        devices
+            .pci_mmio(
+                0,
+                request,
+                |original, base, command| {
+                    routes.borrow_mut().push((original, base, command));
+                    Ok(())
+                },
+                |original, operation| {
+                    accesses.borrow_mut().push((original, operation));
+                    Ok(3)
+                },
+            )?
+            .map(|completion| completion.result)
+            .ok_or(Error::InvalidState)
+    };
+    assert_eq!(
+        call(1, 0, 4, MmioOperation::Read)?,
+        MmioCompletion::Read(0x1048_1af4)
+    );
+    assert_eq!(
+        call(2, 0, 4, MmioOperation::Read)?,
+        MmioCompletion::Read(0x1041_1af4)
+    );
+    assert_eq!(
+        call(3, 0, 4, MmioOperation::Read)?,
+        MmioCompletion::Read(0xffff_ffff)
+    );
+    assert_eq!(
+        call(1, 0x1000, 4, MmioOperation::Read)?,
+        MmioCompletion::Read(0xffff_ffff)
+    );
+    assert_eq!(
+        call(1, CONFIG_DATA, 4, MmioOperation::Read)?,
+        MmioCompletion::Read(0xffff_ffff)
+    );
+    call(1, 0x8c, 4, MmioOperation::Write(4))?;
+    call(1, 0x90, 4, MmioOperation::Write(4))?;
+    assert_eq!(
+        call(1, CONFIG_DATA, 4, MmioOperation::Read)?,
+        MmioCompletion::Read(0)
+    );
+    // Select feature word 1 through PCI_CFG; it changes the same core as BAR.
+    call(1, 0x8c, 4, MmioOperation::Write(0))?;
+    call(1, CONFIG_DATA, 4, MmioOperation::Write(1))?;
+    call(1, 0x8c, 4, MmioOperation::Write(4))?;
+    assert_eq!(
+        call(1, CONFIG_DATA, 4, MmioOperation::Read)?,
+        MmioCompletion::Read(1)
+    );
+    call(1, 0x8c, 4, MmioOperation::Write(0x60))?;
+    call(1, 0x90, 4, MmioOperation::Write(1))?;
+    assert_eq!(
+        call(1, CONFIG_DATA, 4, MmioOperation::Read)?,
+        MmioCompletion::Read(3)
+    );
+    call(2, 0x8c, 4, MmioOperation::Write(0x50))?;
+    call(2, 0x90, 4, MmioOperation::Write(2))?;
+    assert_eq!(
+        call(2, CONFIG_DATA, 4, MmioOperation::Write(0xffff_0001))?,
+        MmioCompletion::Write
+    );
+    assert_eq!(
+        call(1, 6, 2, MmioOperation::Read)?,
+        MmioCompletion::Read(0x18)
+    );
+    assert_eq!(
+        *accesses.borrow(),
+        vec![
+            (io::FRONTEND_MMIO, FrontendOperation::ReadAndClearInterrupt),
+            (io::FRONTEND_NET_MMIO, FrontendOperation::NotifyQueue(1)),
+            (io::FRONTEND_MMIO, FrontendOperation::InterruptStatus),
+        ]
+    );
+    call(1, 0x10, 4, MmioOperation::Write(io::PCI_MEMORY + 0x4000))?;
+    call(1, 4, 2, MmioOperation::Write(6))?;
+    assert_eq!(
+        routes.borrow().last(),
+        Some(&(io::FRONTEND_MMIO, io::PCI_MEMORY + 0x4000, 6))
+    );
+    Ok(())
+}
+
+#[test]
+fn pci_indirect_reset_retires_only_after_backend_reply() -> Result<(), Error> {
+    use hyper_vm_support::virtio_pci::CONFIG_DATA;
+    let transport = Transport::default();
+    let mut disk = initialized(&transport, DeviceKind::Scsi)?;
+    disk.use_pci()?;
+    disk.write_pci_configuration(0x8c, 4, 20)?;
+    disk.write_pci_configuration(0x90, 4, 1)?;
+    let mut devices = IoBackends::new(vec![disk])?;
+    let request = MmioRequest {
+        address: io::PCI_ECAM + (1 << 15) + CONFIG_DATA,
+        ..mmio(DeviceKind::Scsi, 0, MmioOperation::Write(0xffff_ff00))?
+    };
+    // A DWORD PCI write requests a BYTE device reset; high bytes are data
+    // latch contents, never status bits. Neither the write nor a sibling read
+    // may retire before the backend acknowledges the reset.
+    let no_hot_access = |_, _| Err(hyper_os::Error::InvalidResponse);
+    assert!(
+        devices
+            .pci_mmio(2, request, |_, _, _| Ok(()), no_hot_access)?
+            .is_none()
+    );
+    assert!(devices.busy());
+    assert!(devices.progress()?.is_none());
+    transport.notification_reply(DeviceKind::Scsi);
+    assert!(devices.progress()?.is_none());
+    assert_eq!(
+        transport.protocol_reply()?.command,
+        Command::Device(virtio::BackendOperation::Reset)
+    );
+    let completion = devices.progress()?.ok_or(Error::InvalidState)?;
+    assert_eq!(
+        (completion.vcpu, completion.id, completion.result),
+        (2, request.id, MmioCompletion::Write)
+    );
+    assert!(!devices.busy());
+    assert!(devices.progress()?.is_none());
+    let read = MmioRequest {
+        operation: MmioOperation::Read,
+        ..request
+    };
+    let completion = devices
+        .pci_mmio(3, read, |_, _, _| Ok(()), no_hot_access)?
+        .ok_or(Error::InvalidState)?;
+    assert_eq!(completion.result, MmioCompletion::Read(0xffff_ff00));
     Ok(())
 }

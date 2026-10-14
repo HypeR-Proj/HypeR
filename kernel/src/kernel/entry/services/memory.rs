@@ -64,6 +64,23 @@ impl MemoryServices for DeferredProcessServices<'_> {
         crate::kernel::mm::user_space::write_vmo(self.process, vmo, offset, input)
     }
 
+    fn set_memory_residency(
+        &self,
+        vmar: HandleValue,
+        address: u64,
+        size: u64,
+        current: bool,
+        lock: bool,
+    ) -> Result<(), crate::kernel::mm::user_space::MemoryServiceError> {
+        crate::kernel::mm::user_space::set_memory_residency(
+            self.process,
+            vmar,
+            address,
+            size,
+            current,
+            lock,
+        )
+    }
     fn allocate_vmar(
         &self,
         parent: HandleValue,

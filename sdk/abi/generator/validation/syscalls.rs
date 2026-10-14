@@ -295,6 +295,29 @@ fn validate_results(
             ProducedObject::Kind(kind) => require_object_kind(schema, syscall.name, kind)?,
         }
         match handle.rights {
+            ProducedRights::FixedAndInherited {
+                fixed_rights,
+                authority_source,
+                inherited_rights,
+            } => {
+                if !syscall.arguments.iter().any(|candidate| {
+                    candidate.name == authority_source && candidate.kind == ValueKind::Handle
+                }) {
+                    return invalid(format!(
+                        "syscall {} result {} names invalid inherited-rights source {authority_source}",
+                        syscall.name, result.name
+                    ));
+                }
+                if inherited_rights == 0
+                    || (fixed_rights | inherited_rights) & !supported_rights != 0
+                    || fixed_rights & inherited_rights != 0
+                {
+                    return invalid(format!(
+                        "syscall {} result {} has invalid fixed/inherited rights",
+                        syscall.name, result.name
+                    ));
+                }
+            }
             ProducedRights::InheritedSubset {
                 authority_source,
                 allowed_rights,

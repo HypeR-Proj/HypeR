@@ -36,7 +36,7 @@ a persistent journal.
 
 ## Session configuration
 
-`session-manager` reads the optional `/system/etc/hyper/session.json` file once
+`session-manager` reads the optional `/etc/hyper/session.json` file once
 at startup. An absent file, or omitted fields, uses these defaults:
 
 ```json

@@ -31,9 +31,18 @@ impl From<crate::hal::memory::Error> for Error {
 pub struct PreparedMemory {
     allocator: BootAllocator,
     address_space: crate::hal::memory::PreparedAddressSpace,
+    archive_pages: hyper::sync::SpinLock<
+        Option<hyper::platform::RegionList<{ hyper::mm::boot::MAX_BOOT_RESERVATIONS }>>,
+    >,
 }
 
 impl PreparedMemory {
+    /// One-shot transfer to the VFS archive owner after allocator startup.
+    pub(crate) fn take_archive_pages(
+        &self,
+    ) -> Option<hyper::platform::RegionList<{ hyper::mm::boot::MAX_BOOT_RESERVATIONS }>> {
+        self.archive_pages.with(Option::take)
+    }
     pub fn root_address(&self) -> u64 {
         self.address_space.root_address()
     }
@@ -156,7 +165,7 @@ pub unsafe fn prepare(
         PhysicalRange::new(dtb_address, platform.dtb_size)
             .ok_or(BootAllocatorError::InvalidRequest)?,
     )?;
-    allocator.reserve(initial_ramdisk)?;
+    let archive_pages = allocator.reserve_temporary(initial_ramdisk)?;
 
     // SAFETY: This function's caller guarantees bootstrap-accessible writable
     // RAM, while `allocator` exclusively reserves every returned table page.
@@ -165,6 +174,7 @@ pub unsafe fn prepare(
     Ok(PreparedMemory {
         allocator,
         address_space,
+        archive_pages: hyper::sync::SpinLock::new(Some(archive_pages)),
     })
 }
 

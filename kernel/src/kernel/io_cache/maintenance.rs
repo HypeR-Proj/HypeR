@@ -172,6 +172,19 @@ impl<Page> FileDataCache<Page> {
             return Ok(Maintenance::Unchanged);
         };
         let mut maintenance = ParkedTable { cache: self, table };
+        // Scan only while the table is detached, never under the IRQ-safe
+        // cache lock. Existing owners may disappear, but no new lookup can
+        // create a pin after a unique entry has been observed.
+        if maintenance.table.as_ref().is_some_and(|cache| {
+            capacity < cache.model.capacity()
+                && cache
+                    .pages
+                    .iter()
+                    .flatten()
+                    .any(|page| page.mapping_pinned())
+        }) {
+            return Ok(Maintenance::Busy);
+        }
 
         // Empty metadata must remain reclaimable even when the pressure floor
         // rejects replacement allocation. If rebuilding fails, Drop publishes
@@ -197,17 +210,25 @@ impl<Page> FileDataCache<Page> {
                 old.model.remove_clean(slot);
                 drop(old.pages[slot].take());
             }
+            // Validate complete index migration before moving any owner. Losing
+            // a mapped key would permit a second canonical page for the file.
             for slot in 0..old.model.capacity() {
-                let Some((key, sequence)) = old.model.clean_entry(slot) else {
-                    continue;
-                };
-                if let Some(new_slot) = replacement.model.restore_clean(key, sequence) {
-                    replacement.pages[new_slot] = old.pages[slot].take();
-                } else {
-                    old.model.remove_clean(slot);
-                    // The old table retains this rejected owner until its
-                    // destruction outside the cache lock. Cache retention on
-                    // a shrink is best effort when hash buckets merge.
+                if let Some((key, sequence)) = old.model.clean_entry(slot)
+                    && replacement.model.restore_clean(key, sequence).is_none()
+                    && old.pages[slot]
+                        .as_ref()
+                        .is_some_and(|page| page.mapping_pinned())
+                {
+                    return Err(CacheError::InvalidCapacity);
+                }
+            }
+            for slot in 0..old.model.capacity() {
+                if let Some((key, _)) = old.model.clean_entry(slot) {
+                    if let Some(new_slot) = replacement.model.peek_clean(key) {
+                        replacement.pages[new_slot] = old.pages[slot].take();
+                    } else {
+                        old.model.remove_clean(slot);
+                    }
                 }
             }
             replacement.model.inherit_history(&old.model);
@@ -243,7 +264,13 @@ impl<Page> FileDataCache<Page> {
         for _ in 0..limit.min(RECLAIM_BATCH) {
             let page = self.state.with(|control| {
                 let cache = control.table.as_mut()?;
-                let slot = cache.model.oldest_clean()?;
+                let slot = (0..cache.model.clean().min(RECLAIM_BATCH))
+                    .filter_map(|index| cache.model.cold_candidate(index))
+                    .find(|slot| {
+                        cache.pages[*slot]
+                            .as_ref()
+                            .is_some_and(|page| !page.mapping_pinned())
+                    })?;
                 cache.model.remove_clean(slot);
                 cache.pages[slot].take()
             });
@@ -352,7 +379,9 @@ impl<Page> FileDataCache<Page> {
                     let same = cache.pages[slot]
                         .as_ref()
                         .is_some_and(|page| core::ptr::eq(&**page, &*candidate));
-                    if !same {
+                    // Hardware file mappings retain their canonical cache key;
+                    // ordinary read pins may safely outlive eviction.
+                    if !same || candidate.mapping_pinned() {
                         return None;
                     }
                     cache.model.remove_clean(slot);

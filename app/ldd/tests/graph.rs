@@ -117,11 +117,11 @@ fn native_interpreter_uses_system_deployment_and_accepts_explicit_override() -> 
     let graph = inspect(&root, None, false, None)?;
     assert_eq!(
         graph.library_directory,
-        Path::new("/system/lib/aarch64-hyper-hyper")
+        Path::new("/lib/aarch64-hyper-hyper")
     );
     assert_eq!(
         graph.objects[1].path,
-        Path::new("/system/lib64/ld-hyper-aarch64.so")
+        Path::new("/lib64/ld-hyper-aarch64.so")
     );
     assert_eq!(
         graph.declared_interpreter.as_deref(),

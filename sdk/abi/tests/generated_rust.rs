@@ -11,7 +11,7 @@ fn generated_rust_layouts_are_compiler_checked() {
         8
     );
     assert_eq!(generated::HYPER_NATIVE_SYS_HANDLE_CLOSE, 1);
-    assert_eq!(generated::HYPER_NATIVE_RIGHTS_MASK, 0xf_ffff_ffff);
+    assert_eq!(generated::HYPER_NATIVE_RIGHTS_MASK, 0x1f_ffff_ffff);
     assert_eq!(generated::HYPER_NATIVE_SIGNAL_EVENT_SIGNALED, 1);
     assert_eq!(generated::HYPER_NATIVE_DEADLINE_INFINITE, u64::MAX);
     assert_eq!(generated::HYPER_NATIVE_HANDLE_INFO_MIN_SIZE, 16);
@@ -57,6 +57,12 @@ fn generated_rust_layouts_are_compiler_checked() {
     assert_eq!(
         generated::hyper_native_object_transfer_class(
             generated::HYPER_NATIVE_OBJECT_PROCESS_BUILDER
+        ),
+        generated::HYPER_NATIVE_TRANSFER_CLASS_RENDEZVOUS_ONLY
+    );
+    assert_eq!(
+        generated::hyper_native_object_transfer_class(
+            generated::HYPER_NATIVE_OBJECT_VIRTUAL_SERIAL
         ),
         generated::HYPER_NATIVE_TRANSFER_CLASS_RENDEZVOUS_ONLY
     );

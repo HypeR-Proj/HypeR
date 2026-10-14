@@ -6,6 +6,7 @@ use hyper_vm_policy::fleet::{Affinity, Configuration};
 
 fn configuration() -> Configuration {
     Configuration {
+        virtio_transport: Default::default(),
         memory_bytes: 128 * 1024 * 1024,
         vcpus: 1,
         bootargs: "console=ttyAMA0 --io-devices=3".into(),

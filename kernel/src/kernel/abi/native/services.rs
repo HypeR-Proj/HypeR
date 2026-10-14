@@ -368,6 +368,20 @@ pub(in crate::kernel) trait GuestIoServices: UserMemoryServices {
         frontend_irq: u32,
         backend_irq: u32,
     ) -> Result<HandleValue, crate::kernel::vm::service::Error>;
+    fn access_guest_notification(
+        &self,
+        machine: HandleValue,
+        original: u64,
+        operation: u32,
+        value: u32,
+    ) -> Result<u32, crate::kernel::vm::service::Error>;
+    fn configure_guest_notification(
+        &self,
+        machine: HandleValue,
+        original: u64,
+        base: u64,
+        flags: u32,
+    ) -> Result<(), crate::kernel::vm::service::Error>;
     fn control_guest_notification(
         &self,
         notification: HandleValue,
@@ -614,6 +628,12 @@ pub(in crate::kernel) trait VfsServices: UserMemoryServices {
         request: UserSlice,
     ) -> Result<(), VfsServiceError>;
 
+    fn begin_root_switch(
+        &self,
+        directory: HandleValue,
+        request: UserSlice,
+    ) -> Result<HandleValue, VfsServiceError>;
+    fn finish_root_switch(&self, token: HandleValue, commit: bool) -> Result<(), VfsServiceError>;
     fn directory_scope_create(
         &self,
         root: HandleValue,
@@ -805,6 +825,14 @@ pub(in crate::kernel) trait MemoryServices {
         size: u64,
         permissions: Permissions,
     ) -> Result<(), MemoryServiceError>;
+    fn set_memory_residency(
+        &self,
+        vmar: HandleValue,
+        address: u64,
+        size: u64,
+        current: bool,
+        lock: bool,
+    ) -> Result<(), MemoryServiceError>;
     fn allocate_vmar(
         &self,
         parent: HandleValue,
@@ -852,6 +880,11 @@ pub(in crate::kernel) trait ProcessBuilderServices {
         builder: HandleValue,
         words: Option<UserSlice>,
         word_count: usize,
+    ) -> Result<(), ProcessBuilderServiceError>;
+    fn set_process_builder_memory_lock(
+        &self,
+        builder: HandleValue,
+        enabled: bool,
     ) -> Result<(), ProcessBuilderServiceError>;
     fn add_process_builder_handle(
         &self,

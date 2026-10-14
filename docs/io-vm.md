@@ -73,8 +73,10 @@ and preserves existing disks. `make run` validates the disk's GPT against the
 selected board configuration, then launches the existing kernel, ramdisk and
 disk. `BOARD_IMAGE` selects another board disk. The diagnostic `RUN_PROFILE=io` instead creates
 `target/app/aarch64/io-disk.img`; `IO_VM_DISK` overrides that diagnostic disk.
-`RUN_PROFILE=native` selects an all-RAM Native/Alpine deployment with the same
-stage-1 and system-init handoff and no I/O appliance. `IO_VM_PACKAGE` can override the downloaded
+`RUN_PROFILE=native` selects a synthetic no-device test fixture: its test-only
+init copies the supplied formal payload into an independent RAMFS before the
+real stage-1 supervisor performs the handoff. It has no I/O appliance and is
+not a product deployment mode. `IO_VM_PACKAGE` can override the downloaded
 package with a complete, locally qualified boot generation. The importer also
 accepts `IO_VM_REFERENCE` for an explicit digest and `IO_VM_ORAS` for ORAS.
 
@@ -154,7 +156,7 @@ eight slots. Each Native data client has its own shared-memory pool and
 mailbox/notification routes. io-runtime activates the connection and moves its
 exclusive block capability plus discovered partition UUID/label to fs-backend.
 The manager first applies only the bootstrap fstab to mount `/system`. After
-handoff and root switching, formal init asks it to apply `/system/etc/fstab`,
+handoff and root switching, formal init asks it to apply `/etc/fstab`,
 loading the FAT worker from `/system` for `/data`. Fleet configuration follows
 these formal mounts; separate workers own each mounted volume.
 Native clients are absent from the business broker's admission table.
@@ -210,8 +212,43 @@ never authorizes memory reuse.
 
 ## Device protocol and control ownership
 
-The guest-facing devices use modern virtio-mmio with standard virtio-scsi and
-virtio-net. Linux vhost-scsi/LIO and vhost-net consume the shared virtqueues.
+The guest-facing devices use standard virtio-scsi and virtio-net. A business VM's
+`configuration.virtio-transport` selects `mmio` (default) or `pci` on AArch64.
+The two transports share feature negotiation, queue validation and backend
+activation/reset state. For example:
+
+```json
+{
+  "configuration": {
+    "memory-bytes": 268435456,
+    "vcpus": 2,
+    "bootargs": "console=ttyAMA0 earlycon hyper.root=/dev/sda",
+    "virtio-transport": "pci"
+  }
+}
+```
+
+The PCI profile is modern-only: one ECAM bus at `0x0a800000`, a 1 MiB memory
+aperture at `0x0a000000`, and one relocatable 4 KiB memory BAR per endpoint.
+SCSI is `00:01.0` and networking is `00:02.0`; absent endpoints read as absent
+PCI functions. Vendor capabilities describe common configuration, the queue
+notification register, the read-to-clear ISR, device configuration and the
+PCI_CFG indirect-access window. Both register access paths share state. INTx
+uses the guest GIC, including mask/unmask with retained pending status; MSI-X,
+legacy/transitional virtio, PCI root-port hotplug and online runtime ownership
+handoff are not implemented. The virtual bus is independent of physical RP1
+assignment and cannot address host PCI resources.
+
+Queue notifications remain direct kernel routes. Only ECAM, BAR configuration
+and virtio configuration enter userspace. BAR relocation is confined to the
+VM's registered MMIO aperture and cannot change the backend connection or its
+IRQ. Clearing bus master on an active endpoint drains its backend before the
+configuration write completes and requests a virtio reset; live queue
+suspend/resume is not supported. Memory decoding and interrupt masking alone
+do not prove DMA retirement. No change to the I/O VM protocol or image is
+required; the Alpine guest image includes both transport drivers.
+
+Linux vhost-scsi/LIO and vhost-net consume the shared virtqueues.
 Neither vm-runtime nor the Linux management service forwards individual disk
 requests or packets.
 
@@ -272,7 +309,8 @@ network are independent options: a network-only VM does not receive a hidden
 storage endpoint or LIO target. The shared Ethernet segment does not provide
 anti-spoofing or per-VM network isolation policy.
 
-The guest device uses modern virtio-mmio, RX queue 0 and TX queue 1, with at most
+The guest device uses modern virtio over the selected MMIO or PCI transport,
+RX queue 0 and TX queue 1, with at most
 128 descriptors per queue, with MTU 1500. It offers `VIRTIO_F_VERSION_1` and
 `VIRTIO_NET_F_MAC`. Guest TX checksum completion (`VIRTIO_NET_F_CSUM`) and TCP
 segmentation (`VIRTIO_NET_F_HOST_TSO4/HOST_TSO6`) are offered only when the
@@ -708,8 +746,9 @@ its mapping ownership and enters the backend shutdown/quarantine path.
 
 ### Forwarded appliance logs
 
-The Native I/O runtime prefixes each forwarded guest console line with
-`HypeR IO VM:`, including lines split across serial reads. Native runtime messages
+The bootstrap I/O runtime prefixes forwarded guest console lines with
+`HypeR bootstrap-stage1-io-runtime: IO VM:`. After adoption, the formal runtime
+uses `HypeR IO VM:`. Both preserve prefixes across split serial reads. Native runtime messages
 retain their own service name. Prefixing does not buffer a whole line or alter
 its bytes; a partial line remains visible, so output from other services can
 still interleave before the guest emits its next newline.
@@ -720,3 +759,10 @@ to its storage target; it is not a VM ID, memory address, or disk capacity.
 The appliance constructs target names from the authorized client ID (client
 one uses the suffix `000000001`; client zero has no storage target). These locally generated
 names do not assert a globally assigned hardware identity.
+
+### PCI transport acceptance
+
+Run `make test-board-network NETWORK_VIRTIO_TRANSPORT=pci QEMU_CPUS=4` for
+PCI enumeration, guest disk read/write, networking, driver rebind and repeated
+VM retirement. The default `make test-board-network` covers MMIO. Both use
+fresh disposable disks and functional checks, without performance thresholds.

@@ -245,6 +245,11 @@ pub enum ProducedRights {
         /// right before the produced handle can be published.
         authority_source: Option<&'static str>,
     },
+    FixedAndInherited {
+        fixed_rights: u64,
+        authority_source: &'static str,
+        inherited_rights: u64,
+    },
     Fixed(u64),
 }
 
@@ -615,7 +620,7 @@ pub const OBJECT_KINDS: &[ObjectKind] = &[
     ObjectKind {
         value: 25,
         name: "virtual_serial",
-        transfer: TransferClass::Forbidden,
+        transfer: TransferClass::RendezvousOnly,
     },
     ObjectKind {
         value: 26,
@@ -667,6 +672,11 @@ pub const OBJECT_KINDS: &[ObjectKind] = &[
         name: "directory_stream",
         transfer: TransferClass::General,
     },
+    ObjectKind {
+        value: 36,
+        name: "root_transition",
+        transfer: TransferClass::RendezvousOnly,
+    },
 ];
 
 pub const DIRECTORY_STREAM_RIGHTS: u64 =
@@ -677,6 +687,10 @@ pub const FILE_PROTECTION_RIGHTS: u64 = RIGHT_MAP | RIGHT_INSPECT;
 pub const GUEST_MEMORY_RIGHTS: u64 = RIGHT_TRANSFER | RIGHT_DUPLICATE | RIGHT_MAP | RIGHT_INSPECT;
 
 pub const RIGHTS: &[Right] = &[
+    Right {
+        bit: 36,
+        name: "lock_memory",
+    },
     Right {
         bit: 35,
         name: "protect",
@@ -855,6 +869,7 @@ pub const RIGHT_LOCK_FILE: u64 = 1 << 32;
 pub const RIGHT_INSPECT_DETAILS: u64 = 1 << 33;
 pub const RIGHT_MANAGE_NAMESPACE: u64 = 1 << 34;
 pub const RIGHT_PROTECT: u64 = 1 << 35;
+pub const RIGHT_LOCK_MEMORY: u64 = 1 << 36;
 
 pub const EVENT_RIGHTS: u64 =
     RIGHT_DUPLICATE | RIGHT_TRANSFER | RIGHT_WAIT | RIGHT_INSPECT | RIGHT_SIGNAL;
@@ -1057,6 +1072,10 @@ const DIRECTORY_ENTRY_NAME_CAPACITY: u32 = 256;
 const DIRECTORY_ENTRY_RECORD_SIZE: u16 = 24 + DIRECTORY_ENTRY_NAME_CAPACITY as u16;
 
 pub const CONSTANTS: &[AbiConstant] = &[
+    AbiConstant {
+        name: "vmar_memory_current",
+        value: 1,
+    },
     AbiConstant {
         name: "filesystem_switch_root_max_moves",
         value: 16,
@@ -4494,7 +4513,11 @@ const VMAR_ALLOCATE_RESULTS: &[ResultValue] = &[
         kind: ValueKind::Handle,
         handle: Some(ProducedHandle {
             object: ProducedObject::Kind("vmar"),
-            rights: ProducedRights::Fixed(VMAR_RIGHTS),
+            rights: ProducedRights::FixedAndInherited {
+                fixed_rights: VMAR_RIGHTS,
+                authority_source: "vmar",
+                inherited_rights: RIGHT_LOCK_MEMORY,
+            },
         }),
     },
     ResultValue {
@@ -4716,7 +4739,11 @@ const PROCESS_BUILDER_CREATE_RESULTS: &[ResultValue] = &[ResultValue {
     kind: ValueKind::Handle,
     handle: Some(ProducedHandle {
         object: ProducedObject::Kind("process_builder"),
-        rights: ProducedRights::Fixed(PROCESS_BUILDER_RIGHTS),
+        rights: ProducedRights::FixedAndInherited {
+            fixed_rights: PROCESS_BUILDER_RIGHTS,
+            authority_source: "factory",
+            inherited_rights: RIGHT_LOCK_MEMORY,
+        },
     }),
 }];
 
@@ -9773,6 +9800,191 @@ pub const SYSCALLS: &[Syscall] = &[
         failure_results: &[],
     },
     Syscall {
+        number: 161,
+        name: "guest_notification_configure",
+        feature: FeatureGate::Core,
+        arguments: &[
+            Argument {
+                name: "machine",
+                kind: ValueKind::Handle,
+                handle: Some(HandleArgument {
+                    object: ObjectConstraint::Kind("virtual_machine"),
+                    required_rights: RIGHT_WRITE,
+                    disposition: HandleDisposition::Borrow,
+                }),
+                memory: None,
+            },
+            scalar_argument("original_base", ValueKind::U64),
+            scalar_argument("base", ValueKind::U64),
+            scalar_argument("flags", ValueKind::U32),
+        ],
+        results: &[],
+        blocking: BlockingClass::Never,
+        cancellation: CancellationClass::None,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
+        number: 162,
+        name: "guest_notification_access",
+        feature: FeatureGate::Core,
+        arguments: &[
+            Argument {
+                name: "machine",
+                kind: ValueKind::Handle,
+                handle: Some(HandleArgument {
+                    object: ObjectConstraint::Kind("virtual_machine"),
+                    required_rights: RIGHT_WRITE,
+                    disposition: HandleDisposition::Borrow,
+                }),
+                memory: None,
+            },
+            scalar_argument("original_base", ValueKind::U64),
+            scalar_argument("operation", ValueKind::U32),
+            scalar_argument("value", ValueKind::U32),
+        ],
+        results: &[ResultValue {
+            name: "value",
+            kind: ValueKind::U32,
+            handle: None,
+        }],
+        blocking: BlockingClass::Never,
+        cancellation: CancellationClass::None,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
+        number: 163,
+        name: "vmar_lock_memory",
+        feature: FeatureGate::Core,
+        arguments: &[
+            vmar_argument(RIGHT_LOCK_MEMORY),
+            scalar_argument("address", ValueKind::U64),
+            scalar_argument("size", ValueKind::ByteCount),
+            scalar_argument("flags", ValueKind::U32),
+        ],
+        results: &[],
+        blocking: BlockingClass::MayBlock,
+        cancellation: CancellationClass::None,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
+        number: 164,
+        name: "vmar_unlock_memory",
+        feature: FeatureGate::Core,
+        arguments: &[
+            vmar_argument(RIGHT_LOCK_MEMORY),
+            scalar_argument("address", ValueKind::U64),
+            scalar_argument("size", ValueKind::ByteCount),
+            scalar_argument("flags", ValueKind::U32),
+        ],
+        results: &[],
+        blocking: BlockingClass::MayBlock,
+        cancellation: CancellationClass::None,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
+        number: 165,
+        name: "process_builder_set_memory_lock",
+        feature: FeatureGate::Core,
+        arguments: &[
+            process_builder_argument(RIGHT_WRITE | RIGHT_LOCK_MEMORY, HandleDisposition::Borrow),
+            scalar_argument("enabled", ValueKind::U32),
+        ],
+        results: &[],
+        blocking: BlockingClass::MayBlock,
+        cancellation: CancellationClass::None,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
+        number: 166,
+        name: "filesystem_begin_root_switch",
+        feature: FeatureGate::Core,
+        arguments: &[
+            Argument {
+                name: "directory",
+                kind: ValueKind::Handle,
+                handle: Some(HandleArgument {
+                    object: ObjectConstraint::Kind("directory"),
+                    required_rights: RIGHT_MANAGE_NAMESPACE | RIGHT_WRITE | RIGHT_EXECUTE,
+                    disposition: HandleDisposition::Borrow,
+                }),
+                memory: None,
+            },
+            Argument {
+                name: "request",
+                kind: ValueKind::UserAddress,
+                handle: None,
+                memory: Some(UserMemory {
+                    direction: MemoryDirection::Read,
+                    length: MemoryLength::FixedBytes { bytes: 48 },
+                    record: Some("filesystem_root_switch"),
+                    handles: None,
+                    validation_order: 0,
+                }),
+            },
+        ],
+        results: &[ResultValue {
+            name: "transition",
+            kind: ValueKind::Handle,
+            handle: Some(ProducedHandle {
+                object: ProducedObject::Kind("root_transition"),
+                rights: ProducedRights::Fixed(RIGHT_WRITE | RIGHT_TRANSFER | RIGHT_INSPECT),
+            }),
+        }],
+        blocking: BlockingClass::MayBlock,
+        cancellation: CancellationClass::Explicit,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
+        number: 167,
+        name: "filesystem_finish_root_switch",
+        feature: FeatureGate::Core,
+        arguments: &[
+            Argument {
+                name: "transition",
+                kind: ValueKind::Handle,
+                handle: Some(HandleArgument {
+                    object: ObjectConstraint::Kind("root_transition"),
+                    required_rights: RIGHT_WRITE,
+                    disposition: HandleDisposition::Borrow,
+                }),
+                memory: None,
+            },
+            scalar_argument("commit", ValueKind::U32),
+        ],
+        results: &[],
+        blocking: BlockingClass::MayBlock,
+        cancellation: CancellationClass::None,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
         number: 496,
         name: "native_block_transfer",
         feature: FeatureGate::Core,
@@ -9847,7 +10059,7 @@ pub const SEMANTIC_RULES: &[&str] = &[
     "filesystem_mount_ramfs and filesystem_switch_root require MANAGE_NAMESPACE|WRITE|EXECUTE on the live namespace-root Directory anchor. Ordinary directory opens never confer MANAGE_NAMESPACE; only explicit capability duplication, delegation or root-anchor scope creation preserves it. Ramfs mount does not create or configure block filesystems. switch_root copies its request, at most 16 mount moves and every bounded UTF-8 path before namespace mutation; zero moves requires a null moves pointer. new_root and move sources resolve in the old namespace, while put_old and move targets resolve inside new_root. The root and all requested moves publish atomically. Existing non-anchor Directory and File capabilities retain their opened locations; existing root anchors follow the published root. A rejected transaction preserves all mount edges and the current root. Paths are at most 4096 bytes, nonempty and contain no NUL bytes. Layout, boot stages and the choice of put_old are userspace policy.",
     "filesystem_unmount requires Directory WRITE|EXECUTE and an exact mounted-root path. The namespace root cannot be detached. Live File, Directory, cwd, path-resolution or nested-mount uses return busy. Admission closes before synchronous backend flush and namespace publication; no mount-table spinlock is held across backend IPC. A failed flush or concurrent topology change leaves the mount attached. Successful detach permanently retires its transport health and content identity, so retained snapshots or speculative cache work cannot revive the old mount. Userspace then stops and joins the worker before reusing the returned NativeBlock; the syscall itself does not terminate processes or release backend DMA mappings.",
     "VM power control requires WRITE authority. virtual_machine_get_power_request returns a non-consuming snapshot of one pending request, or would_block when none exists. Request IDs identify one completion and stale IDs are rejected. Operations are CPU_ON (1), CPU_OFF (2), SYSTEM_OFF (3), and SYSTEM_RESET (4); accept is strictly 0 or 1. Reserved output is zero. POWER_REQUEST signals pending work, and VCPU_TERMINATED prompts inspection of per-vCPU terminal state. virtual_machine_open_vcpu returns a control handle for an already configured vCPU; it does not change the immutable topology. The runtime owns lifecycle policy; no guest request is forwarded to host firmware. Guest suspend operations remain unsupported.",
-    "PROTECT grants authority to acquire content protection, not READ, WRITE or EXECUTE. Directory/file derivation can only attenuate this right. file_protect returns a process-local nonduplicable, nontransferable FileProtection with MAP|INSPECT and the size observed under protection. Protection rejects writes and resize through every alias but does not freeze names or other metadata. Closing the token releases its reference; protected file mappings retain separate references until unmap or owner-process teardown. After all owner threads stop and its handles close, teardown detaches protected sources without allocation. External VMAR owners can retain the dead address space and its charged pages, but not protection or permission to refill from the file. vmar_map_file requires File READ, additionally EXECUTE for executable mappings, FileProtection MAP for that same canonical file, and MAP on a VMAR of the calling process. It uses private_mapping range/zero-fill semantics and accepts only COPY_ON_WRITE mode; EAGER is reserved for memory-VMO private mappings. Clean file-backed pages may be retired after translation invalidation and faulted back from the protected file; private modified pages cannot be discarded without another backing store. File snapshot VMOs are not exported to userspace. Explicit mapping and user-buffer copy syscalls report allocation, quota or I/O failures. Hardware refaults have no syscall result; when bounded reclaim/refill retries fail, the kernel terminates the Process as an unhandled page fault. Reclaim is best effort and page-table withdrawal may require temporary transaction resources before releasing pages.",
+    "PROTECT grants authority to acquire content protection, not READ, WRITE or EXECUTE. Directory/file derivation can only attenuate this right. file_protect returns a process-local nonduplicable, nontransferable FileProtection with MAP|INSPECT and the size observed under protection. Protection rejects writes and resize through every alias but does not freeze names or other metadata. Closing the token releases its reference; protected file mappings retain separate references until unmap or owner-process teardown. After all owner threads stop and its handles close, teardown detaches protected sources without allocation. External VMAR owners can retain the dead address space and its charged pages, but not protection or permission to refill from the file. vmar_map_file requires File READ, additionally EXECUTE for executable mappings, FileProtection MAP for that same canonical file, and MAP on a VMAR of the calling process. It uses private_mapping range/zero-fill semantics. COPY_ON_WRITE permits clean pages to retire after translation invalidation and fault back from the protected file. Both file mapping modes populate clean pageable contents; EAGER does not grant residency. Full clean pages share canonical cache storage, while partial pages and private writes remain isolated. LOCK_MEMORY on a process-owned VMAR authorizes vmar_lock_memory/ vmar_unlock_memory. Range calls require page-aligned nonempty ranges; VMAR_MEMORY_CURRENT selects only currently mapped pages, including descendants, with address and size zero. Lock success populates the range and charges PinnedPages to the requester; repeated lock is idempotent. Unmap and process teardown release locks; future mappings are not locked. Shared pages remain cached while a mapping retains them. ProcessBuilder memory-lock delegation requires TaskFactory LOCK_MEMORY and explicit enablement before seal. Both modes retain protection until unmap or owner-process teardown; private modified pages cannot be discarded without another backing store. File snapshot VMOs are not exported to userspace. Explicit mapping and user-buffer copy syscalls report allocation, quota or I/O failures. Hardware refaults have no syscall result; when bounded reclaim/refill retries fail, the kernel terminates the Process as an unhandled page fault. Reclaim is best effort and page-table withdrawal may require temporary transaction resources before releasing pages.",
     "Immutable VMO snapshots grant READ and MAP but never WRITE. vmo_create_snapshot coherently copies its source and reports Busy while writable mappings or hardware writers exist. Private mappings require source READ|MAP and VMAR MAP: source_offset is page aligned, data_offset is less than one page, source_length bytes starting at source_offset+data_offset initialize destination data_offset; all other destination bytes are zero. Writable private views never permit EXECUTE. Executable private views additionally require an executable source VMO and source EXECUTE rights; sanitized pages are sealed and instruction-published before mapping, with no writable alias. Copy-on-write mode shares immutable full pages until first write; eager mode allocates all private pages before publication. Private writes, including kernel copyout and atomic waits, cannot change the source or another private view. Ordinary writable/shared VMOs and exclusive hardware leases keep their stable backing contract. Snapshot bytes and old page versions remain owned through acknowledged translation retirement.",
     "VM platform inspection borrows an INSPECT creation lease without consuming it. Metadata describes the selected local platform: counter_frequency_hz is the actual guest counter frequency, and riscv_isa is a guaranteed subset across all admitted CPUs, not a complete host ISA listing. Other architectures return a zero RISC-V mask. The guarantee remains valid across local CPU migration; cross-machine migration is not implied.",
     "WaitSets are process-local, non-transferable objects with capacity 1..1024. BIND_WAIT authorizes add/rearm/remove, WAIT authorizes consumption. Add requires source WAIT and reserves one event slot; WaitSet and CapabilityChannel sources are unsupported. Registration IDs are globally non-reused. Bind/rearm observe signal levels and sequence under the source lock; one-shot publication does not allocate. Rearm is busy until successful event consumption. Wait returns one exact 24-byte record (registration ID, signal bits, sequence), using an absolute monotonic deadline. Copyout failure restores the event unless removal or closure cancelled it. Source handle close does not cancel object-lifetime subscriptions; final set handle close detaches registrations and wakes consumers. Future CapabilityChannel subscriptions require ownership-epoch invalidation.",
@@ -9889,8 +10101,10 @@ pub const SEMANTIC_RULES: &[&str] = &[
     "A VirtualMachineCreationAuthority may derive one resource-domain-bound VirtualMachineCreationLease. The lease is single-use and is consumed only when VirtualMachine creation publishes a PendingVirtualMachine handle successfully.",
     "Virtual-machine info appends resident_memory_bytes after the original 32-byte prefix. UINT64_MAX means unavailable during retirement. It counts currently allocated primary VMO backing, including RAM, explicitly admitted shared pools, and uploaded pages not yet mapped by stage-2; overlapping ranges of the same VMO count once. Dynamic backend alias windows, translation tables, and Native runtime memory are excluded. Shared pages are attributed independently in each guest and are not additive across guests. Inspection samples bounded page chunks and is not a globally atomic memory snapshot.",
     "A PendingVirtualMachine is mutable until seal. It must own at least one explicitly backed, non-overlapping writable region inside the configured IPA envelope and one bootstrap record for boot vCPU 0. Bootstrap entry and stack must lie in admitted backing; sparse envelope gaps remain unbacked and never become anonymous RAM. The configured vcpu_count fixes immutable topology; architecture power-on protocols supply secondary-vCPU runtime entry state, and virtual_machine_open_vcpu exposes their control handles. A guest serial route is optional and exists only when a caller transfers a VirtualSerial handle with assign-device authority before seal. Successful binding consumes the supplied handle and commits a VM-owned reference until VM retirement; a rejected binding leaves the handle unchanged. Guest output is published to a read-only shared VMO consumed by the owning runtime, and VM retirement disconnects the input route without invalidating existing output mappings. Seal is irreversible; install consumes the pending handle only on ok and publishes the installed VirtualMachine and dormant boot VirtualCpu handles together. VirtualCpu start is a separate operation after handle publication. The started VirtualCpu phase means that start committed successfully; it is not an observation that the scheduler currently considers the vCPU runnable or executing. AArch64 reference guests accept 1..8 vCPUs; RISC-V reference guests currently accept one.",
-    "VirtualSerial handles are process-local; device assignment consumes a same-process handle. register_output borrows a caller-allocated writable VMO of exactly 69632 bytes and registers it once before assignment. An exclusive write lease rejects existing writable mappings, direct accesses, snapshots, and further writers until port retirement; read-only mappings may coexist. Offset 0 is an atomic u64 produced count, offset 8 a saturating dropped-byte count, and offset 4096 begins 65536 atomic byte slots. Registration initializes counters; callers must not access contents during registration. The producer release-publishes bytes; the runtime acquire-loads production and reads a batch. acknowledge_output requires READ and submits the absolute consumed position after reading. Regressing or future positions return invalid_argument without mutation. Publication, acknowledgement, and closure serialize on the port: READABLE means unacknowledged output, WRITABLE means a connected input route has queue space, and PEER_CLOSED means no future output or input. WAIT authorizes object waits and WaitSet subscriptions. Acknowledgement clears READABLE only when caught up; new output reasserts it, without lost wakeups or periodic polling. Full output never overwrites unconsumed slots. The AArch64 SBSA UART retains pending bytes in its TX FIFO and exposes TXFF until runtime acknowledgement frees transport space; other producers discard new bytes and count loss when full. Counters never wrap. Last active handle closure synchronizes with writers and closes publication; registered pages remain pinned through final VM/object retirement. The SDK maps output read-only and acknowledges batches by syscall without copying payload through the syscall. Write remains nonblocking input injection: busy means the queue is full, bad_state means disconnected. Runtime policy owns retention and client transport.",
+    "VirtualSerial handles may move through capability rendezvous or staged startup; buffered transfer is forbidden. Device assignment consumes a same-process handle. A runtime handoff transfers the serial consumer together with its output VMO and absolute consumed cursor, without closing the last active handle or re-registering the output buffer. register_output borrows a caller-allocated writable VMO of exactly 69632 bytes and registers it once before assignment. An exclusive write lease rejects existing writable mappings, direct accesses, snapshots, and further writers until port retirement; read-only mappings may coexist. Offset 0 is an atomic u64 produced count, offset 8 a saturating dropped-byte count, and offset 4096 begins 65536 atomic byte slots. Registration initializes counters; callers must not access contents during registration. The producer release-publishes bytes; the runtime acquire-loads production and reads a batch. acknowledge_output requires READ and submits the absolute consumed position after reading. Regressing or future positions return invalid_argument without mutation. Publication, acknowledgement, and closure serialize on the port: READABLE means unacknowledged output, WRITABLE means a connected input route has queue space, and PEER_CLOSED means no future output or input. WAIT authorizes object waits and WaitSet subscriptions. Acknowledgement clears READABLE only when caught up; new output reasserts it, without lost wakeups or periodic polling. Full output never overwrites unconsumed slots. The AArch64 SBSA UART retains pending bytes in its TX FIFO and exposes TXFF until runtime acknowledgement frees transport space; other producers discard new bytes and count loss when full. Counters never wrap. Last active handle closure synchronizes with writers and closes publication; registered pages remain pinned through final VM/object retirement. The SDK maps output read-only and acknowledges batches by syscall without copying payload through the syscall. Write remains nonblocking input injection: busy means the queue is full, bad_state means disconnected. Runtime policy owns retention and client transport.",
     "The creating process retains its guest VMO handle, but attaching it to a PendingVirtualMachine acquires exclusive hardware-write ownership and rejects any active Native writable mapping or direct VMO operation. Direct VMO access, snapshots, and writable Native mappings remain closed until VM retirement removes and invalidates every stage-2 mapping and releases the independent backing reference; read-only Native mappings may coexist.",
+    "guest_notification_access requires frontend VirtualMachine WRITE and addresses an existing connection by original_base. Operation 0 reads pending interrupt status without acknowledgement, 1 reads and acknowledges that status atomically, and 2 submits a queue-index notification (value < 32). For operations 0 and 1 value must be zero; unknown operations are rejected. It shares the direct MMIO source state and serialization. PCI bus-master disable suppresses notifications; PCI memory-decode disable does not suppress this explicit transport fallback. Closure rejects accesses. No backend identity, control operation, DMA lease or epoch can be changed through this call.",
+    "guest_notification_configure requires frontend VirtualMachine WRITE. original_base identifies an existing connection by its creation address; base is a page-aligned 4 KiB window wholly contained in an installed userspace MMIO reservation and, while decoding is enabled, may not overlap another enabled I/O route. Flags 0 select the original virtio-MMIO register layout; bit 0 selects modern virtio-PCI, bit 1 enables memory decoding, bit 2 masks INTx, and bit 3 enables queue notifications (bus master). Unknown flags or PCI flags without bit 0 are rejected. PCI uses a 16-bit queue-index write at BAR+0x50 and a read-to-clear 8-bit ISR at BAR+0x60. Relocation, decode, and IRQ-mask changes serialize with source state and VM retirement. The operation cannot change the admitted backend, IRQs, DMA ownership, or epoch; disabling decode is not proof of backend quiescence.",
 ];
 
 const _: () = assert!(SYSCALL_ARGUMENT_REGISTERS == 6);

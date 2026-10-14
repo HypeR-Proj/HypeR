@@ -93,7 +93,7 @@ while :; do
     fi
     if grep -Eq 'HypeR: kernel startup.*failed|HypeR crash monitor' "$log" ||
         grep -Eq '(^|[^[:alnum:]_])(PANIC|BUG)([^[:alnum:]_]|$)' "$log" ||
-        grep -Eq 'HypeR init: (bootstrap failed|critical service |VM fleet (configuration rejected|result channel closed|configuration reply is invalid)|VM provisioning channel closed)' "$log"; then
+        grep -Eq 'HypeR (bootstrap-stage1-)?init: (bootstrap failed|critical service |VM fleet (configuration rejected|result channel closed|configuration reply is invalid)|VM provisioning channel closed)' "$log"; then
         cat "$log" >&2
         echo "HypeR reported a fatal failure before Native init completed" >&2
         exit 1
@@ -139,14 +139,14 @@ while :; do
                 if [ "$verify_vm" = 1 ]; then
                     command_phase='vm_running'
                 else
-                    send_commands 1 '/system/bin/ps\n'
+                    send_commands 1 '/bin/ps\n'
                     command_phase='ps'
                 fi
             fi
             ;;
         vm_running)
             if grep -q 'HypeR: vCPU 0 running as scheduler thread' "$log"; then
-                send_commands 1 '/system/bin/vmm console alpine\n'
+                send_commands 1 '/bin/vmm console alpine\n'
                 command_phase='guest_console'
             fi
             ;;
@@ -173,13 +173,13 @@ while :; do
             ;;
         guest_detach)
             if grep -Fxq '[vmm] detached' "$native_output"; then
-                send_commands 1 '/system/bin/ps\n'
+                send_commands 1 '/bin/ps\n'
                 command_phase='ps'
             fi
             ;;
         ps)
             if grep -Eq '^process  [[:space:]]*0x[0-9a-f]+[[:space:]]+-[[:space:]]+[^[:space:]]+[[:space:]]+(created|running|stopping|stopped|retiring|retired)' "$native_output"; then
-                send_commands 1 '/system/bin/ps --threads\n'
+                send_commands 1 '/bin/ps --threads\n'
                 command_phase='threads'
             fi
             ;;
@@ -187,7 +187,7 @@ while :; do
             if grep -Eq '^  thread [[:space:]]*0x[0-9a-f]+[[:space:]]+0x[0-9a-f]+[[:space:]]+[^[:space:]]+[[:space:]]+user/(resident|retiring) process=[^[:space:]]+' "$native_output" &&
                 grep -Eq '^  thread [[:space:]]*0x[0-9a-f]+[[:space:]]+kernel[[:space:]]+[^[:space:]]+[[:space:]]+(bootstrap|idle|kernel|vcpu)/(resident|retiring) process=kernel' "$native_output" &&
                 grep -Eq '[[:space:]]kernel[[:space:]]+idle/0[[:space:]]+idle/resident' "$native_output"; then
-                send_commands 1 '/system/bin/echo HYPER_NATIVE_PS_OK\n'
+                send_commands 1 '/bin/echo HYPER_NATIVE_PS_OK\n'
                 command_phase='ps_done'
             fi
             ;;
@@ -198,31 +198,31 @@ while :; do
                     echo "could not select a persistent Process observation" >&2
                     exit 1
                 fi
-                send_commands 1 "/system/bin/handle ${process_koid}\n"
+                send_commands 1 "/bin/handle ${process_koid}\n"
                 command_phase='handles'
             fi
             ;;
         handles)
             if grep -Eq '^0x[0-9a-f]{16}[[:space:]]+0x[0-9a-f]{16}[[:space:]]+[a-z][a-z-]+[[:space:]]+[a-z][a-z|-]+' "$native_output"; then
-                send_commands 1 '/system/bin/handle --objects\n'
+                send_commands 1 '/bin/handle --objects\n'
                 command_phase='objects'
             fi
             ;;
         objects)
             if grep -Eq '^0x[0-9a-f]{16}[[:space:]]+[a-z][a-z-]+[[:space:]]+(unpublished|active|retired)' "$native_output"; then
-                send_commands 1 '/system/bin/dynamic-test\n'
+                send_commands 1 '/bin/dynamic-test\n'
                 command_phase='dynamic'
             fi
             ;;
         dynamic)
             if grep -Fxq 'HYPER_DYNAMIC_LINK_OK' "$native_output"; then
-                send_commands 1 '/system/bin/echo-static HYPER_STATIC_LINK_OK\n'
+                send_commands 1 '/bin/echo-static HYPER_STATIC_LINK_OK\n'
                 command_phase='static'
             fi
             ;;
         static)
             if grep -Fxq 'HYPER_STATIC_LINK_OK' "$native_output"; then
-                send_commands 1 '/system/bin/std-test --name dynamic --read-input\n'
+                send_commands 1 '/bin/std-test --name dynamic --read-input\n'
                 command_phase='std_input'
             fi
             ;;
@@ -235,13 +235,13 @@ while :; do
         std_dynamic)
             if grep -Fxq 'HYPER_STD_OK hello dynamic' "$native_output" &&
                 grep -Fxq 'HYPER_STD_TLS_DROP_OK' "$native_output"; then
-                send_commands 1 '/system/bin/std-test-static --name static\n'
+                send_commands 1 '/bin/std-test-static --name static\n'
                 command_phase='std_static'
             fi
             ;;
         std_static)
             if grep -Fxq 'HYPER_STD_OK hello static' "$native_output"; then
-                send_commands 1 '/system/bin/std-test --help; echo STD-HELP-STATUS=$?\n'
+                send_commands 1 '/bin/std-test --help; echo STD-HELP-STATUS=$?\n'
                 command_phase='std_help'
             fi
             ;;
@@ -254,7 +254,7 @@ while :; do
                     echo "std success/help path returned failure" >&2
                     exit 1
                 fi
-                send_commands 1 '/system/bin/std-test --unknown-option; echo STD-ERROR-STATUS=$?\n'
+                send_commands 1 '/bin/std-test --unknown-option; echo STD-ERROR-STATUS=$?\n'
                 command_phase='std_error'
             fi
             ;;
@@ -264,7 +264,7 @@ while :; do
             if sed 's/hyper-sh\$ //g' "$native_output" |
                 grep -q "unexpected argument '--unknown-option'" &&
                 grep -Eq '^STD-ERROR-STATUS=[1-9][0-9]*$' "$native_output"; then
-                send_commands 1 '/system/bin/std-test --panic; echo STD-ABORT-STATUS=$?\n'
+                send_commands 1 '/bin/std-test --panic; echo STD-ABORT-STATUS=$?\n'
                 command_phase='std_panic'
             fi
             ;;
@@ -332,10 +332,10 @@ while :; do
             ;;
         ls_root)
             if grep -Fxq 'boot/' "$native_output" &&
-                grep -Fxq 'system/' "$native_output" &&
+                grep -Fxq 'bin/' "$native_output" &&
                 grep -Fxq 'data/' "$native_output" &&
                 grep -Fxq 'tmp/' "$native_output"; then
-                send_commands 3 'cd /system/bin\npwd\nls -1\n'
+                send_commands 3 'cd /bin\npwd\nls -1\n'
                 command_phase='ls_bin'
             fi
             ;;
@@ -343,7 +343,7 @@ while :; do
             if grep -Fxq 'echo' "$native_output" &&
                 grep -Fxq 'ls' "$native_output" &&
                 grep -Fxq 'vmm' "$native_output" &&
-                grep -Fxq '/system/bin' "$native_output"; then
+                grep -Fxq '/bin' "$native_output"; then
                 send_commands 1 './echo HYPER_CD_CHILD_OK\n'
                 command_phase='cd_child'
             fi
@@ -356,7 +356,7 @@ while :; do
             ;;
         cd_parent)
             if grep -Fxq 'HYPER_CD_PARENT_OK' "$native_output"; then
-                send_commands 1 '/system/bin/free\n'
+                send_commands 1 '/bin/free\n'
                 command_phase='free'
             fi
             ;;
@@ -364,7 +364,7 @@ while :; do
             if grep -Eq "^Mem:[[:space:]]+${memory_value}[[:space:]]+($memory_value|—)[[:space:]]+${memory_value}([[:space:]]+($memory_value|—)){2}$" "$native_output" &&
                 grep -Eq "^Reserved: $memory_value  Managed: $memory_value  Allocated: $memory_value$" "$native_output" &&
                 grep -Eq "^Owners:[[:space:]]+kernel=($memory_value|—) user=$memory_value guest=$memory_value buffered/cached=($memory_value|—) other=$memory_value$" "$native_output"; then
-                send_commands 1 '/system/bin/top\n'
+                send_commands 1 '/bin/top\n'
                 command_phase='top'
             fi
             ;;
@@ -379,7 +379,7 @@ while :; do
             if awk '/^Press q or Ctrl-C to quit[.]$/ { seen = 1; ready = 0; next }
                 seen && /^hyper-sh\$ q?$/ { ready = 1 }
                 END { exit !ready }' "$native_output"; then
-                send_commands 1 '/system/bin/echo HYPER_NATIVE_ECHO_OK\n'
+                send_commands 1 '/bin/echo HYPER_NATIVE_ECHO_OK\n'
                 command_phase='echo'
             fi
             ;;
@@ -397,8 +397,8 @@ while :; do
     fi
     if [ "$command_phase" = echo_done ] &&
         grep -q 'HypeR: starting Native init process' "$log" &&
-        grep -q 'HypeR init-system: core supervision adopted' "$log" &&
-        grep -q 'HypeR init-system: root namespace switched' "$log" &&
+        grep -q 'HypeR init: core supervision adopted' "$log" &&
+        grep -q 'HypeR bootstrap-stage1-init: provisional system root active; preparing successor' "$log" &&
         grep -Fxq 'HypeR session: console ready' "$native_output" &&
         grep -Eq '^TYPE[[:space:]]+KOID[[:space:]]+OWNER[[:space:]]+NAME[[:space:]]+STATE$' "$native_output" &&
         grep -Eq '^HANDLE[[:space:]]+OBJECT[[:space:]]+KIND[[:space:]]+RIGHTS$' "$native_output" &&
@@ -411,8 +411,8 @@ while :; do
         [ "$(grep -Fxc 'HYPER_STD_FP_THREADS_OK' "$native_output")" -eq 2 ] &&
         [ "$(grep -Fxc 'HYPER_COW_OK' "$native_output")" -eq 2 ] &&
         [ "$(grep -Ec '^(hyper-sh\$ )*HYPER_STD_STDERR_OK$' "$native_output")" -eq 2 ] &&
-        grep -Fxq '/system/bin' "$native_output" &&
-        grep -Fxq '/system' "$native_output" &&
+        grep -Fxq '/bin' "$native_output" &&
+        grep -Fxq '/' "$native_output" &&
         grep -Fxq 'HYPER_SHELL_BUILTIN_OK' "$native_output" &&
         grep -Fxq 'HYPER_CD_CHILD_OK' "$native_output" &&
         grep -Fxq 'HYPER_CD_PARENT_OK' "$native_output" &&

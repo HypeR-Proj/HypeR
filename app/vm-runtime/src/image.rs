@@ -91,6 +91,7 @@ fn build_device_tree(
     boot_arguments: &str,
     metadata: GuestHardwareMetadata,
     devices: u32,
+    pci: bool,
 ) -> Result<(), Error> {
     let mut structure = [0u8; 8192];
     let mut strings = [0u8; 2048];
@@ -109,14 +110,28 @@ fn build_device_tree(
                 boot_arguments,
             },
             guest_fdt::io::IoDevices {
-                virtio: (devices & hyper_service::io::DISK != 0).then_some(
+                virtual_pci: pci.then_some(guest_fdt::io::VirtualPci {
+                    ecam: guest_fdt::io::MmioWindow {
+                        base: hyper_service::io::PCI_ECAM,
+                        size: hyper_service::io::PCI_ECAM_BYTES,
+                    },
+                    memory: guest_fdt::io::MmioWindow {
+                        base: hyper_service::io::PCI_MEMORY,
+                        size: hyper_service::io::PCI_MEMORY_BYTES,
+                    },
+                    interrupts: &[
+                        (1, hyper_service::io::FRONTEND_IRQ),
+                        (2, hyper_service::io::FRONTEND_NET_IRQ),
+                    ],
+                }),
+                virtio: (!pci && devices & hyper_service::io::DISK != 0).then_some(
                     guest_fdt::io::MmioDevice {
                         base: hyper_service::io::FRONTEND_MMIO,
                         size: 4096,
                         irq: hyper_service::io::FRONTEND_IRQ,
                     },
                 ),
-                network: (devices & hyper_service::io::NETWORK != 0).then_some(
+                network: (!pci && devices & hyper_service::io::NETWORK != 0).then_some(
                     guest_fdt::io::MmioDevice {
                         base: hyper_service::io::FRONTEND_NET_MMIO,
                         size: 4096,
@@ -157,6 +172,7 @@ pub(super) fn prepare_guest_memory(
     plan: &linux::BootPlan,
     metadata: GuestHardwareMetadata,
     devices: u32,
+    pci: bool,
     started: std::time::Instant,
 ) -> Result<WritableVmo, Error> {
     let memory = WritableVmo::create(plan.memory_size()).map_err(Error::OperatingSystem)?;
@@ -175,6 +191,7 @@ pub(super) fn prepare_guest_memory(
         image.boot_arguments.as_str(),
         metadata,
         devices,
+        pci,
     )?;
     #[cfg(feature = "startup-profile")]
     eprintln!(

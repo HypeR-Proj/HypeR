@@ -305,7 +305,10 @@ impl private::UserExportable for VirtualSerial {}
 
 impl KernelObject for VirtualSerial {
     const KIND: ObjectKind = ObjectKind::VIRTUAL_SERIAL;
-    const TRANSFER_CLASS: TransferClass = TransferClass::Never;
+    // The port owns output pages, but its VM route is a generation-qualified
+    // weak identity. Moving a live consumer through a rendezvous cannot create
+    // an ownership cycle and must not momentarily close the registered sink.
+    const TRANSFER_CLASS: TransferClass = TransferClass::RendezvousOnly;
     const SUPPORTED_RIGHTS: Rights = Rights::DUPLICATE
         .union(Rights::TRANSFER)
         .union(Rights::INSPECT)

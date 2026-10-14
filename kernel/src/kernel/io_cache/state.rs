@@ -115,14 +115,25 @@ impl State {
         })
     }
 
+    #[cfg(test)]
     pub(super) fn access(&mut self, key: CacheKey) -> Result<Access, Error> {
         self.access_with_admission(key, true)
     }
 
+    #[cfg(test)]
     pub(super) fn access_with_admission(
         &mut self,
         key: CacheKey,
         allow_load: bool,
+    ) -> Result<Access, Error> {
+        self.access_with_victim(key, allow_load, |_| true)
+    }
+
+    pub(super) fn access_with_victim(
+        &mut self,
+        key: CacheKey,
+        allow_load: bool,
+        mut evictable: impl FnMut(usize) -> bool,
     ) -> Result<Access, Error> {
         if let Some(access) = self.find(key)? {
             return Ok(access);
@@ -132,7 +143,13 @@ impl State {
             return Ok(Access::CapacityBusy);
         }
 
-        let target = self.index.vacant().or_else(|| self.eviction.oldest());
+        let target = self.index.vacant().or_else(|| {
+            // A bounded cold scan avoids spinning under the IRQ-safe cache lock
+            // when mappings retain every page. Demand may grow the index.
+            (0..self.clean.min(64))
+                .filter_map(|index| self.eviction.candidate(index))
+                .find(|slot| evictable(*slot))
+        });
         let Some(slot) = target else {
             self.record_capacity_busy();
             return Ok(Access::CapacityBusy);
@@ -171,6 +188,11 @@ impl State {
             },
             evicted,
         })
+    }
+
+    /// Index-only lookup for a detached, immutable maintenance table.
+    pub(super) fn peek_clean(&self, key: CacheKey) -> Option<usize> {
+        self.index.find(key, |slot| matches!(self.slots.get(slot), Some(Slot::Clean { key: found, .. }) if *found == key))
     }
 
     pub(super) fn lookup(&mut self, key: CacheKey) -> Result<Option<usize>, Error> {

@@ -5,7 +5,7 @@
 pub use crate::affinity::Affinity;
 use serde::{Deserialize, Serialize};
 
-pub const CONFIG_PATH: &str = "/boot/etc/hyper/vms.json";
+pub const CONFIG_PATH: &str = "/etc/hyper/vms.json";
 pub const MAX_DEFINITIONS: usize = 8;
 pub const MAX_MESSAGE_BYTES: usize = 16 * 1024;
 pub const MAX_CONFIG_BYTES: u64 = 64 * 1024;
@@ -27,6 +27,8 @@ pub struct Definition {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Configuration {
+    #[serde(default, rename = "virtio-transport")]
+    pub virtio_transport: VirtioTransport,
     #[serde(rename = "memory-bytes")]
     pub memory_bytes: u64,
     pub vcpus: u32,
@@ -34,6 +36,14 @@ pub struct Configuration {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub affinity: Vec<Affinity>,
 }
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum VirtioTransport {
+    #[default]
+    Mmio,
+    Pci,
+}
+
 impl Configuration {
     pub fn image_configuration(&self) -> Result<hyper_vm_image::Configuration, String> {
         use hyper_vm_image::BootArguments;
@@ -61,6 +71,11 @@ impl Configuration {
             self.memory_bytes.to_string(),
             self.vcpus.to_string(),
             self.bootargs.clone(),
+            match self.virtio_transport {
+                VirtioTransport::Mmio => "mmio",
+                VirtioTransport::Pci => "pci",
+            }
+            .to_string(),
         ];
         // One bounded argument per vCPU stays below the 4096-byte argument limit,
         // even when every supported host CPU is listed explicitly.
@@ -80,6 +95,11 @@ impl Configuration {
             memory_bytes: next()?.parse().map_err(|_| "invalid VM memory")?,
             vcpus: next()?.parse().map_err(|_| "invalid VM CPU count")?,
             bootargs: next()?,
+            virtio_transport: match next()?.as_str() {
+                "mmio" => VirtioTransport::Mmio,
+                "pci" => VirtioTransport::Pci,
+                _ => return Err("invalid virtio transport".into()),
+            },
             affinity: args
                 .map(|value| serde_json::from_str(&value))
                 .collect::<Result<_, _>>()

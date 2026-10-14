@@ -53,6 +53,7 @@ fn generated_bit_constants_preserve_schema_bit_positions() {
         ("INSPECT_DETAILS", 33),
         ("MANAGE_NAMESPACE", 34),
         ("PROTECT", 35),
+        ("LOCK_MEMORY", 36),
     ] {
         assert!(
             generated
@@ -68,7 +69,7 @@ fn generated_bit_constants_preserve_schema_bit_positions() {
     assert!(
         generated
             .rust
-            .contains("HYPER_NATIVE_RIGHTS_MASK: u64 = 0xfffffffff;")
+            .contains("HYPER_NATIVE_RIGHTS_MASK: u64 = 0x1fffffffff;")
     );
     assert!(
         generated
@@ -83,7 +84,7 @@ fn generated_bit_constants_preserve_schema_bit_positions() {
     assert!(
         generated
             .c
-            .contains("HYPER_NATIVE_RIGHTS_MASK UINT64_C(0xfffffffff)")
+            .contains("HYPER_NATIVE_RIGHTS_MASK UINT64_C(0x1fffffffff)")
     );
 }
 
@@ -611,6 +612,7 @@ fn process_builder_is_linear_and_uses_staged_syscalls() {
             (28, "process_builder_seal"),
             (29, "process_builder_start"),
             (30, "process_builder_abort"),
+            (165, "process_builder_set_memory_lock"),
         ]
     );
     for name in ["process_builder_start", "process_builder_abort"] {
@@ -784,7 +786,7 @@ fn object_transfer_classes_match_the_audited_contract() {
         ("pending_virtual_machine", TransferClass::RendezvousOnly),
         ("virtual_machine", TransferClass::RendezvousOnly),
         ("virtual_cpu", TransferClass::RendezvousOnly),
-        ("virtual_serial", TransferClass::Forbidden),
+        ("virtual_serial", TransferClass::RendezvousOnly),
         ("wait_set", TransferClass::Forbidden),
         ("guest_memory", TransferClass::RendezvousOnly),
         ("device_assignment_authority", TransferClass::General),
@@ -795,6 +797,7 @@ fn object_transfer_classes_match_the_audited_contract() {
         ("guest_mapping", TransferClass::RendezvousOnly),
         ("file_protection", TransferClass::Forbidden),
         ("directory_stream", TransferClass::General),
+        ("root_transition", TransferClass::RendezvousOnly),
     ];
     assert_eq!(schema::OBJECT_KINDS.len(), expected.len());
     for (kind, expected) in schema::OBJECT_KINDS.iter().zip(expected) {
@@ -985,4 +988,52 @@ fn directory_stream_derivation_requires_read_only_and_separates_cursor_authority
             disposition: schema::HandleDisposition::Borrow
         })
     ));
+}
+
+#[test]
+fn residency_authority_is_inherited_without_becoming_a_default_grant() {
+    for (name, source) in [
+        ("process_builder_create", "factory"),
+        ("vmar_allocate", "vmar"),
+    ] {
+        let call = schema::SYSCALLS.iter().find(|call| call.name == name);
+        assert!(
+            matches!(call.and_then(|call| call.results.first()).and_then(|result| result.handle),
+            Some(schema::ProducedHandle { rights: ProducedRights::FixedAndInherited {
+                fixed_rights, authority_source, inherited_rights }, .. })
+            if fixed_rights & schema::RIGHT_LOCK_MEMORY == 0
+                && authority_source == source && inherited_rights == schema::RIGHT_LOCK_MEMORY)
+        );
+    }
+}
+
+#[test]
+fn mixed_produced_rights_reject_undeclared_source_and_overlapping_masks() {
+    for (source, inherited) in [
+        ("missing", schema::RIGHT_LOCK_MEMORY),
+        ("factory", schema::RIGHT_WRITE),
+    ] {
+        let mut calls = schema::SYSCALLS.to_vec();
+        let Some(call) = calls
+            .iter_mut()
+            .find(|call| call.name == "process_builder_create")
+        else {
+            return;
+        };
+        let mut results = call.results.to_vec();
+        let Some(handle) = results[0].handle.as_mut() else {
+            return;
+        };
+        handle.rights = ProducedRights::FixedAndInherited {
+            fixed_rights: schema::PROCESS_BUILDER_RIGHTS,
+            authority_source: source,
+            inherited_rights: inherited,
+        };
+        call.results = Box::leak(results.into_boxed_slice());
+        let candidate = AbiSchema {
+            syscalls: Box::leak(calls.into_boxed_slice()),
+            ..schema::NATIVE_ABI
+        };
+        assert!(validate(&candidate).is_err());
+    }
 }

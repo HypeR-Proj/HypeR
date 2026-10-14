@@ -62,6 +62,7 @@ pub(super) struct OwnedPage<Page> {
     // Field order releases the allocation before returning its budget permit.
     pub(super) value: Page,
     _permit: Permit,
+    mappings: AtomicUsize,
 }
 
 impl<Page> OwnedPage<Page> {
@@ -69,6 +70,21 @@ impl<Page> OwnedPage<Page> {
         Self {
             value,
             _permit: permit,
+            mappings: AtomicUsize::new(0),
+        }
+    }
+
+    pub(super) fn mapping_pinned(&self) -> bool {
+        self.mappings.load(Ordering::Acquire) != 0
+    }
+    pub(super) fn retain_mapping(&self) {
+        if self.mappings.fetch_add(1, Ordering::AcqRel) == usize::MAX {
+            super::cache_invariant_violation();
+        }
+    }
+    pub(super) fn release_mapping(&self) {
+        if self.mappings.fetch_sub(1, Ordering::AcqRel) == 0 {
+            super::cache_invariant_violation();
         }
     }
 

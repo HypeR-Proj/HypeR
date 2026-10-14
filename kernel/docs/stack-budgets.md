@@ -18,7 +18,7 @@ stack or reduce an ABI batch merely to hide a large temporary.
 ## Reproducing the checks
 
 Run `make test-stack ARCH=aarch64`. This builds a dedicated initramfs in
-`target/stack-audit/aarch64`, substituting the std workload for its `/system/bin/ps`
+`target/stack-audit/aarch64`, substituting the std workload for its `/bin/ps`
 so the existing shell policy supplies thread inspection authority. The normal
 application output and production initramfs are preserved. The workload checks
 thread scan pagination, snapshot isolation, boundary/eager/COW mappings, and
@@ -102,6 +102,12 @@ including their interrupt arrays. Object publication adopts that allocation
 without copying the payload through constructor return values or syscall
 frames. Allocation failure releases the physical claim and its resource charge;
 the number and accounting of the final object allocations are unchanged.
+
+Filesystem RPC returns only a scalar operation result through the blocking
+transport. A separate decode frame validates the complete reply and fills the
+volume's existing metadata scratch when requested. The reply's filename buffer
+is not retained in each caller or across the scheduler wait path; the wire
+format and validation remain unchanged.
 
 `make test-stack ARCH=riscv64` runs the same workload and watermark checks.
 Both architectures use the same runtime limits rather than per-function ceilings.

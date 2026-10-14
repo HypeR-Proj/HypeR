@@ -7,6 +7,7 @@ use hyper_os::vm::MmioRequest;
 use hyper_vm_support::io_backend::{
     Backend, Completion, ControlTransport, Error, NotificationControl,
 };
+mod pci;
 
 /// Once initialized, only this owner may enter a backend's control transport.
 /// Queue kicks bypass this slow lane through their independent kernel routes.
@@ -26,6 +27,13 @@ impl<T: ControlTransport, N: NotificationControl> IoBackends<T, N> {
             return Err(Error::InvalidState);
         }
         Ok(Self { backends })
+    }
+
+    pub fn use_pci(&mut self) -> Result<(), Error> {
+        for backend in &mut self.backends {
+            backend.use_pci()?;
+        }
+        Ok(())
     }
 
     pub fn busy(&self) -> bool {
