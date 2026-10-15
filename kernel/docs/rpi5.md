@@ -290,7 +290,7 @@ applies fstab and starts separate workers to mount EROFS at `/system` and FAT at
 The boot files remain ordinary firmware-readable files in the configuration
 FAT volume.
 
-Bootstrap readiness is `HypeR bootstrap-stage1-io-runtime: ready; bootstrap mounts complete`,
+Bootstrap readiness is `[HypeR bootstrap stage 1][io-runtime] ready; bootstrap mounts complete` (after the boot timestamp),
 after fs-backend has mounted `/system` from the RAM root's fstab. System init
 starts after stage-1 switches the system filesystem to `/`, adopts core
 supervision, and requests `/etc/fstab`.

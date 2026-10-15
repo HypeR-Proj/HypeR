@@ -15,6 +15,13 @@ The independent system filesystem becomes `/` before formal init starts.
 Bootstrap remains temporarily at `/boot`, then retires after provider adoption.
 See [boot and system layout](boot-layout.md) for the handoff and mount policy.
 
+## Service administration
+
+`componentctl` queries component state and capability routes and accepts start/stop/restart requests.
+`journalctl -c PATH -n 100 -f` follows attributed stdout/stderr records in the
+volatile journal. See [service management](services.md) for permissions, component
+configuration and failure semantics.
+
 ## Files and system information
 
 | Command | Examples and behavior |
@@ -221,10 +228,11 @@ instance under the same definition and disconnects the old console session.
 
 ## Configuration
 
-System service wiring in `/etc/hyper/services.json` selects a separate VM configuration:
+The VM manager's service unit selects a separate VM configuration through
+its `service.fleet` field (the unit directory comes from init configuration):
 
 ```json
-"virtual-machines": { "config": "/etc/hyper/vms.json" }
+"fleet": "/etc/hyper/vms.json"
 ```
 
 The VM file contains definitions, not service capabilities:

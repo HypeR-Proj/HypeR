@@ -93,7 +93,7 @@ while :; do
     fi
     if grep -Eq 'HypeR: kernel startup.*failed|HypeR crash monitor' "$log" ||
         grep -Eq '(^|[^[:alnum:]_])(PANIC|BUG)([^[:alnum:]_]|$)' "$log" ||
-        grep -Eq 'HypeR (bootstrap-stage1-)?init: (bootstrap failed|critical service |VM fleet (configuration rejected|result channel closed|configuration reply is invalid)|VM provisioning channel closed)' "$log"; then
+        grep -Eq '(\[HypeR bootstrap stage 1\]\[init\] |HypeR (system-startup|component-manager): )(bootstrap failed|fatal after ownership commit|critical service |VM fleet (configuration rejected|result channel closed|configuration reply is invalid)|VM provisioning channel closed)' "$log"; then
         cat "$log" >&2
         echo "HypeR reported a fatal failure before Native init completed" >&2
         exit 1
@@ -397,8 +397,8 @@ while :; do
     fi
     if [ "$command_phase" = echo_done ] &&
         grep -q 'HypeR: starting Native init process' "$log" &&
-        grep -q 'HypeR init: core supervision adopted' "$log" &&
-        grep -q 'HypeR bootstrap-stage1-init: provisional system root active; preparing successor' "$log" &&
+        grep -q 'HypeR system-startup: core supervision adopted' "$log" &&
+        grep -Fq '[HypeR bootstrap stage 1][init] provisional system root active; preparing successor' "$log" &&
         grep -Fxq 'HypeR session: console ready' "$native_output" &&
         grep -Eq '^TYPE[[:space:]]+KOID[[:space:]]+OWNER[[:space:]]+NAME[[:space:]]+STATE$' "$native_output" &&
         grep -Eq '^HANDLE[[:space:]]+OBJECT[[:space:]]+KIND[[:space:]]+RIGHTS$' "$native_output" &&
@@ -424,7 +424,7 @@ while :; do
             exit 0
         fi
         if grep -Fq 'HypeR vm-manager: ready' "$native_output" &&
-            grep -Fq 'HypeR init: VM fleet configured' "$native_output" &&
+            grep -Fq 'HypeR system-startup: VM fleet configured' "$native_output" &&
             grep -Fq 'HypeR vm-runtime: starting' "$native_output" &&
             grep -q 'Run /init as init process' "$guest_output" &&
             grep -q 'HypeR guest: /init reached' "$guest_output" &&

@@ -17,7 +17,7 @@
         "kernel/Cargo.toml",
         "sdk/abi/Cargo.toml",
         "stdlib/rust/Cargo.toml",
-        // app also owns lib/ and tests/app/; do not link those members twice.
+        // app also owns svc/, lib/ and tests/app/; do not link those members twice.
         // Bootstrap and standalone Native init fixtures have independent workspaces.
         "app/Cargo.toml",
         "bootstrap/stage1/Cargo.toml",

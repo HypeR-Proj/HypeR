@@ -15,7 +15,7 @@ Cargo project roots, including the stdlib workspace, bootstrap, Native applicati
 shared libraries under `lib/`, Native acceptance applications and build tools.
 The shared libraries and `tests/app/` programs belong to
 `app/Cargo.toml`; do not add them as separate linked projects. New formal services
-under `app/`, including init, I/O and filesystem services, are discovered by that
+under `svc/`, including component-manager, I/O and filesystem services, are discovered by that
 workspace's member glob. The standalone `tests/native/io-smoke` fixture has its
 own linked project and static Native configuration. Run
 `make sdk ARCH=aarch64` once to prepare the Native target
@@ -92,7 +92,7 @@ Use these repository-root commands for short feedback loops:
 `app-test` uses SDK source patches within both Native workspaces, an explicit
 host target, and ordinary Cargo. It does not assemble an SDK or require patched
 std; the first invocation can download missing Cargo dependencies.
-`APP_TEST_PACKAGE=hyper-init` selects the formal supervisor;
+`APP_TEST_PACKAGE=hyper-component-manager` selects the formal supervisor;
 `APP_TEST_WORKSPACE=bootstrap/stage1 APP_TEST_PACKAGE=hyper-bootstrap-stage1-init`
 selects the independent bootstrap supervisor;
 `APP_TEST_ARGS=supervision` filters its test names.
@@ -185,7 +185,8 @@ with mode 0777
 and stores the target text, without following build-host paths. Files must be
 listed under their real directories rather than beneath an archive symlink.
 
-Before packing, `services.json` is checked on the host using init's production
+Before packing, bootstrap manifests and individual formal service/target units
+are checked on the host using their owning supervisor's production
 parser, bootstrap authority policy, and supervision rules. Invalid syntax,
 dependencies, capability declarations, unsupported restart policies, or missing
 service images reject the build without replacing the existing ramdisk. The
@@ -279,6 +280,7 @@ exact coverage and supported runtime expectations.
 | `kernel/src/mm/`, `kernel/src/sync/`, `kernel/src/time/` | Reusable allocation, synchronization, and timing mechanisms |
 | `sdk/abi/` | Native ABI schema, generated Rust definitions, C header, and reference |
 | `stdlib/hyper/` | Freestanding Native C runtime and architecture syscall veneers |
+| `svc/` | Formal background services, root component-manager, system-startup, journal and retirement |
 | `bootstrap/stage1/` | Static bootstrap services, recovery tools and initial executable loader |
 | `lib/dynamic-loader/elf/` | Shared bounded ELF mapping and initial stack construction |
 | `lib/dynamic-loader/` | Formal static/dynamic application loading, relocation and runtime loading |

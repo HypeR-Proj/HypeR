@@ -15,14 +15,14 @@ archive. Plain `make`, `make rebuild` and `make run` use this deployment.
 The kernel mounts the supplied RAM archive as `/` and starts `/init` through
 `/lib/userspace-loader-hyper-<arch>`. Those are its only bootstrap path
 conventions. The temporary `/system` path, `/boot`, stage-1, and the service handoff
-are userspace policy. The system environment has no stage number; `init`
-is its supervisor. The Pi firmware's FAT boot partition is separate from the
+are userspace policy. The system environment has no stage number;
+`component-manager` is its root supervisor. The Pi firmware's FAT boot partition is separate from the
 Native `/boot` mount.
 
 ## Files and dependencies
 
 [`bootstrap/stage1`](../bootstrap/stage1/README.md) owns static bootstrap
-programs. Formal applications and providers live in `app/`, and their reusable
+programs. Formal commands live in `app/` and background providers in `svc/`, and their reusable
 implementations live in `lib/`. Bootstrap does not link these formal libraries.
 It may use the Native kernel-facility substrate, static Rust std and third-party
 Cargo crates. Supervisor, format and I/O implementation modules belong to their
@@ -33,25 +33,26 @@ The initial archive directly contains `/init`, `/svc`, `/bin`, `/etc`, `/vm`,
 
 ```text
 /bin/                              formal shell and Native commands
-/svc/                              system init and formal services
-/etc/hyper/services.json           formal service graph
-/etc/hyper/init.json               formal init policy
-/etc/fstab                         later mounts requested by formal init
+/svc/                              component-manager and formal services
+/etc/components/*.json             reusable component declarations
+/etc/hyper/components.json         instance-tree root and configuration directory
+/etc/hyper/startup.json            finite provider-adoption policy
+/etc/fstab                         later mounts requested by /mounts
 /lib64/ld-hyper-<arch>.so           formal executable loader and dynamic linker
 /lib64/<arch>-hyper-hyper/          shared libraries
 /lib -> lib64                      library-directory alias
 /boot/                             original archive until bootstrap retirement
 /tmp/                              separate writable RAM filesystem
-/data/                             persistent FAT volume mounted by formal init
+/data/                             persistent FAT volume mounted in the formal environment
 ```
 
 The system image includes empty `/boot`, `/tmp` and `/data` mountpoint directories,
 so preparing the transition does not require writes to EROFS. Stage-1 switches the
 mounted system filesystem to the namespace root. The old archive becomes `/boot`;
 the temporary `/system` is not a second path to the formal root. After accepting
-supervision, system init commits the root transition and mounts a fresh RAM
-filesystem at `/tmp` before preparing replacement providers. After provider adoption,
-system init stops predecessor processes and detaches `/boot`. Its empty
+supervision, component-manager commits the root transition. System-startup mounts
+a fresh RAM filesystem at `/tmp` before preparing replacement providers. After provider adoption,
+bootstrap-retire stops predecessor processes and detaches `/boot`. Its empty
 mountpoint directory remains. The last kernel owner of an archive-backed file or
 page releases the corresponding physical backing.
 
@@ -97,20 +98,21 @@ business fleet or provisioning connection. Bootstrap contains no terminal servic
 or line discipline, and launches its byte-stream fallback shell only on failure.
 
 Once `/system` is an independent mount, stage-1 prepares a reversible root
-transition. It then starts `/svc/init` in a separate candidate task
-group. The candidate reads the formal graph and validates the offered typed
-capability inventory. One capability-channel rendezvous transfers core Process
+transition. It starts `/svc/component-manager` in a separate candidate task
+group. The manager reads the component tree and prepares system-startup, which
+validates the offered capability inventory and migration policy. One capability-channel rendezvous transfers core Process
 supervisors and their management inventory. That transfer is the supervision
 commit point. Before commit, failure retains stage-1 ownership and rolls the
-namespace back for recovery. After commit, system init owns failure handling and
-retirement timing; stage-1 does not restart its fallback shell.
+namespace back for recovery. After commit, the formal environment owns failure
+handling and retirement timing; stage-1 does not restart its fallback shell.
 
-System init replaces bootstrap console, I/O and filesystem providers with formal
-processes. The running I/O VM and mounted filesystem identities survive adoption:
+Component-manager forwards domain resources to system-startup, which replaces bootstrap console, I/O and filesystem providers with formal processes. The running I/O VM and mounted filesystem identities survive adoption:
 the VM does not reboot and volumes are not remounted. New providers start before
 predecessors retire. A failed adoption retains still-needed predecessor resources.
-System init then applies its own fstab, starts formal services and configures the
-VM fleet. Data mount failures are handled in the formal environment and do not
+The finite coordinator applies the formal fstab through a mount job, starts
+formal services and configures the VM fleet. An independent retirement job
+runs after confirmed provider adoption; successful exit publishes the
+bootstrap-retired progress fact. Data mount failures are handled in the formal environment and do not
 return to stage-1. See the [handoff contract](bootstrap-handoff.md) for transfer
 records, ownership and retirement conditions.
 
@@ -120,13 +122,15 @@ The boot `/etc/hyper/init.json` selects the independent root and successor:
 {
   "system-root": "/system",
   "put-old": "/boot",
-  "system-init": "/svc/init"
+  "system-init": "/svc/component-manager"
 }
 ```
 
 `system-root` is resolved before the switch; `put-old` and `system-init` name
-locations in the new namespace. The formal `/etc/hyper/init.json` selects
-`/etc/hyper/services.json`; it does not specify another root switch.
+locations in the new namespace. Formal `/etc/hyper/components.json` selects the
+component configuration directory, root declaration and startup coordinator; it
+does not specify another root switch. See
+[service management](services.md) for the JSON schema.
 
 Namespace mutation requires `MANAGE_NAMESPACE | WRITE | EXECUTE` on a namespace
 root Directory. Ordinary shells and format workers do not receive that authority.
@@ -156,7 +160,7 @@ The independent system filesystem's `/etc/fstab` contains later mounts:
 PARTLABEL=hyper-data /data auto rw 0 0
 ```
 
-Stage-1 never reads the formal table. Formal init requests it after taking
+Stage-1 never reads the formal table. The formal mount job requests it after taking
 supervision. No stage-number flags are needed and the kernel parses neither table.
 Sources select authorized GPT partitions with `PARTUUID=` or `PARTLABEL=`, not
 Linux device paths. HypeR reads GPT and grants bounded block ranges to the
