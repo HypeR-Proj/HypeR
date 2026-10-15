@@ -264,3 +264,8 @@ The fullscreen [editor](editor.md) uses these application interfaces.
 `make test-editor` checks editing, successful saves, failed-save recovery and
 restoration of shell interaction. The `native-apps` CI shard includes this
 scenario on both supported architectures.
+
+The [pager](less.md) reads file or pipe content independently of the terminal
+keyboard. `make test-less` checks file/pipeline paging, navigation while a
+producer is idle, redirected byte copying and restoration of shell interaction.
+It also runs in the `native-apps` CI shard.
