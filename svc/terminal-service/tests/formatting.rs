@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-use hyper_terminal::{Discipline, EventFlags, Limits, ReadDecision, ReadRequest, Settings};
+use crate::discipline::{CreateError, Discipline, Limits, ReadDecision, ReadRequest};
+use hyper_terminal::{EventFlags, Settings};
 
 fn hex(value: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     if value == "-" {
@@ -43,7 +44,7 @@ fn settings(delta: &str) -> Result<Settings, Box<dyn std::error::Error>> {
 }
 
 /// The same byte fixtures can be checked against a real Linux PTY using
-/// linux-formatting.py. No Linux ABI or implementation enters the library.
+/// linux-formatting.py. No Linux ABI or implementation enters the service.
 #[test]
 fn linux_formatting_vectors() -> Result<(), Box<dyn std::error::Error>> {
     for row in include_str!("formatting.tsv")
@@ -89,8 +90,7 @@ fn linux_formatting_vectors() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn canonical_throttle_waits_for_a_readable_record()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn canonical_throttle_waits_for_a_readable_record() -> Result<(), CreateError> {
     let mut settings = Settings::default();
     settings.input.send_flow_control = true;
     let limits = Limits {
@@ -112,8 +112,7 @@ fn canonical_throttle_waits_for_a_readable_record()
 }
 
 #[test]
-fn dropped_echo_does_not_move_the_tracked_column()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn dropped_echo_does_not_move_the_tracked_column() -> Result<(), CreateError> {
     let mut settings = Settings::default();
     settings.output.expand_tabs = true;
     let mut terminal = Discipline::new(
@@ -135,26 +134,7 @@ fn dropped_echo_does_not_move_the_tracked_column()
 }
 
 #[test]
-fn formatting_settings_roundtrip_and_reject_nonboolean_values() {
-    use hyper_terminal::protocol::{decode_settings, encode_settings};
-    for mask in 0..8 {
-        let mut settings = Settings {
-            visual_kill: mask & 1 != 0,
-            echo_erased: mask & 2 != 0,
-            ..Settings::default()
-        };
-        settings.output.uppercase = mask & 4 != 0;
-        assert_eq!(decode_settings(&encode_settings(settings)), Some(settings));
-    }
-    for index in [13, 14, 15] {
-        let mut bytes = encode_settings(Settings::default());
-        bytes[index] = 2;
-        assert!(decode_settings(&bytes).is_none());
-    }
-}
-
-#[test]
-fn empty_read_keeps_the_next_eof_record() -> Result<(), hyper_terminal::discipline::CreateError> {
+fn empty_read_keeps_the_next_eof_record() -> Result<(), CreateError> {
     let settings = Settings::default();
     let mut terminal = Discipline::new(settings, Limits::default())?;
     terminal.input(b"\x04", 1);

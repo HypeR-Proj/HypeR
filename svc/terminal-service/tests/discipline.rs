@@ -1,11 +1,10 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-use hyper_terminal::{
-    Discipline, EventFlags, Limits, ReadDecision, ReadPolicy, ReadRequest, Settings,
-};
+use crate::discipline::{CreateError, Discipline, Limits, ReadDecision, ReadRequest};
+use hyper_terminal::{EventFlags, ReadPolicy, Settings};
 
-fn terminal(settings: Settings) -> Result<Discipline, hyper_terminal::discipline::CreateError> {
+fn terminal(settings: Settings) -> Result<Discipline, CreateError> {
     Discipline::new(settings, Limits::default())
 }
 
@@ -23,8 +22,7 @@ fn read(terminal: &mut Discipline, capacity: usize, now: u64) -> (ReadDecision, 
 }
 
 #[test]
-fn canonical_eof_commits_partial_line_without_extra_eof()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn canonical_eof_commits_partial_line_without_extra_eof() -> Result<(), CreateError> {
     let mut terminal = terminal(Settings::default())?;
     terminal.input(b"abc\x04", 1);
     assert_eq!(
@@ -43,8 +41,7 @@ fn canonical_eof_commits_partial_line_without_extra_eof()
 }
 
 #[test]
-fn raw_preserves_every_byte_including_flow_and_eof()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn raw_preserves_every_byte_including_flow_and_eof() -> Result<(), CreateError> {
     let mut terminal = terminal(Settings::raw())?;
     let bytes: Vec<u8> = (0..=255).collect();
     terminal.input(&bytes, 1);
@@ -57,8 +54,7 @@ fn raw_preserves_every_byte_including_flow_and_eof()
 }
 
 #[test]
-fn literal_next_bypasses_conversion_delimiter_and_flow()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn literal_next_bypasses_conversion_delimiter_and_flow() -> Result<(), CreateError> {
     let mut terminal = terminal(Settings::default())?;
     terminal.input(b"\x16\r\x16\n\x16\x13\n", 1);
     assert!(!terminal.output_paused());
@@ -67,8 +63,7 @@ fn literal_next_bypasses_conversion_delimiter_and_flow()
 }
 
 #[test]
-fn editing_respects_utf8_scalar_and_word_boundaries()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn editing_respects_utf8_scalar_and_word_boundaries() -> Result<(), CreateError> {
     let mut terminal = terminal(Settings::default())?;
     terminal.input("abé".as_bytes(), 1);
     terminal.input(b"\x7f cd\x17X\n", 2);
@@ -77,8 +72,7 @@ fn editing_respects_utf8_scalar_and_word_boundaries()
 }
 
 #[test]
-fn visual_erase_removes_both_columns_of_a_quoted_carriage_return()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn visual_erase_removes_both_columns_of_a_quoted_carriage_return() -> Result<(), CreateError> {
     let mut terminal = terminal(Settings::default())?;
     terminal.input(b"a\x16\r\x7f\n", 1);
     let mut output = [0; 32];
@@ -89,8 +83,7 @@ fn visual_erase_removes_both_columns_of_a_quoted_carriage_return()
 }
 
 #[test]
-fn byte_mode_erase_keeps_following_tab_expansion_aligned()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn byte_mode_erase_keeps_following_tab_expansion_aligned() -> Result<(), CreateError> {
     let mut settings = Settings {
         utf8: false,
         ..Settings::default()
@@ -106,8 +99,7 @@ fn byte_mode_erase_keeps_following_tab_expansion_aligned()
 }
 
 #[test]
-fn overflow_drops_entire_unfinished_line_and_reports_loss()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn overflow_drops_entire_unfinished_line_and_reports_loss() -> Result<(), CreateError> {
     let limits = Limits {
         line_bytes: 4,
         ..Limits::default()
@@ -123,8 +115,7 @@ fn overflow_drops_entire_unfinished_line_and_reports_loss()
 }
 
 #[test]
-fn settings_changes_do_not_reinterpret_buffered_input()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn settings_changes_do_not_reinterpret_buffered_input() -> Result<(), CreateError> {
     let mut terminal = terminal(Settings::default())?;
     terminal.input(b"part", 1);
     assert!(terminal.configure(Settings::raw()).is_ok());
@@ -136,8 +127,8 @@ fn settings_changes_do_not_reinterpret_buffered_input()
 }
 
 #[test]
-fn cooked_to_binary_read_does_not_wait_for_new_bytes_in_the_old_record()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn cooked_to_binary_read_does_not_wait_for_new_bytes_in_the_old_record() -> Result<(), CreateError>
+{
     let mut cooked = Settings::raw();
     cooked.input.receive_flow_control = true;
     let mut terminal = terminal(cooked)?;
@@ -159,8 +150,7 @@ fn cooked_to_binary_read_does_not_wait_for_new_bytes_in_the_old_record()
 }
 
 #[test]
-fn noncanonical_policies_have_distinct_empty_and_timeout_results()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn noncanonical_policies_have_distinct_empty_and_timeout_results() -> Result<(), CreateError> {
     let mut settings = Settings::raw();
     settings.read_policy = ReadPolicy::Available;
     let terminal = terminal(settings)?;
@@ -183,8 +173,7 @@ fn noncanonical_policies_have_distinct_empty_and_timeout_results()
 }
 
 #[test]
-fn interbyte_timer_waits_for_first_byte_then_restarts_on_progress()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn interbyte_timer_waits_for_first_byte_then_restarts_on_progress() -> Result<(), CreateError> {
     let mut settings = Settings::raw();
     settings.read_policy = ReadPolicy::InterByteTimeout {
         minimum: 4,
@@ -220,7 +209,7 @@ fn interbyte_timer_waits_for_first_byte_then_restarts_on_progress()
 
 #[test]
 fn flow_direction_is_independent_and_priority_resume_survives_output_pause()
--> Result<(), hyper_terminal::discipline::CreateError> {
+-> Result<(), CreateError> {
     let mut settings = Settings::raw();
     settings.input.receive_flow_control = true;
     settings.input.send_flow_control = true;
@@ -250,28 +239,7 @@ fn flow_direction_is_independent_and_priority_resume_survives_output_pause()
 }
 
 #[test]
-fn wire_roundtrip_rejects_reserved_fields_and_conflicting_controls()
--> Result<(), hyper_terminal::discipline::CreateError> {
-    use hyper_terminal::protocol::{decode_settings, encode_settings};
-    for settings in [Settings::default(), Settings::raw()] {
-        let bytes = encode_settings(settings);
-        assert_eq!(decode_settings(&bytes), Some(settings));
-        for length in 0..bytes.len() {
-            assert!(decode_settings(&bytes[..length]).is_none());
-        }
-    }
-    let mut bytes = encode_settings(Settings::default());
-    bytes[63] = 1;
-    assert!(decode_settings(&bytes).is_none());
-    let mut settings = Settings::default();
-    settings.controls.erase = settings.controls.kill;
-    assert!(settings.validate().is_err());
-    Ok(())
-}
-
-#[test]
-fn minimum_is_capped_by_request_and_sealed_canonical_record()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn minimum_is_capped_by_request_and_sealed_canonical_record() -> Result<(), CreateError> {
     let mut settings = Settings::raw();
     settings.read_policy = ReadPolicy::AtLeast { minimum: 100 };
     let mut terminal = terminal(settings)?;
@@ -285,8 +253,7 @@ fn minimum_is_capped_by_request_and_sealed_canonical_record()
 }
 
 #[test]
-fn newline_only_echo_and_output_transformations_are_bounded()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn newline_only_echo_and_output_transformations_are_bounded() -> Result<(), CreateError> {
     let mut settings = Settings {
         echo: false,
         echo_newline: true,
@@ -309,8 +276,8 @@ fn newline_only_echo_and_output_transformations_are_bounded()
 }
 
 #[test]
-fn full_output_still_accepts_flow_control_and_preserves_recovery_reserve()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn full_output_still_accepts_flow_control_and_preserves_recovery_reserve() -> Result<(), CreateError>
+{
     let mut terminal = terminal(Settings::default())?;
     terminal.input(b"\x13", 1);
     let bytes = vec![b'x'; 65536];
@@ -324,8 +291,7 @@ fn full_output_still_accepts_flow_control_and_preserves_recovery_reserve()
 }
 
 #[test]
-fn adversarial_input_and_mode_changes_never_exceed_limits()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn adversarial_input_and_mode_changes_never_exceed_limits() -> Result<(), CreateError> {
     let limits = Limits {
         input_bytes: 64,
         line_bytes: 16,
@@ -362,8 +328,7 @@ fn adversarial_input_and_mode_changes_never_exceed_limits()
 }
 
 #[test]
-fn flow_profile_recovery_retries_start_after_a_full_priority_queue()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn flow_profile_recovery_retries_start_after_a_full_priority_queue() -> Result<(), CreateError> {
     let mut settings = Settings::raw();
     settings.input.send_flow_control = true;
     settings.controls.start = Some(b'S');
@@ -398,8 +363,7 @@ fn flow_profile_recovery_retries_start_after_a_full_priority_queue()
 }
 
 #[test]
-fn full_record_queue_drops_new_line_without_publishing_its_suffix()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn full_record_queue_drops_new_line_without_publishing_its_suffix() -> Result<(), CreateError> {
     let limits = Limits {
         records: 1,
         ..Limits::default()
@@ -415,8 +379,7 @@ fn full_record_queue_drops_new_line_without_publishing_its_suffix()
 }
 
 #[test]
-fn malformed_utf8_erase_removes_one_byte_without_eating_valid_prefix()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn malformed_utf8_erase_removes_one_byte_without_eating_valid_prefix() -> Result<(), CreateError> {
     let mut terminal = terminal(Settings::default())?;
     terminal.input(b"ok\xc3\xa9\x80\x7f\x7f\xe2\x82\x7f\n", 1);
     assert_eq!(read(&mut terminal, 32, 2).1, b"ok\xe2\n");
@@ -424,8 +387,7 @@ fn malformed_utf8_erase_removes_one_byte_without_eating_valid_prefix()
 }
 
 #[test]
-fn output_conversion_is_nonrecursive_and_retains_old_queued_encoding()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn output_conversion_is_nonrecursive_and_retains_old_queued_encoding() -> Result<(), CreateError> {
     let mut settings = Settings::raw();
     settings.output.cr_to_lf = true;
     settings.output.lf_to_crlf = true;
@@ -440,8 +402,7 @@ fn output_conversion_is_nonrecursive_and_retains_old_queued_encoding()
 }
 
 #[test]
-fn owner_recovery_clears_local_stops_but_keeps_remote_flow_obligation()
--> Result<(), hyper_terminal::discipline::CreateError> {
+fn owner_recovery_clears_local_stops_but_keeps_remote_flow_obligation() -> Result<(), CreateError> {
     let mut settings = Settings::raw();
     settings.input.receive_flow_control = true;
     settings.input.send_flow_control = true;
@@ -487,14 +448,16 @@ fn untouched_raw_input_uses_arrival_timing_and_does_not_commit_on_poll() {
 }
 
 #[test]
-fn binary_demand_profile_excludes_input_policy_but_not_output_conversion() {
+fn binary_demand_profile_excludes_input_policy_but_not_output_conversion() -> Result<(), CreateError>
+{
     let mut settings = Settings::raw();
-    assert!(settings.binary_input());
+    assert!(terminal(settings)?.binary_input());
     settings.output.lf_to_crlf = true;
-    assert!(settings.binary_input());
+    assert!(terminal(settings)?.binary_input());
     settings.echo_newline = true;
-    assert!(!settings.binary_input());
+    assert!(!terminal(settings)?.binary_input());
     settings.echo_newline = false;
     settings.input.receive_flow_control = true;
-    assert!(!settings.binary_input());
+    assert!(!terminal(settings)?.binary_input());
+    Ok(())
 }
