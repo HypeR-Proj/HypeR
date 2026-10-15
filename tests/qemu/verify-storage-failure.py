@@ -26,6 +26,8 @@ CASES = ('missing-controller', 'provider-exit', 'closed-ready', 'invalid-ready',
          'handoff-failure')
 DEGRADED = b'HypeR system-startup: VM fleet configuration unavailable; Native services remain available'
 ADOPTED = b'HypeR system-startup: core supervision adopted'
+# The journal carries the component-manager source separately from the message.
+CRITICAL_RETIRED = rb'/vm-manager generation=1 retired: ProcessExited \{ status: 1 \}'
 LIVE_PROVIDERS = frozenset(('closed-ready', 'invalid-ready', 'oversized-ready',
                             'timeout', 'missing-config', 'root-change'))
 BOOT_FAILED = b'[HypeR bootstrap stage 1][init] bootstrap failed'
@@ -229,7 +231,7 @@ def run_case(args, case):
         elif case == 'critical-exit':
             session.await_text(re.escape(ADOPTED), 180)
             session.await_text(rb'provider adoption failed: bootstrap retirement disabled; /io-runtime:', 30)
-            session.await_text(rb'HypeR component-manager: /vm-manager generation=1 retired: ProcessExited \{ status: 1 \}', FORMAL_STARTUP_TIMEOUT)
+            session.await_text(CRITICAL_RETIRED, FORMAL_STARTUP_TIMEOUT)
             formal_prompt()
             # Formal init already owns supervision. The formal session manager
             # remains independent of the failed business service.
@@ -246,7 +248,7 @@ def run_case(args, case):
             # The fixture waits for this explicit trigger, so failure cannot
             # race the startup decision merely because the host is slow.
             session.send(b'touch /tmp/critical-exit\n')
-            session.await_text(rb'HypeR component-manager: /vm-manager generation=1 retired: ProcessExited \{ status: 1 \}', 60)
+            session.await_text(CRITICAL_RETIRED, 60)
         elif case == 'missing-system-shell':
             session.await_text(re.escape(ADOPTED), 180)
             session.await_text(rb'HypeR system-startup: VM fleet configured', FORMAL_STARTUP_TIMEOUT)
