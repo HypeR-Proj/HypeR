@@ -51,7 +51,8 @@ or automatic physical-device passthrough.
 ## Resident startup
 
 `make run` on AArch64 uses the QEMU board configuration, keeps the HypeR shell,
-and starts `/svc/io-runtime` from the generated service manifest. Init explicitly delegates the physical-device
+and starts the bootstrap `/svc/io-runtime` from the generated core manifest.
+Bootstrap init explicitly delegates the physical-device
 capability only to this service and charges its VM to an independent, bounded
 I/O resource domain. Its startup does not require the business VM manager.
 The service owns the VM, assigned physical controllers and control mailboxes. Guest power-off,
@@ -60,9 +61,10 @@ continues to use the kernel's existing quarantine semantics. There is no
 automatic restart of an uncertain device owner.
 
 Native io-runtime discovers GPT partitions and asks the Linux backend to bind
-their authorized ranges. Filesystem workers mount persistent data at `/data`
-and, in the default split layout, the system image at `/system` before init
-provisions the configured business VMs. Business
+their authorized ranges. Bootstrap mounts the system image at `/system` and
+switches it to `/`. Formal system-startup adopts the running I/O VM and filesystem
+providers, then starts the mount oneshot for `/etc/fstab` (including `/data`) and
+the VM manager with its configured fleet. Business
 VMs are started only when their configuration requests autostart or through
 `vmm start`. `make run RUN_PROFILE=io` retains the explicit standby diagnostic
 profile: it boots a resident backend without mounting Native storage or
@@ -830,8 +832,10 @@ its mapping ownership and enters the backend shutdown/quarantine path.
 ### Forwarded appliance logs
 
 The bootstrap I/O runtime prefixes forwarded guest console lines with
-`HypeR bootstrap-stage1-io-runtime: IO VM:`. After adoption, the formal runtime
-uses `HypeR IO VM:`. Both preserve prefixes across split serial reads. Native runtime messages
+`[    1.234567][HypeR bootstrap stage 1][io-runtime] IO VM: `. The timestamp
+is sampled from HypeR's boot clock at the start of each line, before buffering;
+it uses the same seconds and six-digit microseconds format as kernel logs.
+After adoption, the formal runtime uses `HypeR IO VM:`. Both preserve prefixes across split serial reads. Native runtime messages
 retain their own service name. Prefixing does not buffer a whole line or alter
 its bytes; a partial line remains visible, so output from other services can
 still interleave before the guest emits its next newline.

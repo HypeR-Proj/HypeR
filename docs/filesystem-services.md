@@ -71,7 +71,7 @@ fstab after adoption.
 uncompressed core EROFS, including compact/extended inodes, plain and inline
 data, directories and symlinks. It validates a present superblock CRC32C and
 rejects compression, xattrs, external devices and unsupported inode layouts.
-Its [reader documentation](../app/fs-erofs/README.md) gives bounds and
+Its [reader documentation](../svc/fs-erofs/README.md) gives bounds and
 supported block sizes. Recognition alone is not a promise that a worker can
 read every extension of that filesystem format.
 
@@ -318,10 +318,10 @@ identity cannot become visible through a recreated file.
 It cannot recursively predict more work. This worker is separate from memory
 reclamation, so a backend waiting for memory cannot deadlock the reclaim path.
 
-Implementation entry points: [formal manager](../app/fs-backend/src/main.rs),
+Implementation entry points: [formal manager](../svc/fs-backend/src/main.rs),
 [bootstrap transfer](../bootstrap/stage1/fs-backend/src/migration.rs),
 [formal worker transport](../lib/fs-service/src/lib.rs),
-[FAT worker](../app/fs-fat/src/main.rs), [EROFS worker](../app/fs-erofs/src/main.rs),
+[FAT worker](../svc/fs-fat/src/main.rs), [EROFS worker](../svc/fs-erofs/src/main.rs),
 [wire protocol](../stdlib/rust/hyper-filesystem/src/protocol.rs),
 [kernel adapter](../kernel/src/kernel/vfs/remote.rs), and
 [transport](../kernel/src/kernel/vfs/remote/transport.rs).

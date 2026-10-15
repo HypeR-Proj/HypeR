@@ -94,6 +94,7 @@ fn prepare_handles(
     handles[1] = Some(prepare_handle(
         TaskGroupObject::try_publication(group.clone()).map_err(Error::TaskObject)?,
         Rights::DUPLICATE
+            .union(Rights::WAIT)
             .union(Rights::TRANSFER)
             .union(Rights::INSPECT)
             .union(Rights::REQUEST_STOP)

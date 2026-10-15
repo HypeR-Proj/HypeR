@@ -86,7 +86,9 @@ The current foundation includes:
   memory-VMO snapshots still support copy-on-write or eager private mappings.
   Shared writable VMOs and guest memory retain stable physical backing; this
   is not live address-space cloning or fork;
-- manifest-driven stage-1 and system init which construct services transactionally,
+- manifest-driven stage-1 and an independent formal component-manager and finite startup coordinator;
+  formal JSON service/target units, readiness, bounded restart, volatile journal
+  capture and scoped status/control tools construct services transactionally,
   transfer core supervision once, and delegate monotonically attenuated
   capabilities; a separately authorized, atomic VFS root switch retains the
   original RAM root at `/boot`, preserves live file and mount identities, and

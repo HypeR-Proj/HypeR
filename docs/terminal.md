@@ -15,7 +15,7 @@ interpret EOF or apply terminal settings. Bootstrap init uses these byte streams
 for its fallback shell only after a pre-handoff failure. All bootstrap programs
 remain statically linked and independent of the formal terminal library.
 
-Formal init starts `app/session-manager`. The manager owns one `terminal-service`
+The startup coordinator starts `svc/session-manager`. The manager owns one `terminal-service`
 for its assigned Console transport and a session task group containing the shell
 and its ordinary children. Ordinary data goes directly between the client,
 terminal-service and console-raw. The manager is not a byte relay. Capabilities
@@ -28,9 +28,10 @@ live in `stdlib`; they do not depend on the terminal library. The kernel retains
 raw Console I/O, object waits, Process observation and TaskGroup retirement.
 
 Background services receive independent log channels without ordinary raw
-Console write authority. Console-raw mirrors them throughout bootstrap and
-formal operation. Log ingress and retention are bounded; overflow is counted
-per source. Logs bypass terminal software flow control and can disturb a prompt
+Console write authority. Bootstrap mirrors them through console-raw. Formal
+services write stdout/stderr into the independent journal, which retains bounded
+records and mirrors them to console-raw. Overflow counters remain observable
+through journal queries; see [service management](services.md). Logs bypass terminal software flow control and can disturb a prompt
 or full-screen display. Kernel log mirroring is unchanged. This transport is not
 a persistent journal.
 
@@ -47,7 +48,7 @@ at startup. An absent file, or omitted fields, uses these defaults:
 }
 ```
 
-Both image paths are relative to the retained `/system` environment. Absolute
+Image paths are relative to the retained formal root environment. Absolute
 paths, empty components, `.` and `..` components, and NUL bytes are rejected.
 The file is limited to 4096 bytes; unknown fields and malformed JSON fail manager
 startup instead of silently selecting defaults.
@@ -56,7 +57,25 @@ startup instead of silently selecting defaults.
 after exits within 10 seconds of launch, including clean shell exits. Zero
 disables retries after such an exit. A session lasting at least 10 seconds resets
 the counter. Each restart waits 250 ms. This is the manager's local session
-policy; formal init continues to own whole-service supervision.
+policy; component-manager continues to own whole-service supervision.
+
+Component-manager reports startup state directly on the Console after receiving
+bootstrap ownership, before formal providers are adopted. It writes complete
+lines without erasing previous output. Raw consoles continue mirroring service
+logs throughout startup; kernel and emergency output remain independent.
+
+The terminal is prepared after raw console and journal readiness, before I/O and
+filesystem adoption. Session READY means the terminal exists; an independent
+one-shot startup channel holds back the first shell until the startup sequence
+has attempted retirement. Failed adoption or retirement also ends the progress
+report and releases an already prepared session. This gate controls only the
+first interactive client, not service logging. Later session epochs use the
+normal local restart policy without this startup gate.
+
+Each raw log source retains at most 64 KiB of rendered bytes under UART
+backpressure and discards excess records. Journal independently retains bounded
+queryable records. These bounds do not provide a logging or durability barrier;
+background logs continue after the interactive session starts.
 
 ## Input and output behavior
 

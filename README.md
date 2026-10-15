@@ -272,6 +272,7 @@ when adopting changed board policy or guest startup files.
 - [Pi 5 image distribution](docs/image-distribution.md): image builds, release
   artifacts, dependency pins, and component licensing.
 - [Shell and text filtering](docs/shell.md): pipelines, file redirection, and grep.
+- [Service management](docs/services.md): units, targets, lifecycle, journal and status tools.
 - [Native userspace](kernel/docs/native-init.md) and [SDK](sdk/README.md): host
   services and application interfaces.
 - [Issues](https://github.com/roolrz/HypeR/issues): bugs, experiments, and design

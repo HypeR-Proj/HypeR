@@ -68,19 +68,20 @@ interrupts, time and platform/VM services before publishing userspace.
 bootstrap loader and prepares initial capabilities. The userspace loader
 validates and maps init itself. [Bootstrap init runtime](../bootstrap/stage1/init/src/runtime.rs) consumes
 the service manifest and supervises core services. After handoff,
-[session-manager](../app/session-manager/src/main.rs) starts the formal terminal
+[session-manager](../svc/session-manager/src/main.rs) starts the formal terminal
 and shell and supervises their session group. Pre-handoff failures use the
 independent bootstrap fallback shell.
 
-The two init entry points use independent service-manager implementations.
+Bootstrap supervision and formal service management are independent implementations.
 [Boot init](../bootstrap/stage1/init/src/main.rs) starts the core services; the
 [handoff sender](../bootstrap/stage1/init/src/runtime/handoff.rs) starts system init
 with a read-only description of those services and its prospective capabilities.
-The [formal receiver](../app/init/src/runtime/handoff.rs) reads its
-own init policy and validates the system manifest before registering receive.
+[Component-manager](../svc/component-manager/src/runtime/boot.rs) validates the
+instance tree and prepares the [startup coordinator](../svc/system-startup/src/runtime/handoff.rs).
+Both validate policy and lock their mappings before the manager registers receive.
 One capability rendezvous moves every core Process supervisor and carries the
 management capabilities and group leases. That successful operation is the ownership
-commit; boot init then exits without waiting for an acknowledgement. Preparation
+commit; boot init then parks without waiting for an acknowledgement. Preparation
 failure leaves core supervision and the recovery shell with boot init.
 
 Before starting the successor, [stage-1 root policy](../bootstrap/stage1/init/src/runtime/root_switch.rs)
@@ -90,8 +91,8 @@ Namespace-root capabilities follow that transition, while fixed directory
 capabilities remain confined to their original locations. Formal init opens from
 the new root and receives the transition owner together with core supervision.
 Before that transfer, failed launch or admission restores the bootstrap root and
-fallback services. After adoption, formal init commits the transition, replaces
-core providers and eventually retires the original archive. See
+fallback services. After adoption, component-manager commits the transition and
+forwards domain resources; system-startup replaces core providers and submits retirement. See
 [boot layout](boot-layout.md).
 
 For image contents and launch commands, use the
@@ -123,10 +124,10 @@ flowchart TB
 ```
 
 1. [vmm](../app/vmm/src/main.rs) parses the command and sends a management
-   request. [vm-manager](../app/vm-manager/src/manager/mod.rs), with
-   [runtime launch](../app/vm-manager/src/manager/launch.rs), owns the named definition, resource policy and per-instance
+   request. [vm-manager](../svc/vm-manager/src/manager/mod.rs), with
+   [runtime launch](../svc/vm-manager/src/manager/launch.rs), owns the named definition, resource policy and per-instance
    runtime process. Start with the manager when investigating admission errors.
-2. [vm-runtime `run`](../app/vm-runtime/src/runtime.rs) validates the image, prepares
+2. [vm-runtime `run`](../svc/vm-runtime/src/runtime.rs) validates the image, prepares
    its memory and serial channel, creates a pending VM, attaches memory and
    bootstrap information, seals it, installs it and starts the boot vCPU.
    [vm-support](../lib/vm-support/src/lib.rs) contains shared loading/device
@@ -416,17 +417,17 @@ flowchart TB
     classDef machine fill:#f8fafc,stroke:#64748b,color:#0f172a
 ```
 
-Read [vm-runtime I/O setup](../app/vm-runtime/src/io_devices.rs),
+Read [vm-runtime I/O setup](../svc/vm-runtime/src/io_devices.rs),
 [shared virtio state](../lib/vm-support/src/virtio.rs),
 [MMIO registers](../lib/vm-support/src/virtio_mmio.rs),
 [modern PCI registers](../lib/vm-support/src/virtio_pci.rs),
 [network configuration](../lib/vm-support/src/virtio_net.rs), and
 [asynchronous backend control](../lib/vm-support/src/io_backend.rs).
-[The runtime supervisor](../app/vm-runtime/src/supervisor.rs) services deferred
+[The runtime supervisor](../svc/vm-runtime/src/supervisor.rs) services deferred
 MMIO and backend replies without holding the vCPU in a synchronous RPC.
-The [I/O broker](../app/io-runtime/src/runtime/broker/mod.rs) authorizes client sessions;
-[client bindings](../app/io-runtime/src/runtime/broker/client.rs) own their admission and retirement;
-[broker exchange](../app/io-runtime/src/broker_exchange.rs) handles their control
+The [I/O broker](../svc/io-runtime/src/runtime/broker/mod.rs) authorizes client sessions;
+[client bindings](../svc/io-runtime/src/runtime/broker/client.rs) own their admission and retirement;
+[broker exchange](../svc/io-runtime/src/broker_exchange.rs) handles their control
 traffic. [The protocol](../lib/vm-support/src/io_protocol.rs) defines the
 negotiation records.
 
@@ -696,24 +697,24 @@ For physical input, read [PL011](../kernel/src/drivers/serial/pl011/mod.rs),
 [console-raw](../bootstrap/stage1/console-raw/src/main.rs). This separates UART
 reception/IRQ problems from the request-sized byte-stream transport.
 
-[Terminal-service](../app/terminal-service/src/main.rs) owns formal input/output
+[Terminal-service](../svc/terminal-service/src/main.rs) owns formal input/output
 policy through the [terminal library](../lib/terminal/src/lib.rs).
-[Session-manager](../app/session-manager/src/main.rs) creates the terminal and
+[Session-manager](../svc/session-manager/src/main.rs) creates the terminal and
 shell, holds their Process supervisors, and retires their task groups on failure.
 It does not relay data. Separate log channels enter console-raw independently of
 terminal flow control. See [Native terminals](terminal.md) for the capability and
 read/flush/fence contracts.
 
 For guest attachment, read [vmm console](../app/vmm/src/console.rs),
-[vm-runtime console](../app/vm-runtime/src/console.rs) and
-[console waits](../app/vm-runtime/src/console_wait.rs), then the
+[vm-runtime console](../svc/vm-runtime/src/console.rs) and
+[console waits](../svc/vm-runtime/src/console_wait.rs), then the
 [SBSA Generic UART model](../kernel/src/vm/aarch64/device/sbsa_uart.rs).
 A guest that stops consuming input must not make the control/detach path
 unreachable. Keep output, input backpressure and attachment lifetime separate
 when changing the relay.
 
 **Tests to start with:** [vmm console tests](../app/vmm/tests/console.rs),
-[runtime console tests](../app/vm-runtime/tests/console.rs),
+[runtime console tests](../svc/vm-runtime/tests/console.rs),
 [virtual UART tests](../kernel/tests/host/src/cases/sbsa_uart.rs) and
 [console integration](../tests/qemu/verify-console.py).
 
@@ -722,15 +723,15 @@ when changing the relay.
 Configuration has several consumers; modifying the wrong layer can leave the
 runtime unchanged even when the source file looks correct. The table below
 follows the formal supervisor. Bootstrap has its own
-[service-manager implementation](../bootstrap/stage1/init/src/lib.rs),
+[supervisor implementation](../bootstrap/stage1/init/src/lib.rs),
 with the same handoff wire contract and an independent dependency graph.
 
 | Question | Follow this path |
 | --- | --- |
 | Which executable is deployed, and where? | [component declarations](../mk/README.md) → [deployment tool](../scripts/app-deployment.py) |
-| Is the service graph valid? | [manifest parsing](../app/init/src/manifest/parse.rs) → [planning](../app/init/src/manifest/plan/mod.rs) |
-| Who supplies a service's capabilities? | [provisioning](../app/init/src/runtime/provision.rs) → [launcher](../app/init/src/runtime/launcher.rs) |
-| What happens when it exits? | [runtime supervisor](../app/init/src/runtime/supervisor.rs) and [supervision policy](../app/init/src/supervision.rs) |
+| Are instances and capabilities valid? | [component declarations](../lib/component-config/src/model.rs) → [realm route validation](../lib/component-config/src/topology.rs) |
+| Who supplies capabilities? | [startup migration](../svc/system-startup/src/runtime/sequence.rs) → [component launch](../svc/component-manager/src/runtime/launch.rs) and [connection routing](../svc/component-manager/src/runtime/routing.rs) |
+| What happens when it exits? | [lifecycle reactor](../svc/component-manager/src/runtime/mod.rs) joins the process/group, then applies [restart policy](../svc/component-manager/src/lifecycle.rs) |
 | Which files and volumes go into a board image? | [board configuration](../scripts/board_config.py) → [bootstrap generation](../scripts/board_bootstrap.py) → [disk packer](../scripts/pack-board-image.py) |
 | Which I/O VM build is imported? | [package lock](../scripts/io-vm.lock.json) and [I/O VM documentation](io-vm.md) |
 
@@ -743,8 +744,9 @@ that an existing persistent configuration volume was reset.
 Read [deployment tests](../tests/build/app-deployment.py) and
 [board-image tests](../tests/build/board-image.py) alongside packaging changes.
 For service configuration, [the admission tool](../scripts/check-service-manifest.py)
-selects bootstrap's parser for core manifests and the formal parser for combined
-handoff graphs. It validates service wiring without booting the product.
+selects bootstrap's parser for core manifests and the formal parser for unit
+directories (`--units`), including their capability projection and handoff graph.
+It validates service wiring without booting the product.
 
 ## 15. Picking a first contribution and validating it
 
