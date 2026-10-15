@@ -196,6 +196,14 @@ pub const HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_READABLE: u64 = 1_u64 << 0;
 pub const HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_WRITABLE: u64 = 1_u64 << 1;
 pub const HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_PEER_CLOSED: u64 = 1_u64 << 2;
 
+pub const HYPER_NATIVE_MEMORY_STATISTICS_HEAP: u64 = 1;
+pub const HYPER_NATIVE_MEMORY_STATISTICS_BUDDY: u64 = 2;
+pub const HYPER_NATIVE_MEMORY_STATISTICS_OWNER: u64 = 3;
+pub const HYPER_NATIVE_MEMORY_STATISTICS_FILE_CACHE: u64 = 4;
+pub const HYPER_NATIVE_MEMORY_STATISTICS_HEAP_CLASS: u64 = 5;
+pub const HYPER_NATIVE_MEMORY_STATISTICS_BUDDY_ORDER_COUNT: u64 = 19;
+pub const HYPER_NATIVE_MEMORY_STATISTICS_OWNER_COUNT: u64 = 5;
+pub const HYPER_NATIVE_MEMORY_STATISTICS_HEAP_CLASS_COUNT: u64 = 18;
 pub const HYPER_NATIVE_VMAR_MEMORY_CURRENT: u64 = 1;
 pub const HYPER_NATIVE_FILESYSTEM_SWITCH_ROOT_MAX_MOVES: u64 = 16;
 pub const HYPER_NATIVE_NATIVE_BLOCK_TRANSFER_BYTES: u64 = 524288;
@@ -563,6 +571,7 @@ pub const HYPER_NATIVE_SYS_GUEST_MEMORY_TRANSFER: u64 = 168;
 pub const HYPER_NATIVE_SYS_GUEST_MEMORY_SCALAR: u64 = 169;
 pub const HYPER_NATIVE_SYS_GUEST_INTERRUPT_CREATE: u64 = 170;
 pub const HYPER_NATIVE_SYS_GUEST_INTERRUPT_SET_LEVEL: u64 = 171;
+pub const HYPER_NATIVE_SYS_MEMORY_INSPECTOR_READ_STATISTICS: u64 = 172;
 pub const HYPER_NATIVE_SYS_NATIVE_BLOCK_TRANSFER: u64 = 496;
 
 pub const fn hyper_native_failure_result_mask(
@@ -577,6 +586,193 @@ pub const fn hyper_native_failure_result_mask(
         _ => 0,
     }
 }
+
+pub const HYPER_NATIVE_MEMORY_HEAP_STATISTICS_MIN_SIZE: usize = 176;
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HyperNativeMemoryHeapStatistics {
+    pub captured_at_ns: u64,
+    pub live_objects: u64,
+    pub live_slab_objects: u64,
+    pub live_large_objects: u64,
+    pub requested_bytes: u64,
+    pub peak_objects: u64,
+    pub peak_requested_bytes: u64,
+    pub allocations: u64,
+    pub failures: u64,
+    pub cached_objects: u64,
+    pub cache_hits: u64,
+    pub cache_misses: u64,
+    pub cache_refills: u64,
+    pub cache_drains: u64,
+    pub pressure_reclaims: u64,
+    pub reclaimed_objects: u64,
+    pub cache_cpus: u64,
+    pub profiling_enabled: u64,
+    pub page_allocations: u64,
+    pub page_failures: u64,
+    pub page_deallocations: u64,
+    pub peak_allocated_pages: u64,
+}
+const _: () = assert!(core::mem::size_of::<HyperNativeMemoryHeapStatistics>() == 176);
+const _: () = assert!(core::mem::align_of::<HyperNativeMemoryHeapStatistics>() == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, captured_at_ns) == 0);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, live_objects) == 8);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, live_slab_objects) == 16);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, live_large_objects) == 24);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, requested_bytes) == 32);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, peak_objects) == 40);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, peak_requested_bytes) == 48);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, allocations) == 56);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, failures) == 64);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, cached_objects) == 72);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, cache_hits) == 80);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, cache_misses) == 88);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, cache_refills) == 96);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, cache_drains) == 104);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, pressure_reclaims) == 112);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, reclaimed_objects) == 120);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, cache_cpus) == 128);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, profiling_enabled) == 136);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, page_allocations) == 144);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, page_failures) == 152);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, page_deallocations) == 160);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryHeapStatistics, peak_allocated_pages) == 168);
+
+pub const HYPER_NATIVE_MEMORY_BUDDY_STATISTICS_MIN_SIZE: usize = 24;
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HyperNativeMemoryBuddyStatistics {
+    pub captured_at_ns: u64,
+    pub order: u64,
+    pub free_blocks: u64,
+}
+const _: () = assert!(core::mem::size_of::<HyperNativeMemoryBuddyStatistics>() == 24);
+const _: () = assert!(core::mem::align_of::<HyperNativeMemoryBuddyStatistics>() == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryBuddyStatistics, captured_at_ns) == 0);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryBuddyStatistics, order) == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryBuddyStatistics, free_blocks) == 16);
+
+pub const HYPER_NATIVE_MEMORY_OWNER_STATISTICS_MIN_SIZE: usize = 48;
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HyperNativeMemoryOwnerStatistics {
+    pub captured_at_ns: u64,
+    pub resident_pages: u64,
+    pub peak_pages: u64,
+    pub allocations: u64,
+    pub failures: u64,
+    pub deallocations: u64,
+}
+const _: () = assert!(core::mem::size_of::<HyperNativeMemoryOwnerStatistics>() == 48);
+const _: () = assert!(core::mem::align_of::<HyperNativeMemoryOwnerStatistics>() == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryOwnerStatistics, captured_at_ns) == 0);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryOwnerStatistics, resident_pages) == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryOwnerStatistics, peak_pages) == 16);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryOwnerStatistics, allocations) == 24);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryOwnerStatistics, failures) == 32);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryOwnerStatistics, deallocations) == 40);
+
+pub const HYPER_NATIVE_MEMORY_FILE_CACHE_STATISTICS_MIN_SIZE: usize = 120;
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HyperNativeMemoryFileCacheStatistics {
+    pub captured_at_ns: u64,
+    pub payload_pages: u64,
+    pub metadata_slab_pages: u64,
+    pub metadata_large_pages: u64,
+    pub index_capacity: u64,
+    pub clean_entries: u64,
+    pub loading_entries: u64,
+    pub live_payloads: u64,
+    pub metadata_budget_pages: u64,
+    pub table_present: u64,
+    pub admission_enabled: u64,
+    pub admission_paused: u64,
+    pub maintenance_pending: u64,
+    pub maintenance_running: u64,
+    pub growth_requested: u64,
+}
+const _: () = assert!(core::mem::size_of::<HyperNativeMemoryFileCacheStatistics>() == 120);
+const _: () = assert!(core::mem::align_of::<HyperNativeMemoryFileCacheStatistics>() == 8);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryFileCacheStatistics, captured_at_ns) == 0);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryFileCacheStatistics, payload_pages) == 8);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryFileCacheStatistics, metadata_slab_pages) == 16);
+const _: () = assert!(
+    core::mem::offset_of!(HyperNativeMemoryFileCacheStatistics, metadata_large_pages) == 24
+);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryFileCacheStatistics, index_capacity) == 32);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryFileCacheStatistics, clean_entries) == 40);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryFileCacheStatistics, loading_entries) == 48);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryFileCacheStatistics, live_payloads) == 56);
+const _: () = assert!(
+    core::mem::offset_of!(HyperNativeMemoryFileCacheStatistics, metadata_budget_pages) == 64
+);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryFileCacheStatistics, table_present) == 72);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryFileCacheStatistics, admission_enabled) == 80);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryFileCacheStatistics, admission_paused) == 88);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryFileCacheStatistics, maintenance_pending) == 96);
+const _: () = assert!(
+    core::mem::offset_of!(HyperNativeMemoryFileCacheStatistics, maintenance_running) == 104
+);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryFileCacheStatistics, growth_requested) == 112);
+
+pub const HYPER_NATIVE_MEMORY_HEAP_CLASS_STATISTICS_MIN_SIZE: usize = 88;
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HyperNativeMemoryHeapClassStatistics {
+    pub captured_at_ns: u64,
+    pub pool: u64,
+    pub object_size: u64,
+    pub pages: u64,
+    pub capacity: u64,
+    pub reserved: u64,
+    pub cached: u64,
+    pub live: u64,
+    pub requested_bytes: u64,
+    pub allocations: u64,
+    pub deallocations: u64,
+}
+const _: () = assert!(core::mem::size_of::<HyperNativeMemoryHeapClassStatistics>() == 88);
+const _: () = assert!(core::mem::align_of::<HyperNativeMemoryHeapClassStatistics>() == 8);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryHeapClassStatistics, captured_at_ns) == 0);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryHeapClassStatistics, pool) == 8);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryHeapClassStatistics, object_size) == 16);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryHeapClassStatistics, pages) == 24);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryHeapClassStatistics, capacity) == 32);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryHeapClassStatistics, reserved) == 40);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryHeapClassStatistics, cached) == 48);
+const _: () = assert!(core::mem::offset_of!(HyperNativeMemoryHeapClassStatistics, live) == 56);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryHeapClassStatistics, requested_bytes) == 64);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryHeapClassStatistics, allocations) == 72);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeMemoryHeapClassStatistics, deallocations) == 80);
 
 pub const HYPER_NATIVE_FILESYSTEM_ROOT_SWITCH_MIN_SIZE: usize = 48;
 #[repr(C)]

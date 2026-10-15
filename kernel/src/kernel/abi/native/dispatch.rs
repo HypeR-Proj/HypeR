@@ -545,6 +545,9 @@ pub(in crate::kernel) fn dispatch_deferred(
         abi::HYPER_NATIVE_SYS_OBJECT_INSPECTOR_DERIVE_RESOURCE_DOMAIN => {
             handlers::sys_object_inspector_derive_resource_domain(services, invocation.arguments())
         }
+        abi::HYPER_NATIVE_SYS_MEMORY_INSPECTOR_READ_STATISTICS => {
+            handlers::sys_memory_inspector_read_statistics(services, invocation.arguments())
+        }
         abi::HYPER_NATIVE_SYS_MEMORY_INSPECTOR_READ => {
             handlers::sys_memory_inspector_read(services, invocation.arguments())
         }

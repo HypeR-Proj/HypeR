@@ -15,6 +15,9 @@ mod tests;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct CacheUsage {
+    pub(crate) table_present: bool,
+    pub(crate) admission_enabled: bool,
+    pub(crate) maintenance_running: bool,
     pub(crate) capacity: usize,
     pub(crate) clean: usize,
     pub(crate) loading: usize,
@@ -90,6 +93,9 @@ impl<Page> FileDataCache<Page> {
                     )
                 });
             CacheUsage {
+                table_present: control.table.is_some(),
+                admission_enabled: self.admission.load(Ordering::Acquire),
+                maintenance_running: control.maintenance_running,
                 capacity,
                 clean,
                 loading,

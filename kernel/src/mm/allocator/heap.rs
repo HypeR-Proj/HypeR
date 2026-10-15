@@ -24,6 +24,7 @@ mod cache_snapshot;
 mod global;
 mod local_cache;
 mod partial;
+pub mod profile;
 
 use partial::{
     InsertPermit, PartialLinks, PartialNode, PartialNodeStore, PartialSlabLists, RemovePermit,
@@ -712,6 +713,8 @@ impl<'a> PreparedRemove<'a> {
 }
 
 pub struct SlabAllocator {
+    #[cfg(CONFIG_HEAP_PROFILING)]
+    profile_backing: [profile::Backing; profile::BUCKETS],
     buddy: BuddyAllocator,
     partial: [PartialSlabLists<SLAB_CLASS_COUNT>; 2],
     file_cache_slab_pages: usize,
@@ -746,6 +749,8 @@ impl SlabAllocator {
             return Err(BuddyError::Unaddressable);
         }
         Ok(Self {
+            #[cfg(CONFIG_HEAP_PROFILING)]
+            profile_backing: [profile::Backing::EMPTY; profile::BUCKETS],
             // SAFETY: This constructor inherits and preserves its caller's
             // permanent writable direct-map contract for the buddy lifetime.
             buddy: unsafe { BuddyAllocator::from_handoff(handoff, direct_map_base)? },
@@ -899,6 +904,10 @@ impl SlabAllocator {
         if let Some(removal) = removal {
             removal.commit();
         }
+        #[cfg(CONFIG_HEAP_PROFILING)]
+        {
+            self.profile_backing[profile::bucket(pool, Some(class))].reserved += 1;
+        }
         let Some(pointer) = NonNull::new(core::ptr::with_exposed_provenance_mut::<u8>(pointer))
         else {
             allocator_fault(AllocatorFault::InvalidSlabPointer);
@@ -991,6 +1000,10 @@ impl SlabAllocator {
             (*slab.pointer.as_ptr()).in_use = in_use;
         }
         transition.commit();
+        #[cfg(CONFIG_HEAP_PROFILING)]
+        {
+            self.profile_backing[profile::bucket(pool, Some(class))].reserved -= 1;
+        }
         if in_use == 0 {
             // A capacity-one slab transitions directly from detached/full to
             // empty; it never enters the partial list only to leave it again.
@@ -998,6 +1011,12 @@ impl SlabAllocator {
             // this allocator until the buddy deallocation below.
             unsafe { (*slab.pointer.as_ptr()).magic = 0 };
             self.slab_pages -= 1;
+            #[cfg(CONFIG_HEAP_PROFILING)]
+            {
+                let backing = &mut self.profile_backing[profile::bucket(pool, Some(class))];
+                backing.pages -= 1;
+                backing.capacity -= usize::from(slab.header.capacity);
+            }
             if pool == HeapPool::FileCache {
                 self.file_cache_slab_pages -= 1;
             }
@@ -1099,6 +1118,12 @@ impl SlabAllocator {
         permit.commit();
         let _ = pending.publish();
         self.slab_pages = slab_pages;
+        #[cfg(CONFIG_HEAP_PROFILING)]
+        {
+            let backing = &mut self.profile_backing[profile::bucket(pool, Some(class))];
+            backing.pages += 1;
+            backing.capacity += capacity;
+        }
         if pool == HeapPool::FileCache {
             self.file_cache_slab_pages += 1;
         }
@@ -1174,6 +1199,10 @@ impl SlabAllocator {
         if pool == HeapPool::FileCache {
             self.file_cache_large_pages += 1usize << order;
         }
+        #[cfg(CONFIG_HEAP_PROFILING)]
+        {
+            self.profile_backing[profile::bucket(pool, None)].pages += 1usize << order;
+        }
         Ok(user as *mut u8)
     }
 
@@ -1225,6 +1254,11 @@ impl SlabAllocator {
             allocator_fault(AllocatorFault::BuddyDeallocation);
         }
         self.large_heap_pages -= pages;
+        #[cfg(CONFIG_HEAP_PROFILING)]
+        {
+            self.profile_backing[profile::bucket(HeapPool::from_raw(header.pool), None)].pages -=
+                pages;
+        }
         if HeapPool::from_raw(header.pool) == HeapPool::FileCache {
             self.file_cache_large_pages -= pages;
         }
