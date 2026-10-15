@@ -174,7 +174,11 @@ so a program that never reads cannot consume a later command's input.
 File adapters use bounded buffers, not whole-output capture;
 file I/O on the relay thread remains synchronous.
 
-A command reading from the terminal receives a scoped canonical terminal lease.
+A foreground pipeline receives a scoped canonical terminal lease. Its final
+stage owns terminal control and an optional keyboard connector independent of
+stdin, keeping redirected data separate from interactive keystrokes.
+Earlier stages use ordinary streams under that lease. Single commands follow
+the same rule.
 `read` temporarily selects canonical input and restores the shell's raw editing
 profile. Ctrl-D after a partial canonical line makes it readable; at an empty
 line it supplies one zero-length read. Commands selecting raw mode receive

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Scoped control client. Input is read through the generic runtime stream.
+//! Scoped control client and optional input independent of redirected stdin.
 
 use core::mem::MaybeUninit;
 use hyper_os::capability_channel::{
@@ -24,6 +24,8 @@ pub const EVENTS: StartupPurpose<ByteChannelObject> = StartupPurpose::new(0x8009
 pub const RECOVERY: StartupPurpose<ByteChannelObject> = StartupPurpose::new(0x8009_0005);
 pub const RAW_INPUT: StartupPurpose<CapabilityChannelObject> = StartupPurpose::new(0x8009_0006);
 pub const RAW_OUTPUT: StartupPurpose<CapabilityChannelObject> = StartupPurpose::new(0x8009_0007);
+/// Foreground terminal stream, independent of stdin (for example in a pager).
+pub const STREAM: StartupPurpose<CapabilityChannelObject> = StartupPurpose::new(0x8009_0008);
 pub const CONTROL_RIGHTS: Rights = Rights::READ
     .union(Rights::WRITE)
     .union(Rights::WAIT)
@@ -47,6 +49,7 @@ pub struct Terminal {
     control: CapabilityChannel,
     next_id: u64,
     events: Option<OwnedHandle<ByteChannelObject>>,
+    stream: Option<OwnedHandle<CapabilityChannelObject>>,
 }
 
 impl Terminal {
@@ -56,6 +59,7 @@ impl Terminal {
             control: CapabilityChannel::from_handle(handle),
             next_id: 1,
             events: None,
+            stream: None,
         }
     }
 
@@ -65,7 +69,20 @@ impl Terminal {
         };
         let mut terminal = Self::from_handle(handle);
         terminal.events = startup.take_optional(EVENTS)?;
+        terminal.stream = startup.take_optional(STREAM)?;
         Ok(Some(terminal))
+    }
+
+    /// Opens keyboard input without consuming the application's stdin. The
+    /// same foreground lease governs both connections and all control changes.
+    pub fn open_input(&self) -> Result<hyper_os::stream::Connection> {
+        hyper_os::stream::connect(
+            self.stream
+                .as_ref()
+                .ok_or(Error::MissingHandle)?
+                .as_handle_ref(),
+            hyper_os::stream::ACCESS_READ,
+        )
     }
 
     pub fn prepare_child(&mut self) -> Result<PreparedClient> {

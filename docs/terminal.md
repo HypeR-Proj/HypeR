@@ -197,8 +197,19 @@ process-owned stdin connection for event-driven clients such as `top` and
 closes its private connection, preventing its reply from becoming a later
 reader's result.
 
-Shell-launched commands with unredirected terminal stdin receive independent
-leases and control/events; in a pipeline this is the first stage.
+An interactive shell prepares one canonical foreground lease for a pipeline.
+Every unredirected terminal stream uses that lease; the last stage alone receives
+control/events and owns the lease through its Process observer. An upstream
+producer exiting does not revoke the consumer's keyboard access. This is pipeline
+ownership, not a Unix process group or job-control implementation.
+
+The last stage also receives the optional `client::STREAM` connector.
+`Terminal::open_input()` opens a private keyboard connection on the same lease,
+independently of stdin. Fullscreen applications can redirect stdin while still
+reading navigation keys from the terminal. Other stages retain ordinary byte streams
+without independent terminal-control authority. Applications must coordinate
+multiple readers of the same foreground input; the shell does not multiplex
+keystrokes among pipeline stages.
 Generic `std::process::Command` inheritance instead opens a private connection
 under the caller's existing lease; it does not manufacture terminal control or
 foreground policy inside stdlib. The caller should relinquish stdin while that
@@ -248,3 +259,8 @@ full reply queues,
 cancellation ordering and subtree revocation during flow-profile recovery.
 `make test-console` covers normal shell interaction, std subprocess inheritance
 and interactive command exit.
+
+The fullscreen [editor](editor.md) uses these application interfaces.
+`make test-editor` checks editing, successful saves, failed-save recovery and
+restoration of shell interaction. The `native-apps` CI shard includes this
+scenario on both supported architectures.
