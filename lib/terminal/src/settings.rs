@@ -137,22 +137,6 @@ impl Default for Settings {
 }
 
 impl Settings {
-    /// No input policy has consumed or transformed these physical bytes. The
-    /// service can retain typeahead until the next explicit read/foreground.
-    #[must_use]
-    pub fn binary_input(self) -> bool {
-        !self.canonical
-            && !self.echo
-            && !self.echo_newline
-            && !self.input.ignore_cr
-            && !self.input.cr_to_lf
-            && !self.input.lf_to_cr
-            && !self.input.strip_high_bit
-            && !self.input.lowercase
-            && !self.input.receive_flow_control
-            && !self.input.send_flow_control
-    }
-
     /// Binary-transparent input and output, including NUL, CR, EOF and XON/XOFF.
     #[must_use]
     pub fn raw() -> Self {

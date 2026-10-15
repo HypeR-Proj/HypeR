@@ -22,10 +22,16 @@ terminal-service and console-raw. The manager is not a byte relay. Capabilities
 and terminal state belong to that instance; the current deployment exposes one
 physical Console endpoint.
 
-`lib/terminal` contains the portable line discipline, settings protocol and
-scoped client API. Generic request/response streams and standard-I/O integration
-live in `stdlib`; they do not depend on the terminal library. The kernel retains
-raw Console I/O, object waits, Process observation and TaskGroup retirement.
+`svc/terminal-service` privately owns the line discipline, bounded input/output
+queues, echo, character conversion, software flow control and read timing.
+`lib/terminal` provides the settings/events wire contract and scoped client API
+for applications that configure a terminal or manage foreground leases. It does
+not execute terminal behavior or own terminal queues. Applications that only
+read stdin or write stdout/stderr use `std::io` without a terminal-library
+dependency, whether their streams connect to a terminal, pipe or journal.
+Generic request/response streams and standard-I/O integration live in `stdlib`;
+they do not depend on the terminal library. The kernel retains raw Console I/O,
+object waits, Process observation and TaskGroup retirement.
 
 Background services receive independent log channels without ordinary raw
 Console write authority. Bootstrap mirrors them through console-raw. Formal
@@ -227,10 +233,11 @@ signal generation or Unix job-control ABI.
 
 ## Validation
 
-`make app-test APP_TEST_PACKAGE=hyper-terminal` exercises the portable discipline,
+`make app-test APP_TEST_PACKAGE=hyper-terminal` checks the settings wire contract.
+`make app-test APP_TEST_PACKAGE=hyper-terminal-service` exercises the private discipline,
 including editing, EOF, binary raw data, timing, conversions and flow control.
-The shared byte vectors in `lib/terminal/tests/formatting.tsv` also run against
-real Linux PTYs through `python3 -B lib/terminal/tests/linux-formatting.py` in the
+The shared byte vectors in `svc/terminal-service/tests/formatting.tsv` also run against
+real Linux PTYs through `python3 -B svc/terminal-service/tests/linux-formatting.py` in the
 scripts suite on Linux. This checks observable formatting without adopting the
 Linux termios ABI. Native timeout/error distinctions, bounded overflow handling
 and malformed-UTF-8 recovery remain explicit Native policies.

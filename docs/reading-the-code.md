@@ -698,7 +698,9 @@ For physical input, read [PL011](../kernel/src/drivers/serial/pl011/mod.rs),
 reception/IRQ problems from the request-sized byte-stream transport.
 
 [Terminal-service](../svc/terminal-service/src/main.rs) owns formal input/output
-policy through the [terminal library](../lib/terminal/src/lib.rs).
+policy in its private [line discipline](../svc/terminal-service/src/discipline.rs)
+and reactor. The [terminal library](../lib/terminal/src/lib.rs) supplies settings,
+events and control clients; ordinary byte-stream applications use `std::io`.
 [Session-manager](../svc/session-manager/src/main.rs) creates the terminal and
 shell, holds their Process supervisors, and retires their task groups on failure.
 It does not relay data. Separate log channels enter console-raw independently of

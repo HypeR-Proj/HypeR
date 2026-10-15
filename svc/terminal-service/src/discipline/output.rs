@@ -108,10 +108,6 @@ impl Discipline {
         self.output.drain(..count.min(self.output.len()));
     }
     #[must_use]
-    pub fn output_empty(&self) -> bool {
-        self.output.is_empty() && self.flow.is_empty()
-    }
-    #[must_use]
     pub fn output_len(&self) -> usize {
         self.output.len()
     }

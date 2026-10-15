@@ -1,26 +1,25 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Native terminal policy. Bootstrap byte streams do not depend on this crate.
+//! Native terminal client API and wire contract for the formal environment.
 //!
-//! The discipline is independent of IPC and clocks: the owning reactor supplies
-//! monotonic timestamps and commits reads only after successfully sending their
-//! response. Terminal control is separate from the generic standard-I/O stream.
+//! Applications that configure a terminal or manage foreground leases use this
+//! crate. Ordinary standard-I/O byte streams need only `std::io`; they do not
+//! depend on it. Terminal state, queues and line processing belong exclusively
+//! to terminal-service. Bootstrap byte streams remain independent as well.
 
 #![no_std]
 
-extern crate alloc;
-
 #[cfg(feature = "client")]
 pub mod client;
-pub mod discipline;
+mod events;
 pub mod protocol;
 pub mod settings;
 
 #[cfg(feature = "client")]
 pub use client::{PreparedClient, Terminal};
 
-pub use discipline::{Discipline, EventFlags, Limits, ReadDecision, ReadRequest};
+pub use events::EventFlags;
 pub use settings::{
     ControlCharacters, InputFlags, OutputFlags, ReadPolicy, Settings, SettingsError,
 };

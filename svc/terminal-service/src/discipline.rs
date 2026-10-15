@@ -1,12 +1,13 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Bounded line discipline, driven by one reactor. No blocking operations.
+//! Service-owned line discipline and bounded queues. No blocking operations.
+//! The reactor supplies timestamps and commits reads only after their replies
+//! have been sent; application clients never instantiate this state.
 
-use alloc::collections::VecDeque;
-use alloc::vec::Vec;
+use std::collections::VecDeque;
 
-use crate::settings::{ReadPolicy, Settings, SettingsError};
+use hyper_terminal::{EventFlags, ReadPolicy, Settings, SettingsError};
 
 mod characters;
 mod editing;
@@ -36,18 +37,6 @@ impl Default for Limits {
             high_water: 24576,
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct EventFlags(pub u32);
-
-impl EventFlags {
-    pub const INPUT_LOSS: u32 = 1;
-    pub const ECHO_LOSS: u32 = 2;
-    pub const SETTINGS_CHANGED: u32 = 4;
-    pub const OUTPUT_RESUMED: u32 = 8;
-    pub const SIZE_CHANGED: u32 = 16;
-    pub const FOREGROUND_CHANGED: u32 = 32;
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -141,6 +130,23 @@ impl Discipline {
     #[must_use]
     pub fn settings(&self) -> Settings {
         self.settings
+    }
+
+    /// No input policy has consumed or transformed these physical bytes. The
+    /// service can retain typeahead until the next explicit read/foreground.
+    #[must_use]
+    pub fn binary_input(&self) -> bool {
+        let settings = self.settings;
+        !settings.canonical
+            && !settings.echo
+            && !settings.echo_newline
+            && !settings.input.ignore_cr
+            && !settings.input.cr_to_lf
+            && !settings.input.lf_to_cr
+            && !settings.input.strip_high_bit
+            && !settings.input.lowercase
+            && !settings.input.receive_flow_control
+            && !settings.input.send_flow_control
     }
 
     /// Installs prevalidated settings without reparsing buffered logical bytes.
