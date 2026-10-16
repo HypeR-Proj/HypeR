@@ -3,7 +3,7 @@
 
 //! Native guest I/O syscall validation.
 
-use crate::kernel::abi::native::services::DeferredAction;
+use crate::kernel::abi::native::services::NativeAction;
 use crate::kernel::abi::native::status::{
     failure, handle_result, status_from_process_error, status_from_vm_service_error, status_only,
     success,
@@ -22,7 +22,7 @@ use hyper::abi::native::{
 pub(in crate::kernel::abi::native) fn sys_guest_mailbox_create(
     services: &impl GuestIoServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[3..])?;
         services
@@ -33,14 +33,14 @@ pub(in crate::kernel::abi::native) fn sys_guest_mailbox_create(
             )
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_mailbox_send(
     services: &impl GuestIoServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[3..])?;
         let length =
@@ -59,14 +59,14 @@ pub(in crate::kernel::abi::native) fn sys_guest_mailbox_send(
             .send_guest_mailbox(mailbox, &bytes[..length])
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_mailbox_receive(
     services: &impl GuestIoServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[3..])?;
         if arguments[2] == 0 || arguments[2] > 256 {
@@ -88,7 +88,7 @@ pub(in crate::kernel::abi::native) fn sys_guest_mailbox_receive(
             })
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(match result {
+    NativeAction::Return(match result {
         Ok(length) => success([length as u64, 0]),
         Err(status) => failure(status),
     })
@@ -98,7 +98,7 @@ pub(in crate::kernel::abi::native) fn sys_guest_mailbox_receive(
 pub(in crate::kernel::abi::native) fn sys_guest_notification_create(
     services: &impl GuestIoServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         services
             .create_guest_notification(
@@ -111,21 +111,21 @@ pub(in crate::kernel::abi::native) fn sys_guest_notification_create(
             )
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_notification_control(
     services: &impl GuestIoServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[2..])?;
         services
             .control_guest_notification(parse_handle(arguments[0])?, parse_u32(arguments[1])?)
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(match result {
+    NativeAction::Return(match result {
         Ok(epoch) => success([u64::from(epoch), 0]),
         Err(status) => failure(status),
     })
@@ -135,7 +135,7 @@ pub(in crate::kernel::abi::native) fn sys_guest_notification_control(
 pub(in crate::kernel::abi::native) fn sys_native_block_create(
     services: &impl GuestIoServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[5..])?;
         services
@@ -148,14 +148,14 @@ pub(in crate::kernel::abi::native) fn sys_native_block_create(
             )
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_native_block_activate(
     services: &impl GuestIoServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[2..])?;
         if arguments[1] > 1 {
@@ -184,7 +184,7 @@ pub(in crate::kernel::abi::native) fn sys_native_block_activate(
                 }
             })
     })();
-    DeferredAction::Return(match result {
+    NativeAction::Return(match result {
         Ok((sectors, readonly)) => success([sectors, u64::from(readonly)]),
         Err(error) => failure(error),
     })
@@ -194,7 +194,7 @@ pub(in crate::kernel::abi::native) fn sys_native_block_activate(
 pub(in crate::kernel::abi::native) fn sys_filesystem_mount(
     services: &impl GuestIoServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[6..])?;
         if arguments[5] > 1 {
@@ -215,14 +215,14 @@ pub(in crate::kernel::abi::native) fn sys_filesystem_mount(
             )
             .map_err(crate::kernel::abi::native::status::status_from_vfs_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_filesystem_unmount(
     services: &impl GuestIoServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[3..])?;
         if arguments[2] == 0 || arguments[2] > 4096 {
@@ -234,14 +234,14 @@ pub(in crate::kernel::abi::native) fn sys_filesystem_unmount(
             .unmount_filesystem(parse_handle(arguments[0])?, path)
             .map_err(crate::kernel::abi::native::status::status_from_vfs_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_native_block_transfer(
     services: &impl GuestIoServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[5..])?;
         let operation = parse_u32(arguments[1])?;
@@ -270,14 +270,14 @@ pub(in crate::kernel::abi::native) fn sys_native_block_transfer(
                 }
             })
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_mapping_create(
     services: &impl GuestIoServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[3..])?;
         services
@@ -288,7 +288,7 @@ pub(in crate::kernel::abi::native) fn sys_guest_mapping_create(
             )
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(match result {
+    NativeAction::Return(match result {
         Ok((handle, token)) => success([handle.get(), token]),
         Err(error) => failure(error),
     })
@@ -298,21 +298,21 @@ pub(in crate::kernel::abi::native) fn sys_guest_mapping_create(
 pub(in crate::kernel::abi::native) fn sys_guest_mapping_release(
     services: &impl GuestIoServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[1..])?;
         services
             .release_guest_mapping(parse_handle(arguments[0])?)
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_notification_configure(
     services: &impl GuestIoServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[4..])?;
         services
@@ -324,7 +324,7 @@ pub(in crate::kernel::abi::native) fn sys_guest_notification_configure(
             )
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(match result {
+    NativeAction::Return(match result {
         Ok(()) => success([0, 0]),
         Err(status) => failure(status),
     })
@@ -334,7 +334,7 @@ pub(in crate::kernel::abi::native) fn sys_guest_notification_configure(
 pub(in crate::kernel::abi::native) fn sys_guest_notification_access(
     services: &impl GuestIoServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[4..])?;
         services
@@ -346,7 +346,7 @@ pub(in crate::kernel::abi::native) fn sys_guest_notification_access(
             )
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(match result {
+    NativeAction::Return(match result {
         Ok(value) => success([u64::from(value), 0]),
         Err(status) => failure(status),
     })
@@ -356,7 +356,7 @@ pub(in crate::kernel::abi::native) fn sys_guest_notification_access(
 pub(in crate::kernel::abi::native) fn sys_guest_memory_transfer(
     services: &impl GuestIoServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[5..])?;
         if arguments[1] > 1 || arguments[4] == 0 || arguments[4] > 4096 {
@@ -369,14 +369,14 @@ pub(in crate::kernel::abi::native) fn sys_guest_memory_transfer(
             .transfer_guest_memory(memory, arguments[1] != 0, arguments[2], buffer)
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_memory_scalar(
     services: &impl GuestIoServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[5..])?;
         if arguments[1] > 1 {
@@ -392,7 +392,7 @@ pub(in crate::kernel::abi::native) fn sys_guest_memory_scalar(
             )
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(match result {
+    NativeAction::Return(match result {
         Ok(value) => success([value, 0]),
         Err(status) => failure(status),
     })
@@ -402,21 +402,21 @@ pub(in crate::kernel::abi::native) fn sys_guest_memory_scalar(
 pub(in crate::kernel::abi::native) fn sys_guest_interrupt_create(
     services: &impl GuestIoServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[2..])?;
         services
             .create_guest_interrupt(parse_handle(arguments[0])?, parse_u32(arguments[1])?)
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_interrupt_set_level(
     services: &impl GuestIoServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[2..])?;
         if arguments[1] > 1 {
@@ -426,5 +426,5 @@ pub(in crate::kernel::abi::native) fn sys_guest_interrupt_set_level(
             .set_guest_interrupt_level(parse_handle(arguments[0])?, arguments[1] != 0)
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }

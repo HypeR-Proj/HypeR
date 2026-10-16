@@ -175,7 +175,6 @@ const fn classify_scheduler_error(error: crate::kernel::task::scheduler::Error) 
         | SchedulerError::CannotSleepWithInterruptsMasked
         | SchedulerError::CannotSleepWithPreemptionDisabled
         | SchedulerError::IrqTailRequiresInterruptsMasked
-        | SchedulerError::UserRunRequiresInterruptsEnabled
         | SchedulerError::InvalidThreadState
         | SchedulerError::IdleThreadAlreadyInstalled
         | SchedulerError::InvalidIdleTransition

@@ -88,7 +88,7 @@ fn complete_entry(
         Ok(true)
             if matches!(action, Action::Resume { .. })
                 && native_unwind.is_some()
-                && match crate::kernel::task::preempt::should_unwind_user_after_irq() {
+                && match crate::kernel::task::preempt::should_reschedule_after_irq() {
                     Ok(pending) => pending,
                     Err(error) => crate::kernel::irq::exception::fatal_interrupt(
                         error.description(),

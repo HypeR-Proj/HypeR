@@ -1,64 +1,34 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Native immediate/deferred syscall routing.
+//! Native syscall routing in ordinary Thread context.
 
-use hyper::abi::native::{self as abi, NativeInvocation, NativeResult};
+use hyper::abi::native::{self as abi, NativeInvocation};
 
 use super::handlers;
-use super::services::{DeferredAction, DeferredServices, ImmediateServices};
+use super::services::{NativeAction, NativeServices};
 
-/// Defines the complete audited masked-entry route set once.
+/// Dispatches an owned invocation in ordinary, interruptible Thread context.
 ///
-/// Both membership and direct dispatch are generated from this list, so a new
-/// immediate syscall cannot accidentally be admitted without a matching leaf
-/// or routed through the immediate dispatcher without masked-entry admission.
-macro_rules! define_immediate_routes {
-    ($( $number:path => $handler:path ),+ $(,)?) => {
-        /// Reports whether the current implementation is audited for masked entry.
-        ///
-        /// New syscall numbers default to the deferred Thread path until their
-        /// implementation is proven nonblocking and added deliberately here.
-        pub(in crate::kernel) const fn is_immediate(number: u64) -> bool {
-            matches!(number, $( $number )|+)
-        }
-
-        /// Dispatches one owned, nonblocking invocation by direct match.
-        ///
-        /// Architecture entry retains its private raw frame but passes no frame
-        /// borrow or architecture offset into this adapter. Unknown numbers and
-        /// malformed values fail closed.
-        pub(in crate::kernel) fn dispatch_immediate(
-            services: &impl ImmediateServices,
-            invocation: NativeInvocation,
-        ) -> NativeResult {
-            let arguments = invocation.arguments();
-            match invocation.number() {
-                $( $number => $handler(services, arguments), )+
-                _ => handlers::sys_not_supported(),
-            }
-        }
-    };
-}
-
-define_immediate_routes! {
-    abi::HYPER_NATIVE_SYS_SYSTEM_CONFIG => handlers::sys_system_config,
-    abi::HYPER_NATIVE_SYS_ABI_QUERY => handlers::sys_abi_query,
-    abi::HYPER_NATIVE_SYS_CLOCK_GET_MONOTONIC => handlers::sys_clock_get_monotonic,
-    abi::HYPER_NATIVE_SYS_HANDLE_CLOSE => handlers::sys_handle_close,
-}
-
-/// Executes one syscall after the machine context has returned to its Thread.
-///
-/// The returned action separates ABI decoding from scheduler and Process
-/// policy. A blocking service may park the current Thread before producing the
-/// action. Unknown calls remain ordinary returning failures even though they
-/// conservatively use the deferred path.
-pub(in crate::kernel) fn dispatch_deferred(
-    services: &impl DeferredServices,
+/// Services may sleep before producing an action. The caller owns scheduling
+/// and Process lifecycle effects; architecture frames remain private to HAL.
+pub(in crate::kernel) fn dispatch(
+    services: &impl NativeServices,
     invocation: NativeInvocation,
-) -> DeferredAction {
+) -> NativeAction {
     match invocation.number() {
+        abi::HYPER_NATIVE_SYS_ABI_QUERY => {
+            NativeAction::Return(handlers::sys_abi_query(invocation.arguments()))
+        }
+        abi::HYPER_NATIVE_SYS_SYSTEM_CONFIG => {
+            NativeAction::Return(handlers::sys_system_config(invocation.arguments()))
+        }
+        abi::HYPER_NATIVE_SYS_CLOCK_GET_MONOTONIC => {
+            NativeAction::Return(handlers::sys_clock_get_monotonic(invocation.arguments()))
+        }
+        abi::HYPER_NATIVE_SYS_HANDLE_CLOSE => {
+            NativeAction::Return(handlers::sys_handle_close(services, invocation.arguments()))
+        }
         abi::HYPER_NATIVE_SYS_PROCESS_DERIVE_OBSERVER => {
             handlers::sys_process_derive_observer(services, invocation.arguments())
         }
@@ -68,10 +38,10 @@ pub(in crate::kernel) fn dispatch_deferred(
         abi::HYPER_NATIVE_SYS_CONSOLE_DISCARD_INPUT => {
             handlers::sys_console_discard_input(services, invocation.arguments())
         }
-        abi::HYPER_NATIVE_SYS_HANDLE_GET_INFO => DeferredAction::Return(
+        abi::HYPER_NATIVE_SYS_HANDLE_GET_INFO => NativeAction::Return(
             handlers::sys_handle_get_info(services, invocation.arguments()),
         ),
-        abi::HYPER_NATIVE_SYS_OBJECT_GET_BASIC_INFO => DeferredAction::Return(
+        abi::HYPER_NATIVE_SYS_OBJECT_GET_BASIC_INFO => NativeAction::Return(
             handlers::sys_object_get_basic_info(services, invocation.arguments()),
         ),
         abi::HYPER_NATIVE_SYS_VMO_CREATE_SNAPSHOT => {
@@ -92,39 +62,40 @@ pub(in crate::kernel) fn dispatch_deferred(
         abi::HYPER_NATIVE_SYS_VMAR_MAP_PRIVATE => {
             handlers::sys_vmar_map_private(services, invocation.arguments())
         }
-        abi::HYPER_NATIVE_SYS_HANDLE_DUPLICATE => DeferredAction::Return(
+        abi::HYPER_NATIVE_SYS_HANDLE_DUPLICATE => NativeAction::Return(
             handlers::sys_handle_duplicate(services, invocation.arguments()),
         ),
-        abi::HYPER_NATIVE_SYS_HANDLE_REPLACE => DeferredAction::Return(
-            handlers::sys_handle_replace(services, invocation.arguments()),
-        ),
+        abi::HYPER_NATIVE_SYS_HANDLE_REPLACE => NativeAction::Return(handlers::sys_handle_replace(
+            services,
+            invocation.arguments(),
+        )),
         abi::HYPER_NATIVE_SYS_EVENT_CREATE => {
-            DeferredAction::Return(handlers::sys_event_create(services, invocation.arguments()))
+            NativeAction::Return(handlers::sys_event_create(services, invocation.arguments()))
         }
-        abi::HYPER_NATIVE_SYS_BYTE_CHANNEL_CREATE => DeferredAction::Return(
+        abi::HYPER_NATIVE_SYS_BYTE_CHANNEL_CREATE => NativeAction::Return(
             handlers::sys_byte_channel_create(services, invocation.arguments()),
         ),
-        abi::HYPER_NATIVE_SYS_CAPABILITY_CHANNEL_CREATE => DeferredAction::Return(
+        abi::HYPER_NATIVE_SYS_CAPABILITY_CHANNEL_CREATE => NativeAction::Return(
             handlers::sys_capability_channel_create(services, invocation.arguments()),
         ),
-        abi::HYPER_NATIVE_SYS_THREAD_CREATE => DeferredAction::Return(handlers::sys_thread_create(
+        abi::HYPER_NATIVE_SYS_THREAD_CREATE => NativeAction::Return(handlers::sys_thread_create(
             services,
             invocation.arguments(),
         )),
         abi::HYPER_NATIVE_SYS_THREAD_START => {
-            DeferredAction::Return(handlers::sys_thread_start(services, invocation.arguments()))
+            NativeAction::Return(handlers::sys_thread_start(services, invocation.arguments()))
         }
-        abi::HYPER_NATIVE_SYS_THREAD_REQUEST_STOP => DeferredAction::Return(
+        abi::HYPER_NATIVE_SYS_THREAD_REQUEST_STOP => NativeAction::Return(
             handlers::sys_thread_request_stop(services, invocation.arguments()),
         ),
         abi::HYPER_NATIVE_SYS_ATOMIC_WAIT => {
-            DeferredAction::Return(handlers::sys_atomic_wait(services, invocation.arguments()))
+            NativeAction::Return(handlers::sys_atomic_wait(services, invocation.arguments()))
         }
         abi::HYPER_NATIVE_SYS_ATOMIC_WAKE => {
-            DeferredAction::Return(handlers::sys_atomic_wake(services, invocation.arguments()))
+            NativeAction::Return(handlers::sys_atomic_wake(services, invocation.arguments()))
         }
         abi::HYPER_NATIVE_SYS_THREAD_SLEEP => {
-            DeferredAction::Return(handlers::sys_thread_sleep(services, invocation.arguments()))
+            NativeAction::Return(handlers::sys_thread_sleep(services, invocation.arguments()))
         }
         abi::HYPER_NATIVE_SYS_THREAD_YIELD => handlers::sys_thread_yield(),
         abi::HYPER_NATIVE_SYS_THREAD_EXIT => handlers::sys_thread_exit(invocation.arguments()),
@@ -554,6 +525,6 @@ pub(in crate::kernel) fn dispatch_deferred(
         abi::HYPER_NATIVE_SYS_CPU_INSPECTOR_READ => {
             handlers::sys_cpu_inspector_read(services, invocation.arguments())
         }
-        _ => DeferredAction::Return(handlers::sys_not_supported()),
+        _ => NativeAction::Return(handlers::sys_not_supported()),
     }
 }

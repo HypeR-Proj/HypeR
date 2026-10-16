@@ -4,9 +4,7 @@
 //! Native inspect syscall validation.
 
 use crate::kernel::abi::native::Arguments;
-use crate::kernel::abi::native::services::{
-    DeferredAction, InspectServices, SystemInspectServices,
-};
+use crate::kernel::abi::native::services::{InspectServices, NativeAction, SystemInspectServices};
 use crate::kernel::abi::native::status::{
     handle_result, info_result, scan_result, status_from_inspection_error,
 };
@@ -28,7 +26,7 @@ use hyper::abi::native::{
 pub(in crate::kernel::abi::native) fn sys_object_inspector_read_details(
     services: &impl InspectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         let request = prepare_info_request(
             &[arguments[0], arguments[4], arguments[5], 0, 0, 0],
@@ -41,14 +39,14 @@ pub(in crate::kernel::abi::native) fn sys_object_inspector_read_details(
         let record = crate::kernel::abi::native::wire::encode_object_details(&value);
         copy_info_record(services, request, &record)
     })();
-    DeferredAction::Return(info_result(result))
+    NativeAction::Return(info_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_task_inspector_scan_processes(
     services: &impl InspectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_inspector_scan(
         arguments,
         crate::kernel::inspect::PROCESS_PAGE_CAPACITY,
@@ -61,14 +59,14 @@ pub(in crate::kernel::abi::native) fn sys_task_inspector_scan_processes(
             .map_err(status_from_inspection_error)?;
         copy_encoded_page(services, destination, &page, encode_task_process)
     });
-    DeferredAction::Return(scan_result(result))
+    NativeAction::Return(scan_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_task_inspector_scan_threads(
     services: &impl InspectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_inspector_scan(
         arguments,
         crate::kernel::inspect::THREAD_PAGE_CAPACITY,
@@ -81,14 +79,14 @@ pub(in crate::kernel::abi::native) fn sys_task_inspector_scan_threads(
             .map_err(status_from_inspection_error)?;
         copy_encoded_page(services, destination, &page, encode_task_thread)
     });
-    DeferredAction::Return(scan_result(result))
+    NativeAction::Return(scan_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_object_inspector_scan_objects(
     services: &impl InspectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_inspector_scan(
         arguments,
         OBJECT_PAGE_CAPACITY,
@@ -101,14 +99,14 @@ pub(in crate::kernel::abi::native) fn sys_object_inspector_scan_objects(
             .map_err(status_from_inspection_error)?;
         copy_encoded_page(services, destination, &page, encode_object_inspection)
     });
-    DeferredAction::Return(scan_result(result))
+    NativeAction::Return(scan_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_object_inspector_scan_handles(
     services: &impl InspectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_handle_inspector_scan(arguments).and_then(
         |(inspector, process_koid, cursor, destination)| {
             let page = services
@@ -117,92 +115,92 @@ pub(in crate::kernel::abi::native) fn sys_object_inspector_scan_handles(
             copy_encoded_page(services, destination, &page, encode_handle_inspection)
         },
     );
-    DeferredAction::Return(scan_result(result))
+    NativeAction::Return(scan_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_task_inspector_derive_process(
     services: &impl InspectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_inspector_derivation(arguments).and_then(|(inspector, process)| {
         services
             .derive_task_inspector(inspector, process)
             .map_err(status_from_inspection_error)
     });
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_object_inspector_derive_process(
     services: &impl InspectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_inspector_derivation(arguments).and_then(|(inspector, process)| {
         services
             .derive_object_inspector(inspector, process)
             .map_err(status_from_inspection_error)
     });
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_task_inspector_derive_task_group(
     services: &impl InspectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_inspector_derivation(arguments).and_then(|(inspector, group)| {
         services
             .derive_task_inspector_for_task_group(inspector, group)
             .map_err(status_from_inspection_error)
     });
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_object_inspector_derive_task_group(
     services: &impl InspectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_inspector_derivation(arguments).and_then(|(inspector, group)| {
         services
             .derive_object_inspector_for_task_group(inspector, group)
             .map_err(status_from_inspection_error)
     });
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_task_inspector_derive_resource_domain(
     services: &impl InspectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_inspector_derivation(arguments).and_then(|(inspector, domain)| {
         services
             .derive_task_inspector_for_resource_domain(inspector, domain)
             .map_err(status_from_inspection_error)
     });
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_object_inspector_derive_resource_domain(
     services: &impl InspectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_inspector_derivation(arguments).and_then(|(inspector, domain)| {
         services
             .derive_object_inspector_for_resource_domain(inspector, domain)
             .map_err(status_from_inspection_error)
     });
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_memory_inspector_read(
     services: &impl SystemInspectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = prepare_info_request(
         arguments,
         HYPER_NATIVE_MEMORY_OBSERVATION_MIN_SIZE,
@@ -215,14 +213,14 @@ pub(in crate::kernel::abi::native) fn sys_memory_inspector_read(
             .map_err(status_from_inspection_error)?;
         copy_info_record(services, request, &encode_memory_observation(observation))
     });
-    DeferredAction::Return(info_result(result))
+    NativeAction::Return(info_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_cpu_inspector_read(
     services: &impl SystemInspectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = prepare_info_request(
         arguments,
         HYPER_NATIVE_CPU_OBSERVATION_MIN_SIZE,
@@ -235,5 +233,5 @@ pub(in crate::kernel::abi::native) fn sys_cpu_inspector_read(
             .map_err(status_from_inspection_error)?;
         copy_info_record(services, request, &encode_cpu_observation(observation))
     });
-    DeferredAction::Return(info_result(result))
+    NativeAction::Return(info_result(result))
 }

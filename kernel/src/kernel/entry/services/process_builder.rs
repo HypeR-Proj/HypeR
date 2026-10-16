@@ -3,7 +3,7 @@
 
 //! Native process builder service calls under borrowed Process authority.
 
-use super::DeferredProcessServices;
+use super::ProcessServices;
 use super::affinity::AffinityInputError;
 use crate::kernel::abi::native::{
     HierarchyServices, ProcessBuilderServiceError, ProcessBuilderServices,
@@ -26,7 +26,7 @@ impl ChargedBuilderInput {
     }
 }
 
-impl DeferredProcessServices<'_> {
+impl ProcessServices<'_> {
     fn copy_builder_input(
         &self,
         input: Option<UserSlice>,
@@ -64,7 +64,7 @@ impl DeferredProcessServices<'_> {
     }
 }
 
-impl ProcessBuilderServices for DeferredProcessServices<'_> {
+impl ProcessBuilderServices for ProcessServices<'_> {
     fn create_process_builder(
         &self,
         factory: HandleValue,
@@ -194,7 +194,7 @@ impl ProcessBuilderServices for DeferredProcessServices<'_> {
     }
 }
 
-impl HierarchyServices for DeferredProcessServices<'_> {
+impl HierarchyServices for ProcessServices<'_> {
     fn create_resource_domain(
         &self,
         parent: HandleValue,

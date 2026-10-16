@@ -282,7 +282,6 @@ pub enum Error {
     CannotSleepWithInterruptsMasked,
     CannotSleepWithPreemptionDisabled,
     IrqTailRequiresInterruptsMasked,
-    UserRunRequiresInterruptsEnabled,
     InvalidThreadState,
     IdleThreadAlreadyInstalled,
     InvalidIdleTransition,
@@ -315,8 +314,7 @@ impl From<super::preempt::Error> for Error {
             | super::preempt::Error::DisableDepthUnderflow
             | super::preempt::Error::IrqDepthOverflow
             | super::preempt::Error::IrqDepthUnderflow
-            | super::preempt::Error::WrongCpu
-            | super::preempt::Error::AlreadyDisabled => Self::PreemptionInvariant,
+            | super::preempt::Error::WrongCpu => Self::PreemptionInvariant,
         }
     }
 }
@@ -483,6 +481,11 @@ impl PreparedTransition {
             switch,
             interrupt_mask,
         } = self;
+        // Selection is committed and scheduler locks are released. Retire the
+        // outgoing Native CPU ownership before assembly can publish its saved
+        // continuation to another CPU; scheduler `current` already names the
+        // incoming Thread, so the entry hook uses its own CPU-local owner.
+        crate::kernel::entry::user::suspend_current();
         // SAFETY: The architecture switch stores this exact state into the
         // outgoing ThreadContext before changing stacks. Its incoming tail
         // retires source ownership before the state can be restored.
@@ -519,6 +522,9 @@ pub(crate) const fn permanent_worker_count_for_test() -> usize {
 }
 
 pub fn current_thread_id() -> Result<ThreadId, Error> {
+    // SAFETY: Close CPU identification through its local scheduler lookup;
+    // an IRQ-tail migration must not substitute another Thread's identity.
+    let _mask = unsafe { TransitionMask::acquire() };
     let cpu = current_cpu()?;
     state::local_current_thread(cpu)
 }
@@ -527,6 +533,9 @@ pub fn current_thread_id() -> Result<ThreadId, Error> {
 /// Kernel and bootstrap Threads have no user object. No execution pointer or
 /// CPU-affine borrow escapes the local scheduler lock.
 pub(crate) fn current_user_thread() -> Result<Option<crate::kernel::process::UserThread>, Error> {
+    // SAFETY: The returned object is owned, but identifying which local slot
+    // to retain must complete on the same CPU as the scheduler observation.
+    let _mask = unsafe { TransitionMask::acquire() };
     let cpu = current_cpu()?;
     state::local_current_user_thread(cpu)
 }
@@ -976,9 +985,10 @@ pub(in crate::kernel) fn request_vcpu_stop(thread: ThreadId) -> Result<(), Error
 
 /// Returns the pinned native-user payload owned by the current Thread.
 ///
-/// The dedicated guard proves that the non-null payload address remains pinned
-/// and cannot be reclaimed until the caller closes its machine-active borrow.
-pub(crate) fn current_user(_pin: &UserRunGuard) -> Result<CurrentUser, Error> {
+/// The short pin closes the identity lookup. The returned allocation belongs
+/// to this Thread until its entry returns, including while its continuation
+/// blocks or migrates; no CPU-local authority is transferred with the pointer.
+pub(crate) fn current_user(_pin: &PreemptionGuard) -> Result<CurrentUser, Error> {
     state::local_current_user(current_cpu()?)
 }
 
@@ -1102,6 +1112,9 @@ pub fn set_thread_fair_policy(id: ThreadId) -> Result<(), Error> {
 /// switches directly; the architecture IRQ-tail continuation consumes the
 /// coalesced request after completing interrupt accounting.
 pub(crate) fn account_tick(elapsed_ticks: u64) -> Result<(), Error> {
+    // SAFETY: IRQ callers already hold the mask. Direct accounting callers
+    // must also keep CPU identification and the charged Thread consistent.
+    let _mask = unsafe { TransitionMask::acquire() };
     let cpu = current_cpu()?;
     let should_reschedule = state::account_tick(cpu, elapsed_ticks)?;
     if should_reschedule {
@@ -1156,13 +1169,14 @@ pub(crate) fn cond_resched_from_irq_tail(
 }
 
 fn cond_resched_inner() -> Result<bool, Error> {
+    // SAFETY: This continuation transfers the exact prior interrupt state into
+    // its saved ThreadContext at the final machine-switch boundary. Acquire
+    // before CPU identification so an IRQ cannot migrate that observation.
+    let interrupt_mask = unsafe { TransitionMask::acquire() };
     let cpu = current_cpu()?;
     if !super::preempt::pending(cpu)? || !super::preempt::can_reschedule(cpu)? {
         return Ok(false);
     }
-    // SAFETY: This continuation transfers the exact prior interrupt state into
-    // its saved ThreadContext at the final machine-switch boundary.
-    let interrupt_mask = unsafe { TransitionMask::acquire() };
     let pair = match state::prepare_local_preemption(cpu)? {
         state::LocalScheduleAttempt::Complete(pair) => pair,
         state::LocalScheduleAttempt::NeedsCoordinator => SCHEDULER.with(|slot| {
@@ -1191,34 +1205,6 @@ pub struct PreemptionGuard(super::preempt::PreemptionGuard);
 // SAFETY: The underlying per-CPU disable-depth owner prevents every scheduler
 // preemption point from migrating this context until the guard is released.
 unsafe impl hyper::cpu::PinnedExecution for PreemptionGuard {}
-
-/// Exclusive preemption level used by a native-user machine run.
-///
-/// Unlike a generic guard this can be created only from depth zero, making
-/// the IRQ-tail `depth == 1` unwind rule exact and auditable.
-#[must_use = "native-user pinning must span active translation and machine state"]
-pub(crate) struct UserRunGuard(super::preempt::PreemptionGuard);
-
-// SAFETY: Construction atomically changes the current CPU's disable depth
-// from zero to one while IRQs are masked. The guard cannot move safely between
-// Rust threads and its underlying token rejects release on a different CPU.
-unsafe impl hyper::cpu::PinnedExecution for UserRunGuard {}
-
-pub(crate) fn user_run_guard() -> Result<UserRunGuard, Error> {
-    if !crate::hal::irq::local_enabled() {
-        return Err(Error::UserRunRequiresInterruptsEnabled);
-    }
-    super::preempt::disable_for_user_run()
-        .map(UserRunGuard)
-        .map_err(Into::into)
-}
-
-pub(crate) fn finish_user_run(guard: UserRunGuard) -> Result<bool, Error> {
-    if !guard.0.release()? {
-        return Err(Error::PreemptionInvariant);
-    }
-    cond_resched()
-}
 
 /// Prevents asynchronous scheduling while CPU-local state is borrowed.
 pub fn preempt_disable() -> Result<PreemptionGuard, Error> {
@@ -1602,6 +1588,9 @@ pub(crate) fn ensure_sleepable() -> Result<(), Error> {
     if !crate::hal::irq::local_enabled() {
         return Err(Error::CannotSleepWithInterruptsMasked);
     }
+    // SAFETY: Pin this bounded CPU-local depth observation. The mask restores
+    // the enabled state before the caller reaches any scheduling operation.
+    let _mask = unsafe { TransitionMask::acquire() };
     let cpu = current_cpu()?;
     super::preempt::can_reschedule(cpu)?
         .then_some(())
@@ -1646,21 +1635,18 @@ fn scheduler_invariant(operation: &str, error: Error) -> ! {
 }
 
 fn request_reschedule(cpu: CpuIndex) -> Result<(), Error> {
-    // Determine local IRQ ownership before arming the coalesced request. Once
-    // the pending bit elects this caller as notifier, notification must not
-    // fail in a way which leaves later publishers suppressed behind that bit.
-    let notify = super::preempt::notification_required(cpu)?;
-    if super::preempt::request(cpu)? && notify {
+    if super::preempt::request(cpu)? {
         super::super::irq::reschedule::notify(cpu);
     }
     Ok(())
 }
 
 fn prepare_schedule() -> Result<Option<PreparedTransition>, Error> {
-    let cpu = current_cpu()?;
     // SAFETY: This continuation transfers the exact prior interrupt state into
-    // its saved ThreadContext at the final machine-switch boundary.
+    // its saved ThreadContext at the final machine-switch boundary. CPU
+    // identification must follow masking because this Thread may migrate.
     let interrupt_mask = unsafe { TransitionMask::acquire() };
+    let cpu = current_cpu()?;
     let switch = match state::prepare_local_yield(cpu)? {
         state::LocalScheduleAttempt::Complete(switch) => switch,
         state::LocalScheduleAttempt::NeedsCoordinator => SCHEDULER.with(|slot| {
@@ -1736,6 +1722,9 @@ pub(crate) fn exit_current() -> ! {
 
 #[unsafe(no_mangle)]
 extern "C" fn kernel_thread_exit() -> ! {
+    // SAFETY: Mask before observing CPU/Thread identity. The exiting movable
+    // continuation transfers this outer mask into its nonreturning switch.
+    let interrupt_mask = unsafe { TransitionMask::acquire() };
     let cpu = match current_cpu() {
         Ok(cpu) => cpu,
         Err(error) => crate::kernel::crash::fatal(format_args!(
@@ -1754,9 +1743,6 @@ extern "C" fn kernel_thread_exit() -> ! {
             "HypeR: thread {thread:?} exit without name snapshot: {error:?}"
         )),
     };
-    // SAFETY: The exiting continuation is CPU-pinned and transfers this outer
-    // mask directly into the non-returning prepared context transition.
-    let interrupt_mask = unsafe { TransitionMask::acquire() };
     let result = SCHEDULER.with(|slot| {
         slot.as_mut()
             .ok_or(Error::NotInitialized)?

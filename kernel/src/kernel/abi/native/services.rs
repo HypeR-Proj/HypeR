@@ -96,7 +96,8 @@ pub(in crate::kernel) trait UserMemoryServices {
     -> Result<(), ProcessError>;
 }
 
-pub(in crate::kernel) trait HandleServices: ImmediateServices {
+pub(in crate::kernel) trait HandleServices {
+    fn close_handle(&self, value: HandleValue) -> Result<(), ProcessError>;
     fn handle_info(
         &self,
         value: HandleValue,
@@ -972,15 +973,7 @@ pub(in crate::kernel) trait TaskServices: UserMemoryServices {
     fn request_task_group_stop(&self, group: HandleValue) -> Result<(), ProcessError>;
 }
 
-/// Services audited for the masked machine-entry path.
-///
-/// Deliberately excludes user copies (which may resolve COW) and handle-table
-/// growth. Adding a deferred service must not expand this interface implicitly.
-pub(in crate::kernel) trait ImmediateServices {
-    fn close_handle(&self, value: HandleValue) -> Result<(), ProcessError>;
-}
-
-pub(in crate::kernel) trait DeferredServices:
+pub(in crate::kernel) trait NativeServices:
     UserMemoryServices
     + HandleServices
     + ObjectServices
@@ -999,7 +992,7 @@ pub(in crate::kernel) trait DeferredServices:
 {
 }
 
-impl<T> DeferredServices for T where
+impl<T> NativeServices for T where
     T: UserMemoryServices
         + HandleServices
         + ObjectServices
@@ -1018,12 +1011,12 @@ impl<T> DeferredServices for T where
 {
 }
 
-/// Policy action produced after architecture entry has fully unwound.
+/// Policy action produced by an ordinary Native syscall.
 ///
-/// This value owns no architecture frame, CPU pin, or address-space guard, so
-/// the caller may safely execute its scheduling or lifecycle effect.
+/// This value owns no architecture frame or CPU-affine state. The Thread
+/// continuation applies the scheduling or lifecycle effect before user return.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::kernel) enum DeferredAction {
+pub(in crate::kernel) enum NativeAction {
     Return(NativeResult),
     Yield(NativeResult),
     ExitThread { status: i64 },

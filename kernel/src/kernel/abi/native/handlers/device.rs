@@ -3,7 +3,7 @@
 
 //! Native device syscall validation.
 
-use crate::kernel::abi::native::services::DeferredAction;
+use crate::kernel::abi::native::services::NativeAction;
 use crate::kernel::abi::native::status::{
     handle_result, info_result, status_from_process_error, status_from_vm_service_error,
     status_only,
@@ -30,7 +30,7 @@ fn status_from_match_error(
 pub(in crate::kernel::abi::native) fn sys_device_firmware_read(
     services: &impl DeviceServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[4..])?;
         let authority = parse_handle(arguments[0])?;
@@ -101,14 +101,14 @@ pub(in crate::kernel::abi::native) fn sys_device_firmware_read(
         }
         Ok(length)
     })();
-    DeferredAction::Return(info_result(result))
+    NativeAction::Return(info_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_device_claim_bundle(
     services: &impl DeviceServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[4..])?;
         let authority = parse_handle(arguments[0])?;
@@ -151,14 +151,14 @@ pub(in crate::kernel::abi::native) fn sys_device_claim_bundle(
             .device_claim_bundle(authority, &entries[..count], irq_node)
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_device_mmio(
     services: &impl DeviceServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[5..])?;
         if !matches!(arguments[2], 1 | 2 | 4)
@@ -177,28 +177,28 @@ pub(in crate::kernel::abi::native) fn sys_device_mmio(
             )
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(info_result(result))
+    NativeAction::Return(info_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_device_irq_pending(
     services: &impl DeviceServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[1..])?;
         services
             .device_irq_pending(parse_handle(arguments[0])?)
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(info_result(result))
+    NativeAction::Return(info_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_device_irq_complete(
     services: &impl DeviceServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[3..])?;
         if arguments[2] > 1 {
@@ -208,14 +208,14 @@ pub(in crate::kernel::abi::native) fn sys_device_irq_complete(
             .device_irq_complete(parse_handle(arguments[0])?, arguments[1], arguments[2] != 0)
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_device_profile_info(
     services: &impl DeviceServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         let output = prepare_info_request(arguments, 32, 32)?;
         let bytes = services
@@ -223,14 +223,14 @@ pub(in crate::kernel::abi::native) fn sys_device_profile_info(
             .map_err(status_from_vm_service_error)?;
         copy_info_record(services, output, &bytes)
     })();
-    DeferredAction::Return(info_result(result))
+    NativeAction::Return(info_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_device_resource_info(
     services: &impl DeviceServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[4..])?;
         let output =
@@ -240,14 +240,14 @@ pub(in crate::kernel::abi::native) fn sys_device_resource_info(
             .map_err(status_from_vm_service_error)?;
         copy_info_record(services, output, &bytes)
     })();
-    DeferredAction::Return(info_result(result))
+    NativeAction::Return(info_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_device_claim_matching(
     services: &impl DeviceServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[5..])?;
         let length =
@@ -272,28 +272,28 @@ pub(in crate::kernel::abi::native) fn sys_device_claim_matching(
             )
             .map_err(status_from_match_error)
     })();
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_device_claim(
     services: &impl DeviceServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[2..])?;
         services
             .claim_device(parse_handle(arguments[0])?, parse_u32(arguments[1])?)
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_physical_device_info(
     services: &impl DeviceServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         let output = prepare_info_request(arguments, 16, 16)?;
         let info = services
@@ -305,14 +305,14 @@ pub(in crate::kernel::abi::native) fn sys_physical_device_info(
         bytes[8..16].copy_from_slice(&info.mmio_size.to_le_bytes());
         copy_info_record(services, output, &bytes)
     })();
-    DeferredAction::Return(info_result(result))
+    NativeAction::Return(info_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_vmo_get_dma_extent(
     services: &impl DeviceServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         let output =
             prepare_info_request(&[arguments[0], arguments[4], arguments[5], 0, 0, 0], 16, 16)?;
@@ -329,14 +329,14 @@ pub(in crate::kernel::abi::native) fn sys_vmo_get_dma_extent(
         bytes[8..].copy_from_slice(&extent.length.to_le_bytes());
         copy_info_record(services, output, &bytes)
     })();
-    DeferredAction::Return(info_result(result))
+    NativeAction::Return(info_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_pending_virtual_machine_assign_device(
     services: &impl DeviceServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[4..])?;
         services
@@ -348,5 +348,5 @@ pub(in crate::kernel::abi::native) fn sys_pending_virtual_machine_assign_device(
             )
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }

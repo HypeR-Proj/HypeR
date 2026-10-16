@@ -29,7 +29,6 @@ pub(crate) enum Error {
     IrqDepthOverflow,
     IrqDepthUnderflow,
     WrongCpu,
-    AlreadyDisabled,
 }
 
 impl Error {
@@ -43,7 +42,6 @@ impl Error {
             Self::IrqDepthOverflow => "IRQ nesting overflow",
             Self::IrqDepthUnderflow => "IRQ nesting underflow",
             Self::WrongCpu => "preemption guard completed on the wrong CPU",
-            Self::AlreadyDisabled => "native-user entry requires preemption to be enabled",
         }
     }
 }
@@ -114,25 +112,21 @@ impl Drop for CpuPreemptionReservation {
 /// Release ordering makes scheduler queue publication visible before the
 /// target CPU observes the request with Acquire ordering. Requests coalesce;
 /// clearing occurs only while the scheduler lock serializes the decision. A
-/// `true` result grants this caller responsibility for notifying the target.
+/// `true` result elects this caller to send an explicit target notification.
+/// A newly pending local request inside IRQ dispatch returns `false`: that
+/// still-active interrupt already guarantees the target's IRQ-tail evaluation.
 pub(crate) fn request(cpu: CpuIndex) -> Result<bool, Error> {
+    // SAFETY: Keep CPU identification, local IRQ-depth observation, and pending
+    // publication in one masked interval. Otherwise IRQ-tail migration could
+    // make this caller read another CPU's IRQ depth and suppress notification
+    // after that interrupt has already completed. No scheduling occurs here.
+    let _mask = unsafe { hyper::sync::InterruptMaskGuard::<crate::hal::irq::LocalMask>::acquire() };
     let state = &PREEMPTION[cpu];
     ensure_online(state)?;
-    Ok(state.pending.publish())
-}
-
-/// Reports whether a published request needs an explicit target notification.
-///
-/// The active outer interrupt already guarantees IRQ-tail evaluation for a
-/// request targeting this CPU. Remote callers must never inspect another
-/// CPU's locally owned IRQ depth and always require a cross-call.
-pub(crate) fn notification_required(cpu: CpuIndex) -> Result<bool, Error> {
-    let state = &PREEMPTION[cpu];
-    ensure_online(state)?;
-    if current_cpu()? != cpu {
-        return Ok(true);
-    }
-    Ok(state.irq_depth.load(Ordering::Relaxed) == 0)
+    // Short-circuiting keeps remote callers from observing locally owned IRQ
+    // depth. Perform every fallible check before electing the sole notifier.
+    let notify = current_cpu()? != cpu || state.irq_depth.load(Ordering::Relaxed) == 0;
+    Ok(state.pending.publish() && notify)
 }
 
 pub(crate) fn pending(cpu: CpuIndex) -> Result<bool, Error> {
@@ -164,27 +158,12 @@ pub(crate) fn can_reschedule(cpu: CpuIndex) -> Result<bool, Error> {
 
 /// Tests whether an outermost IRQ exit has deferred scheduling work.
 ///
-/// The caller must complete its [`IrqGuard`] first. The scheduler lock later
-/// serializes the final decision and consumes the coalesced request.
+/// The caller must complete its [`IrqGuard`] first and keep local IRQs masked.
+/// The scheduler lock later serializes the final decision and consumes the
+/// coalesced request.
 pub(crate) fn should_reschedule_after_irq() -> Result<bool, Error> {
     let cpu = current_cpu()?;
     Ok(pending(cpu)? && can_reschedule(cpu)?)
-}
-
-/// Tests whether a native-user run must unwind before scheduling.
-///
-/// A native-user run owns exactly one preemption-disable level while its
-/// CPU-affine translation root is installed. IRQ exit cannot schedule under
-/// that root. Instead it returns to the run continuation, which removes the
-/// root, releases this final disable level, and then consumes the durable
-/// reschedule request at an ordinary scheduler point.
-pub(crate) fn should_unwind_user_after_irq() -> Result<bool, Error> {
-    let cpu = current_cpu()?;
-    let state = &PREEMPTION[cpu];
-    ensure_online(state)?;
-    Ok(state.pending.is_pending()
-        && state.irq_depth.load(Ordering::Relaxed) == 0
-        && state.disable_depth.load(Ordering::Relaxed) == 1)
 }
 
 /// Disables asynchronous preemption on the calling CPU.
@@ -206,32 +185,6 @@ pub(crate) fn disable() -> Result<PreemptionGuard, Error> {
     increment(&state.disable_depth, Error::DisableDepthOverflow)?;
     // Do not let protected accesses move above the local preemption boundary.
     // CPU-local depth accounting needs no hardware fence or global ordering.
-    compiler_fence(Ordering::Acquire);
-    let guard = PreemptionGuard {
-        cpu,
-        active: true,
-        not_send: PhantomData,
-    };
-    drop(interrupt_mask);
-    Ok(guard)
-}
-
-/// Acquires the sole preemption-disable level reserved for native-user entry.
-///
-/// Requiring a zero starting depth makes IRQ-tail unwind an exact contract
-/// instead of a guess about arbitrary nested guards.
-pub(crate) fn disable_for_user_run() -> Result<PreemptionGuard, Error> {
-    // SAFETY: See `disable`: masking spans CPU identification and the atomic
-    // zero-to-one publication, then the preemption guard provides pinning.
-    let interrupt_mask =
-        unsafe { hyper::sync::InterruptMaskGuard::<crate::hal::irq::LocalMask>::acquire() };
-    let cpu = current_cpu()?;
-    let state = &PREEMPTION[cpu];
-    ensure_online(state)?;
-    state
-        .disable_depth
-        .compare_exchange(0, 1, Ordering::Relaxed, Ordering::Relaxed)
-        .map_err(|_| Error::AlreadyDisabled)?;
     compiler_fence(Ordering::Acquire);
     let guard = PreemptionGuard {
         cpu,

@@ -157,7 +157,6 @@ pub(super) const fn status_from_scheduler_error(
         | Error::CannotSleepWithInterruptsMasked
         | Error::CannotSleepWithPreemptionDisabled
         | Error::IrqTailRequiresInterruptsMasked
-        | Error::UserRunRequiresInterruptsEnabled
         | Error::IdleThreadAlreadyInstalled
         | Error::InvalidIdleTransition
         | Error::CpuAlreadyRegistered

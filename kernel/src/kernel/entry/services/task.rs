@@ -3,7 +3,7 @@
 
 //! Native task service calls under borrowed Process authority.
 
-use super::DeferredProcessServices;
+use super::ProcessServices;
 use super::affinity::AffinityInputError;
 use crate::kernel::abi::native::{ObjectServiceError, TaskServices};
 use crate::kernel::capability::{HandleValue, Rights};
@@ -12,7 +12,7 @@ use crate::kernel::process::{
     ProcessError, ProcessObject, ProcessSnapshot, TerminalReason, UserThreadPhase,
 };
 
-impl TaskServices for DeferredProcessServices<'_> {
+impl TaskServices for ProcessServices<'_> {
     fn create_thread(
         &self,
         entry: u64,

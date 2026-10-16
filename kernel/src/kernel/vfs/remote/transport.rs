@@ -192,7 +192,7 @@ impl Transport {
                 // Publication transfers the shared range to the worker. An
                 // app's stop request cannot retire a mount used by other apps.
                 // Drain this bounded transaction; the user runner handles stop
-                // after the syscall unwinds. Scheduler cancellation selects one
+                // before the syscall returns. Scheduler cancellation selects one
                 // current wait ticket, not every subsequent rearm.
                 || false,
             )

@@ -3,10 +3,10 @@
 
 //! Native device service calls under borrowed Process authority.
 
-use super::DeferredProcessServices;
+use super::ProcessServices;
 use crate::kernel::capability::HandleValue;
 
-impl crate::kernel::abi::native::DeviceServices for DeferredProcessServices<'_> {
+impl crate::kernel::abi::native::DeviceServices for ProcessServices<'_> {
     fn device_firmware_read(
         &self,
         authority: HandleValue,

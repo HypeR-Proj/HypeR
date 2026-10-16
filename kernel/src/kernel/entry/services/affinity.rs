@@ -3,12 +3,12 @@
 
 //! Native affinity service calls under borrowed Process authority.
 
-use super::DeferredProcessServices;
+use super::ProcessServices;
 use crate::kernel::mm::user_space::UserSlice;
 use crate::kernel::process::ProcessError;
 use crate::kernel::task::scheduler::CpuMask;
 
-impl DeferredProcessServices<'_> {
+impl ProcessServices<'_> {
     pub(super) fn copy_affinity(
         &self,
         input: Option<UserSlice>,

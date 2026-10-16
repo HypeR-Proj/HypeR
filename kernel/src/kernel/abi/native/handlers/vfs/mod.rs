@@ -4,7 +4,7 @@
 //! Native directory traversal and file I/O syscalls.
 
 use crate::kernel::abi::native::Arguments;
-use crate::kernel::abi::native::services::{DeferredAction, VfsServices};
+use crate::kernel::abi::native::services::{NativeAction, VfsServices};
 use crate::kernel::abi::native::status::{
     failure, handle_result, info_result, scan_result, status_from_address_error,
     status_from_process_error, status_from_vfs_service_error, status_only, success,
@@ -36,7 +36,7 @@ const INVALID: Status = abi::HYPER_NATIVE_STATUS_INVALID_ARGUMENT;
 pub(in crate::kernel::abi::native) fn sys_directory_open_file(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_handle(arguments[0]).and_then(|root| {
         if arguments[4] != 0
             || arguments[5] != 0
@@ -52,20 +52,20 @@ pub(in crate::kernel::abi::native) fn sys_directory_open_file(
             .open_file(root, path, rights)
             .map_err(status_from_vfs_service_error)
     });
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_directory_open_directory(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_directory_open(arguments).and_then(|(root, path, rights)| {
         services
             .open_directory(root, path, rights)
             .map_err(status_from_vfs_service_error)
     });
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 fn parse_directory_open(
@@ -89,7 +89,7 @@ fn parse_directory_open(
 pub(in crate::kernel::abi::native) fn sys_directory_begin_read(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[1..])?;
         let directory = parse_handle(arguments[0])?;
@@ -97,14 +97,14 @@ pub(in crate::kernel::abi::native) fn sys_directory_begin_read(
             .begin_directory_read(directory)
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_directory_read(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_directory_read(arguments).and_then(|(directory, cookie, destination)| {
         let mut page = crate::kernel::vfs::DirectoryPage::empty();
         services
@@ -112,7 +112,7 @@ pub(in crate::kernel::abi::native) fn sys_directory_read(
             .map_err(status_from_vfs_service_error)?;
         copy_directory_page(services, destination, &page)
     });
-    DeferredAction::Return(scan_result(result))
+    NativeAction::Return(scan_result(result))
 }
 
 fn parse_directory_read(
@@ -136,7 +136,7 @@ fn parse_directory_read(
 pub(in crate::kernel::abi::native) fn sys_file_read_at(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_handle(arguments[0]).and_then(|file| {
         if arguments[1] != 0 || arguments[4] > HYPER_NATIVE_FILE_MAX_READ_BYTES {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
@@ -150,14 +150,14 @@ pub(in crate::kernel::abi::native) fn sys_file_read_at(
         Ok((actual, file_size)) => success([actual, file_size]),
         Err(status) => failure(status),
     };
-    DeferredAction::Return(result)
+    NativeAction::Return(result)
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_file_get_info(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = prepare_info_request(
         arguments,
         HYPER_NATIVE_FILE_INFO_MIN_SIZE,
@@ -170,14 +170,14 @@ pub(in crate::kernel::abi::native) fn sys_file_get_info(
             .map_err(status_from_vfs_service_error)?;
         copy_info_record(services, request, &encode_file_info(info))
     });
-    DeferredAction::Return(info_result(result))
+    NativeAction::Return(info_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_directory_get_info(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = prepare_info_request(
         arguments,
         HYPER_NATIVE_DIRECTORY_INFO_MIN_SIZE,
@@ -190,14 +190,14 @@ pub(in crate::kernel::abi::native) fn sys_directory_get_info(
             .map_err(status_from_vfs_service_error)?;
         copy_info_record(services, request, &encode_directory_info(info))
     });
-    DeferredAction::Return(info_result(result))
+    NativeAction::Return(info_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_file_write_at(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         if arguments[1] > 1
             || (arguments[1] == 1 && arguments[2] != 0)
@@ -212,7 +212,7 @@ pub(in crate::kernel::abi::native) fn sys_file_write_at(
             .write_file_at(file, (arguments[1] == 0).then_some(arguments[2]), input)
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(match result {
+    NativeAction::Return(match result {
         Ok((actual, end)) => success([actual, end]),
         Err(status) => failure(status),
     })
@@ -222,7 +222,7 @@ pub(in crate::kernel::abi::native) fn sys_file_write_at(
 pub(in crate::kernel::abi::native) fn sys_file_resize(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         if arguments[2..].iter().any(|value| *value != 0) {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
@@ -231,7 +231,7 @@ pub(in crate::kernel::abi::native) fn sys_file_resize(
             .resize_file(parse_handle(arguments[0])?, arguments[1])
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(match result {
+    NativeAction::Return(match result {
         Ok(()) => success([0, 0]),
         Err(status) => failure(status),
     })
@@ -254,7 +254,7 @@ fn parse_mutation_path(
 pub(in crate::kernel::abi::native) fn sys_directory_create_file(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         if arguments[5] != 0 || arguments[4] & !0o777 != 0 {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
@@ -265,14 +265,14 @@ pub(in crate::kernel::abi::native) fn sys_directory_create_file(
             .create_file(directory, path, rights, arguments[4] as u32)
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_directory_create_directory(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         if arguments[4] != 0 || arguments[5] != 0 || arguments[3] & !0o777 != 0 {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
@@ -282,7 +282,7 @@ pub(in crate::kernel::abi::native) fn sys_directory_create_directory(
             .create_directory(directory, path, arguments[3] as u32)
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(match result {
+    NativeAction::Return(match result {
         Ok(()) => success([0, 0]),
         Err(status) => failure(status),
     })
@@ -292,7 +292,7 @@ pub(in crate::kernel::abi::native) fn sys_directory_create_directory(
 pub(in crate::kernel::abi::native) fn sys_directory_remove(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         if arguments[4] != 0 || arguments[5] != 0 || arguments[3] > 1 {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
@@ -302,7 +302,7 @@ pub(in crate::kernel::abi::native) fn sys_directory_remove(
             .remove_entry(directory, path, arguments[3] == 1)
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(match result {
+    NativeAction::Return(match result {
         Ok(()) => success([0, 0]),
         Err(status) => failure(status),
     })
@@ -323,7 +323,7 @@ fn parse_rights(value: u64) -> Result<Rights, Status> {
 pub(in crate::kernel::abi::native) fn sys_directory_scope_create(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[3..])?;
         services
@@ -334,14 +334,14 @@ pub(in crate::kernel::abi::native) fn sys_directory_scope_create(
             )
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_directory_symlink(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[5..])?;
         services
@@ -352,14 +352,14 @@ pub(in crate::kernel::abi::native) fn sys_directory_symlink(
             )
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_directory_remove_if(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[5..])?;
         let is_directory = match arguments[3] {
@@ -376,14 +376,14 @@ pub(in crate::kernel::abi::native) fn sys_directory_remove_if(
             )
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_directory_open_directory_nofollow(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[4..])?;
         services
@@ -394,14 +394,14 @@ pub(in crate::kernel::abi::native) fn sys_directory_open_directory_nofollow(
             )
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_file_sync(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[2..])?;
         if arguments[1] > 1 {
@@ -411,14 +411,14 @@ pub(in crate::kernel::abi::native) fn sys_file_sync(
             .file_sync(parse_handle(arguments[0])?, arguments[1])
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_file_lock(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[3..])?;
         let mode = match arguments[1] {
@@ -430,28 +430,28 @@ pub(in crate::kernel::abi::native) fn sys_file_lock(
             .file_lock(parse_handle(arguments[0])?, mode, arguments[2])
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_file_unlock(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[1..])?;
         services
             .file_unlock(parse_handle(arguments[0])?)
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_directory_open_file_with_options(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         let mode = u32::try_from(arguments[5]).map_err(|_| INVALID)?;
         services
@@ -464,14 +464,14 @@ pub(in crate::kernel::abi::native) fn sys_directory_open_file_with_options(
             )
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_directory_rename(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         services
             .directory_rename(
@@ -482,14 +482,14 @@ pub(in crate::kernel::abi::native) fn sys_directory_rename(
             )
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_directory_link(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         services
             .directory_link(
@@ -500,14 +500,14 @@ pub(in crate::kernel::abi::native) fn sys_directory_link(
             )
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_directory_read_link(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[5..])?;
         if arguments[4] > abi::HYPER_NATIVE_DIRECTORY_MAX_PATH_BYTES {
@@ -533,14 +533,14 @@ pub(in crate::kernel::abi::native) fn sys_directory_read_link(
         }
         Ok(length)
     })();
-    DeferredAction::Return(info_result(result))
+    NativeAction::Return(info_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_directory_canonicalize(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[5..])?;
         if arguments[4] > abi::HYPER_NATIVE_DIRECTORY_MAX_PATH_BYTES {
@@ -566,7 +566,7 @@ pub(in crate::kernel::abi::native) fn sys_directory_canonicalize(
         }
         Ok(length)
     })();
-    DeferredAction::Return(info_result(result))
+    NativeAction::Return(info_result(result))
 }
 
 pub(in crate::kernel::abi::native) use metadata::{
@@ -581,7 +581,7 @@ pub(in crate::kernel::abi::native) use metadata::run_wire_self_test;
 pub(in crate::kernel::abi::native) fn sys_file_protect(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[1..])?;
         let file = parse_handle(arguments[0])?;
@@ -589,7 +589,7 @@ pub(in crate::kernel::abi::native) fn sys_file_protect(
             .protect_file(file)
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(match result {
+    NativeAction::Return(match result {
         Ok((handle, size)) => success([handle.get(), size]),
         Err(error) => failure(error),
     })

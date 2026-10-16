@@ -208,14 +208,13 @@ as a fresh read of remote hardware.
 flowchart TB
     app["Application<br/>std / hyper-os"] --> sdk["SDK veneers<br/>libhyper / hyper-sys"]
     sdk -->|Native trap| entry["HAL user entry"]
-    entry --> dispatch["Native dispatch<br/>Classify operation"]
-    dispatch -->|Immediate| direct["Borrowed service<br/>Complete in exception context"]
-    dispatch -->|Deferred| runner["Kernel user runner<br/>Resume kernel continuation"]
-    runner --> service["Capability-checked service"]
-    direct --> vector["Exception-vector return"]
-    service --> saved["Save result and resume userspace"]
+    entry --> runner["Kernel user runner<br/>Interruptible Thread context"]
+    runner --> dispatch["Native syscall dispatch"]
+    dispatch --> service["Capability-checked service"]
+    service --> resume["Check stop and scheduling<br/>Restore translation if switched"]
+    resume --> vector["Exception-vector return"]
     class app,sdk app
-    class dispatch,direct,runner,service,saved core
+    class dispatch,runner,service,resume core
     class entry,vector machine
     classDef app fill:#eff6ff,stroke:#2563eb,color:#172554
     classDef core fill:#f0fdfa,stroke:#0f766e,color:#134e4a
@@ -229,10 +228,11 @@ syscall's arguments, rights and result format.
 
 [HAL user entry](../kernel/hal/src/arch/aarch64/user_entry.rs) handles the machine
 boundary. [The kernel user runner](../kernel/src/kernel/entry/user.rs) owns the
-Process/Thread execution context and the return/deferred-call protocol.
-Immediate calls can return through the exception vector using a borrowed
-service; deferred calls resume the ordinary kernel continuation.
-[Native dispatch](../kernel/src/kernel/abi/native/dispatch.rs) classifies calls;
+Process/Thread execution context and the sleepable syscall-return protocol.
+Calls execute on the calling Thread's kernel stack with IRQs and preemption
+enabled. Blocking suspends that continuation; an actual scheduler switch
+detaches CPU-local translation, TLS and FP ownership before another Thread runs.
+[Native dispatch](../kernel/src/kernel/abi/native/dispatch.rs) routes calls;
 [capability-domain handlers](../kernel/src/kernel/abi/native/handlers/mod.rs)
 decode requests against service contracts. Each syscall retains a separate
 machine frame, including [device calls](../kernel/src/kernel/abi/native/handlers/device.rs)
@@ -240,10 +240,9 @@ and [filesystem calls](../kernel/src/kernel/abi/native/handlers/vfs/mod.rs).
 [Process services](../kernel/src/kernel/entry/services.rs) bind those contracts
 to the current Process, handles and user memory.
 
-Calls classified as deferred run after leaving the restricted user execution
-context, where the kernel can perform the required scheduled work. Do not add
-an allocating or blocking operation to the immediate path merely because its
-handler is short. For usercopy, follow the service's user-memory helpers into
+Before returning to userspace, the runner checks stop and scheduling state and
+restores translation if the continuation was switched out. For usercopy, follow
+the service's explicit user-memory helpers into
 [the address-space owner](../kernel/src/kernel/mm/user_space/address_space.rs),
 not an assumed global `copy_from_user` function.
 
@@ -253,7 +252,7 @@ borrowed Process and Thread context. [Task services](../kernel/src/kernel/entry/
 capability-specific children implement those contracts without extending that borrow.
 
 **Adding or changing a syscall:** trace schema → generated bindings → dispatch
-classification → handler → service owner → SDK/std caller. An error needs to
+routing → handler → service owner → SDK/std caller. An error needs to
 survive that return path with its meaning intact. Changing only the handler
 can leave the published ABI or application adapter describing the old contract.
 The syscall reference and generated-code checks are part of validation.

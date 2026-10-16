@@ -286,8 +286,9 @@ Fatal, physical-interrupt, and VM-exit services are immutable one-shot
 registrations. Runtime vector installation and vCPU construction require the
 corresponding readiness capability; entry before publication halts in the
 architecture backend. Decode and completion remain allocation-free, keep local
-interrupts masked, and release every raw-frame or backend-state borrow before a
-policy callback. Other architecture mechanism code must not call kernel
+interrupts masked. Native syscall entry retains its private frame on the
+Thread stack while its owned invocation runs in interruptible Thread context;
+no private-frame reference enters policy. Other architecture mechanism code must not call kernel
 logging, boot failure, scheduling, IRQ dispatch, or VM policy directly.
 
 On AArch64, Rust computes the complete guest `HCR_EL2` return regime before
@@ -454,8 +455,8 @@ Process handle accounting uses a sidecar with the same segmented slot geometry
 as the handle table. Segment growth is fallible, prepared outside Process locks,
 and charged before publication. Each slot directly identifies its batch entry;
 weak backward links allow an empty batch to be unlinked without scanning the
-Process. Allocating Native calls unwind to interruptible Thread context; masked
-immediate calls must have bounded work as well as nonblocking implementations.
+Process. Native calls run in interruptible Thread context, including allocation
+and user copies. A blocking operation suspends its existing kernel continuation.
 
 The final total-reference release performs only an allocation-free, nonblocking
 handoff to object reclamation. An object in the reap-pending state cannot be
@@ -518,11 +519,11 @@ tests cover queue, migration and architecture integration.
 
 ## Native userspace boundary
 
-`entry::user` owns execution sessions, pinning and machine completion.
+`entry::user` owns execution sessions, CPU attachment and machine completion.
 `entry::services` adapts Native operations using borrowed Process and UserThread
 authority; it cannot inspect the private UserSession or retain its return token.
-Filesystem adapters have their own child module. This does not change immediate
-versus deferred syscall classification or the ABI service traits.
+Filesystem adapters have their own child module. One dispatcher routes all
+Native calls through ordinary Thread context.
 
 Native user entry follows the same policy-above-mechanism rule without reusing
 the vCPU world switch. Complete trap frames, translation registers, return
@@ -532,16 +533,19 @@ it never passes a Rust frame reference into code which can allocate, block,
 preempt, or migrate.
 
 The selected `hal::user` facade owns architecture user-address limits, opaque
-prepared roots, CPU-affine activation/deactivation tokens, and acknowledged
-local replacement and invalidation. On AArch64 and RISC-V, synchronous exception entry
-passes an owned invocation to a borrowed Native service scoped to that pinned
-machine run. Explicitly classified Never-blocking calls write their fixed-width
-result into the private frame and return directly; unknown calls, faults,
-preemption, and deferred calls close the active translation and return owned
-state to the ordinary Thread continuation. After a true scheduling point, that
-continuation reacquires its scheduler pin and current execution payload rather
-than retaining a CPU-affine borrow. RISC-V uses private Sv39 roots, a dedicated
-U-mode trap vector and full integer/FP state capture. x86-64 currently rejects
+prepared roots, CPU-local activation/deactivation, and acknowledged local
+replacement and invalidation. On AArch64 and RISC-V, synchronous exception entry
+passes an owned invocation to the Native service with IRQs masked. The service
+enables IRQs and enters preemptible Thread context before dispatch. The private
+syscall frame stays on the Thread stack. Calls which do not switch retain their
+translation and FP state and return through the vector.
+Before an actual context switch, the scheduler withdraws outgoing Native
+publication, saves and clears resident FP state, and deactivates translation.
+The resumed syscall continues in kernel context; its final return boundary
+rechecks stop, pending scheduling, ASID and current mappings before activating
+on the current CPU. Lower-user faults and preemption still capture owned state
+and unwind the machine run. RISC-V uses private Sv39 roots, a dedicated U-mode
+trap vector and full integer/FP state capture. x86-64 currently rejects
 native-user entry as unsupported. Process lifetime, handles, rights, syscall
 numbers, bootstrap ELF admission, residency, and resource accounting remain in
 the kernel. Application ELF parsing, stack encoding and relocation belong to
@@ -552,6 +556,11 @@ The kernel
 publishes a bootstrap Thread before ordinary ELF loading; SDK spawn waits for
 the userspace startup result. The scheduler-owned `UserExecution` strongly
 retains its Process, native address space, and per-Thread machine context.
+
+AArch64 admits IRQ-tail preemption of kernel syscall continuations. RISC-V
+retains its existing host IRQ-tail limitation: IRQ delivery remains enabled,
+and explicit waits, yields and return-boundary scheduling support continuation
+migration, but a host IRQ does not asynchronously preempt the syscall body.
 
 `UserThread` wraps one canonical kernel object rather than maintaining a
 parallel task identity. Internal observers and eventual userspace handles share
@@ -572,9 +581,9 @@ Native ASIDs and guest VMIDs use separate rollover namespaces. Old roots remain
 retained until every cut target acknowledges; hardware leases cover execution
 and tagged maintenance. Safe abandonment leaks published owners rather than
 risking premature page reuse. A kernel self-test exercises
-repeated direct Native syscall return, register-result validation, deferred-call
-unwind and re-entry, contained fault unwind, join, and retirement on VHE QEMU
-CPUs. The production path mounts the firmware initramfs during bootstrap,
+repeated direct Native syscall return, register-result validation, blocked
+continuation migration with FP/TLS preservation, active COW copyout, contained
+fault unwind, join, and retirement on VHE QEMU CPUs. The production path mounts the firmware initramfs during bootstrap,
 schedules the `native-init` kernel worker, and retires bootstrap execution.
 That worker snapshots `/init`, validates and maps the selected bootstrap
 loader, publishes its Process and initial UserThread, and then exits. The
@@ -1028,8 +1037,8 @@ outside the namespace lock. Neither software serial nor epoch wraps: the epoch i
 or recycling live tags.
 
 A fully pinned namespace reports temporary `Busy`. Native admission handles
-this before committing a user run, releases its execution pin, and yields before
-retrying. Guest execution cannot saturate the production VMID namespace: at
+this before installing an active translation and yields before retrying.
+A syscall returning after suspension uses the same admission rule. Guest execution cannot saturate the production VMID namespace: at
 most 64 installed or retiring VMs can hold leases, each uses one tag regardless
 of vCPU count, and the HAL provides at least 255 nonzero logical tags, using the untagged
 RISC-V fallback where necessary.

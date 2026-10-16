@@ -49,11 +49,11 @@ use crate::kernel::process::{ProcessError, ProcessSnapshot};
 use crate::kernel::task::TimedWaitError;
 use crate::kernel::vfs::{DirectoryInfo, DirectoryPage, FileInfo, VfsServiceError};
 
-use super::dispatch::{dispatch_deferred, dispatch_immediate};
+use super::dispatch::dispatch;
 use super::handlers::capability_receive_result;
 use super::services::{
-    ConsoleServiceError, ConsoleServices, DeferredAction, HandleServices, HierarchyServices,
-    InspectServices, IpcServices, MemoryServices, ObjectServiceError, ObjectServices,
+    ConsoleServiceError, ConsoleServices, HandleServices, HierarchyServices, InspectServices,
+    IpcServices, MemoryServices, NativeAction, ObjectServiceError, ObjectServices,
     ProcessBuilderServiceError, ProcessBuilderServices, SystemInspectServices, TaskServices,
     UserMemoryServices, VfsServices, VmServices,
 };
@@ -91,7 +91,7 @@ pub(crate) enum SelfTestError {
     ChannelErrorMapping,
     RecordEncoding,
     ValidationReachedService,
-    DeferredDispatch,
+    DispatchAction,
 }
 
 #[cfg(feature = "kernel-self-test")]
@@ -171,14 +171,12 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
         }
     }
 
-    impl super::services::ImmediateServices for RejectingServices {
+    impl HandleServices for RejectingServices {
         fn close_handle(&self, _: HandleValue) -> Result<(), ProcessError> {
             self.calls.set(self.calls.get().saturating_add(1));
             Err(ProcessError::Allocation)
         }
-    }
 
-    impl HandleServices for RejectingServices {
         fn handle_info(&self, _: HandleValue, _: Rights) -> Result<HandleInfo, ProcessError> {
             self.calls.set(self.calls.get().saturating_add(1));
             Err(ProcessError::Allocation)
@@ -1458,6 +1456,16 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
         }
     }
 
+    fn returning(
+        services: &impl super::services::NativeServices,
+        invocation: NativeInvocation,
+    ) -> Result<NativeResult, SelfTestError> {
+        match dispatch(services, invocation) {
+            NativeAction::Return(result) => Ok(result),
+            _ => Err(SelfTestError::DispatchAction),
+        }
+    }
+
     fn invoke(number: u64, arguments: [u64; 6]) -> NativeInvocation {
         NativeInvocation::new(number, arguments, 0x1000)
     }
@@ -1485,8 +1493,7 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
         for (argument, value) in [(1, 0), (1, u64::MAX), (2, 1), (4, 0), (4, size - 1), (5, 1)] {
             let mut args = valid;
             args[argument] = value;
-            let DeferredAction::Return(result) =
-                dispatch_deferred(&diagnostic_services, invoke(number, args))
+            let NativeAction::Return(result) = dispatch(&diagnostic_services, invoke(number, args))
             else {
                 return Err(SelfTestError::InvalidRecordSize);
             };
@@ -1496,8 +1503,7 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
                 return Err(SelfTestError::InvalidRecordSize);
             }
         }
-        let DeferredAction::Return(result) =
-            dispatch_deferred(&diagnostic_services, invoke(number, valid))
+        let NativeAction::Return(result) = dispatch(&diagnostic_services, invoke(number, valid))
         else {
             return Err(SelfTestError::InvalidRecordSize);
         };
@@ -1508,7 +1514,7 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
         }
     }
 
-    let query = dispatch_immediate(&services, invoke(HYPER_NATIVE_SYS_ABI_QUERY, [u64::MAX; 6]));
+    let query = returning(&services, invoke(HYPER_NATIVE_SYS_ABI_QUERY, [u64::MAX; 6]))?;
     if query.status() != HYPER_NATIVE_STATUS_OK
         || query.values() != &[HYPER_NATIVE_ABI_REVISION, HYPER_NATIVE_FEATURE_CORE]
     {
@@ -1516,12 +1522,12 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
     }
     let config = hyper::abi::native::HYPER_NATIVE_SYS_SYSTEM_CONFIG;
     let page_key = hyper::abi::native::HYPER_NATIVE_SYSTEM_CONFIG_PAGE_SIZE;
-    let page = dispatch_immediate(&services, invoke(config, [page_key, 0, 0, 0, 0, 0]));
+    let page = returning(&services, invoke(config, [page_key, 0, 0, 0, 0, 0]))?;
     if page.status() != HYPER_NATIVE_STATUS_OK || page.values() != &[hyper::mm::PAGE_SIZE, 0] {
         return Err(SelfTestError::AbiQuery);
     }
     for key in [0, u64::MAX] {
-        let unknown = dispatch_immediate(&services, invoke(config, [key, 0, 0, 0, 0, 0]));
+        let unknown = returning(&services, invoke(config, [key, 0, 0, 0, 0, 0]))?;
         if unknown.status() != HYPER_NATIVE_STATUS_NOT_SUPPORTED || unknown.values() != &[0, 0] {
             return Err(SelfTestError::AbiQuery);
         }
@@ -1529,23 +1535,23 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
     for index in 1..6 {
         let mut args = [page_key, 0, 0, 0, 0, 0];
         args[index] = 1;
-        let malformed = dispatch_immediate(&services, invoke(config, args));
+        let malformed = returning(&services, invoke(config, args))?;
         if malformed.status() != HYPER_NATIVE_STATUS_INVALID_ARGUMENT {
             return Err(SelfTestError::AbiQuery);
         }
     }
-    let first_clock = dispatch_immediate(
+    let first_clock = returning(
         &services,
         invoke(HYPER_NATIVE_SYS_CLOCK_GET_MONOTONIC, [0; 6]),
-    );
-    let second_clock = dispatch_immediate(
+    )?;
+    let second_clock = returning(
         &services,
         invoke(HYPER_NATIVE_SYS_CLOCK_GET_MONOTONIC, [0; 6]),
-    );
-    let malformed_clock = dispatch_immediate(
+    )?;
+    let malformed_clock = returning(
         &services,
         invoke(HYPER_NATIVE_SYS_CLOCK_GET_MONOTONIC, [1, 0, 0, 0, 0, 0]),
-    );
+    )?;
     if first_clock.status() != HYPER_NATIVE_STATUS_OK
         || first_clock.values()[1] != 0
         || second_clock.status() != HYPER_NATIVE_STATUS_OK
@@ -1558,30 +1564,27 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
     // Withdrawn file snapshot and bind calls must stay unimplemented, including
     // when an old binary supplies values that otherwise look like live handles.
     for number in [46, 115, 153, u64::MAX] {
-        let unknown = dispatch_immediate(&services, invoke(number, [u64::MAX; 6]));
-        if unknown != failure(HYPER_NATIVE_STATUS_NOT_SUPPORTED)
-            || dispatch_deferred(&services, invoke(number, [u64::MAX; 6]))
-                != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_NOT_SUPPORTED))
-        {
+        let unknown = returning(&services, invoke(number, [u64::MAX; 6]))?;
+        if unknown != failure(HYPER_NATIVE_STATUS_NOT_SUPPORTED) {
             return Err(SelfTestError::UnknownNumber);
         }
     }
-    if dispatch_deferred(
+    if dispatch(
         &services,
         invoke(HYPER_NATIVE_SYS_THREAD_YIELD, [u64::MAX; 6]),
-    ) != DeferredAction::Yield(success([0, 0]))
-        || dispatch_deferred(
+    ) != NativeAction::Yield(success([0, 0]))
+        || dispatch(
             &services,
             invoke(HYPER_NATIVE_SYS_THREAD_EXIT, [u64::MAX; 6]),
-        ) != (DeferredAction::ExitThread { status: -1 })
-        || dispatch_deferred(
+        ) != (NativeAction::ExitThread { status: -1 })
+        || dispatch(
             &services,
             invoke(HYPER_NATIVE_SYS_PROCESS_EXIT, [42, 0, 0, 0, 0, 0]),
-        ) != (DeferredAction::ExitProcess { status: 42 })
-        || dispatch_deferred(&services, invoke(u64::MAX, [u64::MAX; 6]))
-            != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_NOT_SUPPORTED))
+        ) != (NativeAction::ExitProcess { status: 42 })
+        || dispatch(&services, invoke(u64::MAX, [u64::MAX; 6]))
+            != NativeAction::Return(failure(HYPER_NATIVE_STATUS_NOT_SUPPORTED))
     {
-        return Err(SelfTestError::DeferredDispatch);
+        return Err(SelfTestError::DispatchAction);
     }
     let thread_services = RejectingServices {
         calls: Cell::new(0),
@@ -1592,29 +1595,29 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
         (0x2000, 5, HYPER_NATIVE_STATUS_INVALID_ARGUMENT),
         (u64::MAX, 1, HYPER_NATIVE_STATUS_FAULT),
     ] {
-        if dispatch_deferred(
+        if dispatch(
             &thread_services,
             invoke(
                 HYPER_NATIVE_SYS_THREAD_CREATE,
                 [0x1000, 0x2000, 0, 7, pointer, count],
             ),
-        ) != DeferredAction::Return(failure(expected))
+        ) != NativeAction::Return(failure(expected))
             || thread_services.calls.get() != 0
         {
             return Err(SelfTestError::ValidationReachedService);
         }
     }
     for (expected_calls, pointer, count) in [(1, 0, 0), (2, 0x3000, 1), (3, 0x3000, 4)] {
-        if dispatch_deferred(
+        if dispatch(
             &thread_services,
             invoke(
                 HYPER_NATIVE_SYS_THREAD_CREATE,
                 [0x1000, 0x2000, 0, 7, pointer, count],
             ),
-        ) != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+        ) != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
             || thread_services.calls.get() != expected_calls
         {
-            return Err(SelfTestError::DeferredDispatch);
+            return Err(SelfTestError::DispatchAction);
         }
     }
     let affinity_services = RejectingServices {
@@ -1636,28 +1639,28 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             HYPER_NATIVE_STATUS_INVALID_ARGUMENT,
         ),
     ] {
-        if dispatch_deferred(
+        if dispatch(
             &affinity_services,
             invoke(
                 hyper::abi::native::HYPER_NATIVE_SYS_VIRTUAL_CPU_SET_AFFINITY,
                 arguments,
             ),
-        ) != DeferredAction::Return(failure(expected))
+        ) != NativeAction::Return(failure(expected))
             || affinity_services.calls.get() != 0
         {
             return Err(SelfTestError::ValidationReachedService);
         }
     }
-    if dispatch_deferred(
+    if dispatch(
         &affinity_services,
         invoke(
             hyper::abi::native::HYPER_NATIVE_SYS_VIRTUAL_CPU_SET_AFFINITY,
             [affinity_handle, 0x2000, 1, 0, 0, 0],
         ),
-    ) != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_NOT_SUPPORTED))
+    ) != NativeAction::Return(failure(HYPER_NATIVE_STATUS_NOT_SUPPORTED))
         || affinity_services.calls.get() != 1
     {
-        return Err(SelfTestError::DeferredDispatch);
+        return Err(SelfTestError::DispatchAction);
     }
     for (error, status) in [
         (
@@ -1793,24 +1796,24 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
     {
         return Err(SelfTestError::ConsoleErrorMapping);
     }
-    let bad_handle = dispatch_immediate(
+    let bad_handle = returning(
         &services,
         invoke(HYPER_NATIVE_SYS_HANDLE_CLOSE, [0, 0, 0, 0, 0, 0]),
-    );
+    )?;
     if bad_handle.status() != HYPER_NATIVE_STATUS_BAD_HANDLE {
         return Err(SelfTestError::InvalidHandle);
     }
-    let bad_rights = dispatch_deferred(
+    let bad_rights = dispatch(
         &services,
         invoke(
             HYPER_NATIVE_SYS_HANDLE_DUPLICATE,
             [1_u64 << 24 | 1, u64::MAX, 0, 0, 0, 0],
         ),
     );
-    if bad_rights != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)) {
+    if bad_rights != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)) {
         return Err(SelfTestError::InvalidRights);
     }
-    let bad_size = dispatch_deferred(
+    let bad_size = dispatch(
         &services,
         invoke(
             HYPER_NATIVE_SYS_HANDLE_GET_INFO,
@@ -1824,7 +1827,7 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             ],
         ),
     );
-    if bad_size != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)) {
+    if bad_size != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)) {
         return Err(SelfTestError::InvalidRecordSize);
     }
     // Reject malformed generic-device requests before touching userspace or
@@ -1869,8 +1872,8 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             [1_u64 << 24 | 1, 0, 2, 0, 0, 0],
         ),
     ] {
-        if dispatch_deferred(&services, invoke(number, arguments))
-            != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+        if dispatch(&services, invoke(number, arguments))
+            != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
             || services.calls.get() != before_device_calls
         {
             return Err(SelfTestError::InvalidRecordSize);
@@ -1882,13 +1885,13 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
     let idle_irq_services = RejectingServices {
         calls: Cell::new(0),
     };
-    if dispatch_deferred(
+    if dispatch(
         &idle_irq_services,
         invoke(
             hyper::abi::native::HYPER_NATIVE_SYS_DEVICE_IRQ_COMPLETE,
             [1_u64 << 24 | 1, 0, 0, 0, 0, 0],
         ),
-    ) != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_NOT_SUPPORTED))
+    ) != NativeAction::Return(failure(HYPER_NATIVE_STATUS_NOT_SUPPORTED))
         || idle_irq_services.calls.get() != 1
     {
         return Err(SelfTestError::InvalidRecordSize);
@@ -1907,11 +1910,11 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             0,
         ],
     ] {
-        let result = dispatch_deferred(&services, invoke(
+        let result = dispatch(&services, invoke(
             hyper::abi::native::HYPER_NATIVE_SYS_VIRTUAL_MACHINE_CREATION_LEASE_GET_PLATFORM_INFO,
             arguments,
         ));
-        if result != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+        if result != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
             || services.calls.get() != before_platform_calls
         {
             return Err(SelfTestError::InvalidRecordSize);
@@ -1932,8 +1935,8 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             [1_u64 << 24 | 1, 0x2000, 1, 0, 0, 0],
         ),
     ] {
-        if dispatch_deferred(&services, invoke(number, arguments))
-            != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+        if dispatch(&services, invoke(number, arguments))
+            != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
             || services.calls.get() != before_namespace_calls
         {
             return Err(SelfTestError::InvalidRecordSize);
@@ -1953,14 +1956,14 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             0,
         ],
     ] {
-        let result = dispatch_deferred(
+        let result = dispatch(
             &services,
             invoke(
                 hyper::abi::native::HYPER_NATIVE_SYS_VMAR_MAP_PRIVATE,
                 arguments,
             ),
         );
-        if result != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+        if result != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
             || services.calls.get() != before_private_calls
         {
             return Err(SelfTestError::InvalidRecordSize);
@@ -1992,25 +1995,25 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             0,
         ],
     ] {
-        if dispatch_deferred(
+        if dispatch(
             &services,
             invoke(
                 hyper::abi::native::HYPER_NATIVE_SYS_VMAR_MAP_FILE,
                 arguments,
             ),
-        ) != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+        ) != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
             || services.calls.get() != before_private_calls
         {
             return Err(SelfTestError::InvalidRecordSize);
         }
     }
-    if dispatch_deferred(
+    if dispatch(
         &services,
         invoke(
             hyper::abi::native::HYPER_NATIVE_SYS_FILE_PROTECT,
             [1_u64 << 24 | 1, 1, 0, 0, 0, 0],
         ),
-    ) != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+    ) != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
         || services.calls.get() != before_private_calls
     {
         return Err(SelfTestError::InvalidRecordSize);
@@ -2135,11 +2138,11 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
     {
         return Err(SelfTestError::InvalidRecordSize);
     }
-    let empty_wait_many = dispatch_deferred(
+    let empty_wait_many = dispatch(
         &services,
         invoke(HYPER_NATIVE_SYS_OBJECT_WAIT_MANY, [0x2000, 0, 0, 0, 0, 0]),
     );
-    let oversized_wait_many = dispatch_deferred(
+    let oversized_wait_many = dispatch(
         &services,
         invoke(
             HYPER_NATIVE_SYS_OBJECT_WAIT_MANY,
@@ -2153,7 +2156,7 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             ],
         ),
     );
-    let bad_process_info_size = dispatch_deferred(
+    let bad_process_info_size = dispatch(
         &services,
         invoke(
             HYPER_NATIVE_SYS_PROCESS_GET_INFO,
@@ -2167,7 +2170,7 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             ],
         ),
     );
-    let bad_directory_page_capacity = dispatch_deferred(
+    let bad_directory_page_capacity = dispatch(
         &services,
         invoke(
             HYPER_NATIVE_SYS_DIRECTORY_READ,
@@ -2181,7 +2184,7 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             ],
         ),
     );
-    let bad_file_info_size = dispatch_deferred(
+    let bad_file_info_size = dispatch(
         &services,
         invoke(
             HYPER_NATIVE_SYS_FILE_GET_INFO,
@@ -2195,7 +2198,7 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             ],
         ),
     );
-    let bad_directory_info_size = dispatch_deferred(
+    let bad_directory_info_size = dispatch(
         &services,
         invoke(
             HYPER_NATIVE_SYS_DIRECTORY_GET_INFO,
@@ -2209,17 +2212,16 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             ],
         ),
     );
-    if empty_wait_many != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+    if empty_wait_many != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
         || oversized_wait_many
-            != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+            != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
         || bad_process_info_size
-            != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+            != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
         || bad_directory_page_capacity
-            != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
-        || bad_file_info_size
-            != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+            != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+        || bad_file_info_size != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
         || bad_directory_info_size
-            != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+            != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
     {
         return Err(SelfTestError::InvalidRecordSize);
     }
@@ -2242,8 +2244,8 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             (OPEN, [handle, u64::from(u32::MAX) + 1, 0, 0, 0, 0]),
             (OPEN, [handle, 0, 1, 0, 0, 0]),
         ] {
-            if dispatch_deferred(&services, invoke(number, arguments))
-                != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+            if dispatch(&services, invoke(number, arguments))
+                != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
             {
                 return Err(SelfTestError::InvalidRecordSize);
             }
@@ -2252,18 +2254,18 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             return Err(SelfTestError::InvalidRecordSize);
         }
     }
-    let bad_channel_create = dispatch_deferred(
+    let bad_channel_create = dispatch(
         &services,
         invoke(HYPER_NATIVE_SYS_BYTE_CHANNEL_CREATE, [1, 0, 0, 0, 0, 0]),
     );
-    let bad_channel_write = dispatch_deferred(
+    let bad_channel_write = dispatch(
         &services,
         invoke(
             HYPER_NATIVE_SYS_BYTE_CHANNEL_WRITE,
             [1_u64 << 24 | 1, 1, 0, 0, 0, 0],
         ),
     );
-    let bad_channel_read = dispatch_deferred(
+    let bad_channel_read = dispatch(
         &services,
         invoke(
             HYPER_NATIVE_SYS_BYTE_CHANNEL_READ,
@@ -2277,28 +2279,27 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             ],
         ),
     );
-    if bad_channel_create != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
-        || bad_channel_write
-            != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
-        || bad_channel_read != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+    if bad_channel_create != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+        || bad_channel_write != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+        || bad_channel_read != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
     {
         return Err(SelfTestError::ChannelValidation);
     }
-    let bad_capability_create = dispatch_deferred(
+    let bad_capability_create = dispatch(
         &services,
         invoke(
             HYPER_NATIVE_SYS_CAPABILITY_CHANNEL_CREATE,
             [1, 0, 0, 0, 0, 0],
         ),
     );
-    let bad_capability_send_options = dispatch_deferred(
+    let bad_capability_send_options = dispatch(
         &services,
         invoke(
             HYPER_NATIVE_SYS_CAPABILITY_CHANNEL_TRY_SEND,
             [1_u64 << 24 | 1, 1, 0, 0, 0, 0],
         ),
     );
-    let oversized_capability_send = dispatch_deferred(
+    let oversized_capability_send = dispatch(
         &services,
         invoke(
             HYPER_NATIVE_SYS_CAPABILITY_CHANNEL_TRY_SEND,
@@ -2312,7 +2313,7 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             ],
         ),
     );
-    let oversized_capability_receive = dispatch_deferred(
+    let oversized_capability_receive = dispatch(
         &services,
         invoke(
             HYPER_NATIVE_SYS_CAPABILITY_CHANNEL_RECEIVE,
@@ -2332,14 +2333,13 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
     // send and receive records may evolve to different ABI sizes.
     let narrow_record_bytes = capability_record_bytes::<[u8; 7]>(3);
     let wide_record_bytes = capability_record_bytes::<[u8; 13]>(5);
-    if bad_capability_create
-        != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+    if bad_capability_create != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
         || bad_capability_send_options
-            != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+            != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
         || oversized_capability_send
-            != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+            != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
         || oversized_capability_receive
-            != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+            != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
         || disposition_bytes
             != Ok(3 * core::mem::size_of::<HyperNativeCapabilityDisposition>() as u64)
         || receive_slot_bytes
@@ -2349,14 +2349,14 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
     {
         return Err(SelfTestError::CapabilityChannelValidation);
     }
-    let bad_console_options = dispatch_deferred(
+    let bad_console_options = dispatch(
         &services,
         invoke(
             HYPER_NATIVE_SYS_CONSOLE_READ,
             [1_u64 << 24 | 1, 1, 0, 0, 0, 0],
         ),
     );
-    let oversized_console_write = dispatch_deferred(
+    let oversized_console_write = dispatch(
         &services,
         invoke(
             HYPER_NATIVE_SYS_CONSOLE_WRITE,
@@ -2370,9 +2370,9 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             ],
         ),
     );
-    if bad_console_options != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+    if bad_console_options != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
         || oversized_console_write
-            != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+            != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
     {
         return Err(SelfTestError::ConsoleValidation);
     }
@@ -2391,14 +2391,14 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
     }
     let mut missing_loader = builder_authorities;
     missing_loader[4] = 0;
-    if dispatch_deferred(
+    if dispatch(
         &services,
         invoke(HYPER_NATIVE_SYS_PROCESS_BUILDER_CREATE, missing_loader),
-    ) != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_BAD_HANDLE))
+    ) != NativeAction::Return(failure(HYPER_NATIVE_STATUS_BAD_HANDLE))
     {
         return Err(SelfTestError::ProcessBuilderValidation);
     }
-    let oversized_builder_name = dispatch_deferred(
+    let oversized_builder_name = dispatch(
         &services,
         invoke(
             HYPER_NATIVE_SYS_PROCESS_BUILDER_SET_NAME,
@@ -2412,7 +2412,7 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             ],
         ),
     );
-    let oversized_affinity = dispatch_deferred(
+    let oversized_affinity = dispatch(
         &services,
         invoke(
             HYPER_NATIVE_SYS_PROCESS_BUILDER_SET_AFFINITY,
@@ -2426,7 +2426,7 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             ],
         ),
     );
-    let bad_process_builder_kind = dispatch_deferred(
+    let bad_process_builder_kind = dispatch(
         &services,
         invoke(
             HYPER_NATIVE_SYS_PROCESS_BUILDER_ADD_HANDLE,
@@ -2440,7 +2440,7 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             ],
         ),
     );
-    let bad_process_builder_operation = dispatch_deferred(
+    let bad_process_builder_operation = dispatch(
         &services,
         invoke(
             HYPER_NATIVE_SYS_PROCESS_BUILDER_ADD_HANDLE,
@@ -2462,14 +2462,12 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
         HYPER_NATIVE_CAPABILITY_DISPOSITION_SAME_RIGHTS,
         HYPER_NATIVE_CAPABILITY_DISPOSITION_MOVE,
     ]);
-    if oversized_builder_name
-        != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
-        || oversized_affinity
-            != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+    if oversized_builder_name != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+        || oversized_affinity != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
         || bad_process_builder_kind
-            != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+            != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
         || bad_process_builder_operation
-            != DeferredAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
+            != NativeAction::Return(failure(HYPER_NATIVE_STATUS_INVALID_ARGUMENT))
         || !matches!(
             same_rights_builder_handle,
             Ok((

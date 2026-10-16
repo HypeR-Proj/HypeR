@@ -3,12 +3,12 @@
 
 //! Native memory service calls under borrowed Process authority.
 
-use super::DeferredProcessServices;
+use super::ProcessServices;
 use crate::kernel::abi::native::MemoryServices;
 use crate::kernel::capability::HandleValue;
 use crate::kernel::mm::user_space::UserSlice;
 
-impl MemoryServices for DeferredProcessServices<'_> {
+impl MemoryServices for ProcessServices<'_> {
     fn create_contiguous_vmo(
         &self,
         size: u64,

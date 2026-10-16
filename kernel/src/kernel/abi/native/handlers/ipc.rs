@@ -4,7 +4,7 @@
 //! Native ipc syscall validation.
 
 use crate::kernel::abi::native::Arguments;
-use crate::kernel::abi::native::services::{DeferredAction, IpcServices};
+use crate::kernel::abi::native::services::{IpcServices, NativeAction};
 use crate::kernel::abi::native::status::{
     failure, status_from_byte_channel_service_error, status_from_capability_channel_error,
     status_from_capability_channel_service_error, status_only, success,
@@ -59,20 +59,20 @@ pub(in crate::kernel::abi::native) fn sys_capability_channel_create(
 pub(in crate::kernel::abi::native) fn sys_byte_channel_write(
     services: &impl IpcServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_byte_channel_io(arguments).and_then(|(endpoint, bytes)| {
         services
             .write_byte_channel(endpoint, bytes)
             .map_err(status_from_byte_channel_service_error)
     });
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_byte_channel_read(
     services: &impl IpcServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_byte_channel_io(arguments).and_then(|(endpoint, bytes)| {
         services
             .read_byte_channel(endpoint, bytes)
@@ -87,28 +87,28 @@ pub(in crate::kernel::abi::native) fn sys_byte_channel_read(
         ),
         Err(status) => failure(status),
     };
-    DeferredAction::Return(result)
+    NativeAction::Return(result)
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_capability_channel_try_send(
     services: &impl IpcServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result =
         parse_capability_channel_send(arguments).and_then(|(endpoint, bytes, dispositions)| {
             services
                 .try_send_capability_channel(endpoint, bytes, dispositions)
                 .map_err(status_from_capability_channel_service_error)
         });
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_capability_channel_receive(
     services: &impl IpcServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_capability_channel_receive(arguments).and_then(
         |(endpoint, deadline, bytes, slots)| {
             services
@@ -116,7 +116,7 @@ pub(in crate::kernel::abi::native) fn sys_capability_channel_receive(
                 .map_err(status_from_capability_channel_service_error)
         },
     );
-    DeferredAction::Return(capability_receive_result(result))
+    NativeAction::Return(capability_receive_result(result))
 }
 
 pub(in crate::kernel::abi::native) fn capability_receive_result(

@@ -13,39 +13,43 @@ use crate::abi::native::{NativeInvocation, NativeResult};
 pub enum NativeCallAction {
     /// Encode the completed result in the interrupted frame and return to EL0.
     Return(NativeResult),
-    /// Stop the machine run and continue on the ordinary kernel Thread stack.
-    Unwind,
+    /// Close this run without returning to userspace. Policy owns the reason.
+    Stop,
 }
 
-/// Nonblocking policy callable while a Native user machine run is active.
+/// Thread-owned policy callable from a Native synchronous exception.
 ///
 /// # Safety
 ///
-/// Implementations run with local interrupts masked, preemption disabled, and
-/// the caller's user translation still installed. They must not block,
-/// schedule, retain `invocation`, or invoke an operation that requires leaving
-/// the current CPU. Returning [`NativeCallAction::Return`] asserts that all
-/// work completed under those restrictions. A call requiring ordinary kernel
-/// execution must return [`NativeCallAction::Unwind`] without side effects.
+/// Entry and return have local interrupts masked. The implementation enters
+/// ordinary interruptible, preemptible Thread context before dispatching and
+/// may block or migrate. The scheduler must suspend the architecture's active
+/// Native publication and translation before every actual context switch.
+/// Returning [`NativeCallAction::Return`] requires an admitted translation on
+/// the current CPU and a completed stop/preemption check. No CPU-affine guard
+/// or borrow may span the interruptible portion. The handler and its owning
+/// Thread remain alive until the machine run has closed.
 pub unsafe trait NativeCallHandler {
-    /// Handles one invocation under the Native exception-entry restrictions.
+    /// Handles one owned invocation on the current Thread's kernel stack.
     ///
     /// # Safety
     ///
-    /// The caller must satisfy the interrupt, preemption, translation,
-    /// CPU-affinity, and lifetime conditions documented on this trait.
+    /// The caller must satisfy this trait's entry, lifetime, and scheduler
+    /// suspension contract. No architecture-frame reference crosses this call.
     unsafe fn dispatch(&self, invocation: NativeInvocation) -> NativeCallAction;
 }
 
 /// Borrowed, type-erased Native exception service for one machine run.
 ///
-/// The value is CPU-affine. Architecture entry may publish its address only
-/// while the borrow and the current Thread's execution pin remain active.
+/// The service follows its Thread across blocking and migration. Architecture
+/// entry publishes its address only while that Thread owns the CPU's Native
+/// machine state, and withdraws it before switching to another Thread. The
+/// service itself and its handler borrow remain live until the run closes.
 pub struct NativeCallService<'handler> {
     handler: NonNull<()>,
     dispatch: unsafe fn(NonNull<()>, NativeInvocation) -> NativeCallAction,
     _lifetime: PhantomData<&'handler ()>,
-    _not_send: PhantomData<*mut ()>,
+    _thread_owned: PhantomData<*mut ()>,
 }
 
 impl<'handler> NativeCallService<'handler> {
@@ -66,7 +70,7 @@ impl<'handler> NativeCallService<'handler> {
             handler: NonNull::from(handler).cast(),
             dispatch: dispatch::<T>,
             _lifetime: PhantomData,
-            _not_send: PhantomData,
+            _thread_owned: PhantomData,
         }
     }
 
@@ -74,7 +78,7 @@ impl<'handler> NativeCallService<'handler> {
     ///
     /// # Safety
     ///
-    /// The caller must own the CPU-pinned machine run which published this
+    /// The caller must own the Thread's machine run which published this
     /// service and satisfy [`NativeCallHandler::dispatch`]'s context contract.
     pub unsafe fn handle(&self, invocation: NativeInvocation) -> NativeCallAction {
         // SAFETY: Construction binds this function pointer and erased address

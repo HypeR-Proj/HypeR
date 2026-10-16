@@ -219,36 +219,46 @@ For Native calls, the architecture entry adapter:
    `NativeInvocation`;
 3. passes no private-frame reference or architecture offset to policy;
 4. invokes the borrowed `kernel::entry::user` service; and
-5. either encodes an immediate `NativeResult` and returns through the vector,
-   or captures an owned stopped context and unwinds to the Thread continuation.
+5. encodes its `NativeResult` and returns through the vector, or captures a
+   terminal context when Thread or Process stop forbids user return.
 
-An immediate service runs with interrupts masked, preemption disabled, and the
-current user translation active. Its unsafe implementation contract forbids
-blocking, scheduling, CPU migration, retained invocation state, and any
-operation which requires the ordinary kernel translation. An explicit
-Never-blocking allowlist selects this path; every new or unknown syscall number
-defaults to unwind until its complete implementation is audited for this
-contract. The borrowed service exists only for one pinned machine run and is
-withdrawn and destroyed before that run releases its CPU pin. A blocking call
-must select unwind before producing side effects.
+Every syscall runs on its Thread's kernel stack with normal IRQ delivery and
+preemption enabled. The single dispatcher handles queries, user copies,
+allocation, IPC and blocking operations; unknown numbers return
+`NOT_SUPPORTED` through the same path. A syscall which completes without a
+context switch retains its active translation and resident user FP bank. The
+kernel itself keeps FP access disabled. User copies may populate file pages or
+resolve COW through the normal mapping transaction and acknowledged replacement
+protocol while that Process is active.
 
-The immediate service interface exposes only handle close; ABI revision and
-monotonic clock queries need no Process service. User-memory copies and handle
-inspection, duplication, and replacement are available only to deferred
-handlers. In particular, a user copy may resolve COW and must not become
-reachable through an immediate handler's service bound. The immediate entry
-adapter does not implement these deferred service traits.
+A blocking call suspends this same kernel continuation. Before an actual
+scheduler switch, the outgoing Thread withdraws its CPU-local Native
+publication, saves and clears any resident user FP state, and leaves its active
+translation. This occurs before another CPU may run the Thread. After waking,
+the syscall continues under ordinary kernel translation, and may sleep again.
+The final return boundary checks stop and pending scheduling work, then acquires
+an ASID and activates the current mapping epoch on the then-current CPU if the
+call was suspended. The no-switch path needs no repeated root activation.
+No CPU-affine guard survives migration.
 
-The unwind return capability is linear and bound to the exact stopped
-`UserContext` plus its Thread, ProcessImage generation, and run generation.
-Machine-active CPU pinning and translation ownership end before deferred policy
-dispatch; a separate stopped-run token keeps that logical generation occupied
-until completion. This makes a stopped continuation migratable without
-exporting or retaining the raw exception frame. Dropping an armed return owner
-enters a lock-, allocation-, and diagnostic-free fail-stop. Exit and termination consume it explicitly. Architecture result encoding is
-proven infallible before a deferred syscall may publish new capabilities; an
-impossible post-publication encoding failure retains the capabilities and
-enters fail-stop rather than attempting rollback.
+AArch64 permits kernel IRQ-tail preemption during the syscall. RISC-V retains
+its existing host IRQ-tail limitation and schedules at explicit waits, yields,
+and the final return boundary; its syscall body still admits normal IRQ delivery.
+
+The Process and UserThread authority, logical run generation, and
+architecture-private syscall frame belong to the stable Thread continuation.
+Scheduling does not expose that frame to policy or complete the syscall twice.
+Exit and cancellation suppress user return even if a service has already
+produced a result. Fixed-width result encoding is infallible; a syscall which
+published capabilities never attempts rollback merely because stop arrived
+before user return.
+
+Lower-user faults and preemption still capture owned state and unwind the
+machine run. Their return capability is linear and bound to the exact stopped
+`UserContext`, Thread, ProcessImage generation, and run generation. The stopped
+run remains occupied until the caller resumes or discards that capability.
+Dropping an armed return owner enters a lock-, allocation-, and diagnostic-free
+fail-stop.
 
 Architecture entry does not interpret syscall numbers, handles, or process
 policy. Kernel services return typed internal errors; the Native adapter maps
@@ -971,7 +981,11 @@ Threads in one Process may execute concurrently on several CPUs. Native roots
 therefore carry an active-CPU residency set, mapping epoch, acknowledged
 shootdown, and stable software identity. Runtime ASID leases belong to a
 separate rollover namespace from guest VMID leases. Mapping removal cannot release physical backing until every relevant
-CPU has acknowledged the old root's retirement. Hardware qualification must
+CPU has acknowledged the old root's retirement. AArch64 disconnects the old
+lower hierarchy through the permanently retained empty boot root before
+invalidating its ASID; context synchronization prevents speculative old-root
+refills after invalidation. Replacement installs the new root only after that
+invalidation completes. Hardware qualification must
 verify exception routing, SMP migration, cache and TLB maintenance, FP/SIMD,
 TLS, counter access, and transitions between Native EL0, the host, and guests.
 
@@ -995,8 +1009,9 @@ describes executable loading and service bootstrap; the
 Verification follows the affected boundary:
 
 - Host tests exercise portable ownership, lifecycle, handle and ABI mechanisms.
-- Kernel self-tests exercise direct calls, deferred unwind and re-entry,
-  user faults, thread/process exit and resource retirement.
+- Kernel self-tests exercise direct calls, COW copyout, blocking continuation
+  migration with FP/TLS preservation, user faults, Thread/Process stop, ASID
+  rollover, and resource retirement.
 - Native QEMU acceptance exercises the assembled SDK, std and apps through
   userspace init, services and the command shell.
 - Guest and I/O VM acceptance exercises userspace VM management, console and

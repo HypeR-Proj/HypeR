@@ -4,7 +4,7 @@
 //! Bounded, read-only allocator diagnostics under `MemoryInspector` authority.
 use crate::kernel::abi::native::{
     Arguments,
-    services::{DeferredAction, SystemInspectServices},
+    services::{NativeAction, SystemInspectServices},
     status::{info_result, status_from_inspection_error},
     wire::{copy_info_record, memory_statistics, prepare_info_request},
 };
@@ -22,7 +22,7 @@ const _: () =
 pub(in crate::kernel::abi::native) fn sys_memory_inspector_read_statistics(
     services: &impl SystemInspectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         if arguments[5] != 0 {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
@@ -76,5 +76,5 @@ pub(in crate::kernel::abi::native) fn sys_memory_inspector_read_statistics(
         let encoded = memory_statistics::encode(snapshot, &mut record);
         copy_info_record(services, request, &record[..encoded])
     })();
-    DeferredAction::Return(info_result(result))
+    NativeAction::Return(info_result(result))
 }

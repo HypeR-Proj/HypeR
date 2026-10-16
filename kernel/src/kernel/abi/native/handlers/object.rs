@@ -4,7 +4,7 @@
 //! Native object syscall validation.
 
 use crate::kernel::abi::native::Arguments;
-use crate::kernel::abi::native::services::{DeferredAction, ObjectServiceError, ObjectServices};
+use crate::kernel::abi::native::services::{NativeAction, ObjectServiceError, ObjectServices};
 use crate::kernel::abi::native::status::{
     failure, handle_result, status_from_address_error, status_from_object_service_error,
     status_only, success,
@@ -36,20 +36,20 @@ pub(in crate::kernel::abi::native) fn sys_event_create(
 pub(in crate::kernel::abi::native) fn sys_event_signal(
     services: &impl ObjectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_handle(arguments[0]).and_then(|value| {
         services
             .signal_event(value, arguments[1], arguments[2])
             .map_err(status_from_object_service_error)
     });
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_object_wait_one(
     services: &impl ObjectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_handle(arguments[0]).and_then(|value| {
         services
             .wait_one(value, arguments[1], arguments[2])
@@ -61,14 +61,14 @@ pub(in crate::kernel::abi::native) fn sys_object_wait_one(
         Ok(SignalWaitOutcome::Cancelled) => failure(HYPER_NATIVE_STATUS_CANCELLED),
         Err(status) => failure(status),
     };
-    DeferredAction::Return(result)
+    NativeAction::Return(result)
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_object_wait_many(
     services: &impl ObjectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_wait_many(arguments).and_then(|(items, item_count, deadline)| {
         services
             .wait_many(items, item_count, deadline)
@@ -83,14 +83,14 @@ pub(in crate::kernel::abi::native) fn sys_object_wait_many(
         Ok(SignalWaitManyOutcome::Cancelled) => failure(HYPER_NATIVE_STATUS_CANCELLED),
         Err(status) => failure(status),
     };
-    DeferredAction::Return(result)
+    NativeAction::Return(result)
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_wait_set_create(
     services: &impl ObjectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         if arguments[1..].iter().any(|value| *value != 0) {
             return Err(ObjectServiceError::InvalidInput);
@@ -99,7 +99,7 @@ pub(in crate::kernel::abi::native) fn sys_wait_set_create(
             usize::try_from(arguments[0]).map_err(|_| ObjectServiceError::InvalidInput)?,
         )
     })();
-    DeferredAction::Return(match result {
+    NativeAction::Return(match result {
         Ok(value) => success([value.get(), 0]),
         Err(error) => failure(status_from_object_service_error(error)),
     })
@@ -109,7 +109,7 @@ pub(in crate::kernel::abi::native) fn sys_wait_set_create(
 pub(in crate::kernel::abi::native) fn sys_wait_set_add(
     services: &impl ObjectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         if arguments[3..].iter().any(|value| *value != 0) {
             return Err(ObjectServiceError::InvalidInput);
@@ -120,7 +120,7 @@ pub(in crate::kernel::abi::native) fn sys_wait_set_add(
             arguments[2],
         )
     })();
-    DeferredAction::Return(match result {
+    NativeAction::Return(match result {
         Ok(value) => success([value, 0]),
         Err(error) => failure(status_from_object_service_error(error)),
     })
@@ -130,7 +130,7 @@ pub(in crate::kernel::abi::native) fn sys_wait_set_add(
 pub(in crate::kernel::abi::native) fn sys_wait_set_rearm(
     services: &impl ObjectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         if arguments[2..].iter().any(|value| *value != 0) {
             return Err(ObjectServiceError::InvalidInput);
@@ -140,7 +140,7 @@ pub(in crate::kernel::abi::native) fn sys_wait_set_rearm(
             arguments[1],
         )
     })();
-    DeferredAction::Return(match result {
+    NativeAction::Return(match result {
         Ok(_) => success([0, 0]),
         Err(error) => failure(status_from_object_service_error(error)),
     })
@@ -150,7 +150,7 @@ pub(in crate::kernel::abi::native) fn sys_wait_set_rearm(
 pub(in crate::kernel::abi::native) fn sys_wait_set_remove(
     services: &impl ObjectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         if arguments[2..].iter().any(|value| *value != 0) {
             return Err(ObjectServiceError::InvalidInput);
@@ -160,7 +160,7 @@ pub(in crate::kernel::abi::native) fn sys_wait_set_remove(
             arguments[1],
         )
     })();
-    DeferredAction::Return(match result {
+    NativeAction::Return(match result {
         Ok(_) => success([0, 0]),
         Err(error) => failure(status_from_object_service_error(error)),
     })
@@ -170,7 +170,7 @@ pub(in crate::kernel::abi::native) fn sys_wait_set_remove(
 pub(in crate::kernel::abi::native) fn sys_wait_set_wait(
     services: &impl ObjectServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         if arguments[3] != 24 || arguments[4] != 0 || arguments[5] != 0 {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
@@ -182,5 +182,5 @@ pub(in crate::kernel::abi::native) fn sys_wait_set_wait(
             .wait_set_wait(set, arguments[1], output)
             .map_err(status_from_object_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }

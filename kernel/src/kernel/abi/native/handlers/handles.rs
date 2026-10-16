@@ -4,7 +4,7 @@
 //! Native handles syscall validation.
 
 use crate::kernel::abi::native::Arguments;
-use crate::kernel::abi::native::services::{HandleServices, ImmediateServices};
+use crate::kernel::abi::native::services::HandleServices;
 use crate::kernel::abi::native::status::{
     handle_result, info_result, status_from_process_error, status_only,
 };
@@ -19,7 +19,7 @@ use hyper::abi::native::{
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_handle_close(
-    services: &impl ImmediateServices,
+    services: &impl HandleServices,
     arguments: &Arguments,
 ) -> NativeResult {
     let result = parse_handle(arguments[0]).and_then(|value| {

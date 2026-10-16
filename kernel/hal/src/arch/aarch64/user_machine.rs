@@ -229,27 +229,38 @@ pub(crate) unsafe fn activate_local(
     if epoch == 0 || local_generation().load(Ordering::Acquire) != 0 {
         hyper::debug::invariant_failure("aarch64/user_machine::activate_local invariant");
     }
+    let previous_root: u64;
+    let previous_hcr: u64;
+    // SAFETY: Admission excludes another local Native activation.
+    unsafe {
+        asm!(
+            "mrs {root}, TTBR0_EL2",
+            "mrs {hcr}, HCR_EL2",
+            root=out(reg) previous_root,
+            hcr=out(reg) previous_hcr,
+            options(nomem,nostack,preserves_flags)
+        );
+    }
+    let host_mode = registers::HCR_EL2_E2H | registers::HCR_EL2_TGE;
+    if previous_root != memory::idle_lower_root() || previous_hcr & host_mode != host_mode {
+        hyper::debug::invariant_failure("native activation requires the idle host root");
+    }
     if seen.load(Ordering::Relaxed) != epoch {
         invalidate_all_local();
         seen.store(epoch, Ordering::Relaxed);
     }
-    let previous_root: u64;
-    let previous_hcr: u64;
     let operand = u64::from(identifier) << registers::TTBR_ASID_SHIFT;
     let encoded = encode_root(root, identifier);
-    // SAFETY: Admission and the retained lease exclude reuse of this tag.
+    // SAFETY: The installed empty root uses ASID zero, so no walk can refill
+    // the nonzero target tag after invalidation. Admission retains its lease.
     unsafe {
         asm!(
-            "mrs {previous_root}, TTBR0_EL2",
-            "mrs {previous_hcr}, HCR_EL2",
             "tlbi aside1, {operand}",
             "dsb ish",
             "msr TTBR0_EL2, {root}",
             "isb",
             operand=in(reg) operand,
             root=in(reg) encoded,
-            previous_root=out(reg) previous_root,
-            previous_hcr=out(reg) previous_hcr,
             options(nostack,preserves_flags)
         );
     }
@@ -306,12 +317,16 @@ fn invalidate_all_local() {
 /// lower-EL execution has stopped and while update admission remains excluded.
 pub(crate) unsafe fn deactivate_local(activation: LocalActivation) {
     let operand = u64::from(activation.installed_identifier) << registers::TTBR_ASID_SHIFT;
-    // SAFETY: The consumed CPU-affine token supplies same-PE ownership.
+    // SAFETY: Activation retained the permanently empty predecessor root and
+    // verified its host HCR. Disconnect the departing hierarchy before TLBI:
+    // leaving it installed would allow speculative refills after invalidation.
+    // Keep the host regime until its ASID invalidation has completed.
     unsafe {
         asm!(
+            "msr TTBR0_EL2, {root}",
+            "isb",
             "tlbi aside1, {operand}",
             "dsb ish",
-            "msr TTBR0_EL2, {root}",
             "msr HCR_EL2, {hcr}",
             "isb",
             operand=in(reg) operand,
@@ -342,10 +357,26 @@ pub(crate) unsafe fn replace_local(root: &PreparedAddressSpace) {
     let identifier = (current >> registers::TTBR_ASID_SHIFT) as u16;
     let encoded = encode_root(root, identifier);
     let operand = u64::from(identifier) << registers::TTBR_ASID_SHIFT;
-    // SAFETY: The update cut retains both roots and closes local user execution.
+    let disconnected = memory::idle_lower_root() | operand;
+    // SAFETY: The update cut retains both hierarchies and excludes EL0. Break
+    // the old root's reachability before invalidating its ASID; otherwise old
+    // speculative walks can refill the TLB between TLBI and the TTBR write.
+    // The permanent empty root cannot populate lower translations. ISB makes
+    // that break effective, and DSB completes retirement before the new root
+    // becomes reachable. Kernel execution uses the unchanged upper hierarchy.
     unsafe {
-        asm!("tlbi aside1, {operand}", "dsb ish", "msr TTBR0_EL2, {root}", "isb",
-            operand=in(reg) operand, root=in(reg) encoded, options(nostack, preserves_flags));
+        asm!(
+            "msr TTBR0_EL2, {disconnected}",
+            "isb",
+            "tlbi aside1, {operand}",
+            "dsb ish",
+            "msr TTBR0_EL2, {root}",
+            "isb",
+            disconnected=in(reg) disconnected,
+            operand=in(reg) operand,
+            root=in(reg) encoded,
+            options(nostack, preserves_flags)
+        );
     }
 }
 
@@ -363,6 +394,9 @@ pub(crate) unsafe fn service_local_request(request: LocalRequest) -> Result<(), 
             // SAFETY: The kernel validated this active owner and mapping epoch.
             unsafe { replace_local(&root) };
         }
+        // Invalidation targets only an inactive owner. Its hierarchy is no
+        // longer reachable from TTBR0; refills belonging to another retained
+        // active owner do not compromise this request's retirement.
         LocalOperation::Invalidate => invalidate_all_local(),
     }
     Ok(())
