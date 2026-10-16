@@ -217,7 +217,19 @@ Retention is volatile: 1 MiB/4096 records globally and 128 KiB/512 records per
 component. Lines split at 4096 bytes; partial lines flush after their source has
 been idle for at least 100 ms, or immediately on EOF. New fragments restart that
 source's idle interval, so a timer tick cannot split a line just received.
-Admission and per-tick work are bounded. Queries use bounded framed byte replies;
+Retention uses a sequence index and per-component byte/count accounting; appending
+a record does not scan the retained history. Component quotas span streams and
+execution generations, and the accounting entry disappears with its last record.
+Each ingestion pass handles at most 16 admissions before servicing active sources;
+connection churn cannot monopolize the pass. A source yields after eight messages
+or at least 64 KiB (the last message is consumed whole). Line batches contain at most
+64 records and 16 KiB. Parsing and nonblocking mirror writes run outside the
+retention lock. Queries select at most 128 records/24 KiB under that lock, then
+materialize and serialize the reply outside it. At most eight query sessions can
+hold such pages; an evicted record lives only until those bounded readers release
+it. The byte quotas estimate retained record cost, not total process RSS; indices,
+input buffers and in-flight replies also consume bounded memory.
+Queries use bounded framed byte replies;
 clients cannot retain journal-sponsored reply VMOs. The CLI escapes terminal control
 characters, reports retention loss and uses a fixed upper cursor for initial lists.
 
@@ -225,16 +237,29 @@ Logs mirror to raw serial during startup and after terminal activation, alongsid
 ordinary kernel logs. The mirror uses each source's line framing, rather than
 mixing individual stdout/stderr write fragments. Partial records also terminate a
 physical line, while retained records preserve their continuation flag. Logs may
-interrupt the interactive display. A full mirror queue drops bytes and
-counts them without blocking retention; producer queues provide bounded backpressure.
+interrupt the interactive display. If the mirror queue cannot accept a complete
+batch, that batch is dropped from the mirror and its bytes are counted; retained
+records are unaffected. Producer queues provide bounded backpressure.
 This is not a durable audit log. Panic output remains an independent kernel path.
 
 ## Verification
 
 `make app-test APP_TEST_PACKAGE=hyper-component-config` checks tree/route policy;
 `hyper-component-manager` checks lifecycle arbitration; `hyper-system-startup`
-checks adoption/provisioning policy; `hyper-journald` checks retention.
+checks adoption/provisioning policy; `hyper-journald` checks retention, indexed
+eviction, query lifetime and batched line framing.
 `make test-services` exercises nested routes, eight concurrent lazy connections,
 separate observation/control authority, stdio, connection deadlines, restart bounds
 and retirement using actual Native processes. See [bootstrap handoff](bootstrap-handoff.md)
 and [boot layout](boot-layout.md) for the filesystem and ownership contracts.
+
+For a manual host retention microbenchmark, build the optimized test executable:
+
+```sh
+make app-test APP_TEST_PACKAGE=hyper-journald APP_TEST_ARGS='--release --lib --no-run'
+```
+
+Run the executable printed by Cargo with `retention_throughput --ignored --nocapture`.
+It measures appends with one or sixteen producers and interleaved queries, excluding
+IPC, scheduling and serial I/O. This is not an end-to-end logging throughput claim
+or a CI performance threshold.
