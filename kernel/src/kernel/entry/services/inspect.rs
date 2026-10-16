@@ -3,7 +3,7 @@
 
 //! Native inspection service calls under borrowed Process authority.
 
-use super::DeferredProcessServices;
+use super::ProcessServices;
 use crate::kernel::abi::native::{InspectServices, SystemInspectServices};
 use crate::kernel::accounting::ResourceDomainObject;
 use crate::kernel::capability::{HandleValue, Rights};
@@ -11,7 +11,7 @@ use crate::kernel::inspect::{CpuInspector, MemoryInspector, ObjectInspector, Tas
 use crate::kernel::object::KernelObject;
 use crate::kernel::process::{ProcessObject, ProcessSnapshot, TaskGroupObject};
 
-impl SystemInspectServices for DeferredProcessServices<'_> {
+impl SystemInspectServices for ProcessServices<'_> {
     fn memory_statistics(
         &self,
         inspector: HandleValue,
@@ -47,7 +47,7 @@ impl SystemInspectServices for DeferredProcessServices<'_> {
     }
 }
 
-impl InspectServices for DeferredProcessServices<'_> {
+impl InspectServices for ProcessServices<'_> {
     fn scan_processes(
         &self,
         inspector: HandleValue,

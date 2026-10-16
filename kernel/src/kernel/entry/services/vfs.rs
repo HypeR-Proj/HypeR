@@ -3,14 +3,14 @@
 
 //! Filesystem calls need Process authority and the calling Thread cancellation state.
 
-use super::DeferredProcessServices;
+use super::ProcessServices;
 use crate::kernel::abi::native::VfsServices;
 use crate::kernel::capability::{HandleValue, Rights};
 use crate::kernel::mm::user_space::UserSlice;
 use crate::kernel::process::UserThreadPhase;
 use crate::kernel::vfs::VfsServiceError;
 
-impl VfsServices for DeferredProcessServices<'_> {
+impl VfsServices for ProcessServices<'_> {
     fn mount_ramfs(&self, directory: HandleValue, path: UserSlice) -> Result<(), VfsServiceError> {
         super::vfs_namespace::mount_ramfs(self.process, directory, path)
     }

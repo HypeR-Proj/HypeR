@@ -4,7 +4,7 @@
 //! Explicit namespace administration; no boot layout is implied by these calls.
 
 use crate::kernel::abi::native::Arguments;
-use crate::kernel::abi::native::services::{DeferredAction, VfsServices};
+use crate::kernel::abi::native::services::{NativeAction, VfsServices};
 use crate::kernel::abi::native::status::{
     status_from_address_error, status_from_vfs_service_error, status_only,
 };
@@ -23,7 +23,7 @@ fn path(address: u64, length: u64) -> Result<UserSlice, abi::HyperNativeStatus> 
 pub(in crate::kernel::abi::native) fn sys_filesystem_mount_ramfs(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[3..])?;
         services
@@ -33,14 +33,14 @@ pub(in crate::kernel::abi::native) fn sys_filesystem_mount_ramfs(
             )
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_filesystem_switch_root(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[2..])?;
         let request = UserSlice::new(
@@ -52,14 +52,14 @@ pub(in crate::kernel::abi::native) fn sys_filesystem_switch_root(
             .switch_root(parse_handle(arguments[0])?, request)
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_filesystem_begin_root_switch(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[2..])?;
         let request = UserSlice::new(
@@ -71,13 +71,13 @@ pub(in crate::kernel::abi::native) fn sys_filesystem_begin_root_switch(
             .begin_root_switch(parse_handle(arguments[0])?, request)
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(crate::kernel::abi::native::status::handle_result(result))
+    NativeAction::Return(crate::kernel::abi::native::status::handle_result(result))
 }
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_filesystem_finish_root_switch(
     services: &impl VfsServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[2..])?;
         let commit = match arguments[1] {
@@ -89,5 +89,5 @@ pub(in crate::kernel::abi::native) fn sys_filesystem_finish_root_switch(
             .finish_root_switch(parse_handle(arguments[0])?, commit)
             .map_err(status_from_vfs_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }

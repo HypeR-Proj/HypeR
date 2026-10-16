@@ -662,15 +662,22 @@ impl NativeAddressSpace {
         })
     }
 
-    /// Acquire before publishing a machine-active user run, so temporary tag
-    /// pressure can release the scheduler pin and retry without an exit proof.
+    /// Acquire before local activation, so temporary tag pressure can retry
+    /// without publishing a partially installed translation context.
     pub(crate) fn acquire_identifier(&self) -> Result<IdentifierLease<HostAsid>, Error> {
         self.identifier.acquire().map_err(Error::Identifier)
     }
 
-    pub(crate) fn activate<'a>(
+    /// Installs this address space for the current Thread's execution interval.
+    ///
+    /// # Safety
+    ///
+    /// Interrupts must remain masked until the activation is registered with
+    /// the Native scheduler switch hook. That hook must consume the token on
+    /// this CPU before every actual context switch. No active token may remain
+    /// in a suspended or migrating Thread's continuation.
+    pub(crate) unsafe fn activate<'a>(
         &'a self,
-        pin: &'a dyn PinnedExecution,
         kernel_access: &crate::hal::user::PreparedKernelAccess<'_>,
         identifier: IdentifierLease<HostAsid>,
     ) -> Result<ActiveNativeAddressSpace<'a>, Error> {
@@ -692,14 +699,14 @@ impl NativeAddressSpace {
                 .residency
                 .check_admission(cpu.get(), state.current.epoch)?;
             // SAFETY: The state lock closes the update cut through the local
-            // install and active publication; `pin` prevents CPU migration.
+            // install and active publication. The caller keeps IRQs masked
+            // until the scheduler hook owns this activation.
             let backend = unsafe {
                 crate::hal::user::activate_local(
                     &state.current.root,
                     identifier.value(),
                     identifier.epoch(),
                     cpu,
-                    pin,
                     self,
                     kernel_access,
                 )?
@@ -728,6 +735,27 @@ impl NativeAddressSpace {
             backend: Some(backend),
             identifier: Some(identifier),
         })
+    }
+
+    /// Combines architecture exit with the scheduler's completed MM detach.
+    /// The proof keeps one logical run generation occupied until its return
+    /// capability has been consumed, even if the syscall migrated meanwhile.
+    pub(crate) fn finish_user_exit(
+        &self,
+        architecture: crate::hal::user::StoppedPublication,
+    ) -> StoppedNativeRun {
+        let Some(cpu) = crate::kernel::cpu::current_index() else {
+            hyper::debug::invariant_failure("native exit without a current CPU");
+        };
+        if crate::hal::irq::local_enabled()
+            || ACTIVE[cpu].load(Ordering::Acquire)
+            || ACTIVE_OWNER[cpu].load(Ordering::Acquire) != 0
+        {
+            hyper::debug::invariant_failure("native exit retained local translation");
+        }
+        StoppedNativeRun {
+            binding: architecture.binding(),
+        }
     }
 
     /// Retires the last machine root and unregisters its software identity only
@@ -897,43 +925,19 @@ pub(crate) struct ActiveNativeAddressSpace<'owner> {
     identifier: Option<IdentifierLease<HostAsid>>,
 }
 
-impl<'owner> ActiveNativeAddressSpace<'owner> {
+impl ActiveNativeAddressSpace<'_> {
     /// Epoch admitted on this CPU before entering userspace. A later shootdown
     /// may advance it; a fault from this root can then legitimately be stale.
     pub(crate) fn mapping_epoch(&self) -> u64 {
         ACTIVE_EPOCH[self.cpu].load(Ordering::Acquire)
     }
 
-    pub(crate) fn run_user<'context>(
-        mut self,
-        context: &'context mut crate::hal::user::UserContext,
-        binding: hyper::hal::user::UserRunBinding,
-        kernel_access: crate::hal::user::PreparedKernelAccess<'_>,
-        service: &hyper::hal::user::NativeCallService<'_>,
-    ) -> StoppedNativeUser<'context, 'owner> {
-        let Some(backend) = self.backend.take() else {
-            hyper::debug::invariant_failure("mm::user_space::machine::run_user invariant");
-        };
-        match crate::hal::user::run_user(context, backend, binding, kernel_access, service) {
-            Ok(stopped) => StoppedNativeUser {
-                active: Some(self),
-                stopped: Some(stopped),
-            },
-            Err(error) => {
-                // HAL has already restored the preceding translation. This is
-                // an invariant failure in a prepared context. Retain logical
-                // residency and fail-stop rather than return a recoverable
-                // error after losing its backend token.
-                core::mem::forget(self);
-                crate::kernel::crash::fatal(format_args!(
-                    "HypeR: native-user architecture entry failed: {error:?}"
-                ))
-            }
-        }
-    }
-
+    /// Detaches before the scheduler exposes this Thread to another CPU.
+    /// A concurrent page-table cut can be waiting for this CPU's acknowledgement;
+    /// service its mailbox while waiting, since local IRQs are masked here.
     pub(crate) fn leave(mut self) -> Result<(), Error> {
-        if crate::kernel::cpu::current_index() != Some(self.cpu) {
+        if crate::kernel::cpu::current_index() != Some(self.cpu) || crate::hal::irq::local_enabled()
+        {
             return Err(Error::Hal(crate::hal::user::AddressSpaceError::InvalidCpu));
         }
         loop {
@@ -952,8 +956,8 @@ impl<'owner> ActiveNativeAddressSpace<'owner> {
                 if backend.cpu() != self.cpu {
                     hyper::debug::invariant_failure("mm::user_space::machine::leave invariant");
                 }
-                // SAFETY: The current-CPU check above, PinnedExecution borrow,
-                // and non-Send token prove same-PE teardown.
+                // SAFETY: IRQs are masked and this token is consumed on its
+                // original CPU before the scheduler exposes the continuation.
                 unsafe { crate::hal::user::deactivate_local(backend)? };
                 // Hardware is detached before this pin can make the ASID reusable.
                 drop(self.identifier.take());
@@ -962,51 +966,19 @@ impl<'owner> ActiveNativeAddressSpace<'owner> {
                 Ok(())
             });
             match result {
-                Err(Error::Residency(ResidencyError::Busy)) => core::hint::spin_loop(),
+                Err(Error::Residency(ResidencyError::Busy)) => {
+                    #[cfg(all(CONFIG_ARCH_AARCH64, feature = "kernel-self-test"))]
+                    self_test::observe_busy(self.owner.logical.id().get(), self.cpu);
+                    // No MM or scheduler lock is held here. The updater pins
+                    // itself across the closed admission cut, so it cannot be
+                    // suspended by this switch on this CPU. Polling lets its
+                    // remote RPC replace our root and reopen admission even
+                    // though interrupt delivery is currently masked.
+                    crate::kernel::irq::cross_call::service();
+                    core::hint::spin_loop();
+                }
                 other => return other,
             }
-        }
-    }
-}
-
-/// Native-user exception captured while the process root remains installed.
-#[must_use = "native user stop must restore the kernel translation before dispatch"]
-pub(crate) struct StoppedNativeUser<'context, 'owner> {
-    active: Option<ActiveNativeAddressSpace<'owner>>,
-    stopped: Option<crate::hal::user::StoppedUser<'context, 'owner>>,
-}
-
-impl<'context> StoppedNativeUser<'context, '_> {
-    pub(crate) fn leave(mut self) -> (crate::hal::user::UserExit<'context>, StoppedNativeRun) {
-        let Some(stopped) = self.stopped.take() else {
-            hyper::debug::invariant_failure("mm::user_space::machine::leave invariant");
-        };
-        let (exit, backend, architecture) = stopped.release();
-        let Some(mut active) = self.active.take() else {
-            hyper::debug::invariant_failure("mm::user_space::machine::leave invariant");
-        };
-        if active.backend.is_some() || backend.cpu() != active.cpu {
-            hyper::debug::invariant_failure("mm::user_space::machine::leave invariant");
-        }
-        active.backend = Some(backend);
-        if active.leave().is_err() {
-            // ActiveNativeAddressSpace::Drop already fail-stops if hardware
-            // ownership could not be closed. Keep this branch explicit.
-            hyper::debug::invariant_failure("mm::user_space::machine::leave invariant");
-        }
-        (
-            exit,
-            StoppedNativeRun {
-                binding: architecture.binding(),
-            },
-        )
-    }
-}
-
-impl Drop for StoppedNativeUser<'_, '_> {
-    fn drop(&mut self) {
-        if self.stopped.is_some() || self.active.is_some() {
-            hyper::debug::invariant_failure("mm::user_space::machine::drop invariant");
         }
     }
 }
@@ -1050,6 +1022,8 @@ impl PreparedNativeChange<'_> {
         let cut = owner
             .state
             .with(|state| state.residency.begin_update(logical.base_epoch()))?;
+        #[cfg(all(CONFIG_ARCH_AARCH64, feature = "kernel-self-test"))]
+        self_test::after_cut(owner.logical.id().get(), cut.active());
         let committed = match logical.commit_machine() {
             Ok(committed) => committed,
             Err(error) => {

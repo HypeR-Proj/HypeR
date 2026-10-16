@@ -6,119 +6,10 @@
 extern crate hyper_clap_shared as _;
 
 use clap::Parser;
-use hyper_ls::cli::{Ls, Sort};
-use std::fs::{self, Metadata};
+use hyper_ls::cli::Ls;
 use std::io::{self, Write};
-#[cfg(target_os = "hyper")]
-use std::os::hyper::fs::MetadataExt;
-#[cfg(unix)]
-use std::os::unix::fs::MetadataExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
-
-struct Entry {
-    name: String,
-    path: PathBuf,
-    metadata: Metadata,
-}
-
-fn list(path: &Path, args: &Ls, output: &mut impl Write) -> io::Result<()> {
-    let metadata = fs::symlink_metadata(path)?;
-    let mut entries = Vec::new();
-    if metadata.is_dir() && !args.directory {
-        for entry in fs::read_dir(path)? {
-            let entry = entry?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if !args.all && name.starts_with('.') {
-                continue;
-            }
-            entries.push(Entry {
-                name,
-                path: entry.path(),
-                metadata: entry.metadata()?,
-            });
-        }
-    } else {
-        entries.push(Entry {
-            name: path.to_string_lossy().into_owned(),
-            path: path.to_path_buf(),
-            metadata,
-        });
-    }
-    let sort = if args.newest {
-        Sort::Time
-    } else if args.largest {
-        Sort::Size
-    } else {
-        args.sort
-    };
-    // Read timestamps before sorting: an unavailable timestamp is an error,
-    // not an invented epoch value that could silently reorder the listing.
-    let mut entries: Vec<_> = entries
-        .into_iter()
-        .map(|entry| {
-            let modified = if matches!(sort, Sort::Time) {
-                Some(entry.metadata.modified()?)
-            } else {
-                None
-            };
-            Ok((entry, modified))
-        })
-        .collect::<io::Result<_>>()?;
-    entries.sort_by(|(a, a_time), (b, b_time)| match sort {
-        Sort::Name => a.name.cmp(&b.name),
-        Sort::Size => b
-            .metadata
-            .len()
-            .cmp(&a.metadata.len())
-            .then(a.name.cmp(&b.name)),
-        Sort::Time => b_time.cmp(a_time).then(a.name.cmp(&b.name)),
-    });
-    if args.reverse {
-        entries.reverse();
-    }
-    if !args.names_only {
-        writeln!(output, "MODE                 SIZE  NAME")?;
-    }
-    for (entry, _) in entries {
-        let directory = entry.metadata.is_dir();
-        let symlink = entry.metadata.file_type().is_symlink();
-        let name = hyper_ls::escape_path(&entry.name);
-        let suffix = if directory {
-            "/"
-        } else if symlink {
-            "@"
-        } else {
-            ""
-        };
-        if args.names_only {
-            writeln!(output, "{name}{suffix}")?;
-        } else {
-            // Read the link itself: relative and dangling targets must not be
-            // resolved against the listing's working directory.
-            let target = if symlink {
-                let target = fs::read_link(&entry.path)?;
-                format!(" -> {}", hyper_ls::escape_path(&target.to_string_lossy()))
-            } else {
-                String::new()
-            };
-            let size = if directory {
-                "-".into()
-            } else if args.bytes {
-                entry.metadata.len().to_string()
-            } else {
-                hyper_ls::readable_size(entry.metadata.len())
-            };
-            writeln!(
-                output,
-                "{} {:>14}  {name}{suffix}{target}",
-                hyper_ls::mode_text(entry.metadata.mode(), directory, symlink),
-                size
-            )?;
-        }
-    }
-    Ok(())
-}
 
 fn run() -> io::Result<bool> {
     let mut args = Ls::parse();
@@ -126,6 +17,7 @@ fn run() -> io::Result<bool> {
         args.paths.push(PathBuf::from("."));
     }
     let mut output = io::stdout().lock();
+    let mut errors = io::stderr().lock();
     let mut failed = false;
     for (index, path) in args.paths.iter().enumerate() {
         if args.paths.len() > 1 {
@@ -134,12 +26,15 @@ fn run() -> io::Result<bool> {
             }
             writeln!(output, "{}:", path.display())?;
         }
-        if let Err(error) = list(path, &args, &mut output) {
-            if error.kind() == io::ErrorKind::BrokenPipe {
-                return Err(error);
+        match hyper_ls::listing::list(path, &args, &mut output, &mut errors) {
+            Ok(partial_failure) => failed |= partial_failure,
+            Err(error) => {
+                if error.kind() == io::ErrorKind::BrokenPipe {
+                    return Err(error);
+                }
+                writeln!(errors, "ls: {}: {error}", path.display())?;
+                failed = true;
             }
-            eprintln!("ls: {}: {error}", path.display());
-            failed = true;
         }
     }
     output.flush()?;

@@ -20,24 +20,24 @@ mod vfs;
 mod vfs_namespace;
 mod vm;
 
-use crate::kernel::abi::native::{HandleServices, ImmediateServices, UserMemoryServices};
+use crate::kernel::abi::native::{HandleServices, UserMemoryServices};
 use crate::kernel::capability::{HandleInfo, HandleValue, Rights};
 use crate::kernel::mm::user_space::UserSlice;
 use crate::kernel::process::{Process, ProcessError, UserThread};
 
 /// Borrowed syscall authority; contains no machine-run or return-token state.
-pub(super) struct DeferredProcessServices<'process> {
+pub(super) struct ProcessServices<'process> {
     process: &'process Process,
     thread: &'process UserThread,
 }
 
-impl<'process> DeferredProcessServices<'process> {
+impl<'process> ProcessServices<'process> {
     pub(super) fn new(process: &'process Process, thread: &'process UserThread) -> Self {
         Self { process, thread }
     }
 }
 
-impl UserMemoryServices for DeferredProcessServices<'_> {
+impl UserMemoryServices for ProcessServices<'_> {
     fn copy_to_user(&self, destination: UserSlice, source: &[u8]) -> Result<(), ProcessError> {
         self.process.copy_to_user(destination, source)
     }
@@ -51,13 +51,11 @@ impl UserMemoryServices for DeferredProcessServices<'_> {
     }
 }
 
-impl ImmediateServices for DeferredProcessServices<'_> {
+impl HandleServices for ProcessServices<'_> {
     fn close_handle(&self, value: HandleValue) -> Result<(), ProcessError> {
         self.process.close_handle(value)
     }
-}
 
-impl HandleServices for DeferredProcessServices<'_> {
     fn handle_info(
         &self,
         value: HandleValue,

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod cli;
+pub mod listing;
 
 /// Keep paths on one terminal line without escaping printable Unicode.
 pub fn escape_path(path: &str) -> String {

@@ -3,7 +3,7 @@
 
 //! Native object service calls under borrowed Process authority.
 
-use super::DeferredProcessServices;
+use super::ProcessServices;
 use crate::kernel::abi::native::{ObjectServiceError, ObjectServices};
 use crate::kernel::accounting::{ResourceAmount, ResourceKind};
 use crate::kernel::capability::{HandleValue, ResolvedWaitable, Rights};
@@ -19,7 +19,7 @@ struct ResolvedWaitEntry {
     signals: u64,
 }
 
-impl ObjectServices for DeferredProcessServices<'_> {
+impl ObjectServices for ProcessServices<'_> {
     fn current_process_id(&self) -> u64 {
         self.process.koid().get()
     }

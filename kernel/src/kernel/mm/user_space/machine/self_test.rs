@@ -6,6 +6,11 @@
 use super::*;
 use alloc::boxed::Box;
 
+#[cfg(CONFIG_ARCH_AARCH64)]
+mod busy_detach;
+#[cfg(CONFIG_ARCH_AARCH64)]
+pub(super) use busy_detach::{after_cut, observe_busy};
+
 struct TestFile {
     bytes: Vec<u8>,
     reads: FallibleArc<AtomicU64>,
@@ -42,6 +47,34 @@ fn require(condition: bool) -> Result<(), Error> {
         Ok(())
     } else {
         Err(Error::Unsupported)
+    }
+}
+
+impl NativeAddressSpace {
+    /// Installs an untouched private output page for a real EL0 copyout probe.
+    #[cfg(CONFIG_ARCH_AARCH64)]
+    pub(crate) fn prepare_cow_output_for_test(&self, range: UserSlice) -> Result<(), Error> {
+        let reads = FallibleArc::try_new(AtomicU64::new(0)).map_err(|_| Error::Allocation)?;
+        static BYTES: [u8; PAGE_SIZE as usize] = [0x5a; PAGE_SIZE as usize];
+        let logical = self.logical();
+        let view = logical.prepare_file_view(
+            source(&BYTES, reads)?,
+            PAGE_SIZE,
+            0,
+            PAGE_SIZE,
+            0,
+            false,
+            super::super::PrivateMappingMode::CopyOnWrite,
+        )?;
+        let change = logical.prepare_map_private_view(
+            logical.root_vmar(),
+            range,
+            view,
+            Permissions::read_write(),
+            Permissions::read_write(),
+        )?;
+        self.prepare_change(change)?.commit()?;
+        Ok(())
     }
 }
 

@@ -38,7 +38,7 @@ pub(crate) use owner::{
 };
 pub(crate) use task_group::{TaskGroup, TaskGroupError, TaskGroupId};
 pub(in crate::kernel) use user_thread::UserExecutionOwnership;
-pub(crate) use user_thread::{RunAdmissionError, StoppedUserRun, UserExecution, UserThread};
+pub(crate) use user_thread::{RunAdmissionError, UserExecution, UserThread};
 
 #[cfg(not(feature = "kernel-self-test"))]
 pub(crate) use owner::ProcessHandleReservation;

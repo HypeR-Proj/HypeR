@@ -118,7 +118,6 @@ impl KernelObject for UserThreadObject {
 struct RunIdentity {
     generation: u64,
     image_generation: u64,
-    cpu: hyper::cpu::CpuIndex,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -126,7 +125,6 @@ pub(crate) enum RunAdmissionError {
     AdmissionClosed,
     AlreadyAdmitted,
     GenerationExhausted,
-    InvalidCpu,
     StaleImage,
 }
 
@@ -254,6 +252,12 @@ impl UserThread {
         })
     }
 
+    pub(crate) fn stop_requested(&self) -> bool {
+        self.inner()
+            .control
+            .with(|control| control.lifecycle.phase() == UserThreadPhase::StopRequested)
+    }
+
     pub(crate) fn request_stop(&self, reason: TerminalReason) -> bool {
         self.inner()
             .control
@@ -290,25 +294,18 @@ impl UserThread {
             .with(|control| control.lifecycle.mark_runnable())
     }
 
-    /// Reserves one exact architecture resume before machine preparation.
+    /// Reserves one logical architecture generation for this Thread.
+    ///
+    /// The generation follows its syscall continuation across scheduling and
+    /// migration. CPU-local hardware ownership belongs to entry policy.
     pub(crate) fn prepare_run(
         &self,
-        pin: crate::kernel::task::scheduler::UserRunGuard,
         expected_image_generation: u64,
-    ) -> Result<
-        PreparedUserRun,
-        (
-            crate::kernel::task::scheduler::UserRunGuard,
-            RunAdmissionError,
-        ),
-    > {
-        let Some(cpu) = crate::kernel::cpu::current_index() else {
-            return Err((pin, RunAdmissionError::InvalidCpu));
-        };
+    ) -> Result<PreparedUserRun, RunAdmissionError> {
         let Some(process) = self.process() else {
-            return Err((pin, RunAdmissionError::AdmissionClosed));
+            return Err(RunAdmissionError::AdmissionClosed);
         };
-        let identity = match process.with_run_admission(expected_image_generation, || {
+        let identity = process.with_run_admission(expected_image_generation, || {
             self.inner().control.with(|control| {
                 if control.lifecycle.phase() != UserThreadPhase::Runnable {
                     return Err(RunAdmissionError::AdmissionClosed);
@@ -323,20 +320,15 @@ impl UserThread {
                 let identity = RunIdentity {
                     generation,
                     image_generation: expected_image_generation,
-                    cpu,
                 };
                 control.prepared_run = Some(identity);
                 Ok(identity)
             })
-        }) {
-            Ok(Ok(identity)) => identity,
-            Ok(Err(error)) | Err(error) => return Err((pin, error)),
-        };
+        })??;
         Ok(PreparedUserRun {
             thread: self.clone(),
             identity,
             armed: true,
-            pin: Some(pin),
         })
     }
 
@@ -506,13 +498,14 @@ impl UserExecution {
         }
     }
 
-    /// Returns the stopped register owner to the fixed native-user trampoline.
+    /// Returns the register owner to the fixed native-user trampoline.
     ///
     /// # Safety
     ///
-    /// The caller must own the scheduler's current-user pin and one admitted
-    /// run generation. No other code may access the context until the returned
-    /// architecture capability is consumed or discarded.
+    /// The caller must execute this payload's scheduler Thread and own one
+    /// admitted generation. Only its architecture entry and switch-detach
+    /// mechanism may access the context until return ownership is consumed.
+    /// Scheduling suspends this continuation without releasing its payload.
     pub(crate) unsafe fn context_ptr(&self) -> *mut crate::hal::user::UserContext {
         self.context.get()
     }
@@ -565,25 +558,14 @@ pub(crate) struct PreparedUserRun {
     thread: UserThread,
     identity: RunIdentity,
     armed: bool,
-    pin: Option<crate::kernel::task::scheduler::UserRunGuard>,
 }
 
 impl PreparedUserRun {
-    /// Publishes one CPU-affine run only after HAL preparation succeeds.
-    pub(crate) fn commit(
-        mut self,
-    ) -> Result<
-        ActiveUserRun,
-        (
-            crate::kernel::task::scheduler::UserRunGuard,
-            RunAdmissionError,
-        ),
-    > {
-        if crate::kernel::cpu::current_index() != Some(self.identity.cpu) {
-            return Err((self.abort_inner(), RunAdmissionError::InvalidCpu));
-        }
+    /// Publishes one generation after the initial machine preparation succeeds.
+    pub(crate) fn commit(mut self) -> Result<ActiveUserRun, RunAdmissionError> {
         let Some(process) = self.thread.process() else {
-            return Err((self.abort_inner(), RunAdmissionError::AdmissionClosed));
+            self.abort_inner();
+            return Err(RunAdmissionError::AdmissionClosed);
         };
         let publication = process.with_run_admission(self.identity.image_generation, || {
             self.thread.inner().control.with(|control| {
@@ -599,22 +581,22 @@ impl PreparedUserRun {
             })
         });
         if let Err(error) | Ok(Err(error)) = publication {
-            return Err((self.abort_inner(), error));
+            self.abort_inner();
+            return Err(error);
         }
         self.armed = false;
         Ok(ActiveUserRun {
             thread: self.thread.clone(),
             identity: self.identity,
             armed: true,
-            pin: self.pin.take(),
         })
     }
 
-    pub(crate) fn abort(mut self) -> crate::kernel::task::scheduler::UserRunGuard {
-        self.abort_inner()
+    pub(crate) fn abort(mut self) {
+        self.abort_inner();
     }
 
-    fn abort_inner(&mut self) -> crate::kernel::task::scheduler::UserRunGuard {
+    fn abort_inner(&mut self) {
         self.thread.inner().control.with(|control| {
             if control.prepared_run != Some(self.identity) {
                 hyper::debug::invariant_failure("process::user_thread::abort_inner invariant");
@@ -622,10 +604,6 @@ impl PreparedUserRun {
             control.prepared_run = None;
         });
         self.armed = false;
-        match self.pin.take() {
-            Some(pin) => pin,
-            None => hyper::debug::invariant_failure("process::user_thread::abort_inner invariant"),
-        }
     }
 }
 
@@ -642,7 +620,6 @@ pub(crate) struct ActiveUserRun {
     thread: UserThread,
     identity: RunIdentity,
     armed: bool,
-    pin: Option<crate::kernel::task::scheduler::UserRunGuard>,
 }
 
 impl ActiveUserRun {
@@ -657,45 +634,25 @@ impl ActiveUserRun {
         }
     }
 
-    pub(crate) fn pin(&self) -> &crate::kernel::task::scheduler::UserRunGuard {
-        match self.pin.as_ref() {
-            Some(pin) => pin,
-            None => hyper::debug::invariant_failure("process::user_thread::pin invariant"),
-        }
-    }
-
-    /// Ends machine-active CPU affinity after architecture publication and
-    /// translation have both been closed. The durable generation remains
-    /// occupied across syscall dispatch, blocking, and migration.
+    /// Closes machine ownership after publication and translation are idle.
+    ///
+    /// The durable generation remains occupied until the architecture return
+    /// capability has been consumed, independently of the CPU which ran it.
     pub(crate) fn stop_after_machine_exit(
         mut self,
         proof: crate::kernel::mm::user_space::StoppedNativeRun,
-    ) -> (StoppedUserRun, crate::kernel::task::scheduler::UserRunGuard) {
-        if crate::kernel::cpu::current_index() != Some(self.identity.cpu) {
-            hyper::debug::invariant_failure(
-                "process::user_thread::stop_after_machine_exit invariant",
-            );
-        }
+    ) -> StoppedUserRun {
         if proof.binding() != self.binding() {
             hyper::debug::invariant_failure(
                 "process::user_thread::stop_after_machine_exit invariant",
             );
         }
         self.armed = false;
-        let pin = match self.pin.take() {
-            Some(pin) => pin,
-            None => hyper::debug::invariant_failure(
-                "process::user_thread::stop_after_machine_exit invariant",
-            ),
-        };
-        (
-            StoppedUserRun {
-                thread: self.thread.clone(),
-                identity: self.identity,
-                armed: true,
-            },
-            pin,
-        )
+        StoppedUserRun {
+            thread: self.thread.clone(),
+            identity: self.identity,
+            armed: true,
+        }
     }
 }
 
@@ -709,8 +666,8 @@ impl Drop for ActiveUserRun {
 
 /// Durable ownership of one stopped architecture generation.
 ///
-/// This token is deliberately not CPU-affine. A syscall may block and resume
-/// on another CPU, but architecture return ownership must be resolved before
+/// This token is deliberately not CPU-affine. Fault resolution may block and
+/// resume on another CPU, but architecture return ownership must be resolved before
 /// this logical generation is acknowledged.
 #[must_use = "stopped user generation must follow architecture completion"]
 pub(crate) struct StoppedUserRun {

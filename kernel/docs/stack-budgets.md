@@ -79,6 +79,44 @@ The harness waits for the guest's idle prompt before measuring. Compare repeated
 stage timings, accounting for QEMU and host scheduling noise; CI deliberately
 does not enforce a wall-clock timing threshold.
 
+For the Native syscall boundary, `tests/native/syscall-cost.c` provides a smaller
+opt-in workload. It validates ABI query results, ready Event signal/wait pairs,
+and eight-byte Channel roundtrips. Each stage warms up before nine measurements
+of 4096 iterations. Output and capability construction are outside the timed
+intervals. Build and package it with the installed SDK, from the repository root:
+
+The SDK compiler driver uses `HYPER_CLANG` and `HYPER_LD` when set. Point them
+at the local cross-capable Clang and LLD if those tools are unavailable under
+their default names; this workload does not require another tool installation.
+
+```sh
+mkdir -p target/syscall-cost
+HYPER_LINK_MODE=static target/sdk/aarch64/bin/hyper-clang \
+  -std=c17 -O2 -Wall -Wextra -Werror tests/native/syscall-cost.c \
+  -o target/syscall-cost/probe
+make native-initramfs ARCH=aarch64 \
+  NATIVE_IMAGE_PROFILE=development \
+  NATIVE_INITRAMFS="$PWD/target/syscall-cost/initramfs.cpio" \
+  NATIVE_PS_IMAGE="$PWD/target/syscall-cost/probe" \
+  NATIVE_SERVICE_MANIFEST="$PWD/bootstrap/stage1/init/config/services-console-only.json" \
+  NATIVE_VM_CONFIG=
+QEMU_CPUS=4 python3 -B tests/qemu/measure-syscall-cost.py \
+  --qemu qemu-system-aarch64 \
+  --image kernel/target/aarch64-unknown-none-softfloat/kernel/hyper.img \
+  --initramfs target/syscall-cost/initramfs.cpio \
+  --log target/syscall-cost/candidate.log
+```
+
+Retain that exact probe and archive when comparing kernel revisions. Use
+ordinary production kernels with identical configuration, QEMU CPU/memory/SMP
+settings, and host load; record image hashes and all samples. The runner checks
+completion and sample structure, and reports medians without a timing threshold.
+QEMU timings describe the emulator workload, not physical hypervisor overhead.
+Repeat the same workload on physical AArch64 with IRQ load, migration, mapping
+replacement and ASID rollover before qualifying hardware behavior. Self-test
+run/suspension and FP-copy counters, together with the optimized entry call
+graph, explain which boundaries were removed; timings alone cannot prove that.
+
 The runtime optimizations preserve eight-record inspector pages and serial
 transfer limits. Caller-owned inspector output removes large aggregate return
 copies. Snapshot and private-map initialization copy between pinned page

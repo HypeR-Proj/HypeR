@@ -129,7 +129,8 @@ See [implementation status](docs/status.md) and the [roadmap](docs/roadmap.md).
 
 ## Exploratory Pi 5 I/O measurements
 
-**Initial survey: 2026-10-06; guest TCP update: 2026-10-10. For reference only.**
+**Initial survey: 2026-10-06; guest TCP update: 2026-10-10;
+Native sequential-write update: 2026-10-16. For reference only.**
 This was an informal development setup, not a controlled benchmark. Each table
 entry comes from a single run. Card identity/state, filesystem and mount settings,
 available RAM, thermal/clock
@@ -140,9 +141,15 @@ not establish production readiness or power-loss durability.
 The tests used physical Raspberry Pi 5 hardware and separate SD cards for HypeR
 and native Raspbian. HypeR Native accessed FAT32 at `/data`; Alpine accessed its
 ext4 root disk through virtio-scsi and the Linux I/O VM. Raspbian used its existing
-filesystem. Alpine had two vCPUs and 256 MiB RAM; the I/O VM had one vCPU and
-128 MiB. The October 6 HypeR storage image was based on `b7022b6` with local test
+filesystem. Alpine had two vCPUs and 256 MiB RAM; the initial I/O VM had one vCPU
+and 128 MiB. The October 6 HypeR storage image was based on `b7022b6` with local test
 fixtures and the digest-pinned Pi 5 appliance from I/O VM source `c8ec02adbb8f`.
+
+The October 16 Native sequential-write results use userspace FAT and the image
+`0.1.0-fc34db9bd216-dirty`, built at `2026-10-16T14:30:30Z`, with the pinned
+I/O VM source `56b1b8788820` on one vCPU and 64 MiB RAM. Only the Native
+new-file and overwrite rows below use this run; the synchronous 4 KiB results
+and the Raspbian/Alpine storage references remain from October 6.
 
 Storage used the same deterministic **1 GiB** workload: 128 KiB sequential
 writes followed by a volume sync. Throughput and total time include the sync;
@@ -153,10 +160,10 @@ one; its IOPS are synchronous-write IOPS, not ordinary buffered or raw-disk IOPS
 
 | Storage measurement | Native Raspbian | HypeR Native | Alpine guest on HypeR |
 | --- | ---: | ---: | ---: |
-| New-file sequential write (MiB/s) | 24.76 | 8.82 | 23.34 |
-| New-file write total (s) | 41.36 | 116.13 | 43.87 |
-| Existing-file overwrite (MiB/s) | 25.48 | 14.35 | 23.09 |
-| Overwrite total (s) | 40.19 | 71.37 | 44.34 |
+| New-file sequential write (MiB/s) | 24.76 | 9.12 | 23.34 |
+| New-file write total (s) | 41.36 | 112.26 | 43.87 |
+| Existing-file overwrite (MiB/s) | 25.48 | 16.40 | 23.09 |
+| Overwrite total (s) | 40.19 | 62.42 | 44.34 |
 | 4 KiB write + volume sync (IOPS) | 175.54 | 103.60 | 93.07 |
 | Synchronous-write mean latency (ms) | 5.70 | 9.65 | 10.74 |
 | Synchronous-write P95 latency (ms) | 13.00 | 12.44 | 12.18 |

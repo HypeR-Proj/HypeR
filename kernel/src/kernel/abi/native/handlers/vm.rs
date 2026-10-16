@@ -4,7 +4,7 @@
 //! Native vm syscall validation.
 
 use crate::kernel::abi::native::Arguments;
-use crate::kernel::abi::native::services::{DeferredAction, VmServices};
+use crate::kernel::abi::native::services::{NativeAction, VmServices};
 use crate::kernel::abi::native::status::{
     console_io_result, failure, handle_result, info_result, status_from_vm_service_error,
     status_only, success,
@@ -25,75 +25,75 @@ use hyper::abi::native::{
 pub(in crate::kernel::abi::native) fn sys_virtual_machine_creation_lease_create(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_two_handles(arguments).and_then(|[authority, domain]| {
         services
             .derive_virtual_machine_creation_lease(authority, domain)
             .map_err(status_from_vm_service_error)
     });
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_virtual_machine_create(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_handle(arguments[0]).and_then(|lease| {
         let configuration = decode_virtual_machine_configuration(services, arguments)?;
         services
             .create_pending_virtual_machine(lease, configuration)
             .map_err(status_from_vm_service_error)
     });
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_pending_virtual_machine_set_memory(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_two_handles(arguments).and_then(|[pending, vmo]| {
         services
             .set_pending_virtual_machine_memory(pending, vmo)
             .map_err(status_from_vm_service_error)
     });
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_pending_virtual_machine_set_bootstrap(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_handle(arguments[0]).and_then(|pending| {
         let bootstrap = decode_virtual_cpu_bootstrap(services, arguments)?;
         services
             .set_pending_virtual_machine_bootstrap(pending, bootstrap)
             .map_err(status_from_vm_service_error)
     });
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_pending_virtual_machine_set_virtual_serial(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_two_handles(arguments).and_then(|[pending, serial]| {
         services
             .set_pending_virtual_machine_virtual_serial(pending, serial)
             .map_err(status_from_vm_service_error)
     });
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_virtual_serial_create(
     services: &impl VmServices,
     _arguments: &Arguments,
-) -> DeferredAction {
-    DeferredAction::Return(handle_result(
+) -> NativeAction {
+    NativeAction::Return(handle_result(
         services
             .create_virtual_serial()
             .map_err(status_from_vm_service_error),
@@ -104,8 +104,8 @@ pub(in crate::kernel::abi::native) fn sys_virtual_serial_create(
 pub(in crate::kernel::abi::native) fn sys_virtual_serial_register_output(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
-    DeferredAction::Return(status_only(parse_two_handles(arguments).and_then(
+) -> NativeAction {
+    NativeAction::Return(status_only(parse_two_handles(arguments).and_then(
         |[serial, buffer]| {
             services
                 .register_virtual_serial_output(serial, buffer)
@@ -118,27 +118,27 @@ pub(in crate::kernel::abi::native) fn sys_virtual_serial_register_output(
 pub(in crate::kernel::abi::native) fn sys_virtual_serial_acknowledge_output(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = require_zero(&arguments[2..]).and_then(|()| {
         let serial = crate::kernel::abi::native::wire::parse_handle(arguments[0])?;
         services
             .acknowledge_virtual_serial_output(serial, arguments[1])
             .map_err(status_from_vm_service_error)
     });
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_virtual_serial_write(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_virtual_serial_io(arguments).and_then(|(serial, bytes)| {
         services
             .write_virtual_serial(serial, bytes)
             .map_err(status_from_vm_service_error)
     });
-    DeferredAction::Return(console_io_result(
+    NativeAction::Return(console_io_result(
         HYPER_NATIVE_SYS_VIRTUAL_SERIAL_WRITE,
         result,
     ))
@@ -148,8 +148,8 @@ pub(in crate::kernel::abi::native) fn sys_virtual_serial_write(
 pub(in crate::kernel::abi::native) fn sys_pending_virtual_machine_seal(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
-    DeferredAction::Return(status_only(parse_single_handle(arguments).and_then(
+) -> NativeAction {
+    NativeAction::Return(status_only(parse_single_handle(arguments).and_then(
         |pending| {
             services
                 .seal_pending_virtual_machine(pending)
@@ -162,13 +162,13 @@ pub(in crate::kernel::abi::native) fn sys_pending_virtual_machine_seal(
 pub(in crate::kernel::abi::native) fn sys_pending_virtual_machine_install(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_single_handle(arguments).and_then(|pending| {
         services
             .install_pending_virtual_machine(pending)
             .map_err(status_from_vm_service_error)
     });
-    DeferredAction::Return(match result {
+    NativeAction::Return(match result {
         Ok([machine, vcpu]) => success([machine.get(), vcpu.get()]),
         Err(status) => failure(status),
     })
@@ -178,21 +178,21 @@ pub(in crate::kernel::abi::native) fn sys_pending_virtual_machine_install(
 pub(in crate::kernel::abi::native) fn sys_virtual_cpu_set_affinity(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_affinity_request(arguments).and_then(|(vcpu, words, count)| {
         services
             .set_virtual_cpu_affinity(vcpu, words, count)
             .map_err(status_from_vm_service_error)
     });
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_virtual_cpu_start(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
-    DeferredAction::Return(status_only(parse_single_handle(arguments).and_then(
+) -> NativeAction {
+    NativeAction::Return(status_only(parse_single_handle(arguments).and_then(
         |vcpu| {
             services
                 .start_virtual_cpu(vcpu)
@@ -205,8 +205,8 @@ pub(in crate::kernel::abi::native) fn sys_virtual_cpu_start(
 pub(in crate::kernel::abi::native) fn sys_pending_virtual_machine_abort(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
-    DeferredAction::Return(status_only(parse_single_handle(arguments).and_then(
+) -> NativeAction {
+    NativeAction::Return(status_only(parse_single_handle(arguments).and_then(
         |pending| {
             services
                 .abort_pending_virtual_machine(pending)
@@ -219,8 +219,8 @@ pub(in crate::kernel::abi::native) fn sys_pending_virtual_machine_abort(
 pub(in crate::kernel::abi::native) fn sys_virtual_machine_request_stop(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
-    DeferredAction::Return(status_only(parse_single_handle(arguments).and_then(
+) -> NativeAction {
+    NativeAction::Return(status_only(parse_single_handle(arguments).and_then(
         |machine| {
             services
                 .request_virtual_machine_stop(machine)
@@ -233,7 +233,7 @@ pub(in crate::kernel::abi::native) fn sys_virtual_machine_request_stop(
 pub(in crate::kernel::abi::native) fn sys_virtual_machine_get_info(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = prepare_info_request(
         arguments,
         HYPER_NATIVE_VIRTUAL_MACHINE_INFO_MIN_SIZE,
@@ -250,14 +250,14 @@ pub(in crate::kernel::abi::native) fn sys_virtual_machine_get_info(
             &encode_virtual_machine_info(configuration, snapshot),
         )
     });
-    DeferredAction::Return(info_result(result))
+    NativeAction::Return(info_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_virtual_cpu_get_info(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = prepare_info_request(
         arguments,
         HYPER_NATIVE_VIRTUAL_CPU_INFO_MIN_SIZE,
@@ -270,14 +270,14 @@ pub(in crate::kernel::abi::native) fn sys_virtual_cpu_get_info(
             .map_err(status_from_vm_service_error)?;
         copy_info_record(services, request, &encode_virtual_cpu_info(snapshot))
     });
-    DeferredAction::Return(info_result(result))
+    NativeAction::Return(info_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_virtual_machine_creation_lease_get_platform_info(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     use hyper::abi::native::{
         HYPER_NATIVE_VIRTUAL_MACHINE_PLATFORM_INFO_MIN_SIZE, HyperNativeVirtualMachinePlatformInfo,
     };
@@ -299,14 +299,14 @@ pub(in crate::kernel::abi::native) fn sys_virtual_machine_creation_lease_get_pla
             &crate::kernel::abi::native::wire::encode_virtual_machine_platform_info(info),
         )
     })();
-    DeferredAction::Return(info_result(result))
+    NativeAction::Return(info_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_virtual_machine_get_power_request(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     use hyper::abi::native::{
         HYPER_NATIVE_STATUS_WOULD_BLOCK, HYPER_NATIVE_VIRTUAL_MACHINE_POWER_REQUEST_MIN_SIZE,
         HyperNativeVirtualMachinePowerRequest,
@@ -329,14 +329,14 @@ pub(in crate::kernel::abi::native) fn sys_virtual_machine_get_power_request(
             &crate::kernel::abi::native::wire::encode_virtual_machine_power_request(request),
         )
     });
-    DeferredAction::Return(info_result(result))
+    NativeAction::Return(info_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_virtual_machine_complete_power_request(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[3..])?;
         let machine = parse_handle(arguments[0])?;
@@ -347,14 +347,14 @@ pub(in crate::kernel::abi::native) fn sys_virtual_machine_complete_power_request
             .complete_power_request(machine, arguments[1], arguments[2] == 1)
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_virtual_machine_open_vcpu(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[2..])?;
         let machine = parse_handle(arguments[0])?;
@@ -363,14 +363,14 @@ pub(in crate::kernel::abi::native) fn sys_virtual_machine_open_vcpu(
             .open_vcpu(machine, vcpu)
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_virtual_machine_register_mmio(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[4..])?;
         let machine = parse_handle(arguments[0])?;
@@ -384,14 +384,14 @@ pub(in crate::kernel::abi::native) fn sys_virtual_machine_register_mmio(
             .register_mmio(machine, arguments[1], arguments[2], arguments[3])
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_virtual_cpu_get_mmio_request(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     use hyper::abi::native::{
         HYPER_NATIVE_STATUS_WOULD_BLOCK, HYPER_NATIVE_VIRTUAL_CPU_MMIO_REQUEST_MIN_SIZE,
         HyperNativeVirtualCpuMmioRequest,
@@ -412,14 +412,14 @@ pub(in crate::kernel::abi::native) fn sys_virtual_cpu_get_mmio_request(
             &crate::kernel::abi::native::wire::encode_virtual_cpu_mmio_request(request),
         )
     });
-    DeferredAction::Return(info_result(result))
+    NativeAction::Return(info_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_virtual_cpu_complete_mmio(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     use hyper::vm::exit::MmioAction;
     let result = (|| {
         require_zero(&arguments[4..])?;
@@ -437,27 +437,27 @@ pub(in crate::kernel::abi::native) fn sys_virtual_cpu_complete_mmio(
             .complete_mmio(vcpu, arguments[1], action)
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_memory_create(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = parse_single_handle(arguments).and_then(|vmo| {
         services
             .create_guest_memory(vmo)
             .map_err(status_from_vm_service_error)
     });
-    DeferredAction::Return(handle_result(result))
+    NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_pending_virtual_machine_map_memory(
     services: &impl VmServices,
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(&arguments[5..])?;
         let pending = parse_handle(arguments[0])?;
@@ -466,5 +466,5 @@ pub(in crate::kernel::abi::native) fn sys_pending_virtual_machine_map_memory(
             .map_guest_memory(pending, memory, arguments[2], arguments[3], arguments[4])
             .map_err(status_from_vm_service_error)
     })();
-    DeferredAction::Return(status_only(result))
+    NativeAction::Return(status_only(result))
 }

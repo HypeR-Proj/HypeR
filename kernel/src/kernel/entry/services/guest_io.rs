@@ -3,11 +3,11 @@
 
 //! Native guest I/O service calls under borrowed Process authority.
 
-use super::DeferredProcessServices;
+use super::ProcessServices;
 use crate::kernel::capability::HandleValue;
 use crate::kernel::mm::user_space::UserSlice;
 
-impl crate::kernel::abi::native::GuestIoServices for DeferredProcessServices<'_> {
+impl crate::kernel::abi::native::GuestIoServices for ProcessServices<'_> {
     fn transfer_guest_memory(
         &self,
         memory: HandleValue,

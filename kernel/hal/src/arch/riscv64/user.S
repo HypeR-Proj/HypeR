@@ -178,6 +178,16 @@ riscv64_native_vector:
     sret
 .size riscv64_native_vector, . - riscv64_native_vector
 
+.global riscv64_refresh_native_anchor
+.type riscv64_refresh_native_anchor, @function
+riscv64_refresh_native_anchor:
+    # A blocked syscall's private anchor follows its Thread. Kernel TP names
+    # the current hart, while the user's TLS pointer stays in frame register x4.
+    addi a0, a0, USER_FRAME_SIZE
+    sd tp, USER_ANCHOR_TP_OFFSET(a0)
+    ret
+.size riscv64_refresh_native_anchor, . - riscv64_refresh_native_anchor
+
 .global riscv64_unwind_native_user
 .type riscv64_unwind_native_user, @function
 riscv64_unwind_native_user:

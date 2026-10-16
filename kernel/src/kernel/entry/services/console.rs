@@ -3,13 +3,13 @@
 
 //! Native console service calls under borrowed Process authority.
 
-use super::DeferredProcessServices;
+use super::ProcessServices;
 use crate::kernel::abi::native::{ConsoleServiceError, ConsoleServices};
 use crate::kernel::capability::{HandleValue, Rights};
 use crate::kernel::mm::user_space::UserSlice;
 use crate::kernel::process::ProcessError;
 
-impl ConsoleServices for DeferredProcessServices<'_> {
+impl ConsoleServices for ProcessServices<'_> {
     fn discard_console_input(&self, value: HandleValue) -> Result<usize, ConsoleServiceError> {
         let console = self
             .process

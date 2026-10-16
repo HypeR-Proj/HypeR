@@ -9,16 +9,15 @@ pub(super) type Arguments = [u64; hyper::abi::native::HYPER_NATIVE_SYSCALL_ARGUM
 mod services;
 
 pub(in crate::kernel) use services::{
-    ConsoleServiceError, ConsoleServices, DeferredAction, DeviceServices, GuestIoServices,
-    HandleServices, HierarchyServices, ImmediateServices, InspectServices, IpcServices,
-    MemoryServices, ObjectServiceError, ObjectServices, ProcessBuilderServiceError,
-    ProcessBuilderServices, SystemInspectServices, TaskServices, UserMemoryServices, VfsServices,
-    VmServices,
+    ConsoleServiceError, ConsoleServices, DeviceServices, GuestIoServices, HandleServices,
+    HierarchyServices, InspectServices, IpcServices, MemoryServices, NativeAction,
+    ObjectServiceError, ObjectServices, ProcessBuilderServiceError, ProcessBuilderServices,
+    SystemInspectServices, TaskServices, UserMemoryServices, VfsServices, VmServices,
 };
 
 mod dispatch;
 
-pub(in crate::kernel) use dispatch::{dispatch_deferred, dispatch_immediate, is_immediate};
+pub(in crate::kernel) use dispatch::dispatch;
 mod handlers;
 #[cfg(feature = "kernel-self-test")]
 mod self_test;

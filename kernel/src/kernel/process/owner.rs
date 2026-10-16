@@ -641,6 +641,13 @@ impl Process {
         self.inner.id
     }
 
+    pub(crate) fn name(&self) -> ProcessNameSnapshot {
+        match self.inner.name.get() {
+            Some(name) => *name,
+            None => process_invariant_violation(),
+        }
+    }
+
     pub(crate) fn image(&self) -> &ProcessImage {
         &self.inner.image
     }

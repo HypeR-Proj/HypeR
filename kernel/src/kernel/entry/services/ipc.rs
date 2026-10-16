@@ -3,7 +3,7 @@
 
 //! Native ipc service calls under borrowed Process authority.
 
-use super::DeferredProcessServices;
+use super::ProcessServices;
 use crate::kernel::abi::native::IpcServices;
 use crate::kernel::capability::HandleValue;
 use crate::kernel::ipc::{
@@ -13,7 +13,7 @@ use crate::kernel::ipc::{
 use crate::kernel::mm::user_space::UserSlice;
 use crate::kernel::process::UserThreadPhase;
 
-impl IpcServices for DeferredProcessServices<'_> {
+impl IpcServices for ProcessServices<'_> {
     fn create_byte_channel(&self) -> Result<[HandleValue; 2], ByteChannelServiceError> {
         crate::kernel::ipc::byte_channel_create(self.process)
     }

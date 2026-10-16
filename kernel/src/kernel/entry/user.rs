@@ -1,72 +1,31 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Native-user execution session and synchronous-call policy entry.
+//! Native Thread execution and sleepable synchronous-call policy.
 
 mod fault;
+#[cfg(all(CONFIG_ARCH_AARCH64, feature = "kernel-self-test"))]
+pub(crate) mod self_test;
 
+use core::cell::UnsafeCell;
 use core::ptr::NonNull;
+use core::sync::atomic::{AtomicPtr, Ordering};
 
-use hyper::abi::native::{NativeInvocation, NativeResult};
+use hyper::abi::native::NativeInvocation;
+use hyper::cpu::PerCpu;
 use hyper::hal::user::{
     NativeCallAction, NativeCallHandler, NativeCallService, UserFault, UserFaultKind,
 };
 use hyper::sync::InterruptMaskGuard;
 
-use super::services::DeferredProcessServices;
-use crate::kernel::abi::native::{self, ImmediateServices};
-use crate::kernel::capability::HandleValue;
-use crate::kernel::mm::user_space::UserAddress;
+use super::services::ProcessServices;
+use crate::kernel::abi::native;
+use crate::kernel::mm::user_space::{ActiveNativeAddressSpace, UserAddress};
 use crate::kernel::process::{
-    AbiFamily, ExecutionRoute, Process, ProcessError, RunAdmissionError, StoppedUserRun,
-    TerminalReason, UserExecution, UserThread, UserThreadPhase,
+    AbiFamily, ExecutionRoute, Process, RunAdmissionError, TerminalReason, UserExecution,
+    UserThread,
 };
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum NativeRunAction {
-    Resume,
-    Stop,
-}
-
-struct ProcessServices<'process> {
-    process: &'process Process,
-}
-
-impl ImmediateServices for ProcessServices<'_> {
-    fn close_handle(&self, value: HandleValue) -> Result<(), ProcessError> {
-        self.process.close_handle(value)
-    }
-}
-
-struct NativeProcessCalls<'process> {
-    process: &'process Process,
-}
-
-impl NativeProcessCalls<'_> {
-    fn dispatch_immediate(&self, invocation: NativeInvocation) -> NativeResult {
-        native::dispatch_immediate(
-            &ProcessServices {
-                process: self.process,
-            },
-            invocation,
-        )
-    }
-}
-
-// SAFETY: The current Native ABI dispatcher contains only Never-blocking
-// operations. Its Process services use non-sleeping spinlocked transactions,
-// fallible nonblocking allocation, and resident-page copies; none enters the
-// scheduler or retains the invocation. A future blocking ABI operation must
-// return NativeCallAction::Unwind before it performs any work.
-unsafe impl NativeCallHandler for NativeProcessCalls<'_> {
-    unsafe fn dispatch(&self, invocation: NativeInvocation) -> NativeCallAction {
-        if native::is_immediate(invocation.number()) {
-            NativeCallAction::Return(self.dispatch_immediate(invocation))
-        } else {
-            NativeCallAction::Unwind
-        }
-    }
-}
+use crate::kernel::task::scheduler;
 
 /// Stable ownership established once for the scheduler Thread's entire entry.
 struct UserSession {
@@ -75,23 +34,18 @@ struct UserSession {
 }
 
 impl UserSession {
-    fn attach(
-        current: crate::kernel::task::scheduler::CurrentUser,
-        pin: &crate::kernel::task::scheduler::UserRunGuard,
-    ) -> (Self, NonNull<UserExecution>) {
+    fn attach(current: scheduler::CurrentUser) -> (Self, NonNull<UserExecution>) {
         validate_current_stack(current.stack);
         let execution = current.execution;
-        // SAFETY: `current_user` returned the scheduler-owned payload of this
-        // pinned current Thread. This borrow ends before `pin` is consumed by
-        // run admission; later machine runs obtain a fresh pointer and pin.
         let thread = current.object;
         if thread.scheduler_id() != Some(current.thread) {
             crate::kernel::crash::fatal(format_args!(
                 "HypeR: native-user scheduler identity is inconsistent"
             ));
         }
-        // SAFETY: the scheduler pin keeps the execution payload resident, and
-        // publication arms its Process membership before this entry can run.
+        // SAFETY: The caller pins the current Thread through this attachment.
+        // Its scheduler-owned payload remains allocated until entry returns,
+        // including while syscall continuations block or migrate.
         let process = unsafe { execution.as_ref() }.process().clone();
         if process.id() != thread.process_id() {
             crate::kernel::crash::fatal(format_args!(
@@ -105,188 +59,315 @@ impl UserSession {
                 "HypeR: native-user Thread has an invalid execution route"
             ));
         }
-        let _ = pin;
         (Self { thread, process }, execution)
     }
 
-    fn refresh_execution(
-        &self,
-        current: crate::kernel::task::scheduler::CurrentUser,
-        pin: &crate::kernel::task::scheduler::UserRunGuard,
-    ) -> NonNull<UserExecution> {
-        if self.thread.scheduler_id() != Some(current.thread) {
-            crate::kernel::crash::fatal(format_args!(
-                "HypeR: resumed native-user scheduler identity is inconsistent"
-            ));
+    fn stop_requested(&self) -> bool {
+        self.thread.stop_requested()
+    }
+}
+
+/// A Thread-owned continuation with optional current-CPU translation ownership.
+///
+/// The cell is accessed only by this Thread with IRQs masked, or by its masked
+/// switch hook before the saved continuation can be published on another CPU.
+/// The hook empties it before migration; a suspended syscall owns no CPU token.
+struct NativeMachineSession<'owner> {
+    session: &'owner UserSession,
+    execution: &'owner UserExecution,
+    active: UnsafeCell<Option<ActiveNativeAddressSpace<'owner>>>,
+}
+
+static ACTIVE_SESSIONS: PerCpu<AtomicPtr<NativeMachineSession<'static>>> =
+    PerCpu::new([const { AtomicPtr::new(core::ptr::null_mut()) }; hyper::cpu::MAX_CPUS]);
+
+impl NativeMachineSession<'_> {
+    /// Observes deferred scheduling and stop before admitting an EL0 return.
+    /// Enters with IRQs enabled and returns with IRQs masked, including stop.
+    fn prepare_user_return(&self) -> bool {
+        loop {
+            if let Err(error) = scheduler::ensure_sleepable() {
+                fail_run("native-user return left sleepable context", error);
+            }
+            crate::hal::irq::mask_local();
+            if self.session.stop_requested() {
+                return false;
+            }
+            if preemption_pending() {
+                crate::hal::irq::enable_local();
+                if let Err(error) = scheduler::cond_resched() {
+                    fail_run("failed to schedule native-user continuation", error);
+                }
+                continue;
+            }
+            // SAFETY: Masking excludes IRQ-tail suspension. Only this current
+            // continuation and that suspension hook access the optional token.
+            if unsafe { &*self.active.get() }.is_some() {
+                return true;
+            }
+            crate::hal::irq::enable_local();
+            let identifier = match self.execution.address_space().acquire_identifier() {
+                Ok(identifier) => identifier,
+                Err(error) if error.is_identifier_busy() => {
+                    if let Err(error) = scheduler::yield_now() {
+                        fail_run("failed to yield under Native translation pressure", error);
+                    }
+                    continue;
+                }
+                Err(error) => fail_run("failed to acquire Native translation identifier", error),
+            };
+            crate::hal::irq::mask_local();
+            if self.session.stop_requested() {
+                drop(identifier);
+                return false;
+            }
+            let activated = {
+                // SAFETY: This lexical guard is created while already masked
+                // and ends before IRQs can be enabled or the Thread can move.
+                let mask = unsafe { InterruptMaskGuard::<crate::hal::irq::LocalMask>::acquire() };
+                let access = match crate::hal::user::prepare_kernel_access(&mask) {
+                    Ok(access) => access,
+                    Err(error) => {
+                        fail_run("failed to establish native-user access isolation", error)
+                    }
+                };
+                // SAFETY: IRQs remain masked through storing this token and
+                // registering the switch hook below. Every actual switch
+                // consumes it before publishing this Thread's saved context.
+                unsafe { self.execution.address_space().activate(&access, identifier) }
+            };
+            match activated {
+                Ok(active) => {
+                    // SAFETY: No activation exists and this masked continuation
+                    // exclusively owns the Thread's empty residency slot.
+                    unsafe { *self.active.get() = Some(active) };
+                    let cpu = current_cpu();
+                    let pointer = core::ptr::from_ref(self)
+                        .cast::<NativeMachineSession<'static>>()
+                        .cast_mut();
+                    if ACTIVE_SESSIONS[cpu]
+                        .compare_exchange(
+                            core::ptr::null_mut(),
+                            pointer,
+                            Ordering::Release,
+                            Ordering::Relaxed,
+                        )
+                        .is_err()
+                    {
+                        hyper::debug::invariant_failure("Native CPU session already registered");
+                    }
+                    if self.session.stop_requested() {
+                        return false;
+                    }
+                    if !preemption_pending() {
+                        return true;
+                    }
+                    crate::hal::irq::enable_local();
+                }
+                Err(error) if error.is_mapping_conflict() => {
+                    crate::hal::irq::enable_local();
+                    if let Err(error) = scheduler::yield_now() {
+                        fail_run("failed to yield under Native mapping contention", error);
+                    }
+                }
+                Err(error) => fail_run("failed to activate native-user address space", error),
+            }
         }
-        let execution = current.execution;
-        if current.object.object_snapshot().koid != self.thread.object_snapshot().koid {
-            crate::kernel::crash::fatal(format_args!(
-                "HypeR: resumed native-user execution owner is inconsistent"
-            ));
+    }
+
+    fn mapping_epoch(&self) -> Option<u64> {
+        require_masked();
+        // SAFETY: The current Thread owns this cell and IRQs exclude its hook.
+        unsafe { &*self.active.get() }
+            .as_ref()
+            .map(ActiveNativeAddressSpace::mapping_epoch)
+    }
+
+    /// Leaves the current CPU after a final architecture exit.
+    fn detach_address(&self) {
+        require_masked();
+        let pointer = ACTIVE_SESSIONS[current_cpu()].swap(core::ptr::null_mut(), Ordering::Acquire);
+        if !pointer.is_null() && pointer.cast_const() != core::ptr::from_ref(self).cast() {
+            hyper::debug::invariant_failure("Native exit belongs to a different CPU session");
         }
-        let _ = pin;
-        execution
+        // SAFETY: Architecture publication is closed and the masked current
+        // Thread exclusively owns this cell. A previously suspended call has
+        // neither a registered pointer nor an activation to consume.
+        let active = unsafe { &mut *self.active.get() }.take();
+        if active.is_some() != !pointer.is_null() {
+            hyper::debug::invariant_failure("Native translation registration is inconsistent");
+        }
+        if let Some(active) = active
+            && let Err(error) = active.leave()
+        {
+            fail_run("failed to leave native-user address space", error);
+        }
+    }
+}
+
+impl Drop for NativeMachineSession<'_> {
+    fn drop(&mut self) {
+        if self.active.get_mut().is_some() {
+            hyper::debug::invariant_failure("Native session dropped with active translation");
+        }
+    }
+}
+
+// SAFETY: Dispatch enters ordinary IRQ-enabled Thread context without retaining
+// a CPU-affine guard. The scheduler's single committed-switch seam withdraws
+// architecture publication and empties this session's translation cell before
+// any other Thread runs. The retained Thread stack owns the service and session
+// throughout blocking/migration. Return masks IRQs, checks stop and scheduling,
+// and reacquires translation when the continuation was actually switched out.
+unsafe impl NativeCallHandler for NativeMachineSession<'_> {
+    unsafe fn dispatch(&self, invocation: NativeInvocation) -> NativeCallAction {
+        require_masked();
+        crate::hal::irq::enable_local();
+        if let Err(error) = scheduler::ensure_sleepable() {
+            fail_run("native-user syscall did not enter sleepable context", error);
+        }
+        #[cfg(all(CONFIG_ARCH_AARCH64, feature = "kernel-self-test"))]
+        self_test::hold_syscall(&self.session.thread, invocation);
+        if self.session.stop_requested() {
+            crate::hal::irq::mask_local();
+            return NativeCallAction::Stop;
+        }
+        let services = ProcessServices::new(&self.session.process, &self.session.thread);
+        let result = match native::dispatch(&services, invocation) {
+            native::NativeAction::Return(result) => result,
+            native::NativeAction::Yield(result) => {
+                if let Err(error) = scheduler::yield_now() {
+                    fail_run("failed to yield native-user Thread", error);
+                }
+                result
+            }
+            native::NativeAction::ExitThread { status } => {
+                self.session
+                    .thread
+                    .request_stop(TerminalReason::ThreadExited { status });
+                crate::hal::irq::mask_local();
+                return NativeCallAction::Stop;
+            }
+            native::NativeAction::ExitProcess { status } => {
+                self.session
+                    .process
+                    .request_stop(TerminalReason::ProcessExited { status });
+                crate::hal::irq::mask_local();
+                return NativeCallAction::Stop;
+            }
+        };
+        if self.prepare_user_return() {
+            NativeCallAction::Return(result)
+        } else {
+            NativeCallAction::Stop
+        }
+    }
+}
+
+/// Withdraws the outgoing Native owner at the one committed scheduler seam.
+/// Scheduler `current` already names the incoming Thread here.
+pub(crate) fn suspend_current() {
+    require_masked();
+    let pointer = ACTIVE_SESSIONS[current_cpu()].swap(core::ptr::null_mut(), Ordering::Acquire);
+    let Some(session) = NonNull::new(pointer) else {
+        return;
+    };
+    // SAFETY: Registration retains this session on the outgoing Thread's
+    // private stack. The switch has not saved or published that stack yet,
+    // IRQs are masked, and no scheduler/MM lock remains held. Architecture
+    // suspension closes every raw-frame/FP/TLS CPU ownership before MM leave.
+    unsafe { crate::hal::user::suspend_current_user() };
+    #[cfg(all(CONFIG_ARCH_AARCH64, feature = "kernel-self-test"))]
+    // SAFETY: The registered outgoing session remains retained as above.
+    self_test::record_suspension(unsafe { &session.as_ref().session.thread });
+    // SAFETY: The outgoing Thread still exclusively owns its registered cell;
+    // taking the token empties all CPU-affine state before context migration.
+    let active = unsafe { &mut *session.as_ref().active.get() }.take();
+    let Some(active) = active else {
+        hyper::debug::invariant_failure("Native switch lost its active translation");
+    };
+    if let Err(error) = active.leave() {
+        fail_run("failed to suspend native-user translation", error);
     }
 }
 
 /// Fixed scheduler entry for every native user Thread.
-///
-/// Process construction supplies no arbitrary kernel callback. Returning from
-/// this function transfers to the ordinary scheduler thread-exit trampoline.
+/// Returning transfers to the ordinary scheduler thread-exit trampoline.
 pub(in crate::kernel) extern "C" fn thread_entry(_argument: usize) {
-    run_current()
-}
-
-fn run_current() {
-    let pin = acquire_pin();
-    let current = match crate::kernel::task::scheduler::current_user(&pin) {
+    let pin = match scheduler::preempt_disable() {
+        Ok(pin) => pin,
+        Err(error) => fail_run("failed to attach native-user execution", error),
+    };
+    let current = match scheduler::current_user(&pin) {
         Ok(current) => current,
         Err(error) => fail_run("failed to identify current native-user Thread", error),
     };
-    let (session, execution) = UserSession::attach(current, &pin);
-    run_session(&session, pin, execution)
+    let (session, execution) = UserSession::attach(current);
+    if let Err(error) = scheduler::preempt_enable_without_reschedule(pin) {
+        fail_run("failed to release native-user attachment pin", error);
+    }
+    // SAFETY: The boxed payload belongs to this exact scheduler Thread and
+    // cannot be reclaimed until this entry returns. Stop preserves runnable
+    // continuations so they close architecture ownership and Rust locals.
+    run_session(&session, unsafe { execution.as_ref() });
 }
 
-fn run_session(
-    session: &UserSession,
-    mut pin: crate::kernel::task::scheduler::UserRunGuard,
-    mut execution: NonNull<UserExecution>,
-) {
+fn run_session(session: &UserSession, execution: &UserExecution) {
+    let machine = NativeMachineSession {
+        session,
+        execution,
+        active: UnsafeCell::new(None),
+    };
     loop {
-        // SAFETY: `execution` was obtained with this run's `pin`. The prepared
-        // and active run tokens below consume that same pin and retain its
-        // no-migration/no-reclamation guarantee until machine exit.
-        let execution_owner = unsafe { execution.as_ref() };
-        if session.thread.snapshot().phase == UserThreadPhase::StopRequested {
-            finish_pin(pin);
+        if session.stop_requested() {
             return;
         }
-
         let prepared = match session
             .thread
-            .prepare_run(pin, session.process.image_generation())
+            .prepare_run(session.process.image_generation())
         {
             Ok(prepared) => prepared,
-            Err((pin, RunAdmissionError::AdmissionClosed)) => {
-                finish_pin(pin);
-                return;
-            }
-            Err((_pin, error)) => fail_run("failed to reserve native-user generation", error),
+            Err(RunAdmissionError::AdmissionClosed) => return,
+            Err(error) => fail_run("failed to reserve native-user generation", error),
         };
-
-        // Masking closes the final pending-check-to-ERET window. Assembly
-        // restores this masked state after capture; it is released before
-        // address-space leave so local replacement IPIs can make progress.
-        // SAFETY: The guard remains on this pinned continuation and is dropped
-        // before any scheduling point.
-        let interrupt_mask = unsafe { InterruptMaskGuard::<crate::hal::irq::LocalMask>::acquire() };
-        let cpu = match crate::kernel::cpu::current_index() {
-            Some(cpu) => cpu,
-            None => crate::kernel::crash::fatal(format_args!(
-                "HypeR: native-user Thread lost its CPU identity"
-            )),
-        };
-        match crate::kernel::task::preempt::pending(cpu) {
-            Ok(true) => {
-                let aborted_pin = prepared.abort();
-                drop(interrupt_mask);
-                finish_pin(aborted_pin);
-                (pin, execution) = reacquire_execution(session);
-                continue;
-            }
-            Ok(false) => {}
-            Err(error) => fail_run("failed to inspect native-user preemption state", error),
+        if !machine.prepare_user_return() {
+            machine.detach_address();
+            prepared.abort();
+            crate::hal::irq::enable_local();
+            return;
         }
-        let kernel_access = match crate::hal::user::prepare_kernel_access(&interrupt_mask) {
-            Ok(access) => access,
-            Err(error) => {
-                let pin = prepared.abort();
-                drop(interrupt_mask);
-                finish_pin(pin);
-                fail_run("failed to establish native-user access isolation", error);
-            }
-        };
-
-        let identifier = match execution_owner.address_space().acquire_identifier() {
-            Ok(identifier) => identifier,
-            Err(error) => {
-                let aborted_pin = prepared.abort();
-                drop(interrupt_mask);
-                finish_pin(aborted_pin);
-                if !error.is_identifier_busy() {
-                    fail_run("failed to acquire Native translation identifier", error);
-                }
-                if let Err(error) = crate::kernel::task::scheduler::yield_now() {
-                    fail_run("failed to yield under Native translation pressure", error);
-                }
-                (pin, execution) = reacquire_execution(session);
-                continue;
-            }
-        };
-
         let active_run = match prepared.commit() {
             Ok(active) => active,
-            Err((pin, error)) => {
-                drop(identifier);
-                drop(interrupt_mask);
-                finish_pin(pin);
+            Err(error) => {
+                machine.detach_address();
+                crate::hal::irq::enable_local();
                 if error == RunAdmissionError::AdmissionClosed {
                     return;
                 }
                 fail_run("failed to publish native-user generation", error);
             }
         };
-        let active_address = match execution_owner.address_space().activate(
-            active_run.pin(),
-            &kernel_access,
-            identifier,
-        ) {
-            Ok(active) => active,
-            Err(error) => fail_run("failed to activate native-user address space", error),
-        };
-        let observed_epoch = active_address.mapping_epoch();
         let binding = active_run.binding();
-        // SAFETY: The scheduler pin, admitted generation, and active address
-        // root uniquely own the stopped context until its return capability is
-        // consumed. UserExecution uses UnsafeCell solely for this seam.
-        let context = unsafe { &mut *execution_owner.context_ptr() };
-        let stopped = {
-            // Keep the CPU-affine service wholly inside this pinned machine
-            // run. Architecture exit closes its publication before returning,
-            // so both borrowed values are gone before the pin can be released.
-            let calls = NativeProcessCalls {
-                process: &session.process,
-            };
-            let service = NativeCallService::new(&calls);
-            active_address.run_user(context, binding, kernel_access, &service)
+        let service = NativeCallService::new(&machine);
+        // SAFETY: This Thread retains its scheduler payload, session, service,
+        // and admitted generation until the returned capability is consumed.
+        // Initial translation is registered and IRQs are masked. The scheduler
+        // hook retires CPU state before every switch; direct callback return
+        // restores translation. No CPU-affine guard spans this machine run.
+        let (exit, architecture) = match unsafe {
+            crate::hal::user::run_user(&mut *execution.context_ptr(), binding, &service)
+        } {
+            Ok(stopped) => stopped,
+            Err(error) => fail_run("failed to run native-user context", error),
         };
+        let observed_epoch = machine.mapping_epoch();
+        machine.detach_address();
+        let proof = execution.address_space().finish_user_exit(architecture);
+        let stopped_run = active_run.stop_after_machine_exit(proof);
+        crate::hal::irq::enable_local();
 
-        drop(interrupt_mask);
-        let (exit, proof) = stopped.leave();
-        let (stopped_run, returned_pin) = active_run.stop_after_machine_exit(proof);
-        if let Err(error) = crate::kernel::task::scheduler::finish_user_run(returned_pin) {
-            fail_run("failed to release native-user execution pin", error);
-        }
-
-        let stop_requested = session.thread.snapshot().phase == UserThreadPhase::StopRequested;
+        let stop_requested = session.stop_requested();
         match exit {
-            crate::hal::user::UserExit::NativeCall {
-                invocation,
-                completion,
-            } => {
-                if finish_native_call(
-                    session,
-                    invocation,
-                    completion,
-                    binding,
-                    stopped_run,
-                    stop_requested,
-                ) == NativeRunAction::Stop
-                {
-                    return;
-                }
-            }
             crate::hal::user::UserExit::Interrupted { completion } => {
                 let result = if stop_requested {
                     completion.discard(binding)
@@ -302,11 +383,13 @@ fn run_session(
                 }
             }
             crate::hal::user::UserExit::Fault { fault, completion } => {
-                let address = UserAddress::new(fault.address());
+                let Some(observed_epoch) = observed_epoch else {
+                    hyper::debug::invariant_failure("Native fault has no translation epoch");
+                };
                 let resolution = fault::resolve(
                     &session.thread,
-                    execution_owner.address_space(),
-                    address,
+                    execution.address_space(),
+                    UserAddress::new(fault.address()),
                     fault.kind(),
                     observed_epoch,
                 );
@@ -314,22 +397,18 @@ fn run_session(
                     .as_ref()
                     .is_err_and(|error| error.is_mapping_conflict());
                 let resolved = matches!(resolution, Ok(true));
-                let stopped = session.thread.snapshot().phase == UserThreadPhase::StopRequested;
+                let stopped = session.stop_requested();
                 if !stopped && (resolved || retry_conflict) {
-                    // The faulting PC and every register remain unchanged. The
-                    // previous machine run is acknowledged before scheduling;
-                    // admission on the next iteration observes the current root.
                     if let Err(failure) = completion.resume_execution(binding) {
                         fail_completion(failure);
                     }
                     stopped_run.acknowledge_architecture_exit();
-                    if retry_conflict
-                        && let Err(error) = crate::kernel::task::scheduler::yield_now()
-                    {
+                    if retry_conflict && let Err(error) = scheduler::yield_now() {
                         fail_run("failed to yield a contended private-page fault", error);
                     }
                 } else {
                     if !stopped {
+                        report_user_fault(session, fault, observed_epoch, &resolution);
                         session.process.request_stop(fault_reason(fault));
                     }
                     if let Err(failure) = completion.discard(binding) {
@@ -340,99 +419,49 @@ fn run_session(
                 }
             }
         }
-        (pin, execution) = reacquire_execution(session);
     }
 }
 
-fn finish_native_call(
+#[inline(never)]
+fn report_user_fault(
     session: &UserSession,
-    invocation: NativeInvocation,
-    completion: crate::hal::user::ReturnCapability<'_>,
-    binding: hyper::hal::user::UserRunBinding,
-    stopped_run: StoppedUserRun,
-    stop_requested: bool,
-) -> NativeRunAction {
-    if stop_requested {
-        consume_discarded_call(completion, binding, stopped_run);
-        return NativeRunAction::Stop;
-    }
-
-    let deferred = DeferredProcessServices::new(&session.process, &session.thread);
-    match native::dispatch_deferred(&deferred, invocation) {
-        native::DeferredAction::Return(result) => {
-            if session.thread.snapshot().phase == UserThreadPhase::StopRequested {
-                consume_discarded_call(completion, binding, stopped_run);
-                return NativeRunAction::Stop;
-            }
-            consume_returning_call(completion, binding, stopped_run, result);
-            NativeRunAction::Resume
-        }
-        native::DeferredAction::Yield(result) => {
-            consume_returning_call(completion, binding, stopped_run, result);
-            if let Err(error) = crate::kernel::task::scheduler::yield_now() {
-                fail_run("failed to yield native-user Thread", error);
-            }
-            NativeRunAction::Resume
-        }
-        native::DeferredAction::ExitThread { status } => {
-            session
-                .thread
-                .request_stop(TerminalReason::ThreadExited { status });
-            consume_discarded_call(completion, binding, stopped_run);
-            NativeRunAction::Stop
-        }
-        native::DeferredAction::ExitProcess { status } => {
-            session
-                .process
-                .request_stop(TerminalReason::ProcessExited { status });
-            consume_discarded_call(completion, binding, stopped_run);
-            NativeRunAction::Stop
-        }
-    }
-}
-
-fn consume_returning_call(
-    completion: crate::hal::user::ReturnCapability<'_>,
-    binding: hyper::hal::user::UserRunBinding,
-    stopped_run: StoppedUserRun,
-    result: NativeResult,
+    fault: UserFault,
+    observed_epoch: u64,
+    resolution: &Result<bool, crate::kernel::mm::user_space::MachineError>,
 ) {
-    if let Err(failure) = completion.complete_native(binding, result) {
-        fail_completion(failure);
+    let name = session.process.name();
+    crate::pr_err!(
+        "HypeR: Native process fault process={} process_koid={} thread_koid={} kind={:?} pc={:#x} address={:#x} syndrome={:#x} observed_epoch={} resolution={:?}",
+        core::str::from_utf8(name.as_bytes()).unwrap_or("<invalid name>"),
+        session.process.koid().get(),
+        session.thread.object_snapshot().koid.get(),
+        fault.kind(),
+        fault.program_counter(),
+        fault.address(),
+        fault.syndrome(),
+        observed_epoch,
+        resolution,
+    );
+}
+
+fn current_cpu() -> hyper::cpu::CpuIndex {
+    match crate::kernel::cpu::current_index() {
+        Some(cpu) => cpu,
+        None => hyper::debug::invariant_failure("Native continuation lost CPU identity"),
     }
-    stopped_run.acknowledge_architecture_exit();
 }
 
-fn consume_discarded_call(
-    completion: crate::hal::user::ReturnCapability<'_>,
-    binding: hyper::hal::user::UserRunBinding,
-    stopped_run: StoppedUserRun,
-) {
-    if let Err(failure) = completion.discard(binding) {
-        fail_completion(failure);
+fn require_masked() {
+    if crate::hal::irq::local_enabled() {
+        hyper::debug::invariant_failure("Native transition requires masked IRQs");
     }
-    stopped_run.acknowledge_architecture_exit();
 }
 
-fn reacquire_execution(
-    session: &UserSession,
-) -> (
-    crate::kernel::task::scheduler::UserRunGuard,
-    NonNull<UserExecution>,
-) {
-    let pin = acquire_pin();
-    let current = match crate::kernel::task::scheduler::current_user(&pin) {
-        Ok(current) => current,
-        Err(error) => fail_run("failed to refresh current native-user Thread", error),
-    };
-    let execution = session.refresh_execution(current, &pin);
-    (pin, execution)
-}
-
-fn acquire_pin() -> crate::kernel::task::scheduler::UserRunGuard {
-    match crate::kernel::task::scheduler::user_run_guard() {
-        Ok(pin) => pin,
-        Err(error) => fail_run("failed to pin native-user execution", error),
+fn preemption_pending() -> bool {
+    require_masked();
+    match crate::kernel::task::preempt::pending(current_cpu()) {
+        Ok(pending) => pending,
+        Err(error) => fail_run("failed to inspect native-user preemption state", error),
     }
 }
 
@@ -443,12 +472,6 @@ fn validate_current_stack(stack: (usize, usize)) {
         crate::kernel::crash::fatal(format_args!(
             "HypeR: native-user runner is outside its scheduler stack"
         ));
-    }
-}
-
-fn finish_pin(pin: crate::kernel::task::scheduler::UserRunGuard) {
-    if let Err(error) = crate::kernel::task::scheduler::finish_user_run(pin) {
-        fail_run("failed to finish native-user pin", error);
     }
 }
 

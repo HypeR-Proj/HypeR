@@ -4,7 +4,7 @@
 //! Native system syscall validation.
 
 use crate::kernel::abi::native::Arguments;
-use crate::kernel::abi::native::services::{DeferredAction, ImmediateServices};
+use crate::kernel::abi::native::services::NativeAction;
 use crate::kernel::abi::native::status::{failure, success};
 use crate::kernel::abi::native::wire::require_zero;
 use hyper::abi::native as abi;
@@ -14,18 +14,12 @@ use hyper::abi::native::{
 };
 
 #[inline(never)]
-pub(in crate::kernel::abi::native) fn sys_abi_query(
-    _services: &impl ImmediateServices,
-    _arguments: &Arguments,
-) -> NativeResult {
+pub(in crate::kernel::abi::native) fn sys_abi_query(_arguments: &Arguments) -> NativeResult {
     success([HYPER_NATIVE_ABI_REVISION, HYPER_NATIVE_FEATURE_CORE])
 }
 
 #[inline(never)]
-pub(in crate::kernel::abi::native) fn sys_system_config(
-    _services: &impl ImmediateServices,
-    arguments: &Arguments,
-) -> NativeResult {
+pub(in crate::kernel::abi::native) fn sys_system_config(arguments: &Arguments) -> NativeResult {
     if let Err(status) = require_zero(&arguments[1..]) {
         return failure(status);
     }
@@ -45,7 +39,6 @@ pub(in crate::kernel::abi::native) fn sys_system_config(
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_clock_get_monotonic(
-    _services: &impl ImmediateServices,
     arguments: &Arguments,
 ) -> NativeResult {
     let result = require_zero(arguments).and_then(|()| {
@@ -65,12 +58,12 @@ pub(in crate::kernel::abi::native) fn sys_not_supported() -> NativeResult {
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_clock_get_realtime(
     arguments: &Arguments,
-) -> DeferredAction {
+) -> NativeAction {
     let result = (|| {
         require_zero(arguments)?;
         crate::kernel::time::realtime().ok_or(abi::HYPER_NATIVE_STATUS_NOT_SUPPORTED)
     })();
-    DeferredAction::Return(match result {
+    NativeAction::Return(match result {
         Ok(time) => success([time.seconds() as u64, u64::from(time.nanoseconds())]),
         Err(status) => failure(status),
     })

@@ -3,13 +3,13 @@
 
 //! Native vm service calls under borrowed Process authority.
 
-use super::DeferredProcessServices;
+use super::ProcessServices;
 use super::affinity::AffinityInputError;
 use crate::kernel::abi::native::VmServices;
 use crate::kernel::capability::{HandleValue, Rights};
 use crate::kernel::mm::user_space::UserSlice;
 
-impl DeferredProcessServices<'_> {
+impl ProcessServices<'_> {
     // Keep the full batch buffer off the interactive input call path. Both
     // variants copy once before publishing any input and kick the guest once.
     // A full 4 KiB write still needs its complete scratch buffer: shortening
@@ -33,7 +33,7 @@ impl DeferredProcessServices<'_> {
     }
 }
 
-impl VmServices for DeferredProcessServices<'_> {
+impl VmServices for ProcessServices<'_> {
     fn virtual_machine_platform_info(
         &self,
         lease: HandleValue,

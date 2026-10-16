@@ -58,8 +58,15 @@ route on the supported platform; current RISC-V guests are not fully lazy.
 Guest stop and IRQ-tail actions pass through one final save-and-scrub boundary
 before the assembly anchor unwinds, including deferred device exits.
 
-A real Native unwind saves used state before closing run publication. Guest
-wait, device, terminal, and administrative-stop exits do the same. AArch64
+A real Native unwind saves used state before closing run publication. A Native
+syscall runs with FP disabled in the kernel while its original private frame
+records whether the user bank is resident. Only an actual scheduler switch
+saves and clears that bank and withdraws publication; nested kernel IRQ frames
+cannot substitute for the original syscall frame. The resumed syscall may run
+on another CPU, and its final user return requires another first-use restore.
+A syscall which never switches retains the bank, including allocation, ready
+waits, unknown calls, and COW copies. Guest wait, device, terminal, and
+administrative-stop exits save and clear before publication closes. AArch64
 guest IRQ postludes are also ownership boundaries: they can deactivate,
 schedule, migrate, or terminate the vCPU without unwinding the original
 exception frame. Before
@@ -73,13 +80,15 @@ Save and release clears the physical vector registers and FP controls before
 returning. Startup clears firmware state on every CPU. Consequently no prior
 owner's register contents remain on a CPU after an ownership boundary, even
 while a later owner has not yet used FP. All state leaves execute with local
-exceptions masked and keep FP disabled on return. No destructor, remote flush,
-or reference surviving migration is required.
+exceptions masked and keep FP disabled on return. No cross-Thread FP owner
+pointer or CPU-local residency reference survives migration. The private
+syscall frame remains owned by its suspended Thread.
 
 ## Scope and validation
 
 This is run-scoped lazy restore, not cross-run CPU ownership caching. An FP-using
-thread may trap again after a blocking call or scheduling boundary. Retaining
+thread may trap again after an actual scheduling boundary. A call that can block
+but completes without switching does not create such a boundary. Retaining
 state across that boundary would require another lifetime and migration
 protocol and is deliberately outside this design.
 
@@ -94,8 +103,15 @@ Native or guest execution paths. RVV, SVE and SME register banks remain outside
 the admitted execution contract.
 
 The QEMU self-tests exercise integer-only Native execution, initialized FP
-state, preservation across direct and deferred syscalls, competing owners,
-preemption, guest timer waits, and guest affinity migration. RISC-V probes also
+state, preservation across direct syscalls and actual scheduling, competing
+owners, preemption, guest timer waits, and guest affinity migration. AArch64
+also checks a real blocked syscall through repeated CPU migration, complete
+FP/TLS preservation, cancellation, and an untouched COW output mapping. A
+self-test-only gate admits a syscall with the original user FP bank resident,
+then forces nested host-IRQ suspension while a competing FP owner runs. A
+separate SMP gate makes a remote mapping update overlap masked syscall detach
+and verifies that cross-call servicing completes the update before user return.
+RISC-V probes also
 verify genuine VS illegal-instruction delegation and the guest FS=Off policy.
 The normal Linux guest acceptance also exercises Native/guest interleaving.
 These establish architectural behavior
