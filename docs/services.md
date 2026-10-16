@@ -214,7 +214,9 @@ execution generation, stream, monotonic time and sequence. Legacy internal domai
 log registrations retain their supplied labels and generation zero.
 
 Retention is volatile: 1 MiB/4096 records globally and 128 KiB/512 records per
-component. Lines split at 4096 bytes; partial lines flush periodically and on EOF.
+component. Lines split at 4096 bytes; partial lines flush after their source has
+been idle for at least 100 ms, or immediately on EOF. New fragments restart that
+source's idle interval, so a timer tick cannot split a line just received.
 Admission and per-tick work are bounded. Queries use bounded framed byte replies;
 clients cannot retain journal-sponsored reply VMOs. The CLI escapes terminal control
 characters, reports retention loss and uses a fixed upper cursor for initial lists.
