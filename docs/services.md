@@ -232,6 +232,9 @@ input buffers and in-flight replies also consume bounded memory.
 Queries use bounded framed byte replies;
 clients cannot retain journal-sponsored reply VMOs. The CLI escapes terminal control
 characters, reports retention loss and uses a fixed upper cursor for initial lists.
+`journalctl --json` exposes one bounded page with records, source attribution,
+cursors and loss counters. `--after`, `--through` and `--limit` select the page;
+these options require JSON mode. See [service administration](../app/README.md#service-administration).
 
 Logs mirror to raw serial during startup and after terminal activation, alongside
 ordinary kernel logs. The mirror uses each source's line framing, rather than
