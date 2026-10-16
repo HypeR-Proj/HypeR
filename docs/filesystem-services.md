@@ -130,6 +130,23 @@ retried after making the worker available. A running worker failure loses that
 reusable ownership; reopening requires a new backend connection rather than
 assuming interrupted I/O has retired.
 
+The formal manager observes worker Process termination independently of its
+serialized mount-control requests. An unexpected exit records the worker name,
+mountpoint, process KOID and kernel terminal reason (including exit status or
+fault class/code). The record goes to the manager's stderr journal stream, and
+`componentctl status /fs-backend` retains a failure summary. `mount` shows each
+worker's state and terminal reason. The manager stays running for healthy volumes;
+`mount -a` cannot treat a terminated worker as a successful existing mount.
+An explicit clean unmount is distinguished from an unexpected exit. Failed
+mounts remain fenced rather than exposing the directory underneath or silently
+reusing their block connection.
+
+Directory enumeration and child metadata are separate operations. A failed
+child mount does not invalidate its parent's directory stream. `ls /` preserves
+healthy entries when `/data` metadata fails, displays unknown attributes for that
+entry, reports its path on stderr, and returns a nonzero status for the partial
+listing. Accessing the failed volume itself still returns an error.
+
 A configured VM can keep `/data` busy even while stopped: vm-manager retains
 the registered guest image's file capability. `vmm delete alpine` releases a
 stopped Alpine definition and its image handle; it does not delete the image or
@@ -357,3 +374,11 @@ backend: file and directory operations, aliases and shared identities, writes,
 truncation, cache invalidation, synchronization and readback after a cold QEMU
 restart. These are correctness tests; they do not establish hardware performance
 or qualify physical power-loss durability.
+
+`make test-boot-system` also injects an exit with status 37 and a CPU exception
+into a mounted test worker, without modifying the underlying FAT media. It
+checks journal attribution, persistent component/mount status, clean unmounts,
+rejection of a failed mount retry, and continued root listing, program loading
+and `/tmp` I/O. A worker fault during shutdown must remain observable after
+namespace detach and mount-owner release. This tests supervision and fault
+isolation, not FAT correctness.
