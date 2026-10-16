@@ -87,7 +87,15 @@ impl Screen {
         if inverted {
             self.bytes.push_str("\x1b[7m");
         }
-        self.bytes.push_str(&visible(text, offset, self.width));
+        let text = visible(text, offset, self.width);
+        self.bytes.push_str(&text);
+        if inverted {
+            // Pad by display cells so wide and combining characters align too.
+            self.bytes.extend(std::iter::repeat_n(
+                ' ',
+                self.width.saturating_sub(cells(&text)),
+            ));
+        }
         self.bytes.push_str("\x1b[0m");
     }
     pub fn cursor(&mut self, row: usize, column: usize) {
