@@ -157,7 +157,9 @@ Choose the oracle for the behavior being tested:
   an independent cursor; use `mark()` before an action when old evidence must
   not satisfy a new assertion. A prompt is terminal output, not service readiness
   or proof that asynchronous logs have all arrived.
-* `command.Shell` runs finite formal-shell commands once. It captures merged
+* `command.Shell` runs finite formal-shell commands once. Commands enter through
+  bracketed paste to avoid per-character echo delays under concurrent kernel
+  logs. It captures merged
   stdout/stderr in `/tmp`, then the development-only `/bin/test-report` exports
   numbered hex chunks and a footer carrying the command's status, byte length
   and FNV-1a checksum of **status and payload**. The saved status is bound to the

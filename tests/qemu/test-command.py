@@ -68,7 +68,7 @@ class HostCommandTests(unittest.TestCase):
     def test_persistent_shell_exact_bytes_and_saved_result_reread(self):
         with tempfile.TemporaryDirectory() as directory:
             with Session(['/bin/bash', '--noprofile', '--norc'], Path(directory) / 'serial') as vm:
-                shell = Shell(vm, reporter=self.reporter)
+                shell = Shell(vm, reporter=self.reporter, bracketed_paste=False)
                 shell.base = str(Path(directory) / 'saved')
                 result = shell.run("value=persistent; printf 'hyper-sh$ \\000\\r\\n'; printf err >&2; false")
                 self.assertEqual(result.status, 1)
@@ -98,7 +98,7 @@ class HostCommandTests(unittest.TestCase):
         for failure in ('status-write', 'output-open'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
                 with Session(['/bin/bash', '--noprofile', '--norc'], Path(directory) / 'serial') as vm:
-                    shell = Shell(vm, reporter=self.reporter)
+                    shell = Shell(vm, reporter=self.reporter, bracketed_paste=False)
                     shell.base = str(Path(directory) / 'saved')
                     self.assertEqual(shell.run('true').status, 0)
                     # Bash noclobber provides deterministic redirection failure,

@@ -56,15 +56,25 @@ class Shell:
     use Session directly. The group redirects output, not stdin, and runs once.
     The exporter is development-only; neither kernel nor bootstrap has a test ABI.
     """
-    def __init__(self, session, *, reporter='/bin/test-report'):
+    def __init__(self, session, *, reporter='/bin/test-report', bracketed_paste=True):
         self.session = session
         self.reporter = shlex.quote(reporter)
+        self.bracketed_paste = bracketed_paste
         self.base = '/tmp/htr-' + uuid.uuid4().hex[:8]
         self.function = '__htr_' + uuid.uuid4().hex[:8]
         self.initialized = False
         self.sequence = 0
         self.artifacts = Path(str(session.logfile) + '.commands') / uuid.uuid4().hex
         self.artifacts.mkdir(parents=True)
+
+    def _send(self, source):
+        data = source.encode()
+        if self.bracketed_paste:
+            # Submit one edit, then Enter. Per-character echo can otherwise
+            # spend the command deadline behind concurrent kernel diagnostics
+            # before the shell has even received the complete command.
+            data = b'\x1b[200~' + data.removesuffix(b'\n') + b'\x1b[201~\r'
+        self.session.send(data)
 
     def run(self, command, timeout=60):
         if isinstance(command, bytes):
@@ -83,7 +93,7 @@ class Shell:
                      f'{self.reporter} "$1" {self.base} "$3"; '
                      "printf '\\nHTR1 %s READY %s\\n' \"$2\" \"$?\"; }; "
                      f"printf '\\nHTR1 %s INIT\\n' {ready}\n")
-            self.session.send(setup.encode())
+            self._send(setup)
             self.session.await_text(rb'\nHTR1 ' + ready.encode() + rb' INIT\n', timeout=timeout)
             self.initialized = True
         # A newline before } also permits here-documents and trailing comments.
@@ -104,7 +114,7 @@ class Shell:
             # The builtin receipt runs only after the exporter has been joined;
             # input now belongs to the shell, not its exiting child. Splitting
             # the format and token prevents command echo from forging a receipt.
-            self.session.send(((execute if attempt == 0 else '') + report).encode())
+            self._send((execute if attempt == 0 else '') + report)
             try:
                 serial = self.session.await_text(
                     rb'\nHTR1 ' + receipt.encode() + rb' READY (\d+)\n',
