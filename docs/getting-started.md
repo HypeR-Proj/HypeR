@@ -27,6 +27,29 @@ Commands in this guide run from the repository root.
   `IO_VM_ORAS` can select an executable; verified packages are reused offline;
 - `dtc` when building the x86-64 QEMU platform description.
 
+### macOS with MacPorts
+
+MacPorts' `erofs-utils` requires `libuuid`, while its `e2fsprogs` requires the
+conflicting `ossp-uuid`. Keep `erofs-utils` installed and let the build provide
+private ext4 tools instead of installing the `e2fsprogs` port:
+
+```sh
+sudo port install erofs-utils dosfstools mtools squashfs-tools
+make host-e2fsprogs
+```
+
+`make host-e2fsprogs` downloads SHA-256-pinned e2fsprogs 1.47.3 and compiles only
+`mke2fs`, `debugfs` and their static support libraries under `target/host-tools/`.
+It needs a host C compiler, Make, curl and Python 3.11+; no root access or
+Autotools installation is needed. The image packer also invokes this fallback
+automatically when it cannot find the ext4 tools in the system or Homebrew.
+Subsequent builds reuse the local tools offline. `make clean` removes them;
+`HOST_CC` selects the compiler for the explicit preparation target.
+
+Ensure `python3 --version` reports Python 3.11 or newer. With MacPorts Python
+3.14, for example, `sudo port select --set python3 python314` selects it for
+the build; Apple's `/usr/bin/python3` may be too old.
+
 Build the AArch64 kernel, Native SDK, and initramfs, then run the complete
 system with the default boot/system separation:
 
