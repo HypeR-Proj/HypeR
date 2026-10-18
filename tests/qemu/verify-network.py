@@ -214,7 +214,6 @@ class Scenario:
         self.send(f'vmm console {name}\n'.encode())
         self.session.await_text(re.escape(f'Connected to {name}.'.encode()))
         self.send(b'\n')
-        # Two Linux guests boot concurrently under cross-architecture TCG.
         # Match the SMP boot allowance; network commands keep their own limits.
         self.session.await_text(rb'~ # ', timeout=GUEST_BOOT_TIMEOUT_SECONDS)
         try:
@@ -384,11 +383,17 @@ def run(args):
         # Runtime forwarding and later client reset exercise the adopted policy
         # without keeping bootstrap configuration files alive for inspection.
 
+        # Bring each guest to readiness before booting the next. Concurrent
+        # Linux initialization saturates cross-architecture TCG workers and can
+        # exhaust the boot deadline before either console becomes interactive.
+        # Both guests stay alive for all transfer/reset/retirement assertions.
         for vm in guests:
             scenario.native(f'vmm start {vm["name"]}')
-        for vm in guests:
             with scenario.console(vm):
                 scenario.automatic_network(vm)
+        for vm in guests:
+            with scenario.console(vm):
+                scenario.interface(vm)
                 scenario.transfer()
                 if args.external_url:
                     scenario.external_transfer(args.external_url)

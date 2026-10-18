@@ -23,6 +23,9 @@ for that distribution; installation starts only after downloading succeeds and i
 subject to that download deadline. This keeps slow package servers from consuming
 the entire test job's budget without interrupting dpkg midway through an install.
 
+Cargo download caches use a digest of tracked lockfiles captured before the
+build. Cache finalization reuses that key without walking generated directories.
+
 The separate `Documentation` workflow builds the complete Markdown, Rustdoc
 and Doxygen site on every pull request and push to `main`. Its build job checks
 documentation diagnostics and local links in the generated HTML artifact. Only
@@ -161,6 +164,10 @@ QEMU. Package caches are separated by distribution and version. The dedicated
 MMIO network matrix entry remains enabled, and the independent MMIO cross-VM
 reset job also retains coverage on Ubuntu's older QEMU. No benchmark thresholds
 are part of these jobs.
+
+Network acceptance boots its two SMP guests one at a time to bound TCG startup
+contention. Both remain running during payload checks, driver rebinds and peer
+restart checks; guest boot retains a 300-second deadline.
 
 Choose the oracle for the behavior being tested:
 
