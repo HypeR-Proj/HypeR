@@ -17,6 +17,13 @@ external modules, Linux userspace services, initramfs assembly, tests, and
 package publication. This repository does not build Linux or modify appliance binaries. Board
 deployment adds a separate configuration archive to the Linux initramfs.
 
+The default QEMU deployment assigns physical virtio-PCI devices through
+host-owned SMMUv3 domains, restricting DMA to the I/O VM's RAM and explicit
+shared-memory grants. Guests still trust the backend for I/O data and
+availability. The physical MMIO compatibility and Pi 5 paths retain their
+trusted-I/O-VM requirement. See [I/O isolation](../kernel/docs/io-isolation.md)
+for the permission, memory-lifetime and qualification boundaries.
+
 The AArch64 QEMU baseline runs two Linux VMs: the I/O VM directly drives a
 QEMU virtio-scsi disk, and a business VM reaches it through standard virtio-scsi
 and upstream vhost-scsi/LIO. A Native test deployment owns both VMs, their DTBs,
@@ -68,7 +75,9 @@ the VM manager with its configured fleet. Business
 VMs are started only when their configuration requests autostart or through
 `vmm start`. `make run RUN_PROFILE=io` retains the explicit standby diagnostic
 profile: it boots a resident backend without mounting Native storage or
-provisioning business clients.
+provisioning business clients. This QEMU diagnostic uses physical virtio-MMIO
+storage with no network uplink, independently of the production board's PCI
+selection.
 
 Building the default board profile creates `target/board/qemu/disk.img` once
 and preserves existing disks. `make run` validates the disk's GPT against the
@@ -248,7 +257,8 @@ never authorizes memory reuse.
 ## Device protocol and control ownership
 
 The guest-facing devices use standard virtio-scsi and virtio-net. A business VM's
-`configuration.virtio-transport` selects `mmio` (default) or `pci` on AArch64.
+`configuration.virtio-transport` selects `mmio` (when omitted) or `pci` on AArch64.
+The QEMU board explicitly selects PCI for its default Alpine guest.
 The two transports share feature negotiation, queue validation and backend
 activation/reset state. For example:
 
@@ -274,7 +284,7 @@ legacy/transitional virtio remain unsupported. This business-VM profile has a
 fixed endpoint topology. The virtual bus is independent of physical RP1
 assignment and cannot address host PCI resources.
 
-The I/O appliance has a separate userspace PCIe host bus in domain 1. Bootstrap
+The I/O appliance has a separate userspace PCIe host bus in domain 2. Bootstrap
 advertises two ECAM buses at `0x0a600000` and a 2 MiB memory window at
 `0x0aa00000`. Bus 0 contains a root port with an empty, standard PCIe hotplug
 slot; bus 1 is its downstream bus. Physical RP1 assignment remains in domain 0,
@@ -849,10 +859,17 @@ names do not assert a globally assigned hardware identity.
 
 ### PCI transport acceptance
 
-Run `make test-board-network NETWORK_VIRTIO_TRANSPORT=pci QEMU_CPUS=4` for
-PCI enumeration, guest disk read/write, networking, driver rebind and repeated
-VM retirement. The default `make test-board-network` covers MMIO. Both use
+Run `make test-board-network QEMU_CPUS=4` for physical and guest PCI enumeration,
+guest disk read/write, networking, driver rebind and repeated VM retirement.
+The default QEMU board selects physical virtio-SCSI and virtio-net PCI functions
+behind an SMMUv3, using host-mediated INTx. The I/O VM's physical network and
+storage projections use PCI domains 0 and 1; domain 2 is reserved for hotplug.
+`make test-board-mmio` explicitly selects MMIO for both physical and guest
+transports and covers the same lifecycle. Both use
 fresh disposable disks and functional checks, without performance thresholds.
+The protected PCI configuration requires QEMU 9.2+ and its `virt-9.2` or newer
+machine model. Older models expose a stage-1-only SMMU and are rejected by the
+stage-2 driver; selecting an old model is not a supported isolation fallback.
 
 ### Hotplugged agent transport
 

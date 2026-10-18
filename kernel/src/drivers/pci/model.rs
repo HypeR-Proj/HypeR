@@ -130,6 +130,9 @@ pub struct FunctionState {
     masked: bool,
     active: bool,
     pending_irq: Option<u32>,
+    // An ECAM assignment exposes only validated, read-only transport
+    // capabilities. Power management, reset, ATS and MSI controls stay hidden.
+    transport_config: Option<[u32; 64]>,
 }
 impl FunctionState {
     pub fn new(
@@ -161,7 +164,15 @@ impl FunctionState {
             masked: true,
             active: false,
             pending_irq: None,
+            transport_config: None,
         }
+    }
+    pub(super) fn with_transport_config(mut self, config: [u32; 64]) -> Self {
+        self.transport_config = Some(config);
+        self
+    }
+    pub fn intx_enabled(&self) -> bool {
+        self.active && self.command & 0x400 == 0
     }
     pub fn activate(&mut self) {
         self.active = true;
@@ -247,6 +258,11 @@ impl FunctionState {
         Some((u64::from(word) >> ((offset & 3) * 8)) & width_mask(width))
     }
     fn config_word(&self, offset: usize) -> u32 {
+        if let Some(config) = &self.transport_config
+            && (offset == 0x34 || offset >= 0x3c)
+        {
+            return config.get(offset / 4).copied().unwrap_or(0);
+        }
         match offset {
             0 => self.identity,
             4 => u32::from(self.command) | (1 << 20),
@@ -255,7 +271,7 @@ impl FunctionState {
             0x10..=0x24 => self.bar_word((offset - 0x10) / 4),
             0x2c => self.subsystem,
             0x34 => MSIX_CAPABILITY as u32,
-            MSIX_CAPABILITY => {
+            MSIX_CAPABILITY if self.msix.count != 0 => {
                 0x11 | ((self.msix.count - 1) << 16)
                     | (u32::from(self.masked) << 30)
                     | (u32::from(self.enabled) << 31)
@@ -301,7 +317,7 @@ impl FunctionState {
             (self.config_word(register) & !mask) | (((value as u32) << ((offset & 3) * 8)) & mask);
         match register {
             4 => self.command = word as u16 & (2 | 4 | 0x400),
-            MSIX_CAPABILITY => {
+            MSIX_CAPABILITY if self.transport_config.is_none() => {
                 self.enabled = word & (1 << 31) != 0;
                 self.masked = word & (1 << 30) != 0;
             }

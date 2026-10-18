@@ -117,6 +117,12 @@ pub struct GuestMemoryStats {
 }
 
 /// VM-owned sparse guest RAM and its architecture stage-2 hierarchy.
+impl GuestAddressSpace {
+    pub(crate) fn dma_snapshot(&self) -> (backing::ResidentMemory, ResourceDomain) {
+        (self.resident_memory(), self.domain.clone())
+    }
+}
+
 pub(crate) struct GuestAddressSpace {
     ipa_base: u64,
     size: u64,

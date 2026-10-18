@@ -296,8 +296,10 @@ thresholds; they use separate bootstrap archives and no persistent board disk.
 
 The bootstrap board document selects the physical controller explicitly through
 `io-vm.io-device`: `profile` selects the I/O runtime's device policy and
-exactly one of `compatible` or `path` identifies its firmware node. QEMU uses
-`virtio-mmio-scsi` with `virtio,mmio`. Multiple eligible matches are rejected;
+one of `compatible`, `path`, or `pci-id` identifies the resource. QEMU defaults
+to `pci-function` with `pci-id: "1af4:1048"` behind the host SMMUv3.
+`virtio-mmio-scsi` with `virtio,mmio` remains supported for compatibility.
+Multiple eligible matches are rejected;
 use the full canonical FDT path when a machine exposes several controllers.
 Claiming a device never falls back to another match because one is busy. Eight data clients are shared by Native volumes and business VMs: the default
 split layout leaves six guest clients, while ramfs system placement leaves seven.
@@ -394,8 +396,8 @@ The resident I/O VM has its own `io-vm` node, outside `virtual-machines`:
     "affinity": [{"vcpu": 0, "cpus": [1, 3]}]
   },
   "io-device": {
-    "profile": "virtio-mmio-scsi",
-    "compatible": "virtio,mmio"
+    "profile": "pci-function",
+    "pci-id": "1af4:1048"
   }
 }
 ```

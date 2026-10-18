@@ -225,13 +225,15 @@ performance survey are complete. The next priorities are:
   architecture rework. Start with Native storage writes and guest network
   transmit throughput, using the physical Pi 5/Raspbian survey as a reference.
   Linux parity is not an acceptance requirement; performance tests stay manual.
-- [ ] **Security hardening around the I/O VM.** Refine capabilities into finer
-  device, resource and operation permissions. Add host-owned SMMU/IOMMU drivers
-  and DMA domains, including the applicable RP1/BCM2712 isolation mechanisms.
-  Establish coverage for each assigned device, including the separate SDHCI
-  path. The goal is to protect HypeR memory and authority from the I/O VM;
-  guests still depend on it for I/O. The current Pi 5 deployment remains a
-  trusted I/O VM configuration until that isolation is implemented and verified.
+- [ ] **Security hardening around the I/O VM.** Device operation permissions,
+  retained DMA leases and default QEMU virtio-PCI assignments through SMMUv3
+  are implemented. Continue the capability/lifecycle audit and qualify DMA
+  denial through the production I/O VM path. Establish physical isolation
+  coverage for each assigned device, including the applicable RP1/BCM2712
+  mechanisms and the separate SDHCI path. The goal is to protect HypeR memory
+  and authority from the I/O VM; guests still depend on it for I/O. MMIO and
+  Pi 5 deployments remain trusted I/O VM configurations. See the
+  [current isolation contract](kernel/docs/io-isolation.md).
 
 See the [roadmap](docs/roadmap.md) for scope and acceptance criteria, and the
 [Pi 5 boot guide](kernel/docs/rpi5.md) for the recommended firmware setup.
@@ -264,6 +266,12 @@ for package requirements and the `boards/qemu.json` deployment.
 This boots the AArch64 system with the HypeR shell and a resident Linux I/O VM
 in QEMU. The first build downloads pinned assets and creates a persistent board
 disk; `make run` launches those existing artifacts without building them.
+The default QEMU board uses virtio-PCI for physical I/O backends and the Alpine
+guest. Physical requester IDs are bound to host SMMUv3 domains before DMA is
+enabled. MMIO remains supported and has a dedicated `make test-board-mmio`
+compatibility suite; it does not provide PCI SMMU containment.
+The PCI deployment requires QEMU 9.2 or newer with a `virt-9.2` or newer machine
+model (`virt` selects the installed version's default).
 HypeR uses its read-only system volume as `/` and mounts its writable
 persistent data volume at `/data`. System init adopts the existing core services
 and launches VM management. Start the default guest with

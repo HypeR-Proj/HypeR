@@ -8,14 +8,18 @@ SPDX-License-Identifier: Apache-2.0
 The non-secure SMMUv3 driver implements host-owned stage-2 DMA translation.
 The QEMU acceptance fixture uses real PCI EDU DMA endpoints behind
 `virt,iommu=smmuv3` for both reads and writes.
+Use QEMU 9.2 or newer and a `virt-9.2` or newer machine model. Earlier `virt`
+models expose only stage 1; see the upstream
+[machine compatibility rule](https://github.com/qemu/qemu/blob/v9.2.0/hw/arm/virt.c#L3101-L3107).
 The register and descriptor contract follows
 [Arm IHI 0070 G.b](https://documentation-service.arm.com/static/6813b2bbefb0f21122c144c2).
 
-This is the hardware-driver foundation for I/O VM containment. The current
-I/O VM assignment and shared-memory protocols are not yet connected to these
-domains. Default QEMU storage/network devices use **virtio-mmio**, which does
-not traverse the `virt` machine's PCI SMMU. Pi 5 uses different hardware and
-remains a trusted-I/O-VM deployment, including the deferred SDHCI exception.
+Default QEMU storage/network assignments use **virtio-PCI** and bind their
+requester IDs to owned domains. Initial VM RAM and live shared-memory grants
+retain DMA leases until completed invalidation. See [I/O isolation](io-isolation.md)
+for the production ownership and retirement sequence. Dedicated **virtio-mmio**
+compatibility tests remain; that transport bypasses the PCI SMMU. Pi 5 uses
+different hardware and remains a trusted-I/O-VM deployment, including SDHCI.
 
 ## Ownership and admission
 
@@ -23,8 +27,9 @@ remains a trusted-I/O-VM deployment, including the deferred SDHCI exception.
   DMA translation tables and synchronization. It has no Native syscall policy.
 - `kernel/device/iommu` supplies owned `PageBlock` allocations and selected-HAL
   barriers. Platform initialization activates a discovered SMMU before physical
-  device publication. The SMMU and generic ECAM apertures are host-reserved in
-  the firmware catalogue, including overlapping MMIO aliases and every host-owned interrupt descriptor.
+  device publication. Translation providers (including unsupported providers
+  with `#iommu-cells`) and generic ECAM apertures are host-reserved in the
+  firmware catalogue, including overlapping MMIO aliases and host IRQs.
 - Discovery currently admits one SMMUv3 controller. It requires coherent
   table/queue access in both firmware and IDR0, little-endian VMSAv8-64 tables,
   stage 2, 4 KiB granules, terminate faults and software-owned queues/tables.
@@ -43,10 +48,12 @@ remains a trusted-I/O-VM deployment, including the deferred SDHCI exception.
 
 The controller is serialized by a sleeping mutex and permanently retained by
 the platform bus and its fault worker. Allocation and hardware completion waits
-never run under an IRQ-masked queue lock or in the IRQ callback. Before connecting
-assignment syscalls, the kernel still needs the canonical device KO, derived
-resource grants and the domain/lease lifecycle using internal references.
-This driver does not introduce a second userspace handle namespace.
+never run under an IRQ-masked queue lock or in the IRQ callback. Payload mappings
+retain kernel-only BackendMemoryLease objects independently of source handles
+and CPU mappings. Production PCI assignment installs the domain before enabling
+bus mastering; live backend grants extend it and complete invalidation before
+releasing their leases. The [authority and ownership contract](io-isolation.md)
+describes that lifecycle. There is no second userspace handle namespace.
 
 ## Translation and retirement
 
@@ -57,11 +64,15 @@ the driver never installs bypass STEs. ATS and PRI are not admitted. If ATS is
 implemented, CR0.ATSCHK enables checking of Translated traffic and EATS remains
 zero, avoiding the architecture's fast-mode bypass.
 
-Page mappings own their allocations and express read-only, write-only or
-read/write access. Descriptor publication is ordered with full-system barriers.
-Mapping replacement requires removal first. Removal clears the descriptor,
-invalidates the domain's TLB entries and waits for `CMD_SYNC` before returning
-the allocation. This covers the affected transactions' architectural completion
+Payload mappings own retained buffers and express read-only, write-only or
+read/write access. `map_buffer` admits a complete buffer (including physically
+scattered pages), preallocates its intermediate tables and retains its owner
+before leaf publication. `map_page` is the one-page convenience form. Control
+tables/queues retain a separate exclusive allocation interface; payloads expose
+no CPU pointer to the driver. Descriptor publication is ordered with full-system
+barriers. Mapping replacement requires removal first. `unmap_buffer` clears all
+leaves of the original mapping, invalidates the domain's TLB entries and waits
+for `CMD_SYNC` before returning the buffer owner. This covers the affected transactions' architectural completion
 semantics, not just command consumption. ATS translation caches cannot retain
 old translations because ATS is disabled.
 

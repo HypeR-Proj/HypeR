@@ -42,7 +42,9 @@ impl PhysicalDevice {
                     return MmioAction::Stop;
                 };
                 match &self.claim.hardware.profile {
-                    Profile::Pci(transport) => self.access_pci(transport, binding, offset, access),
+                    Profile::Pci(transport) => {
+                        self.access_pci(transport, binding, route.irq, offset, access)
+                    }
                     Profile::Virtio(_) | Profile::Userspace => {
                         self.access_registers(active, route.irq, binding, offset, access)
                     }
@@ -52,8 +54,8 @@ impl PhysicalDevice {
             action
         })
         .unwrap_or(MmioAction::Stop);
-        if matches!(access.operation(), MmioOperation::Write(_))
-            && self.irq_write(offset)
+        if ((matches!(access.operation(), MmioOperation::Write(_)) && self.irq_write(offset))
+            || matches!(&self.claim.hardware.profile, Profile::Pci(t) if t.uses_intx()))
             && matches!(
                 self.claim.hardware.trigger,
                 hyper::hal::interrupt::InterruptTrigger::Level
@@ -77,6 +79,7 @@ impl PhysicalDevice {
         &self,
         transport: &Transport,
         binding: &VmBinding,
+        irq: u32,
         offset: usize,
         access: MmioAccess,
     ) -> MmioAction {
@@ -99,6 +102,11 @@ impl PhysicalDevice {
             };
             if let Some(irq) = pci.take_pending_irq() {
                 io::inject_interrupt(binding, irq);
+            }
+            if transport.uses_intx() {
+                // Reading the virtio ISR can deassert INTx. Every access samples
+                // the physical line before the masked host source is rearmed.
+                io::set_line(binding, irq, transport.line_asserted());
             }
             action
         })

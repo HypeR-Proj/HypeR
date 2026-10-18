@@ -24,6 +24,11 @@ pub(in crate::kernel) struct VmBinding {
 }
 
 impl VmBinding {
+    pub(in crate::kernel::vm) fn dma(
+        &self,
+    ) -> Option<FallibleArc<crate::kernel::device::iommu::address_space::AddressSpace>> {
+        self.machine.dma.with(|dma| dma.clone())
+    }
     pub(super) fn new(id: VmId, machine: FallibleArc<VirtualMachine>) -> Self {
         Self { id, machine }
     }
@@ -441,6 +446,10 @@ impl VmExecutionReleaseFailure {
 pub(super) struct VirtualMachine {
     id: VmId,
     address_space: AddressSpaceLock,
+    dma: InterruptSpinLock<
+        Option<FallibleArc<crate::kernel::device::iommu::address_space::AddressSpace>>,
+        crate::hal::irq::LocalMask,
+    >,
     execution: ConcurrentExecution,
     run_admission: crate::kernel::vm::run_admission::RunAdmission,
     interrupts: VmInterruptController,
@@ -456,6 +465,33 @@ pub(super) struct VirtualMachine {
 }
 
 impl VirtualMachine {
+    pub(super) fn dma_owner(
+        &self,
+    ) -> Option<FallibleArc<crate::kernel::device::iommu::address_space::AddressSpace>> {
+        self.dma.with(|slot| slot.clone())
+    }
+    pub(super) fn prepare_dma(&self) -> Result<(), Error> {
+        let streams = self.physical_owners().dma_streams();
+        if streams.iter().all(Option::is_none) {
+            return Ok(());
+        }
+        let (memory, domain) = self.address_space.with(|space| space.dma_snapshot());
+        let leases = memory.dma_leases(&domain).map_err(|_| Error::Allocation)?;
+        let dma = crate::kernel::device::iommu::address_space::AddressSpace::create(
+            streams, &leases, domain,
+        )
+        .map_err(|_| Error::Allocation)?;
+        self.dma.with(|slot| *slot = Some(dma));
+        crate::pr_info!("HypeR: VM {:?}: physical PCI DMA domain installed", self.id);
+        Ok(())
+    }
+
+    pub(super) fn retire_dma(&self) -> Result<(), Error> {
+        if let Some(dma) = self.dma.with(|dma| dma.clone()) {
+            dma.retire().map_err(|_| Error::Allocation)?;
+        }
+        Ok(())
+    }
     #[allow(clippy::too_many_arguments)]
     pub(super) fn try_new(
         id: VmId,
@@ -468,6 +504,7 @@ impl VirtualMachine {
         FallibleArc::try_new(Self {
             id,
             address_space: InterruptSpinLock::new(address_space),
+            dma: InterruptSpinLock::new(None),
             execution: ConcurrentExecution::new(id.execution_owner()),
             run_admission: crate::kernel::vm::run_admission::RunAdmission::new(
                 id.execution_owner(),

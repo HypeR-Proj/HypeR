@@ -696,6 +696,11 @@ pub const OBJECT_KINDS: &[ObjectKind] = &[
         name: "crash_view",
         transfer: TransferClass::General,
     },
+    ObjectKind {
+        value: 40,
+        name: "backend_memory_lease",
+        transfer: TransferClass::Forbidden,
+    },
 ];
 
 pub const DIRECTORY_STREAM_RIGHTS: u64 =
@@ -879,6 +884,8 @@ pub const RIGHT_REQUEST_STOP: u64 = 1 << 11;
 pub const RIGHT_RUN_VCPU: u64 = 1 << 12;
 pub const RIGHT_INJECT_INTERRUPT: u64 = 1 << 13;
 pub const RIGHT_ASSIGN_DEVICE: u64 = 1 << 15;
+pub const RIGHT_MAP_DMA: u64 = 1 << 16;
+pub const RIGHT_ACK_INTERRUPT: u64 = 1 << 17;
 pub const RIGHT_REVOKE: u64 = 1 << 18;
 pub const RIGHT_CREATE_PROCESS: u64 = 1 << RIGHT_CREATE_PROCESS_BIT;
 pub const RIGHT_CREATE_THREAD: u64 = 1 << RIGHT_CREATE_THREAD_BIT;
@@ -1370,6 +1377,10 @@ pub const CONSTANTS: &[AbiConstant] = &[
     AbiConstant {
         name: "device_resource_pci_bar0",
         value: 0x200,
+    },
+    AbiConstant {
+        name: "device_resource_pci_intx",
+        value: 0x102,
     },
     AbiConstant {
         name: "device_resource_memory_64",
@@ -9315,7 +9326,7 @@ pub const SYSCALLS: &[Syscall] = &[
                 kind: ValueKind::Handle,
                 handle: Some(HandleArgument {
                     object: ObjectConstraint::Kind("device_assignment_authority"),
-                    required_rights: RIGHT_INSPECT,
+                    required_rights: RIGHT_ASSIGN_DEVICE,
                     disposition: HandleDisposition::Borrow,
                 }),
                 memory: None,
@@ -9328,7 +9339,7 @@ pub const SYSCALLS: &[Syscall] = &[
             handle: Some(ProducedHandle {
                 object: ProducedObject::Kind("physical_device"),
                 rights: ProducedRights::Fixed(
-                    RIGHT_TRANSFER | RIGHT_DUPLICATE | RIGHT_INSPECT | RIGHT_WRITE,
+                    RIGHT_TRANSFER | RIGHT_DUPLICATE | RIGHT_INSPECT | RIGHT_ASSIGN_DEVICE,
                 ),
             }),
         }],
@@ -9391,7 +9402,7 @@ pub const SYSCALLS: &[Syscall] = &[
                 kind: ValueKind::Handle,
                 handle: Some(HandleArgument {
                     object: ObjectConstraint::Kind("device_assignment_authority"),
-                    required_rights: RIGHT_INSPECT,
+                    required_rights: RIGHT_MAP_DMA,
                     disposition: HandleDisposition::Borrow,
                 }),
                 memory: None,
@@ -9454,7 +9465,7 @@ pub const SYSCALLS: &[Syscall] = &[
                 kind: ValueKind::Handle,
                 handle: Some(HandleArgument {
                     object: ObjectConstraint::Kind("physical_device"),
-                    required_rights: RIGHT_WRITE,
+                    required_rights: RIGHT_ASSIGN_DEVICE,
                     disposition: HandleDisposition::Borrow,
                 }),
                 memory: None,
@@ -9905,7 +9916,7 @@ pub const SYSCALLS: &[Syscall] = &[
                 kind: ValueKind::Handle,
                 handle: Some(HandleArgument {
                     object: ObjectConstraint::Kind("device_assignment_authority"),
-                    required_rights: RIGHT_INSPECT,
+                    required_rights: RIGHT_ASSIGN_DEVICE,
                     disposition: HandleDisposition::Borrow,
                 }),
                 memory: None,
@@ -9935,7 +9946,7 @@ pub const SYSCALLS: &[Syscall] = &[
             handle: Some(ProducedHandle {
                 object: ProducedObject::Kind("physical_device"),
                 rights: ProducedRights::Fixed(
-                    RIGHT_TRANSFER | RIGHT_DUPLICATE | RIGHT_INSPECT | RIGHT_WRITE,
+                    RIGHT_TRANSFER | RIGHT_DUPLICATE | RIGHT_INSPECT | RIGHT_ASSIGN_DEVICE,
                 ),
             }),
         }],
@@ -10096,7 +10107,7 @@ pub const SYSCALLS: &[Syscall] = &[
                 kind: ValueKind::Handle,
                 handle: Some(HandleArgument {
                     object: ObjectConstraint::Kind("device_assignment_authority"),
-                    required_rights: RIGHT_INSPECT,
+                    required_rights: RIGHT_ASSIGN_DEVICE,
                     disposition: HandleDisposition::Borrow,
                 }),
                 memory: None,
@@ -10126,7 +10137,14 @@ pub const SYSCALLS: &[Syscall] = &[
             handle: Some(ProducedHandle {
                 object: ProducedObject::Kind("physical_device"),
                 rights: ProducedRights::Fixed(
-                    RIGHT_TRANSFER | RIGHT_DUPLICATE | RIGHT_INSPECT | RIGHT_WRITE | RIGHT_WAIT,
+                    RIGHT_TRANSFER
+                        | RIGHT_DUPLICATE
+                        | RIGHT_INSPECT
+                        | RIGHT_READ
+                        | RIGHT_WRITE
+                        | RIGHT_WAIT
+                        | RIGHT_ASSIGN_DEVICE
+                        | RIGHT_ACK_INTERRUPT,
                 ),
             }),
         }],
@@ -10148,7 +10166,7 @@ pub const SYSCALLS: &[Syscall] = &[
                 kind: ValueKind::Handle,
                 handle: Some(HandleArgument {
                     object: ObjectConstraint::Kind("physical_device"),
-                    required_rights: RIGHT_WRITE,
+                    required_rights: 0,
                     disposition: HandleDisposition::Borrow,
                 }),
                 memory: None,
@@ -10208,7 +10226,7 @@ pub const SYSCALLS: &[Syscall] = &[
                 kind: ValueKind::Handle,
                 handle: Some(HandleArgument {
                     object: ObjectConstraint::Kind("physical_device"),
-                    required_rights: RIGHT_WRITE,
+                    required_rights: RIGHT_ACK_INTERRUPT,
                     disposition: HandleDisposition::Borrow,
                 }),
                 memory: None,
@@ -11266,15 +11284,16 @@ pub const SEMANTIC_RULES: &[&str] = &[
     "Memory statistics are independently sampled, including fields sourced from atomic counters; they are not a transaction across topics, CPUs, or logical and physical accounting. Page counts use memory_observation.page_size. Heap-class reserved slots include live objects, magazine objects and in-flight transfers; large buckets report zero capacity/reserved/cached and object_size=0. File-cache metadata physical pages and reservations overlap other accounting and must not be added twice. Cumulative heap-class allocation/deallocation counters saturate and reset only on reboot. No address or allocation authority is exposed.",
     "object_inspector_read_details requires INSPECT and INSPECT_DETAILS on an ObjectInspector. With process_koid zero, target is a KOID and only system scope is allowed. Otherwise target is a generation-qualified handle in the named, scope-visible process. Inspection takes a diagnostic reference under the lookup lock, releases that lock, and copies object-local metadata only; it does not grant operation authority. Cursor zero starts a query; next_cursor zero finishes it. Empty records may advance a bounded scan without yielding a mapping. Concurrent mutation makes pages weakly consistent. Unsupported object kinds return NOT_SUPPORTED; inaccessible or expired identities return NOT_FOUND. Inspector derivation continues to produce only the original basic rights, never implicitly acquiring INSPECT_DETAILS.",
     "Object-details payload consists of eight little-endian u64 words. All unused words are zero. Record 0 is empty. Thread (1): scheduler TID (zero is a valid bootstrap TID), role (task_thread role values), user lifecycle phase (0 unavailable, 1 prepared, 2 dormant, 3 runnable, 4 stop-requested, 5 detached), TID present (0/1; absent TID word is zero). VMAR (2): base, length, live (0/1). Mapping (3): base, length, current R/W/X bits, maximum R/W/X bits. Channel (4): peer KOID (zero until pair publication), local open (0/1), peer open (0/1), queued messages or receivers, queued bytes, byte-queue counters present (0/1). Device (5): profile, virtio device ID, PCI vendor/device word, host IRQ domain, first host interrupt, interrupt count, lifecycle (1 claimed, 2 attached, 3 active, 4 retired, 5 quarantined), resource count. Device resource (6): resource kind, host physical base, length, guest aperture offset, attributes. Addresses never contain kernel virtual pointers. Device details read metadata without MMIO/config-space probes; host interrupt identities are not guest IRQs.",
+    "Device assignment authority separates INSPECT (firmware discovery), ASSIGN_DEVICE (claims), and MAP_DMA (resident DMA extent disclosure). Claim and claim_matching return TRANSFER|DUPLICATE|INSPECT|ASSIGN_DEVICE; userspace bundles additionally grant READ|WRITE|WAIT|ACK_INTERRUPT. Assigning a physical device requires ASSIGN_DEVICE on that handle and WRITE on the pending VM. device_mmio checks READ for operation zero and WRITE for operation one after validating the operation selector; its unconditional schema rights are empty. MMIO reads may have hardware side effects and still require an active assignment with retained backing. IRQ pending requires WAIT; IRQ completion requires ACK_INTERRUPT. An inspection-only handle cannot claim, assign, access registers, acknowledge interrupts, or disclose VMO physical addresses.",
     "Device firmware inspection reads one immutable boot snapshot. Field PROPERTY_NAMES (5) returns every property name as a NUL-separated list, without granting ownership or exposing mapping capabilities; field PROPERTY (4) reads a named property's original bytes. Other fields report node identity, compatible strings, translated registers and interrupt metadata. Empty output queries the required byte length. The caller supplies a name only for PROPERTY; all other fields require an empty name. Inspection cannot substitute for an atomic device claim.",
     "Physical device profiles identify the admitted transport contract: virtio-mmio SCSI (1), userspace-managed registers (2), virtio-mmio network (3), and an exclusively assigned PCI function (4). Firmware matching combines profile with identity and rejects ambiguous matches. PCI identity kind 3 uses exactly nine lowercase ASCII bytes vvvv:dddd (vendor and device identifiers). Physical MMIO is mediated against exact resource extents; a device handle never grants a host MMIO page mapping. DEVICE_PROFILE_INFO reports the complete guest aperture, resource count, interrupt count, PCI device/vendor word and admitted DMA bus offset. Non-PCI profiles use a 64 KiB aperture and zero PCI identity and DMA offset. Virtio profiles have one interrupt; userspace profiles report zero or one physical interrupt. Non-PCI assignment still reserves one virtual interrupt when no physical interrupt is present. A pending VM admits at most DEVICE_ASSIGNMENT_MAX_DEVICES controllers with disjoint apertures and interrupt ranges; all share its DMA backing lifetime. Partial installation rolls back every controller, and retirement releases pages only after every controller is quiescent.",
-    "The PCI-function profile presents one endpoint at guest BDF 00:00.0 through an 8 MiB aperture. Resource kinds PCI_ECAM and PCI_MSI describe a virtual 1 MiB ECAM window and 4 KiB GICv2m frame; PCI_BAR0 through PCI_BAR0+5 describe implemented memory BARs. Resource offsets are relative to the assigned guest aperture; bus_address is the initial virtual PCI address of a BAR. MEMORY_64 and PREFETCHABLE flags apply only to BAR resources; other resources have zero flags and bus_address. PCI configuration and MSI-X are mediated: physical host-bridge, interrupt-controller and DMA-window registers are never guest resources. The interrupt argument selects the first of interrupt_count consecutive GIC SPIs (at most 64); the AArch64 reference GIC has 256 IDs. Linux owns the entire endpoint and its child drivers. DMA bus addresses equal the admitted host physical extent plus dma_bus_offset; this translation is not an IOMMU boundary. Firmware-initialized devices remain fail-closed if link or DMA translation validation fails. Clearing bus mastering alone is not proof of DMA retirement; a PCI assignment without a proven reset/quiescence protocol retains its DMA backing and physical claim on teardown.",
+    "The PCI-function profile presents one endpoint at guest BDF 00:00.0 through an 8 MiB aperture. Resource kind PCI_ECAM describes a virtual 1 MiB ECAM window. Interrupt delivery uses either PCI_MSI, a 4 KiB GICv2m frame, or PCI_INTX with interrupt_count one and zero offset, length, flags and bus_address; PCI_BAR0 through PCI_BAR0+5 describe implemented memory BARs. Resource offsets are relative to the assigned guest aperture; bus_address is the initial virtual PCI address of a BAR. MEMORY_64 and PREFETCHABLE flags apply only to BAR resources; other resources have zero flags and bus_address. PCI configuration and MSI-X are mediated: physical host-bridge, interrupt-controller and DMA-window registers are never guest resources. The interrupt argument selects the first of interrupt_count consecutive GIC SPIs (at most 64); the AArch64 reference GIC has 256 IDs. Linux owns the entire endpoint and its child drivers. DMA bus addresses equal the admitted host physical extent plus dma_bus_offset. The offset alone is not an IOMMU boundary. On the QEMU ECAM/SMMUv3 path the kernel binds requester IDs to the VM domain and maps only retained initial RAM and live grants before bus mastering; MMIO and BCM2712 assignments remain trusted. Firmware-initialized devices remain fail-closed if link or DMA translation validation fails. Clearing bus mastering alone is not proof of DMA retirement; a PCI assignment without a proven reset/quiescence protocol retains its DMA backing and physical claim on teardown.",
     "system_config queries a public scalar system property by u64 key. PAGE_SIZE (1) returns the Native mapping granule in bytes, immutable for the lifetime of a process. Unknown keys return NOT_SUPPORTED. Unused argument registers must be zero. Success returns the value in value0 and zero in value1. This query requires no inspector capability and does not expose privileged observations.",
     "vmar_allocate(parent, address, size, options) uses address as the low end. Options zero treats nonzero address as a hint, choosing the nearest fitting free interval with lower-base tie breaking; address zero selects the lowest free interval. VMAR_ALLOCATE_EXACT requires the exact address, including zero. Unknown flags are invalid. Size is nonzero, addresses and size page aligned, and intervals must not overflow. Success returns child in value0 and actual base in value1. Selection and reservation commit atomically within parent authority. No fitting free interval returns NO_MEMORY.",
     "system_config key SYSTEM_CONFIG_APPLICATION_ADDRESS_LIMIT returns the HAL application-exclusive address limit in value0 and zero in value1. It describes profile geometry, not VMAR authority. The kernel grants ROOT_VMAR from one page to that limit.",
     "Every Native process enters a caller-selected loader. Process-builder create derives the executable File into the child using explicit READ|EXECUTE|PROTECT|DUPLICATE|TRANSFER authority, and borrows the loader with READ|EXECUTE. The target is not frozen by builder creation. The kernel takes only a temporary stable loader image while preparing its restricted bootstrap mappings. Seal validates and maps only the loader's restricted Native ET_DYN bootstrap image and an empty guarded stack; the first argument register holds a ByteChannel handle. Only initial boot selects a loader by pathname: /lib/userspace-loader-hyper-<architecture> launches /init from the ramdisk root. The queued message contains loader_startup, handle_count startup_handle records, then data_size opaque bytes. size is 72; flags permits only loader_startup_reply. Executable is an ordinary File with READ|EXECUTE|PROTECT. The user loader acquires content protection before querying size or parsing ELF. root_vmar and stack_vmar identify child-owned mapping authority; stack_base and stack_size describe mapped usable stack bytes with an unmapped guard at each end. loader_base and loader_size describe the loader mappings. Library directories are ordinary explicitly supplied startup capabilities; the kernel neither selects nor opens them. No argv, environment, auxv, application ELF parsing or relocation belongs to this kernel entry contract. The selected runtime owns bootstrap-handle closure and mapping retirement. Closing a VMAR handle alone does not unmap or destroy its reservation.",
     "Virtual CPU set_affinity borrows a VirtualCpu with WRITE and accepts the same nonempty little-endian u64 CPU-mask word array as process-builder affinity. Bits above the kernel CPU limit are rejected; the mask must contain a schedulable CPU. The affinity update retains the current assignment when allowed; otherwise the scheduler selects an allowed registered CPU and safely migrates the saved context. Automatic Fair balancing may later move a Ready vCPU within this allowed set; a singleton mask prevents automatic movement. OK means the update or required handoff was accepted; migration may complete before or after return. An overlapping incompatible handoff or CPU-local wait returns busy. VM stop or guest power operations may supersede the request. Stopping, detached, and reaped endpoints reject new affinity updates. VirtualCpu info extends its 24-byte prefix with host_cpu and migration_target at offsets 24 and 28, one scheduler placement observation rather than running state or a completion token. Value 0xffffffff means unavailable assignment or no pending migration; older kernels return only the original prefix.",
-    "Guest mapping creation borrows backend VirtualMachine WRITE and GuestMemory MAP, populates the full stable grant, and returns an owned mapping handle plus a backend-VM-local non-reused token. The backend IPA envelope must contain all sparse aliases: alias = 64 GiB + host physical address, with host addresses below 256 GiB. Unadmitted envelope holes have no RAM or page bitmap entries. The kernel constructs immutable frontend-ordered, coalesced physical extents; neither Native policy nor Linux may replace their addresses. Backend notification write64 0x28 admits one token exactly once to that unique notification route; read64 0x30/0x38/0x40/0x48 return frontend base, total bytes, status, extent count. Write64 0x50 selects an extent index; read64 0x58/0x60/0x68/0x70 return alias, frontend-relative offset, byte length, and query status. Rejection clears the old reply. Extents cover the entire frontend range without holes or overlapping physical pages. After draining vhost and releasing all page pins, only that backend route may write64 the token at 0x20 to certify quiescence. Mapping release accepts never-admitted or quiescent tokens, withdraws lookup, clears leaves, waits for every CPU translation acknowledgement, then releases backing. Closing a mapping handle alone quarantines its pages until backend VM retirement. Notification control operation 3 permanently disconnects both routes, only when no admitted mapping remains; a disconnected route never affects an address or IRQ reused by a subsequent connection.",
+    "Guest mapping creation borrows backend VirtualMachine WRITE and GuestMemory MAP, populates the full stable grant, and returns an owned mapping handle plus a backend-VM-local non-reused token. The backend IPA envelope must contain all sparse aliases: alias = 64 GiB + host physical address, with host addresses below 256 GiB. Unadmitted envelope holes have no RAM or page bitmap entries. The kernel constructs immutable frontend-ordered, coalesced physical extents; neither Native policy nor Linux may replace their addresses. Backend notification write64 0x28 admits one token exactly once to that unique notification route; read64 0x30/0x38/0x40/0x48 return frontend base, total bytes, status, extent count. Write64 0x50 selects an extent index; read64 0x58/0x60/0x68/0x70 return alias, frontend-relative offset, byte length, and query status. Rejection clears the old reply. Extents cover the entire frontend range without holes or overlapping physical pages. After draining vhost and releasing all page pins, only that backend route may write64 the token at 0x20 to certify quiescence. Mapping release accepts never-admitted or quiescent tokens, withdraws lookup, clears leaves, waits for every CPU translation acknowledgement and, for an IOMMU-bound backend, completed DMA invalidation, then releases backing. Closing a mapping handle alone quarantines its pages until backend VM retirement. Notification control operation 3 permanently disconnects both routes, only when no admitted mapping remains; a disconnected route never affects an address or IRQ reused by a subsequent connection.",
     "Native block creation dedicates one fully resident 1048576-byte guest-memory grant permanently to one kernel virtio-scsi initiator; repeated creation from that grant fails. The backend VM must retain the matching mapping until execution and physical DMA are quiescent. Six standard split queues (control, event, and four request queues) have size 8, descriptor offsets n*4096, available offsets n*4096+256, and used offsets n*4096+512, relative to guest_base. Userspace negotiates VERSION_1 with the backend before activation. Activation enables notifications and issues READ CAPACITY(16), accepting only 512-byte sectors; capacity is never supplied by userspace. The block capability remains the data-plane owner across filesystem worker handoff; a clean unmount returns the same activated object rather than creating or activating a replacement. Reads use bounded batches across the four request queues; writes and flushes remain ordered. Requests use shared queues and blocking kernel notifications, not per-request userspace RPC. Unretired request failures permanently disconnect the initiator and never recycle its buffer. PEER_CLOSED reports disconnection. The physical pages remain retained by backend mappings until VM/DMA retirement; notification closure alone never proves DMA quiescence.",
     "filesystem_mount borrows a READ|WRITE|WAIT ByteChannel, a READ|WRITE|MAP shared VMO and a WRITE|EXECUTE Directory. The kernel retains the transport and buffer, validates the worker root, and publishes a fresh mount and filesystem identity at the capability-relative path. The VMO must satisfy the published filesystem protocol capacity and pinning contract. read_only is exactly zero or one; read-only mounts reject mutating protocol operations in the kernel independently of worker policy. Media discovery, format selection and exclusive NativeBlock ownership belong to the userspace filesystem manager and format worker, not this syscall.",
     "filesystem_mount_ramfs and filesystem_switch_root require MANAGE_NAMESPACE|WRITE|EXECUTE on the live namespace-root Directory anchor. Ordinary directory opens never confer MANAGE_NAMESPACE; only explicit capability duplication, delegation or root-anchor scope creation preserves it. Ramfs mount does not create or configure block filesystems. switch_root copies its request, at most 16 mount moves and every bounded UTF-8 path before namespace mutation; zero moves requires a null moves pointer. new_root and move sources resolve in the old namespace, while put_old and move targets resolve inside new_root. The root and all requested moves publish atomically. Existing non-anchor Directory and File capabilities retain their opened locations; existing root anchors follow the published root. A rejected transaction preserves all mount edges and the current root. Paths are at most 4096 bytes, nonempty and contain no NUL bytes. Layout, boot stages and the choice of put_old are userspace policy.",

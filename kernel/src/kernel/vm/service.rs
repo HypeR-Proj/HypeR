@@ -646,9 +646,15 @@ pub(crate) fn install(
     };
     let installed = match prepared.install() {
         Ok(installed) => installed,
-        Err(error) => crate::kernel::crash::fatal(format_args!(
-            "HypeR: sealed VM failed its final registry publication: {error:?}"
-        )),
+        Err(error) => {
+            // Hardware domain allocation and activation can still fail after
+            // sealing. The installation transaction has withdrawn admission;
+            // keep the now exhausted pending handle available for abort/close.
+            drop((vm_handle, vcpu_handle));
+            consumption.rollback();
+            process.abort_handles(output);
+            return Err(classify_registry_error(error));
+        }
     };
     drop(installed.publish_handle_lifecycle());
     Ok(consumption.commit_replacement(output, [vm_handle, vcpu_handle]))

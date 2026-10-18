@@ -89,6 +89,13 @@ pub(crate) struct AssignmentOwners {
 }
 
 impl AssignmentOwners {
+    pub(crate) fn dma_streams(&self) -> [Option<u32>; MAX_DEVICES] {
+        core::array::from_fn(|index| {
+            self.entries[index]
+                .as_ref()
+                .and_then(|(owner, _)| owner.object().dma_stream())
+        })
+    }
     /// A failure may leave earlier controllers active. The installation
     /// transaction must quiesce the entire set before dropping its VM.
     pub(crate) fn activate_for(&self, vm: VmId) -> Result<(), Error> {

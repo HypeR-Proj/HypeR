@@ -817,6 +817,7 @@ fn object_transfer_classes_match_the_audited_contract() {
         ("guest_interrupt", TransferClass::RendezvousOnly),
         ("process_retirement", TransferClass::RendezvousOnly),
         ("crash_view", TransferClass::General),
+        ("backend_memory_lease", TransferClass::Forbidden),
     ];
     assert_eq!(schema::OBJECT_KINDS.len(), expected.len());
     for (kind, expected) in schema::OBJECT_KINDS.iter().zip(expected) {

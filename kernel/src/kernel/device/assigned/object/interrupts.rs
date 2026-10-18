@@ -135,14 +135,19 @@ impl PhysicalDevice {
                 }
                 State::Active(_) => {}
             }
-            // All owning vCPUs have detached. PCI BME/MSI gating cannot prove
-            // DMA has drained: preserve the complete VM and its device claim.
+            // All owning vCPUs have detached. Require the transport's reset
+            // acknowledgement; PCI BME/MSI gating alone cannot prove DMA drained.
             if let Profile::Pci(transport) = &self.claim.hardware.profile {
+                let reset = transport.reset();
                 self.pci.with(|slot| {
                     if let Some(pci) = slot {
                         transport.stop(pci);
                     }
                 });
+                if reset {
+                    *state = State::Retired;
+                    return Ok(());
+                }
                 *state = State::Quarantined;
                 return Err(Error::Quarantined);
             }
@@ -200,7 +205,7 @@ fn interrupt_handler(_: VirtualInterrupt, context: usize) -> HandlerResult {
     // SAFETY: register_interrupt publishes a non-null stable owner before the
     // handler is registered; the registration retains the enclosing context.
     let object = unsafe { &*pointer };
-    if matches!(object.claim.hardware.profile, Profile::Pci(_)) {
+    if matches!(&object.claim.hardware.profile, Profile::Pci(t) if !t.uses_intx()) {
         object.deliver_msi(context.vector);
         return HandlerResult::Handled;
     }

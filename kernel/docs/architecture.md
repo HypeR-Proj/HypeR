@@ -151,16 +151,24 @@ The kernel owns device authority, permitted MMIO access, interrupt delivery,
 DMA admission and translation, and safe revocation/retirement. Delegating a
 driver does not delegate these ownership guarantees, and userspace placement
 alone does not establish DMA isolation on hardware without suitable support.
-The current Linux I/O VM is trusted.
+Guests trust the Linux I/O VM for backend data and availability. Host DMA
+containment additionally depends on the physical assignment path.
 
 The [SMMUv3 driver](smmuv3.md) provides a host-owned stage-2 DMA mechanism and
 a dedicated QEMU PCI DMA acceptance fixture. It reserves SMMU and generic ECAM
 control apertures and all their interrupt aliases, defaults to denying
 unassigned streams, and retains exposed backing on failed invalidation.
 A wired-IRQ worker quarantines faulting streams, while control-plane failures
-close the controller with disabled-mode abort policy and retain live backing. Integration with device capability grants and
-I/O VM memory leases remains separate work; default virtio-mmio and Pi 5 paths
-do not acquire isolation merely from this driver's presence.
+close the controller with disabled-mode abort policy and retain live backing.
+Default QEMU virtio-PCI assignments bind their requester IDs to the I/O VM's
+domain before enabling bus mastering. Initial RAM and explicit live backend
+grants retain kernel-only memory leases until completed invalidation; full VM
+retirement additionally requires physical virtio reset acknowledgement before
+stream detachment and domain teardown. Device operation rights and those leases
+are integrated with the assignment path. See [I/O isolation](io-isolation.md)
+for the ownership contract and qualification boundaries. The dedicated
+virtio-mmio compatibility deployment and Pi 5 still trust the I/O VM and have
+no equivalent DMA containment.
 
 On Pi 5, HypeR owns the BCM2712 PCIe transport, resource claims and MSI routing.
 The complete RP1 PCI function belongs to the I/O VM; Linux owns its interrupt

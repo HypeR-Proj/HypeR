@@ -141,6 +141,7 @@ impl PreparedVm {
         let id = self.reservation.id;
         REGISTRY.with(|registry| registry.validate_install(id, &self.machine))?;
         let physical = self.machine.physical_owners();
+        self.machine.prepare_dma()?;
         // Activation can fail after an earlier controller is active. The same
         // rollback covers that partial activation and later VMID failure.
         let activated = physical
@@ -148,7 +149,7 @@ impl PreparedVm {
             .map_err(|_| Error::Allocation)
             .and_then(|()| self.machine.activate_identifier_for_install());
         if let Err(error) = activated {
-            if physical.quiesce_all().is_err() {
+            if physical.quiesce_all().is_err() || self.machine.retire_dma().is_err() {
                 let _retained = core::mem::ManuallyDrop::new(self);
                 crate::kernel::crash::fatal(format_args!(
                     "physical assignments rollback could not quiesce"

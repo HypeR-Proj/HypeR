@@ -1,22 +1,27 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! A whole PCI function behind a firmware-initialized host bridge.
+//! Whole PCI functions with host-owned configuration and interrupt routing.
 //!
 //! The host owns configuration, BAR placement and MSI routing. Function MMIO
-//! is opaque: Linux owns its device drivers. The supported BCM2712 translation
-//! has no DMA isolation; assignment therefore requires a trusted I/O owner.
-//! The first host implementation admits one direct, single-function type-0
+//! is opaque: Linux owns its device drivers. Generic ECAM admits modern virtio
+//! endpoints only behind an active host SMMU, using mediated `INTx` delivery.
+//! The BCM2712 translation has no DMA isolation and requires a trusted I/O
+//! owner. That implementation admits one direct, single-function type-0
 //! endpoint behind one live BCM2712 x4 root port. It configures bus numbers
 //! before enumeration, retains or relocates outbound windows into reserved
 //! CPU MMIO, and installs validated DT inbound DMA ranges. Its exclusive owner
 //! serializes the configuration selector; multiple functions will require a
 //! shared host-bridge configuration lock.
 //!
-//! Disabling bus mastering is not a DMA-drain certificate. Active retirement
-//! must retain the entire VM until a separately proven reset protocol exists.
+//! Disabling bus mastering is not a DMA-drain certificate. Modern virtio has a
+//! standard reset acknowledgement; other active functions remain quarantined
+//! until a separately proven reset protocol exists.
 
 mod bcm2712;
+mod ecam;
+mod transport;
+pub use transport::Transport;
 mod firmware;
 pub mod model;
 pub use bcm2712::{
@@ -118,7 +123,7 @@ pub struct Bar {
     pub index: u32,
 }
 
-pub struct Transport {
+struct BcmTransport {
     bridge: bcm2712::HostBridge,
     mip: Registers,
     bars: [Option<Bar>; 6],
@@ -142,7 +147,7 @@ pub struct Prepared {
     pub transport: Transport,
 }
 
-impl Transport {
+impl BcmTransport {
     pub fn discover<B: Barrier>(
         nodes: &[PlatformDevice],
         services: &dyn DriverServices,
@@ -256,7 +261,7 @@ impl Transport {
             bars,
             interrupt: topology.host_irq,
             interrupt_count: count as u32,
-            transport,
+            transport: Transport::bcm(transport),
         }))
     }
     pub const fn identity(&self) -> u32 {

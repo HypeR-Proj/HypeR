@@ -54,6 +54,8 @@ pub(crate) fn create(
         .with_address_space(|space| space.live.reserve_token())
         .map_err(classify)?;
     mapping.token = token;
+    let dma = binding.dma();
+    let dma_lease = mapping.lease.clone();
     let mut mapping = Some(hyper::mm::try_box(mapping).map_err(|_| Error::NoMemory)?);
     let charge = crate::kernel::vm::objects::reserve_object_charge::<GuestMapping>(&domain)
         .map_err(Error::from)?;
@@ -71,6 +73,9 @@ pub(crate) fn create(
             HandleFlags::NONE,
         )
         .map_err(|_| Error::NoMemory)?;
+        if let Some(dma) = &dma {
+            dma.grant(token, &dma_lease).map_err(|_| Error::BadState)?;
+        }
         let mut committed = false;
         for _ in 0..8 {
             // Retry only unpublished metadata preparation. Reclaim may sleep,
@@ -110,6 +115,11 @@ pub(crate) fn create(
         Ok(value) => value,
         Err(error) => {
             process.abort_handles(reservation);
+            if let Some(dma) = &dma {
+                // No CPU admission was published on this error path. Failed
+                // invalidation retains the driver's counted backing owners.
+                let _ = dma.revoke(token);
+            }
             return Err(error);
         }
     };
@@ -131,6 +141,11 @@ pub(crate) fn create(
                 }
                 slot.take()
             });
+            if cancelled.is_some()
+                && let Some(dma) = &dma
+            {
+                let _ = dma.revoke(token);
+            }
             drop(cancelled);
             Err(failure.error.into())
         }
@@ -221,6 +236,9 @@ pub(crate) fn release(process: &Process, handle: HandleValue) -> Result<(), Erro
     }
     binding.with_address_space(|space| space.table_rebuild_blocked = false);
     drop(synchronization);
+    if let Some(dma) = binding.dma() {
+        dma.revoke(mapping.token).map_err(|_| Error::BadState)?;
+    }
     let retired = binding.with_address_space(|space| {
         space
             .live
