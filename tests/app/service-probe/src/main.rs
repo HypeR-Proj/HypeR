@@ -89,7 +89,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "test worker terminated: ProcessExited { status: 37 }",
             )?;
         }
-        Some("terminal-disconnect") => {
+        Some("terminal-disconnect" | "terminal-shell-first") => {
             use hyper_os::{Error, Status, stream, wait::wait_many};
             let _startup = hyper_rt::process::startup()?;
             // The runtime owns standard streams after claiming startup. Its
@@ -103,7 +103,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if input.try_complete(&mut byte)?.is_some() {
                 return Err("terminal read was not pending before failure".into());
             }
-            std::fs::write("/tmp/terminal-fault-request", b"stop terminal\n")?;
+            let request = if std::env::args().nth(1).as_deref() == Some("terminal-shell-first") {
+                "shell-first"
+            } else {
+                "stop terminal"
+            };
+            std::fs::write("/tmp/terminal-fault-request.tmp", request)?;
+            std::fs::rename(
+                "/tmp/terminal-fault-request.tmp",
+                "/tmp/terminal-fault-request",
+            )?;
             wait_many(
                 &[input.wait_item()],
                 hyper_os::time::deadline_after(Duration::from_secs(5))?.as_raw(),

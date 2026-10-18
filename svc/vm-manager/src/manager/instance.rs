@@ -300,10 +300,9 @@ impl FleetManager {
                 self.machines[vm].definition.name,
                 instance.runtime.basic_info()?.koid.get(),
             );
-            if let Ok(startup) = hyper_rt::process::startup()
-                && let Ok(connector) = startup.borrow(hyper_component::CONNECTOR)
-            {
-                let _ = hyper_component::connection::report_failure(connector, &detail);
+            if let Some(connector) = &self.component_connector {
+                let _ =
+                    hyper_component::connection::report_failure(connector.as_handle_ref(), &detail);
             }
             eprintln!(
                 "HypeR vm-manager: VM '{}' failed: {reason:?}",

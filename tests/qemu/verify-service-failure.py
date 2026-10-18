@@ -18,7 +18,8 @@ from session import Session, native_command
 
 CASES = ('console-raw', 'journal', 'session-manager', 'vm-manager',
          'ordinary-exit', 'ordinary-fault', 'critical-clean', 'child-failure',
-         'missing-image', 'missing-terminal', 'journal-then-worker', 'terminal-disconnect')
+         'missing-image', 'missing-terminal', 'journal-then-worker', 'terminal-disconnect',
+         'terminal-shell-first')
 BOARD_CASES = ('io-runtime', 'fs-backend')
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -96,9 +97,9 @@ def run(args, case, initramfs):
         journal = Journal(shell)
         journal.snapshot('/component-manager')
         boundary = vm.mark()
-        if case == 'terminal-disconnect':
-            vm.send(b'service-probe terminal-disconnect\r')
-            vm.observe(rb'HypeR component-manager: CRITICAL: /session-manager generation=1 worker failure: .*terminal-service exited.*Requested', 30, after=boundary)
+        if case in ('terminal-disconnect', 'terminal-shell-first'):
+            vm.send(f'service-probe {case}\r'.encode())
+            vm.observe(rb'HypeR component-manager: CRITICAL: /session-manager generation=1 worker failure: .*terminal-service (?:exited|closed control while releasing shell).*Requested', 30, after=boundary)
             # The old shell may have left a prompt in Session's unread buffer.
             # Wait for the new terminal epoch before addressing its shell, and
             # install the command reporter again in that fresh process.

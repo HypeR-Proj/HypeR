@@ -129,7 +129,7 @@ pub fn connect(
     let (client, server) = CapabilityChannel::create()?;
     transact(
         connector,
-        &Request::Connect {
+        Request::Connect {
             name: name.into(),
             deadline_ns: until,
         },
@@ -142,7 +142,7 @@ pub fn connect(
 pub fn publish(connector: HandleRef<'_, CapabilityChannelObject>, name: &str) -> Result<()> {
     transact(
         connector,
-        &Request::Publish { name: name.into() },
+        Request::Publish { name: name.into() },
         None,
         hyper_service_ipc::deadline()?,
     )
@@ -152,8 +152,8 @@ pub fn publish(connector: HandleRef<'_, CapabilityChannelObject>, name: &str) ->
 pub fn status(connector: HandleRef<'_, CapabilityChannelObject>, message: &str) -> Result<()> {
     transact(
         connector,
-        &Request::Status {
-            message: message.into(),
+        Request::Status {
+            message: message.chars().take(256).collect(),
         },
         None,
         hyper_service_ipc::deadline()?,
@@ -169,7 +169,7 @@ pub fn report_failure(
 ) -> Result<()> {
     transact(
         connector,
-        &Request::ReportFailure {
+        Request::ReportFailure {
             message: message.chars().take(256).collect(),
         },
         None,
@@ -178,16 +178,38 @@ pub fn report_failure(
     .map_err(Into::into)
 }
 
+/// Bound diagnostic text by its complete wire representation: JSON escaping
+/// can use six bytes per character, even when the original text is ASCII.
+fn encode_request(mut request: Request) -> Result<Vec<u8>> {
+    if let Request::Status { message } | Request::ReportFailure { message } = &mut request
+        && let Some((end, _)) = message.char_indices().nth(256)
+    {
+        message.truncate(end);
+    }
+    loop {
+        let bytes = serde_json::to_vec(&request).map_err(|_| Error::InvalidResponse)?;
+        if bytes.len() <= MAX_MESSAGE {
+            return Ok(bytes);
+        }
+        match &mut request {
+            Request::Status { message } | Request::ReportFailure { message }
+                if !message.is_empty() =>
+            {
+                message.pop();
+            }
+            // Routing names must remain exact; only diagnostic text is lossy.
+            _ => return Err(Error::InvalidResponse),
+        }
+    }
+}
+
 fn transact(
     connector: HandleRef<'_, CapabilityChannelObject>,
-    request: &Request,
+    request: Request,
     mut session: Option<OwnedHandle<CapabilityChannelObject>>,
     until: u64,
 ) -> core::result::Result<(), ConnectionError> {
-    let bytes = serde_json::to_vec(request).map_err(|_| Error::InvalidResponse)?;
-    if bytes.len() > MAX_MESSAGE {
-        return Err(Error::InvalidResponse.into());
-    }
+    let bytes = encode_request(request)?;
     let channel =
         CapabilityChannel::from_handle(connector.duplicate(hyper_service_ipc::CLIENT_RIGHTS)?);
     let (reader, writer) = create_pair()?;
@@ -220,6 +242,10 @@ fn transact(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "../tests/connection.rs"]
+mod tests;
 
 pub struct Call {
     pub request: Request,

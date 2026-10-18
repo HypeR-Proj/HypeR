@@ -281,31 +281,69 @@ fn run_session(
             ObjectSignals::<ProcessObject>::TERMINATED,
         ),
     ];
-    let observation = loop {
+    #[cfg(feature = "test-service-failure")]
+    let mut shell_first = false;
+    let exited = loop {
         #[cfg(feature = "test-service-failure")]
         let deadline = {
             // Only the isolated failure fixture can request this injection.
             // Keep the linear terminal supervisor in its normal owner.
-            if epoch == 1 && std::fs::remove_file("/tmp/terminal-fault-request").is_ok() {
+            if epoch == 1
+                && let Ok(request) = std::fs::read_to_string("/tmp/terminal-fault-request")
+            {
+                std::fs::remove_file("/tmp/terminal-fault-request")?;
                 terminal_process.as_process_supervisor().request_stop()?;
+                if request == "shell-first" {
+                    // Force the shell-wins observation, leaving its child app
+                    // alive to prove the grace period applies in this order.
+                    shell_first = true;
+                    shell.as_process_supervisor().request_stop()?;
+                }
             }
             hyper_os::time::deadline_after(std::time::Duration::from_millis(50))?.as_raw()
         };
         #[cfg(not(feature = "test-service-failure"))]
         let deadline = hyper_os::DEADLINE_INFINITE;
-        match wait_many(&waits, deadline) {
-            Ok(observation) => break observation,
+        #[cfg(feature = "test-service-failure")]
+        let first = usize::from(shell_first);
+        #[cfg(not(feature = "test-service-failure"))]
+        let first = 0;
+        match wait_many(&waits[first..], deadline) {
+            Ok(observation) => break first + observation.index,
             Err(hyper_os::Error::Status(hyper_os::Status::TIMED_OUT)) => continue,
             Err(error) => return Err(error.into()),
         }
     };
-    if observation.index == 0 {
+    // Endpoint closure can make the shell exit while the terminal is still
+    // Stopping. The latched reason precedes closure; TERMINATED need not have
+    // been published yet, so the wait winner alone cannot select cleanup.
+    if exited == 0
+        || terminal_process
+            .as_process_supervisor()
+            .info()?
+            .terminal
+            .is_some()
+    {
         terminal_failed.set(true);
         return Err(
             terminal_failure(&terminal_process, &retirement, "terminal-service exited").into(),
         );
     }
-    terminal.release_child(id)?;
+    match terminal.release_child(id) {
+        Ok(()) => {}
+        Err(hyper_os::Error::Status(hyper_os::Status::PEER_CLOSED)) => {
+            // Exit can also start after the lifecycle snapshot above. A lost
+            // management endpoint still requires the disconnected-app grace.
+            terminal_failed.set(true);
+            return Err(terminal_failure(
+                &terminal_process,
+                &retirement,
+                "terminal-service closed control while releasing shell",
+            )
+            .into());
+        }
+        Err(error) => return Err(error.into()),
+    }
     use hyper_os::task::ProcessTermination;
     match shell.as_process_supervisor().info()?.terminal {
         Some(
