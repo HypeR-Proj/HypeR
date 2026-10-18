@@ -141,7 +141,12 @@ system volume, preserving data and guest partitions.
 The Alpine volume is initialized from the pinned base rootfs as an ext4 disk.
 Alpine boots it through I/O VM virtio-scsi; `apk` and BusyBox tools are included.
 Rootfs generation additionally requires e2fsprogs and squashfs-tools (Homebrew:
-`brew install e2fsprogs squashfs`). Run `make test-alpine-rootfs` for a disposable
+`brew install e2fsprogs squashfs`). If `mke2fs` or `debugfs` is unavailable, the
+packer builds private e2fsprogs tools under `target/host-tools/`, using bundled
+static UUID and blkid libraries. This avoids the MacPorts `libuuid`/`ossp-uuid`
+conflict with erofs-utils. `make host-e2fsprogs` prepares these tools explicitly;
+see [MacPorts setup](getting-started.md#macos-with-macports).
+Run `make test-alpine-rootfs` for a disposable
 root-disk boot and persistence test.
 
 The build imports a protocol version 3 appliance from the platform's
