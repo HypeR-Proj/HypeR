@@ -8,6 +8,7 @@ mod transaction;
 pub(super) use model::pci_identity as parse_pci_identity;
 pub(super) use model::transport_profile;
 pub(super) use model::unique_match as select_unique;
+pub(crate) mod events;
 mod object;
 pub(crate) mod service;
 mod set;

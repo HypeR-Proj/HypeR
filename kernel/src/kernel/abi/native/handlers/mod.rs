@@ -30,10 +30,10 @@ mod vm;
 
 pub(super) use console::{sys_console_discard_input, sys_console_read, sys_console_write};
 pub(super) use device::{
-    sys_device_claim, sys_device_claim_bundle, sys_device_claim_matching, sys_device_firmware_read,
-    sys_device_irq_complete, sys_device_irq_pending, sys_device_mmio, sys_device_profile_info,
-    sys_device_resource_info, sys_pending_virtual_machine_assign_device, sys_physical_device_info,
-    sys_vmo_get_dma_extent,
+    sys_device_claim, sys_device_claim_bundle, sys_device_claim_matching,
+    sys_device_dma_fault_info, sys_device_firmware_read, sys_device_irq_complete,
+    sys_device_irq_pending, sys_device_mmio, sys_device_profile_info, sys_device_resource_info,
+    sys_pending_virtual_machine_assign_device, sys_physical_device_info, sys_vmo_get_dma_extent,
 };
 pub(super) use guest_io::{
     sys_filesystem_mount, sys_filesystem_unmount, sys_guest_interrupt_create,

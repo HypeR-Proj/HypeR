@@ -715,6 +715,21 @@ transfer becomes available only with ResourceDomain revocation and iterative
 teardown capable of reclaiming queued endpoint cycles; the disposition ABI
 does not change when that restriction is removed.
 
+### Physical-device DMA fault observation
+
+`device_dma_fault_info` borrows a physical device with `INSPECT | ASSIGN_DEVICE`
+and returns its first retained DMA containment report. An all-zero record means
+no report, not an assurance of hardware isolation. The record and sticky
+`DMA_FAULT` signal survive capability handoff. `WAIT` is granted when claiming
+a device; inspection does not consume the record or clear the signal.
+
+Reports identify the device's stream, source, scope, hardware code, original
+monotonic timestamp and, when meaningful, DMA address and direction. Controller
+failure reports expose no other device's address. The ABI does not select a
+process, restart a device or stop a VM. Formal io-runtime consumes this mechanism
+for journal reporting; bootstrap has no corresponding policy. See
+[SMMUv3](smmuv3.md#formal-io-runtime-notification) for containment and retention.
+
 ## Waiting, signals, and atomic waits
 
 Object kinds expose typed, positive, level state such as `READABLE`, `WRITABLE`,

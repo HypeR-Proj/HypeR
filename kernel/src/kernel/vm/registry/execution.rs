@@ -475,12 +475,20 @@ impl VirtualMachine {
         if streams.iter().all(Option::is_none) {
             return Ok(());
         }
+        // Register durable observers before any DMA domain or device is activated.
+        self.physical_owners()
+            .observe_dma_faults()
+            .map_err(|_| Error::Allocation)?;
         let (memory, domain) = self.address_space.with(|space| space.dma_snapshot());
         let leases = memory.dma_leases(&domain).map_err(|_| Error::Allocation)?;
         let dma = crate::kernel::device::iommu::address_space::AddressSpace::create(
             streams, &leases, domain,
         )
         .map_err(|_| Error::Allocation)?;
+        #[cfg(all(CONFIG_ARCH_AARCH64, feature = "io-dma-revoke-test"))]
+        if streams.contains(&Some(16)) {
+            crate::kernel::device::iommu::revoke_test::start(dma.clone());
+        }
         self.dma.with(|slot| *slot = Some(dma));
         crate::pr_info!("HypeR: VM {:?}: physical PCI DMA domain installed", self.id);
         Ok(())

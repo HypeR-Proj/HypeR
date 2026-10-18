@@ -84,8 +84,10 @@ provide physical DMA isolation.
   checks with each change; the extended fault and stress campaign below remains
   deferred.
   QEMU EDU and host fault-injection tests cover DMA denial and retained backing.
-  End-to-end DMA denial initiated inside the Linux I/O VM through the production
-  virtio-PCI assignment and grant path still needs a dedicated negative test.
+  The production virtio-PCI NIC fixture also revokes a warmed Linux RX mapping
+  and verifies write denial, unchanged destination bytes, continued storage DMA
+  and formal-runtime journal reporting before and after bootstrap handoff.
+  Broader device/read-path and physical hardware qualification remain open.
 
 Pi 5 hardware coverage must be established per path. Raspberry Pi's
 [Pi 5 device tree](https://github.com/raspberrypi/linux/blob/rpi-6.18.y/arch/arm64/boot/dts/broadcom/bcm2712-rpi-5-b.dts)

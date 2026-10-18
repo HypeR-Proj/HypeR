@@ -239,6 +239,11 @@ pub(in crate::kernel) trait DeviceServices: UserMemoryServices {
         asserted: bool,
     ) -> Result<(), crate::kernel::vm::service::Error>;
 
+    fn device_dma_fault_info(
+        &self,
+        device: HandleValue,
+    ) -> Result<[u8; 40], crate::kernel::vm::service::Error>;
+
     fn device_profile_info(
         &self,
         device: HandleValue,

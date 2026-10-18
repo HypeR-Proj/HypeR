@@ -78,7 +78,8 @@ pub(crate) fn claim_matching(
                 Rights::TRANSFER
                     .union(Rights::DUPLICATE)
                     .union(Rights::INSPECT)
-                    .union(Rights::ASSIGN_DEVICE),
+                    .union(Rights::ASSIGN_DEVICE)
+                    .union(Rights::WAIT),
                 HandleFlags::NONE,
             )
             .map_err(|_| Error::NoMemory)?;
@@ -122,7 +123,8 @@ pub(crate) fn claim(
                 Rights::TRANSFER
                     .union(Rights::DUPLICATE)
                     .union(Rights::INSPECT)
-                    .union(Rights::ASSIGN_DEVICE),
+                    .union(Rights::ASSIGN_DEVICE)
+                    .union(Rights::WAIT),
                 HandleFlags::NONE,
             )
             .map_err(|_| Error::NoMemory)?;
@@ -135,6 +137,12 @@ pub(crate) fn claim(
         .map(|handles| handles[0])
         .map_err(|failure| failure.error.into())
 }
+pub(crate) fn dma_fault_info(process: &Process, device: HandleValue) -> Result<[u8; 40], Error> {
+    let device = process
+        .resolve_handle::<PhysicalDevice>(device, Rights::INSPECT.union(Rights::ASSIGN_DEVICE))?;
+    Ok(device.object().events.snapshot())
+}
+
 pub(crate) fn profile_info(process: &Process, device: HandleValue) -> Result<[u8; 32], Error> {
     let device = process.resolve_handle::<PhysicalDevice>(device, Rights::INSPECT)?;
     Ok(device.object().profile_info())

@@ -4,6 +4,9 @@
 //! Host ownership of SMMU registers and coherent control-memory allocations.
 
 pub(crate) mod address_space;
+mod notifications;
+#[cfg(all(CONFIG_ARCH_AARCH64, feature = "io-dma-revoke-test"))]
+pub(crate) mod revoke_test;
 pub(crate) mod runtime;
 
 use crate::kernel::mm::{memory, page_block::PageBlock};

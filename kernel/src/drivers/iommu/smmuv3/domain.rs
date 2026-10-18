@@ -170,4 +170,32 @@ impl<M: DmaMemory, B: DmaBuffer> Domain<M, B> {
         }
         Ok(mapping)
     }
+
+    #[cfg(feature = "io-dma-revoke-test")]
+    pub(super) fn revoke_test_page<E: Environment<Memory = M>>(
+        &mut self,
+        iova: u64,
+        bits: u8,
+    ) -> Result<B, Error>
+    where
+        B: Clone,
+    {
+        if !iova.is_multiple_of(4096) {
+            return Err(Error::Address);
+        }
+        let mapping = self
+            .mappings
+            .iter()
+            .find(|mapping| iova >= mapping.iova && iova - mapping.iova < mapping.memory.length())
+            .ok_or(Error::NotMapped)?;
+        // Keep the production mapping owner AND an independent test owner.
+        // Neither CPU access nor backing lifetime changes with this missing PTE.
+        let retained = mapping.memory.clone();
+        let (table, index) = self.leaf::<E>(iova, false, bits)?;
+        if memory::read(&self.tables[table], index) == 0 {
+            return Err(Error::NotMapped);
+        }
+        memory::write(&self.tables[table], index, 0);
+        Ok(retained)
+    }
 }

@@ -988,6 +988,11 @@ pub const SIGNALS: &[Signal] = &[
         name: "readable",
     },
     Signal {
+        object: "physical_device",
+        bit: 1,
+        name: "dma_fault",
+    },
+    Signal {
         object: "native_block",
         bit: 0,
         name: "peer_closed",
@@ -1122,6 +1127,30 @@ const DIRECTORY_ENTRY_NAME_CAPACITY: u32 = 256;
 const DIRECTORY_ENTRY_RECORD_SIZE: u16 = 24 + DIRECTORY_ENTRY_NAME_CAPACITY as u16;
 
 pub const CONSTANTS: &[AbiConstant] = &[
+    AbiConstant {
+        name: "dma_fault_source_smmuv3",
+        value: 1,
+    },
+    AbiConstant {
+        name: "dma_fault_scope_stream",
+        value: 1,
+    },
+    AbiConstant {
+        name: "dma_fault_scope_controller",
+        value: 2,
+    },
+    AbiConstant {
+        name: "dma_fault_address_valid",
+        value: 1,
+    },
+    AbiConstant {
+        name: "dma_fault_read",
+        value: 2,
+    },
+    AbiConstant {
+        name: "dma_fault_write",
+        value: 4,
+    },
     AbiConstant {
         name: "process_retirement_prepared",
         value: 0,
@@ -3630,6 +3659,54 @@ pub const RECORDS: &[Record] = &[
         fields: OBJECT_DETAILS_FIELDS,
         minimum_size: 88,
         size: 88,
+        alignment: 8,
+    },
+    Record {
+        name: "device_dma_fault_info",
+        fields: &[
+            Field {
+                name: "timestamp_ns",
+                kind: FieldKind::U64,
+                offset: 0,
+            },
+            Field {
+                name: "address",
+                kind: FieldKind::U64,
+                offset: 8,
+            },
+            Field {
+                name: "stream_id",
+                kind: FieldKind::U32,
+                offset: 16,
+            },
+            Field {
+                name: "source",
+                kind: FieldKind::U32,
+                offset: 20,
+            },
+            Field {
+                name: "scope",
+                kind: FieldKind::U32,
+                offset: 24,
+            },
+            Field {
+                name: "code",
+                kind: FieldKind::U32,
+                offset: 28,
+            },
+            Field {
+                name: "flags",
+                kind: FieldKind::U32,
+                offset: 32,
+            },
+            Field {
+                name: "reserved",
+                kind: FieldKind::U32,
+                offset: 36,
+            },
+        ],
+        minimum_size: 40,
+        size: 40,
         alignment: 8,
     },
     Record {
@@ -9339,7 +9416,11 @@ pub const SYSCALLS: &[Syscall] = &[
             handle: Some(ProducedHandle {
                 object: ProducedObject::Kind("physical_device"),
                 rights: ProducedRights::Fixed(
-                    RIGHT_TRANSFER | RIGHT_DUPLICATE | RIGHT_INSPECT | RIGHT_ASSIGN_DEVICE,
+                    RIGHT_TRANSFER
+                        | RIGHT_DUPLICATE
+                        | RIGHT_INSPECT
+                        | RIGHT_ASSIGN_DEVICE
+                        | RIGHT_WAIT,
                 ),
             }),
         }],
@@ -9946,7 +10027,11 @@ pub const SYSCALLS: &[Syscall] = &[
             handle: Some(ProducedHandle {
                 object: ProducedObject::Kind("physical_device"),
                 rights: ProducedRights::Fixed(
-                    RIGHT_TRANSFER | RIGHT_DUPLICATE | RIGHT_INSPECT | RIGHT_ASSIGN_DEVICE,
+                    RIGHT_TRANSFER
+                        | RIGHT_DUPLICATE
+                        | RIGHT_INSPECT
+                        | RIGHT_ASSIGN_DEVICE
+                        | RIGHT_WAIT,
                 ),
             }),
         }],
@@ -11221,6 +11306,47 @@ pub const SYSCALLS: &[Syscall] = &[
         failure_results: &[],
     },
     Syscall {
+        number: 183,
+        name: "device_dma_fault_info",
+        feature: FeatureGate::Core,
+        arguments: &[
+            Argument {
+                name: "device",
+                kind: ValueKind::Handle,
+                handle: Some(HandleArgument {
+                    object: ObjectConstraint::Kind("physical_device"),
+                    required_rights: RIGHT_INSPECT | RIGHT_ASSIGN_DEVICE,
+                    disposition: HandleDisposition::Borrow,
+                }),
+                memory: None,
+            },
+            Argument {
+                name: "output",
+                kind: ValueKind::UserAddress,
+                handle: None,
+                memory: Some(UserMemory {
+                    direction: MemoryDirection::Write,
+                    length: MemoryLength::Bytes {
+                        argument: "output_size",
+                        maximum_bytes: EXTENSIBLE_RECORD_MAX_BYTES,
+                    },
+                    record: Some("device_dma_fault_info"),
+                    handles: None,
+                    validation_order: 0,
+                }),
+            },
+            scalar_argument("output_size", ValueKind::ByteCount),
+        ],
+        results: INFO_RECORD_RESULTS,
+        blocking: BlockingClass::Never,
+        cancellation: CancellationClass::None,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
+    Syscall {
         number: 496,
         name: "native_block_transfer",
         feature: FeatureGate::Core,
@@ -11279,6 +11405,7 @@ pub const NATIVE_ABI: AbiSchema = AbiSchema {
 };
 
 pub const SEMANTIC_RULES: &[&str] = &[
+    "device_dma_fault_info requires INSPECT and ASSIGN_DEVICE on the physical-device handle. It returns the first retained DMA containment report without consuming it; an all-zero record means no report. DMA_FAULT is a persistent level signal observed with WAIT. Claim and claim_matching grant WAIT. Fault evidence follows the device object across handle transfer; querying does not acknowledge or resume DMA. The kernel never selects a userspace process or stops a VM for this notification. The formal I/O runtime queries after adoption and journals each device's first report; bootstrap does not consume it. timestamp_ns is monotonic boot time. source 1 identifies SMMUv3. scope 1 means stream quarantine, with code holding the SMMUv3 event ID; scope 2 means controller containment, with code holding the captured GERROR bits (zero is possible for a software-detected failure). stream_id always identifies this handle's device. ADDRESS_VALID, READ and WRITE describe the address only for translation/access faults; controller reports disclose no other device's address. reserved is zero. A first stream report remains unchanged if the whole controller later fails. Quarantine and backing retention remain independent of observer presence or progress.",
     "thread_set_current_name changes only the calling Native Thread's diagnostic label. No handle or extra authority is needed and no other Thread or Process can be renamed. Input is 1..thread_name_max_bytes (64) bytes of UTF-8 without control characters, excluding any NUL terminator. Empty, oversized, invalid UTF-8, control-containing names and nonzero unused arguments return INVALID_ARGUMENT without changing the old name. Inspectors receive complete old or new snapshots; names confer no identity or authority. Process names remain unchanged.",
     "memory_inspector_read_statistics requires MemoryInspector INSPECT; it is observational and never drains caches or initiates reclaim. Topic selects a typed extensible record: heap (index 0), buddy (orders 0..18), owner (0 kernel, 1 page tables, 2 guest, 3 user, 4 file cache), file_cache (index 0), or heap_class (0..8 kernel, 9..17 file-cache pool; eight slab sizes 16..2048 then large allocations). Unknown topic/index and a nonzero unused argument are INVALID_ARGUMENT. Heap-class records require CONFIG_HEAP_PROFILING, otherwise NOT_SUPPORTED. Other records are always available after allocator initialization.",
     "Memory statistics are independently sampled, including fields sourced from atomic counters; they are not a transaction across topics, CPUs, or logical and physical accounting. Page counts use memory_observation.page_size. Heap-class reserved slots include live objects, magazine objects and in-flight transfers; large buckets report zero capacity/reserved/cached and object_size=0. File-cache metadata physical pages and reservations overlap other accounting and must not be added twice. Cumulative heap-class allocation/deallocation counters saturate and reset only on reboot. No address or allocation authority is exposed.",

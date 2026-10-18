@@ -162,6 +162,31 @@ further operations return `Failed`. The worker logs a global failure once and
 parks. This deliberate terminal state is separate from ordinary denied DMA,
 which only quarantines the offending stream.
 
+### Formal I/O runtime notification
+
+A physical-device capability retains its first DMA containment report and a
+sticky `DMA_FAULT` signal. The SMMU worker publishes this state after containment,
+without depending on a userspace consumer or modifying VM execution state.
+Observers are registered before hardware activation and hold only weak references
+to device-local notification storage; they never retain a VM or its DMA leases.
+Fault handling allocates no observer records.
+
+The formal `io-runtime` queries its adopted storage/network handles, then waits
+for new faults and writes one diagnostic per device to its component's stderr
+journal stream. `journalctl -c /io-runtime` shows the source, quarantine scope,
+SID, event code, available DMA address/direction and original boot timestamp.
+Bootstrap has no fault-consumer logic, new handoff messages or journal dependency.
+A fault recorded before ownership transfer remains observable by the successor.
+Reporting failures do not request a VM stop. Existing kernel serial/ring logging
+remains independent of this userspace report.
+
+Inspection requires `INSPECT | ASSIGN_DEVICE`; waiting requires `WAIT`. Records
+are non-consuming and contain only the selected device's address evidence.
+Controller failures are reported to all registered devices without disclosing
+another device's fault address. A device's first report is not replaced by later
+controller failure. Consumers stop waiting on the sticky signal once reported;
+they cannot acknowledge quarantine or reopen DMA admission through this API.
+
 ## Reproduce the acceptance test
 
 From the repository root:
@@ -213,6 +238,51 @@ timeout, and failed GBPA/CR0 acknowledgements. It verifies that failed
 containment never frees published memory or falsely reports successful
 retirement. The QEMU runtime fixture exercises separate wired IRQs; the
 combined-route parser has host coverage, not a separate hardware qualification.
+
+### Production I/O VM mapping revocation
+
+```sh
+make test-board-dma-revoke ARCH=aarch64 \
+  CONFIG_FILE=kernel/configs/qemu_aarch64_defconfig
+```
+
+This opt-in test boots the pinned, unmodified Linux I/O VM with the normal
+physical virtio-PCI NIC (SID 16) and storage controller (SID 8). It creates a
+disposable disk and private Ethernet socket; it does not use external networking.
+QMP observes the NIC's receive descriptors. Ordinary Ethernet frames first
+demonstrate successful DMA, then the test selects a posted receive buffer on an
+already-used page.
+The feature-gated kernel worker removes that page from the **production** DMA
+domain and completes the ordinary domain TLBI/CMD_SYNC. The mapping owner and a
+separate retained reference keep the backing alive; CPU mappings remain intact.
+
+Another Ethernet frame must produce a real SMMU translation fault identifying
+SID 16, the removed page and a write access. Every byte in the attempted DMA
+write range (virtio header plus Ethernet frame) must remain unchanged. The
+unused tail is excluded because Linux may place skb metadata there after
+completion; this test preserves CPU access. New storage I/O must still complete
+on SID 8, including an observed advance of its physical request queue. Timeout
+alone is never success.
+Two boots cover faults after formal runtime adoption and before adoption. Both
+require a matching `/io-runtime` journal report and a still-running I/O VM;
+the early case verifies evidence survives bootstrap ownership transfer.
+Serial logs, command receipts and the JSON evidence are kept in the generated
+`target/board-tests/dma-revoke.*/` directory.
+
+The runner uses QEMU's experimental `x-query-virtio-*` monitor commands and
+QTest physical reads. Its only memory write is an aligned request to a private
+test-kernel mailbox while all emulated CPUs are stopped. It does not edit I/O
+VM descriptors, payloads, or page tables. The `io-dma-revoke-test` feature is
+disabled by default, adds no syscall, and preserves Native startup so that the
+ordinary I/O VM can run. This target builds its kernel in
+`target/board-tests/dma-revoke-kernel/` and copies it into the disposable fixture;
+it does not replace the production `hyper.img` used by `make run`.
+
+Revocation is limited to this disposable boot: the existing fault policy
+quarantines the offending SID until reboot, so the test does not restore its
+mapping or resume the device. This proves denial of a real NIC DMA write after
+revocation, not every possible device/read path or physical DMA retirement.
+It complements the standalone read/write/permission tests above.
 
 ### QEMU boundary
 
