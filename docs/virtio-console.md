@@ -18,7 +18,7 @@ ownership boundary.
 
 ## Device and Linux driver contract
 
-The virtual hierarchy is PCI domain 1, with a two-bus ECAM window at
+The virtual hierarchy is PCI domain 2, with a two-bus ECAM window at
 `0x0a600000` and a memory window at `0x0aa00000`. Domain 0 remains available for
 assigned physical PCI hardware. The root-port hotplug interrupt uses guest GIC
 INTID 120 and endpoint INTB uses INTID 121. The bridge advertises a hotplug-capable

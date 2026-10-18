@@ -14,6 +14,20 @@ The 32-byte profile record contains `profile` at offset 0, `interrupt_count` at
 64 KiB aperture. Userspace bundles have zero or one physical IRQ, but assignment
 reserves one guest IRQ even when the physical IRQ count is zero.
 
+For PCI functions, resource kind `PCI_ECAM` describes the configuration window.
+Interrupt delivery is described by either `PCI_MSI` (a virtual MSI frame) or
+`PCI_INTX` (`0x102`, exactly one level interrupt). The INTx descriptor has zero
+offset, length, flags and bus address: it names an interrupt mode, not an MMIO
+window. Resource enumeration must not reject that canonical zero-length entry.
+BAR descriptors retain their existing offsets, lengths and memory-type flags.
+QEMU modern virtio functions use INTx; the existing RP1 projection uses MSI-X.
+
+Installing a VM with protected physical devices allocates and activates its
+DMA domain before publishing the VM. Failure returns an error and withdraws
+device admission; it does not panic merely because allocation failed. The
+pending handle is consumed only on success. After a failed installation the
+exhausted construction must be aborted or closed and recreated, not retried.
+
 ## Capability boundaries
 
 | Object | Operation | Required right |

@@ -61,6 +61,8 @@ pub const MAX_ASSIGNED_DEVICES: usize =
 /// Resource kinds and attributes returned by device inspection.
 pub const RESOURCE_PCI_ECAM: u32 = hyper_abi::HYPER_NATIVE_DEVICE_RESOURCE_PCI_ECAM as u32;
 pub const RESOURCE_PCI_MSI: u32 = hyper_abi::HYPER_NATIVE_DEVICE_RESOURCE_PCI_MSI as u32;
+/// A level interrupt routed by the host; no MSI-controller aperture is exposed.
+pub const RESOURCE_PCI_INTX: u32 = hyper_abi::HYPER_NATIVE_DEVICE_RESOURCE_PCI_INTX as u32;
 pub const RESOURCE_PCI_BAR0: u32 = hyper_abi::HYPER_NATIVE_DEVICE_RESOURCE_PCI_BAR0 as u32;
 pub const RESOURCE_MEMORY_64: u32 = hyper_abi::HYPER_NATIVE_DEVICE_RESOURCE_MEMORY_64 as u32;
 pub const RESOURCE_PREFETCHABLE: u32 = hyper_abi::HYPER_NATIVE_DEVICE_RESOURCE_PREFETCHABLE as u32;

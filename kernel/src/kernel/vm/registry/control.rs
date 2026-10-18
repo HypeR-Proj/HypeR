@@ -119,7 +119,7 @@ impl QuiescentControl {
     /// registry mutation. A precheck failure returns this exact authority;
     /// every later inconsistency is fail-stop with ownership retained.
     pub(in crate::kernel::vm) fn retire(self) -> Result<(), RetirementFailure> {
-        let physical = match REGISTRY.with(|registry| registry.quiescent_physical(self.id)) {
+        let (physical, dma) = match REGISTRY.with(|registry| registry.quiescent_io(self.id)) {
             Ok(physical) => physical,
             Err(error) => crate::kernel::crash::fatal(format_args!(
                 "quiescent physical owner lookup failed: {error:?}"
@@ -128,6 +128,12 @@ impl QuiescentControl {
         if physical.quiesce_all().is_err() {
             // The exact quiescent owner, all imported pages and the device
             // claim remain retained. A reset timeout never permits reuse.
+            return Err(RetirementFailure {
+                control: self,
+                error: RetirementError::DeviceQuarantined,
+            });
+        }
+        if dma.is_some_and(|dma| dma.retire().is_err()) {
             return Err(RetirementFailure {
                 control: self,
                 error: RetirementError::DeviceQuarantined,

@@ -248,7 +248,8 @@ never authorizes memory reuse.
 ## Device protocol and control ownership
 
 The guest-facing devices use standard virtio-scsi and virtio-net. A business VM's
-`configuration.virtio-transport` selects `mmio` (default) or `pci` on AArch64.
+`configuration.virtio-transport` selects `mmio` (when omitted) or `pci` on AArch64.
+The QEMU board explicitly selects PCI for its default Alpine guest.
 The two transports share feature negotiation, queue validation and backend
 activation/reset state. For example:
 
@@ -274,7 +275,7 @@ legacy/transitional virtio remain unsupported. This business-VM profile has a
 fixed endpoint topology. The virtual bus is independent of physical RP1
 assignment and cannot address host PCI resources.
 
-The I/O appliance has a separate userspace PCIe host bus in domain 1. Bootstrap
+The I/O appliance has a separate userspace PCIe host bus in domain 2. Bootstrap
 advertises two ECAM buses at `0x0a600000` and a 2 MiB memory window at
 `0x0aa00000`. Bus 0 contains a root port with an empty, standard PCIe hotplug
 slot; bus 1 is its downstream bus. Physical RP1 assignment remains in domain 0,
@@ -849,10 +850,17 @@ names do not assert a globally assigned hardware identity.
 
 ### PCI transport acceptance
 
-Run `make test-board-network NETWORK_VIRTIO_TRANSPORT=pci QEMU_CPUS=4` for
-PCI enumeration, guest disk read/write, networking, driver rebind and repeated
-VM retirement. The default `make test-board-network` covers MMIO. Both use
+Run `make test-board-network QEMU_CPUS=4` for physical and guest PCI enumeration,
+guest disk read/write, networking, driver rebind and repeated VM retirement.
+The default QEMU board selects physical virtio-SCSI and virtio-net PCI functions
+behind an SMMUv3, using host-mediated INTx. The I/O VM's physical network and
+storage projections use PCI domains 0 and 1; domain 2 is reserved for hotplug.
+`make test-board-mmio` explicitly selects MMIO for both physical and guest
+transports and covers the same lifecycle. Both use
 fresh disposable disks and functional checks, without performance thresholds.
+The protected PCI configuration requires QEMU 9.2+ and its `virt-9.2` or newer
+machine model. Older models expose a stage-1-only SMMU and are rejected by the
+stage-2 driver; selecting an old model is not a supported isolation fallback.
 
 ### Hotplugged agent transport
 

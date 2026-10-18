@@ -3,6 +3,7 @@
 
 //! Host ownership of SMMU registers and coherent control-memory allocations.
 
+pub(crate) mod address_space;
 pub(crate) mod runtime;
 
 use crate::kernel::mm::{memory, page_block::PageBlock};
@@ -25,7 +26,7 @@ impl From<smmuv3::Error> for Error {
     }
 }
 
-pub(crate) type Controller = smmuv3::Controller<KernelEnvironment, super::dma::Lease>;
+pub(crate) type Controller = smmuv3::Controller<KernelEnvironment, super::dma::Buffer>;
 pub(crate) struct KernelEnvironment;
 pub(crate) struct CoherentMemory {
     page: PageBlock,
@@ -74,6 +75,7 @@ pub(super) fn host_owned(node: &PlatformDevice) -> bool {
         || node.is_compatible("arm,smmu-v3")
         || node.is_compatible("brcm,bcm2712-iommu")
         || node.is_compatible("pci-host-ecam-generic")
+        || node.property("msi-controller").is_some()
 }
 
 pub(super) fn initialize(

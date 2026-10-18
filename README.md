@@ -264,6 +264,12 @@ for package requirements and the `boards/qemu.json` deployment.
 This boots the AArch64 system with the HypeR shell and a resident Linux I/O VM
 in QEMU. The first build downloads pinned assets and creates a persistent board
 disk; `make run` launches those existing artifacts without building them.
+The default QEMU board uses virtio-PCI for physical I/O backends and the Alpine
+guest. Physical requester IDs are bound to host SMMUv3 domains before DMA is
+enabled. MMIO remains supported and has a dedicated `make test-board-mmio`
+compatibility suite; it does not provide PCI SMMU containment.
+The PCI deployment requires QEMU 9.2 or newer with a `virt-9.2` or newer machine
+model (`virt` selects the installed version's default).
 HypeR uses its read-only system volume as `/` and mounts its writable
 persistent data volume at `/data`. System init adopts the existing core services
 and launches VM management. Start the default guest with

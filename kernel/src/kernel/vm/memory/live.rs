@@ -32,7 +32,7 @@ pub(crate) struct Mapping {
     // A physical-order index permits logarithmic fault lookup while the
     // immutable extent list remains in frontend order for vhost registration.
     order: Vec<usize>,
-    _lease: crate::kernel::device::dma::Lease,
+    pub(super) lease: crate::kernel::device::dma::Lease,
     _charge: CommittedCharge,
 }
 
@@ -109,7 +109,7 @@ impl Mapping {
             extents,
             table_capacity,
             order,
-            _lease: lease,
+            lease,
             _charge: charge,
         })
     }

@@ -84,8 +84,8 @@ pub(crate) fn run(
     let guarded = page(GUARD)?;
     let address_a = page_a.virtual_address();
     let address_b = page_b.virtual_address();
-    controller.map_page(domain_a, IOVA, page_a, Permissions::ReadWrite)?;
-    controller.map_page(domain_b, IOVA, page_b, Permissions::ReadWrite)?;
+    controller.map_page(domain_a, IOVA, page_a.into(), Permissions::ReadWrite)?;
+    controller.map_page(domain_b, IOVA, page_b.into(), Permissions::ReadWrite)?;
     // Unconfigured StreamID must not reach physical RAM, even with a valid PA.
     unbound.probe_write(guarded.physical())?;
     fault(controller, sid_unbound, 4, None)?;
@@ -116,7 +116,7 @@ pub(crate) fn run(
 
     let readonly = page(PATTERN_B)?;
     let readonly_address = readonly.virtual_address();
-    controller.map_page(domain_a, OTHER_IOVA, readonly, Permissions::Read)?;
+    controller.map_page(domain_a, OTHER_IOVA, readonly.into(), Permissions::Read)?;
     // A denied write must carry bytes different from the protected contents.
     a.read_dma(IOVA)?;
     a.probe_write(OTHER_IOVA)?;
@@ -163,7 +163,7 @@ pub(crate) fn run(
     verify(old_a.virtual_address(), GUARD)?;
     let replacement = page(PATTERN_B)?;
     let replacement_address = replacement.virtual_address();
-    controller.map_page(domain_a, IOVA, replacement, Permissions::ReadWrite)?;
+    controller.map_page(domain_a, IOVA, replacement.into(), Permissions::ReadWrite)?;
     a.write_dma(IOVA)?;
     clean(controller)?;
     verify(replacement_address, PATTERN_A)?;
@@ -216,7 +216,12 @@ pub(crate) fn run(
         )
         .unwrap_or_else(|| hyper::debug::invariant_failure("DMA test page outside RAM"))
     });
-    controller.map_buffer(buffer_domain, buffer_base, buffer, Permissions::ReadWrite)?;
+    controller.map_buffer(
+        buffer_domain,
+        buffer_base,
+        buffer.into(),
+        Permissions::ReadWrite,
+    )?;
     controller.attach(sid_a, buffer_domain)?;
     for (index, address) in addresses.into_iter().enumerate() {
         a.read_dma(buffer_base + index as u64 * 4096)?;
@@ -256,6 +261,15 @@ impl LeaseAddress for Lease {
     fn virtual_address(&self) -> usize {
         crate::kernel::mm::memory::linear_address(self.physical())
             .unwrap_or_else(|| hyper::debug::invariant_failure("test lease outside linear RAM"))
+    }
+}
+impl LeaseAddress for crate::kernel::device::dma::Buffer {
+    fn physical(&self) -> u64 {
+        hyper::drivers::iommu::smmuv3::DmaBuffer::physical_page(self, 0)
+    }
+    fn virtual_address(&self) -> usize {
+        crate::kernel::mm::memory::linear_address(self.physical())
+            .unwrap_or_else(|| hyper::debug::invariant_failure("test buffer outside linear RAM"))
     }
 }
 

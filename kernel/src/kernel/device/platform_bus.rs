@@ -73,6 +73,8 @@ pub(crate) enum Error {
     Fdt(fdt::Error),
     Scan(ScanError),
     Iommu(super::iommu::Error),
+    Pci(hyper::drivers::pci::Error),
+    PciOwnership,
 }
 
 pub(super) struct InitializationReport {
@@ -112,15 +114,63 @@ pub(super) fn initialize(
     let mut assignable = Vec::new();
     assignable
         .try_reserve_exact(devices.len().saturating_add(dependencies.len()))
-        .map_err(|_| Error::DriverRegistration(ProbeError::Resource))?;
+        .map_err(|_| {
+            crate::pr_err!(
+                "HypeR: physical device catalogue allocation failed ({} nodes, {} bytes per entry)",
+                devices.len() + dependencies.len(),
+                core::mem::size_of::<super::assigned::Resource>()
+            );
+            Error::DriverRegistration(ProbeError::Resource)
+        })?;
     let catalogue = super::firmware::Catalogue::new(dependencies, |node| node.kernel_claimed())
-        .map_err(|_| Error::DriverRegistration(ProbeError::Resource))?;
+        .map_err(|_| {
+            crate::pr_err!("HypeR: firmware catalogue allocation failed");
+            Error::DriverRegistration(ProbeError::Resource)
+        })?;
     let services = KernelDriverServices { boot };
     // Activate default-deny translation before publishing any physical device.
     // A discovered but unsupported/failed IOMMU aborts admission, never bypasses.
     let iommu =
         super::iommu::initialize(&catalogue.nodes, &services, boot.interrupts().root_domain)
             .map_err(Error::Iommu)?;
+    // ECAM functions require the already active default-deny SMMU. A PCI
+    // configuration error is fatal to admission rather than a DMA bypass.
+    if catalogue
+        .nodes
+        .iter()
+        .any(|node| node.is_compatible("pci-host-ecam-generic"))
+        && iommu.is_some()
+    {
+        let functions =
+            hyper::drivers::pci::Transport::discover_ecam::<crate::hal::memory::Barrier>(
+                &catalogue.nodes,
+                &services,
+            )
+            .map_err(Error::Pci)?;
+        // Keep later catalogue pushes infallible after runtime driver IRQs
+        // are active, including all ECAM functions beyond firmware nodes.
+        assignable
+            .try_reserve_exact(
+                devices
+                    .len()
+                    .saturating_add(catalogue.nodes.len())
+                    .saturating_add(functions.len()),
+            )
+            .map_err(|_| Error::DriverRegistration(ProbeError::Resource))?;
+        for prepared in functions {
+            let identity = prepared.transport.identity();
+            let stream = prepared.transport.stream();
+            let resource = super::assigned::Resource::pci(prepared, boot.interrupts().root_domain)
+                .ok_or(Error::PciOwnership)?;
+            assignable.push(resource);
+            crate::pr_info!(
+                "HypeR: PCI function {:04x}:{:04x} prepared; SMMU stream {:?}, DMA disabled",
+                identity & 0xffff,
+                identity >> 16,
+                stream
+            );
+        }
+    }
     let console = super::serial::initialize(boot, &devices);
     let reserved_console_base = boot.early_console().map(|console| console.base);
     devices.retain(|device| {

@@ -6,6 +6,9 @@
 
 use std::cell::Cell;
 
+#[path = "pci/ecam.rs"]
+mod ecam;
+
 use hyper::{
     drivers::{
         pci::{Error, LinkFailure, LinkState, Prepared, Transport},

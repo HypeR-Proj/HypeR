@@ -3,12 +3,17 @@
 
 # I/O authority and DMA memory ownership
 
-The implemented boundaries below improve authority separation and memory
-lifetime. They do **not** establish complete isolation of the current Linux
-I/O VM. Production assignment still lacks an IOMMU domain binding; the default
-QEMU virtio-mmio devices bypass the PCI SMMU, and the Pi 5 deployment remains
-trusted. Do not mark the security roadmap complete on the strength of the
-standalone SMMUv3 fixture.
+The default QEMU deployment assigns modern virtio-PCI SCSI and network
+functions behind an SMMUv3. The kernel binds each function's firmware-resolved
+requester ID to the I/O VM's DMA domain before enabling bus mastering. Only
+that VM's RAM and explicit live backend grants enter the domain. This protects
+ungranted HypeR memory; it does not protect a guest from its authorized I/O
+backend or prevent denial of service.
+
+Physical virtio-mmio remains supported by a dedicated compatibility deployment
+and test. It does not traverse QEMU's PCI SMMU. That deployment and Pi 5 remain
+trusted-I/O-VM configurations; neither gains DMA containment from capability
+attenuation alone.
 
 ## Device operations
 
@@ -42,16 +47,36 @@ owner uses the existing `KernelService` reference class. Every cloned owner
 retains the stable VMO pages and exclusive hardware-write lease. The object and
 its page-address snapshot are charged to the creating resource domain.
 
-Production live backend mappings now retain this lease. A future DMA mapping
-can retain the same owner independently of the CPU mapping or source handles.
+Production live backend mappings and SMMU mappings retain this lease. Each DMA
+extent holds the same owner independently of the CPU mapping or source handles.
 Closing a handle or removing a CPU mapping cannot release a page still held by
 the DMA domain. Final destruction uses the ordinary object reaper and performs
 no device register access, reset, or IOMMU command.
 
-This ownership mechanism does not make a guest's RELEASE_MEMORY acknowledgement
-a physical DMA fence. The current unprotected backend still relies on its
-trusted quiescence protocol; active PCI/userspace assignments remain quarantined
-when the kernel cannot prove complete retirement.
+For protected PCI assignments, live removal withdraws CPU mappings and completes
+DMA invalidation before releasing the lease. Full VM retirement first resets
+the physical virtio functions and waits for their status-zero acknowledgement,
+then detaches streams, invalidates mappings and destroys the domain. Failures
+retain the backing rather than treating a backend reply as a physical fence.
+Unprotected MMIO and Pi 5 paths still require a trusted quiescence protocol.
+
+## QEMU physical PCI transport
+
+The generic ECAM host admits modern virtio-SCSI (`1af4:1048`) and virtio-net
+(`1af4:1041`) single-function endpoints. Physical BAR placement, configuration
+and requester identity remain host-owned. Linux sees a separate mediated host
+bridge for each function and owns all SCSI and network protocol handling.
+Readonly configuration capabilities expose only modern virtio transport fields;
+MSI/MSI-X, power management, ATS and PCI_CFG access stay hidden.
+
+Interrupts use exclusive firmware-routed INTx lines, with guest acknowledgement
+rearming the physical level interrupt. No interrupt-controller page is mapped
+into the DMA domain. MSI-X and shared INTx lines are outside this implementation.
+The domain uses identity IOVAs for its authorized physical extents, matching
+the existing guest `dma-ranges` contract without granting access to other RAM.
+All assigned functions share the I/O VM's domain. Production grants currently
+permit both reads and writes; they do not partition shared memory by device or
+individual I/O request.
 
 ## SMMUv3 data and control memory
 
@@ -84,6 +109,12 @@ entries after partial allocation failure and an invalid final physical page,
 and check that failed revocation clears leaves while retaining their payload
 owners. See [SMMUv3](smmuv3.md).
 
+Production virtio-PCI storage and networking have functional acceptance tests.
+The EDU tests exercise DMA denial through test-created domains; they do not
+submit out-of-range virtio descriptors from inside the running Linux I/O VM
+through the production assignment and grant path. That end-to-end negative
+case remains unqualified.
+
 ## Pi 5 coverage and remaining integration
 
 Host ownership now reserves every firmware translation provider identified by
@@ -107,10 +138,6 @@ proven to supply the required retirement fence. No speculative programming of
 those live physical windows or SDHCI DMA controls is included in this change.
 SDHCI remains the explicit trusted exception; HypeR does not add an SD driver.
 
-The remaining production work is to connect enumerated requester IDs and exact
-shared-memory grants to owned domains before enabling bus mastering, serialize
-live grant removal with completed DMA invalidation, and test faults through
-actual assigned block/network devices. QEMU needs a physical PCI transport path
-for those devices; enabling `iommu=smmuv3` alongside existing virtio-mmio is
-insufficient. Pi 5 requires verified coverage and retirement for the applicable
-bridge/IOMMU paths before any deployment can claim I/O VM containment.
+Pi 5 requires verified coverage and retirement for its applicable bridge/IOMMU
+paths before a deployment can claim I/O VM containment. Future physical
+qualification should use hardware with a documented DMA isolation boundary.

@@ -66,8 +66,8 @@ pub(crate) fn run() -> Result<(), Error> {
             let a = page(PATTERN_A)?;
             let b = page(PATTERN_B)?;
             let addresses = (a.virtual_address(), b.virtual_address());
-            controller.map_page(domain_a, IOVA, a, Permissions::ReadWrite)?;
-            controller.map_page(domain_b, IOVA, b, Permissions::ReadWrite)?;
+            controller.map_page(domain_a, IOVA, a.into(), Permissions::ReadWrite)?;
+            controller.map_page(domain_b, IOVA, b.into(), Permissions::ReadWrite)?;
             controller.attach(sid_a, domain_a)?;
             controller.attach(sid_b, domain_b)?;
             Ok((domain_a, domain_b, addresses.0, addresses.1))

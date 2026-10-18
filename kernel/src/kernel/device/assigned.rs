@@ -78,7 +78,7 @@ impl Hardware {
         match &self.profile {
             Profile::Virtio(_) => self.read(0x60) != 0,
             Profile::Userspace => false,
-            Profile::Pci(_) => false,
+            Profile::Pci(transport) => transport.line_asserted(),
         }
     }
     fn register(&self, offset: usize, width: usize) -> Option<(PermanentMmioMapping, usize)> {
@@ -171,6 +171,11 @@ impl Resource {
                 offset: bar.offset as usize,
             });
         }
+        let trigger = if prepared.transport.uses_intx() {
+            InterruptTrigger::Level
+        } else {
+            InterruptTrigger::Edge
+        };
         Some(Self {
             hardware: Hardware {
                 mapping: first.mapping,
@@ -179,7 +184,7 @@ impl Resource {
                 domain,
                 interrupt: InterruptId::new(prepared.interrupt),
                 interrupt_count: prepared.interrupt_count,
-                trigger: InterruptTrigger::Edge,
+                trigger,
             },
             firmware: prepared.firmware,
             claimed: false,

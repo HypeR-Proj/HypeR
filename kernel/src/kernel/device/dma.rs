@@ -17,7 +17,7 @@ use hyper::mm::PAGE_SIZE;
 /// release pages still held by a DMA domain. No hardware operation runs in Drop.
 pub(crate) struct BackendMemoryLease {
     pages: Vec<u64>,
-    backing: GuestMemoryBacking,
+    _backing: GuestMemoryBacking,
     _charge: CommittedCharge,
 }
 
@@ -31,9 +31,26 @@ impl BackendMemoryLease {
         backing: GuestMemoryBacking,
         domain: &ResourceDomain,
     ) -> Result<Lease, MemoryObjectError> {
-        let count = usize::try_from(backing.size() / PAGE_SIZE)
-            .map_err(|_| MemoryObjectError::AllocationSize)?;
-        if count == 0 || !backing.size().is_multiple_of(PAGE_SIZE) {
+        let size = backing.size();
+        Self::prepare_range(backing, 0, size, domain)
+    }
+
+    pub(crate) fn prepare_range(
+        backing: GuestMemoryBacking,
+        start: u64,
+        length: u64,
+        domain: &ResourceDomain,
+    ) -> Result<Lease, MemoryObjectError> {
+        if !start.is_multiple_of(PAGE_SIZE)
+            || start
+                .checked_add(length)
+                .is_none_or(|end| end > backing.size())
+        {
+            return Err(MemoryObjectError::AllocationSize);
+        }
+        let count =
+            usize::try_from(length / PAGE_SIZE).map_err(|_| MemoryObjectError::AllocationSize)?;
+        if count == 0 || !length.is_multiple_of(PAGE_SIZE) {
             return Err(MemoryObjectError::AllocationSize);
         }
         let bytes = count
@@ -53,20 +70,20 @@ impl BackendMemoryLease {
         crate::kernel::mm::reclaim::reserve_exact(&mut pages, count)
             .map_err(|_| MemoryObjectError::AllocationSize)?;
         for index in 0..count {
-            let offset = index as u64 * PAGE_SIZE;
+            let offset = start + index as u64 * PAGE_SIZE;
             backing.populate_page(offset)?;
             pages.push(backing.physical_page(offset)?.get());
         }
         Lease::try_new_service(Self {
             pages,
-            backing,
+            _backing: backing,
             _charge: charge,
         })
         .map_err(MemoryObjectError::Object)
     }
 
     pub(crate) fn length(&self) -> u64 {
-        self.backing.size()
+        self.pages.len() as u64 * PAGE_SIZE
     }
 
     pub(crate) fn physical_page(&self, offset: u64) -> u64 {
@@ -75,6 +92,59 @@ impl BackendMemoryLease {
             hyper::debug::invariant_failure("DMA lease page outside retained buffer");
         }
         self.pages[(offset / PAGE_SIZE) as usize]
+    }
+}
+
+/// A checked slice retains the complete lease while exposing only the pages
+/// authorized by one contiguous IOVA extent to the translation driver.
+pub(crate) struct Buffer {
+    lease: Lease,
+    offset: u64,
+    length: u64,
+}
+impl Buffer {
+    pub(crate) fn slice(
+        lease: Lease,
+        offset: u64,
+        length: u64,
+    ) -> Result<Self, hyper::drivers::iommu::smmuv3::Error> {
+        if length == 0
+            || !offset.is_multiple_of(PAGE_SIZE)
+            || !length.is_multiple_of(PAGE_SIZE)
+            || offset
+                .checked_add(length)
+                .is_none_or(|end| end > lease.object().length())
+        {
+            return Err(hyper::drivers::iommu::smmuv3::Error::Address);
+        }
+        Ok(Self {
+            lease,
+            offset,
+            length,
+        })
+    }
+}
+impl From<Lease> for Buffer {
+    fn from(lease: Lease) -> Self {
+        let length = lease.object().length();
+        Self {
+            lease,
+            offset: 0,
+            length,
+        }
+    }
+}
+// SAFETY: The checked subrange owns a counted stable backing lease. The driver
+// only asks for aligned page offsets below length and never receives CPU bytes.
+unsafe impl hyper::drivers::iommu::smmuv3::DmaBuffer for Buffer {
+    fn length(&self) -> u64 {
+        self.length
+    }
+    fn physical_page(&self, offset: u64) -> u64 {
+        if offset >= self.length {
+            hyper::debug::invariant_failure("DMA buffer page out of bounds");
+        }
+        self.lease.object().physical_page(self.offset + offset)
     }
 }
 

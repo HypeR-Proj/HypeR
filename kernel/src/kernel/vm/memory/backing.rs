@@ -51,6 +51,25 @@ pub(crate) struct ResidentMemory {
 }
 
 impl ResidentMemory {
+    pub(crate) fn dma_leases(
+        &self,
+        domain: &ResourceDomain,
+    ) -> Result<[Option<crate::kernel::device::dma::Lease>; 8], MemoryObjectError> {
+        let mut leases = [const { None }; 8];
+        for (index, region) in self.regions.iter().enumerate() {
+            if let Some(region) = region {
+                leases[index] = Some(
+                    crate::kernel::device::dma::BackendMemoryLease::prepare_range(
+                        region.backing.clone(),
+                        region.source_offset,
+                        region.length,
+                        domain,
+                    )?,
+                );
+            }
+        }
+        Ok(leases)
+    }
     #[cfg(feature = "kernel-self-test")]
     pub(super) fn owned(bytes: u64) -> Self {
         Self {

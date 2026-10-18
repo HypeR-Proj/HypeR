@@ -6,6 +6,12 @@ use super::{Error, PhysicalDevice};
 use hyper::drivers::pci;
 
 impl PhysicalDevice {
+    pub(crate) fn dma_stream(&self) -> Option<u32> {
+        match &self.claim.hardware.profile {
+            Profile::Pci(transport) => transport.stream(),
+            _ => None,
+        }
+    }
     pub(crate) fn info(&self) -> service::Info {
         service::Info {
             device_id: match self.claim.hardware.profile {
@@ -45,6 +51,7 @@ impl PhysicalDevice {
         if let Profile::Pci(transport) = &self.claim.hardware.profile {
             let (kind, flags, offset, length, bus) = match index {
                 0 => (0x100, 0, 0, pci::ECAM_SIZE, 0),
+                1 if transport.uses_intx() => (0x102, 0, 0, 0, 0),
                 1 => (0x101, 0, pci::MSI_FRAME_OFFSET, 4096, 0),
                 _ => {
                     let bar = transport

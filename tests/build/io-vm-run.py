@@ -33,7 +33,7 @@ class DiskTests(unittest.TestCase):
         self.assertEqual(runner.network_arguments(Board.parse(source)), [])
         self.assertEqual(runner.network_arguments(Board.load(root / 'boards/qemu.json')),
                          ['-netdev', 'user,id=physicalnet', '-device',
-                          'virtio-net-device,id=physicalnet,netdev=physicalnet,iommu_platform=on'])
+                          'virtio-net-pci,addr=2.0,disable-legacy=on,romfile=,id=physicalnet,netdev=physicalnet,iommu_platform=on'])
 
     def test_board_network_is_included_in_the_executed_command(self):
         from board_config import Board
@@ -48,8 +48,26 @@ class DiskTests(unittest.TestCase):
             runner.main()
         command = execute.call_args.args[1]
         self.assertEqual(command[command.index('-netdev') + 1], 'user,id=physicalnet')
-        self.assertIn('virtio-net-device,id=physicalnet,netdev=physicalnet,iommu_platform=on', command)
-        self.assertIn('virtio-scsi-device,id=physicalscsi,iommu_platform=on', command)
+        self.assertIn('virtio-net-pci,addr=2.0,disable-legacy=on,romfile=,id=physicalnet,netdev=physicalnet,iommu_platform=on', command)
+        self.assertIn('virtio-scsi-pci,addr=1.0,disable-legacy=on,id=physicalscsi,iommu_platform=on', command)
+        self.assertIn('iommu=smmuv3', command[command.index('-machine') + 1].split(','))
+
+    def test_mmio_compatibility_does_not_silently_select_pci(self):
+        from board_config import Board
+        source = json.loads((Path(__file__).resolve().parents[2] / 'boards/qemu.json').read_text())
+        source['io-vm']['io-device'] = {'profile': 'virtio-mmio-scsi', 'compatible': 'virtio,mmio'}
+        source['io-vm']['network-device'] = {'profile': 'virtio-mmio-net', 'compatible': 'virtio,mmio'}
+        board = Board.parse(source)
+        self.assertEqual(runner.machine_arguments(board, 'virt'), 'virt')
+        self.assertTrue(runner.storage_controller(board).startswith('virtio-scsi-device,'))
+        self.assertTrue(runner.network_arguments(board)[-1].startswith('virtio-net-device,'))
+
+    def test_pci_cannot_bypass_the_host_iommu_through_an_environment_override(self):
+        from board_config import Board
+        board = Board.load(Path(__file__).resolve().parents[2] / 'boards/qemu.json')
+        for machine in ('virt,iommu=none', 'virt,default-bus-bypass-iommu=on'):
+            with self.assertRaises(ValueError):
+                runner.machine_arguments(board, machine)
 
     def test_monitor_is_only_enabled_for_terminal_input(self):
         for interactive in (False, True):

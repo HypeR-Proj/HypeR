@@ -38,6 +38,7 @@
       "configuration": {
         "memory-bytes": 268435456,
         "vcpus": 2,
+        "virtio-transport": "pci",
         "bootargs": "console=ttyAMA0 earlycon rdinit=/init loglevel=7 hyper.root=/dev/sda"
       },
       "network": {
@@ -59,12 +60,12 @@
       "bootargs": "console=ttyAMA0 earlycon rdinit=/init loglevel=4 hyper.role=io hyper.mode=standby"
     },
     "io-device": {
-      "profile": "virtio-mmio-scsi",
-      "compatible": "virtio,mmio"
+      "profile": "pci-function",
+      "pci-id": "1af4:1048"
     },
     "network-device": {
-      "profile": "virtio-mmio-net",
-      "compatible": "virtio,mmio"
+      "profile": "pci-function",
+      "pci-id": "1af4:1041"
     },
     "networks": [
       {
