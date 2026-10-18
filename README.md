@@ -225,13 +225,15 @@ performance survey are complete. The next priorities are:
   architecture rework. Start with Native storage writes and guest network
   transmit throughput, using the physical Pi 5/Raspbian survey as a reference.
   Linux parity is not an acceptance requirement; performance tests stay manual.
-- [ ] **Security hardening around the I/O VM.** Refine capabilities into finer
-  device, resource and operation permissions. Add host-owned SMMU/IOMMU drivers
-  and DMA domains, including the applicable RP1/BCM2712 isolation mechanisms.
-  Establish coverage for each assigned device, including the separate SDHCI
-  path. The goal is to protect HypeR memory and authority from the I/O VM;
-  guests still depend on it for I/O. The current Pi 5 deployment remains a
-  trusted I/O VM configuration until that isolation is implemented and verified.
+- [ ] **Security hardening around the I/O VM.** Device operation permissions,
+  retained DMA leases and default QEMU virtio-PCI assignments through SMMUv3
+  are implemented. Continue the capability/lifecycle audit and qualify DMA
+  denial through the production I/O VM path. Establish physical isolation
+  coverage for each assigned device, including the applicable RP1/BCM2712
+  mechanisms and the separate SDHCI path. The goal is to protect HypeR memory
+  and authority from the I/O VM; guests still depend on it for I/O. MMIO and
+  Pi 5 deployments remain trusted I/O VM configurations. See the
+  [current isolation contract](kernel/docs/io-isolation.md).
 
 See the [roadmap](docs/roadmap.md) for scope and acceptance criteria, and the
 [Pi 5 boot guide](kernel/docs/rpi5.md) for the recommended firmware setup.

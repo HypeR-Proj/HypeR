@@ -17,6 +17,13 @@ external modules, Linux userspace services, initramfs assembly, tests, and
 package publication. This repository does not build Linux or modify appliance binaries. Board
 deployment adds a separate configuration archive to the Linux initramfs.
 
+The default QEMU deployment assigns physical virtio-PCI devices through
+host-owned SMMUv3 domains, restricting DMA to the I/O VM's RAM and explicit
+shared-memory grants. Guests still trust the backend for I/O data and
+availability. The physical MMIO compatibility and Pi 5 paths retain their
+trusted-I/O-VM requirement. See [I/O isolation](../kernel/docs/io-isolation.md)
+for the permission, memory-lifetime and qualification boundaries.
+
 The AArch64 QEMU baseline runs two Linux VMs: the I/O VM directly drives a
 QEMU virtio-scsi disk, and a business VM reaches it through standard virtio-scsi
 and upstream vhost-scsi/LIO. A Native test deployment owns both VMs, their DTBs,

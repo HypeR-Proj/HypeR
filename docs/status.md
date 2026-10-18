@@ -31,11 +31,13 @@ unqualified and are tracked as
 [deferred qualification](roadmap.md#deferred-hardware-qualification).
 The current priorities are best-effort block/guest-network tuning without major
 code or architecture rework, and capability/DMA isolation hardening around the
-I/O VM. These are planned work, not additional isolation guarantees of the
-current deployment. A [standard SMMUv3 driver and QEMU PCI DMA fixture](../kernel/docs/smmuv3.md)
-now provide stage-2 translation, invalidation, IRQ-driven stream quarantine
-and fail-closed controller handling; the current I/O VM
-assignment path is not yet connected to those DMA domains.
+I/O VM. The default QEMU deployment now connects physical virtio-PCI assignments
+to [host-owned SMMUv3 domains](../kernel/docs/smmuv3.md), with retained RAM and
+shared-buffer leases, completed invalidation, IRQ-driven stream quarantine and
+fail-closed controller handling. This integration does not establish DMA
+containment for the MMIO compatibility or Pi 5 deployments. See the
+[I/O authority and DMA ownership contract](../kernel/docs/io-isolation.md) for
+implemented protections and remaining qualification gaps.
 See the [Pi 5 guide](../kernel/docs/rpi5.md) and
 [image release contract](image-distribution.md).
 
@@ -135,10 +137,11 @@ development.
 
 ## Linux I/O VM baseline
 
-The [I/O VM integration](io-vm.md) has an AArch64 QEMU cross-VM storage baseline.
-Unmodified upstream Linux 6.18.51 and external modules run in a trusted I/O VM;
-it directly drives a QEMU virtio-scsi disk and exports it through upstream
-vhost-scsi/LIO iblock. A separate Linux guest uses its ordinary virtio-scsi
+The [I/O VM integration](io-vm.md) retains a dedicated AArch64 QEMU MMIO
+cross-VM storage compatibility fixture. Unmodified upstream Linux 6.18.51 and
+external modules run in a trusted I/O VM; it directly drives a QEMU virtio-scsi
+disk and exports it through upstream vhost-scsi/LIO iblock. A separate Linux
+guest uses its ordinary virtio-scsi
 block driver. The Native fixture verifies 32 direct write/flush/read rounds,
 host disk bytes, and restoration of Native memory access after both VMs retire.
 Both GICv2 with one host CPU and GICv3 with four host CPUs pass driver
@@ -164,6 +167,17 @@ The manager loads `/data/vms.json`;
 artifacts, while `make run` only launches them. The optional `RUN_PROFILE=io`
 standby profile deliberately omits Native storage and business clients.
 
+The default QEMU board instead assigns physical virtio-PCI SCSI and network
+functions behind SMMUv3. The kernel installs the I/O VM's DMA domain before
+enabling bus mastering, admits only its RAM and explicit live backend grants,
+and retains backing until DMA invalidation completes. Separate operation rights
+gate device inspection, assignment, DMA-address disclosure, register access and
+interrupt acknowledgement. These mechanisms protect ungranted HypeR memory;
+guests still trust the backend for data and availability. Functional PCI
+storage/network acceptance and the separate EDU DMA-denial fixture do not yet
+qualify an attack initiated inside the Linux I/O VM through its production
+assignment and grant path.
+
 `board-storage` tests persistent Native files, Alpine ext4 root, ordinary VM
 disks, broker isolation and userspace device access. `test-io-vm` checks the
 isolated two-VM data path; `test-io-standby` checks idle backend operation.
@@ -178,9 +192,10 @@ QEMU does not qualify physical cache, interrupt or DMA behavior.
 
 ## Guest virtio-net implementation
 
-The QEMU guest path uses a Native virtio frontend (MMIO by default, or modern
-PCI with INTx) and Linux vhost-net/TAP,
-bridged to an assigned virtio-net uplink and QEMU user networking. A VM can have
+The QEMU board selects a modern PCI virtio frontend with INTx and Linux
+vhost-net/TAP; configurations omitting `virtio-transport` still default to MMIO.
+The frontend is bridged to an assigned virtio-net uplink and QEMU user
+networking. A VM can have
 a disk, a network interface, or both. Both devices share one guest-memory grant
 and mailbox, with separate notification bindings and reset epochs. All vhost
 users must drain before the shared mapping can be released. Client zero owns physical-block management and has no active network frontend

@@ -54,6 +54,10 @@ provide physical DMA isolation.
   device/resource boundaries in the kernel and allow delegation only with the
   same or reduced authority. Audit grants from init through io-runtime to the
   I/O VM; board configuration alone is not an access-control boundary.
+  [Implemented operation rights](../kernel/docs/io-isolation.md#device-operations)
+  now separate inspection, claims, assignment, DMA-address disclosure,
+  register reads/writes and interrupt observation/acknowledgement. This does
+  not complete the broader delegation and device-lifecycle audit.
 - [ ] Introduce host-owned DMA domains and SMMU/IOMMU drivers on supported
   hardware. Keep translation tables and isolation controls outside I/O VM
   access. Admit only authorized RAM and shared buffers, with supported access
@@ -64,7 +68,9 @@ provide physical DMA isolation.
   and fault injection. [Device operation permissions and retained buffer
   leases](../kernel/docs/io-isolation.md) now separate claim, register/IRQ and
   DMA-address authority, and share kernel-only memory owners with SMMU mappings.
-  Production assignment/domain integration and physical qualification remain
+  Default QEMU virtio-PCI assignments now bind requester IDs to the I/O VM's
+  domain before bus mastering and admit only its RAM and explicit live grants.
+  Physical qualification and containment for the MMIO and Pi 5 paths remain
   open, so this broader item is not complete.
 - [ ] Implement the applicable RP1/BCM2712 DMA isolation mechanisms after
   establishing their coverage and enforcement properties. Audit bus masters,
@@ -77,6 +83,9 @@ provide physical DMA isolation.
   on supported paths, including the mapping lifecycle. Keep focused correctness
   checks with each change; the extended fault and stress campaign below remains
   deferred.
+  QEMU EDU and host fault-injection tests cover DMA denial and retained backing.
+  End-to-end DMA denial initiated inside the Linux I/O VM through the production
+  virtio-PCI assignment and grant path still needs a dedicated negative test.
 
 Pi 5 hardware coverage must be established per path. Raspberry Pi's
 [Pi 5 device tree](https://github.com/raspberrypi/linux/blob/rpi-6.18.y/arch/arm64/boot/dts/broadcom/bcm2712-rpi-5-b.dts)
