@@ -13,6 +13,7 @@ import time
 
 from session import Session, native_command
 from command import Shell
+from journal import Journal
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
@@ -269,8 +270,10 @@ def run_case(args, case):
                     raise AssertionError('readiness wait started an early shell')
             # Exercise the production 120 s deadline, not a test-only override.
             session.observe(re.escape(ADOPTED), 240)
-            session.observe(re.escape(DEGRADED), 120)
             formal_prompt()
+            # Splash and kernel output may split the serial mirror mid-line.
+            # The attributed journal record is the complete service evidence.
+            Journal(session.shell).message('/startup', DEGRADED.decode(), timeout=120)
             if case == 'root-change':
                 # The observer can finish before init logs the unavailable
                 # fleet. Check the complete capture, not only unread output.

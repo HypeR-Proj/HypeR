@@ -1242,23 +1242,27 @@ impl Process {
         // In-flight transactions retain their reserved slots until rollback;
         // unrelated endpoints close even while a filesystem call is draining.
         if phase == ProcessPhase::Stopping {
-            let mut cursor = self.inner.state.with(|state| state.stopping_handle_cursor);
             for _ in 0..64 {
-                let detached = self
-                    .inner
-                    .handles
-                    .with(|table| table.remove_stopping_owner(&mut cursor));
-                let Some((metadata, owner)) = detached else {
+                let detached = self.inner.state.with(|state| {
+                    let (metadata, owner) = self.inner.handles.with(|table| {
+                        table.remove_stopping_owner(&mut state.stopping_handle_cursor)
+                    })?;
+                    // An in-flight syscall can reclaim empty handle pages while
+                    // unwinding. Withdraw the matching accounting index under
+                    // the same Process lock before exposing an empty slot page.
+                    let (charge, record) = state.handle_accounting.release(metadata.value);
+                    Some((metadata, owner, charge, record))
+                });
+                let Some((metadata, owner, charge, record)) = detached else {
                     break;
                 };
                 if let Some(retention) = self.inner.retention.get() {
                     retention.handle(metadata);
                 }
                 owner.complete();
+                drop(charge);
+                drop(record);
             }
-            self.inner
-                .state
-                .with(|state| state.stopping_handle_cursor = cursor);
             return Ok(ProcessRetirementStep::InProgress);
         }
         if self.inner.state.with(|state| state.address_retired) {

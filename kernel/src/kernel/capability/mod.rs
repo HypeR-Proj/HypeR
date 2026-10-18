@@ -33,6 +33,7 @@ pub(crate) use transfer::InTransitCapabilities;
 /// safe from handle-table, transfer, and teardown contexts. Diagnostics use
 /// the binary panic handler, never the ordinary log path.
 #[cold]
+#[track_caller]
 fn invariant_violation() -> ! {
     hyper::debug::invariant_failure("capability ownership invariant")
 }
