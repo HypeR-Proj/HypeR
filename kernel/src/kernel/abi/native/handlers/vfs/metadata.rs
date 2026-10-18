@@ -30,9 +30,9 @@ fn parse_follow_symlinks(options: u64) -> Result<bool, Status> {
     }
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 mod self_test;
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(in crate::kernel::abi::native) use self_test::run as run_wire_self_test;
 
 fn metadata_request(handle: u64, address: u64, capacity: u64) -> Result<InfoRequest, Status> {

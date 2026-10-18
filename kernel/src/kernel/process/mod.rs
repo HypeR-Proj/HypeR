@@ -41,11 +41,11 @@ pub(crate) use task_group::{TaskGroup, TaskGroupError, TaskGroupId};
 pub(in crate::kernel) use user_thread::UserExecutionOwnership;
 pub(crate) use user_thread::{RunAdmissionError, UserExecution, UserThread};
 
-#[cfg(not(feature = "kernel-self-test"))]
+#[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
 pub(crate) use owner::ProcessHandleReservation;
 
 #[cfg_attr(
-    feature = "kernel-self-test",
+    all(feature = "kernel-test", feature = "kernel-self-test"),
     allow(
         unused_imports,
         reason = "Native diagnostics tests require user execution support"

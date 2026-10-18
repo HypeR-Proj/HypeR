@@ -115,7 +115,7 @@ pub(super) fn submit(
     }
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn permanent_worker_count_for_test() -> usize {
     usize::from(READY.load(Ordering::Acquire))
 }

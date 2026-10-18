@@ -39,14 +39,14 @@ pub(crate) use address_space::{
 };
 #[cfg(not(test))]
 pub(crate) use authority::ExecutableAuthority;
-#[cfg(all(not(test), feature = "kernel-self-test"))]
+#[cfg(all(not(test), all(feature = "kernel-test", feature = "kernel-self-test")))]
 pub(crate) use authority::ExecutableAuthorityError;
 pub(crate) use contract::{
     Access, AddressError, MemoryAccount, MemoryCharge, Permissions, UserAddress, UserSlice,
 };
 #[cfg(not(test))]
 pub(crate) use kernel_adapter::address_window;
-#[cfg(all(not(test), feature = "kernel-self-test"))]
+#[cfg(all(not(test), all(feature = "kernel-test", feature = "kernel-self-test")))]
 #[allow(
     unused_imports,
     reason = "shared self-test entry; hardware coverage is architecture-dependent"
@@ -54,13 +54,13 @@ pub(crate) use kernel_adapter::address_window;
 pub(crate) use kernel_adapter::fail_exposed_write_after_copy_for_test;
 #[cfg(not(test))]
 pub(crate) use kernel_adapter::{DomainAccount, KernelPageBackend, KernelPageError};
-#[cfg(all(not(test), feature = "kernel-self-test"))]
+#[cfg(all(not(test), all(feature = "kernel-test", feature = "kernel-self-test")))]
 #[allow(
     unused_imports,
     reason = "shared self-test entry; hardware coverage is architecture-dependent"
 )]
 pub(crate) use machine::prepare_native_entry_self_test;
-#[cfg(all(not(test), feature = "kernel-self-test"))]
+#[cfg(all(not(test), all(feature = "kernel-test", feature = "kernel-self-test")))]
 #[allow(
     unused_imports,
     reason = "shared self-test entry; hardware coverage is architecture-dependent"

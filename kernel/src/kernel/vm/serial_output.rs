@@ -25,7 +25,10 @@ pub(crate) struct SharedAtomicOutput {
     _pinned: CommittedCharge,
     produced: AtomicU64,
     consumed: AtomicU64,
-    #[cfg(any(not(CONFIG_ARCH_AARCH64), feature = "kernel-self-test"))]
+    #[cfg(any(
+        not(CONFIG_ARCH_AARCH64),
+        all(feature = "kernel-test", feature = "kernel-self-test")
+    ))]
     dropped: AtomicU64,
 }
 
@@ -59,7 +62,10 @@ impl SharedAtomicOutput {
             _lease: lease,
             produced: AtomicU64::new(0),
             consumed: AtomicU64::new(0),
-            #[cfg(any(not(CONFIG_ARCH_AARCH64), feature = "kernel-self-test"))]
+            #[cfg(any(
+                not(CONFIG_ARCH_AARCH64),
+                all(feature = "kernel-test", feature = "kernel-self-test")
+            ))]
             dropped: AtomicU64::new(0),
         };
         output.word(0).store(0, Ordering::Relaxed);
@@ -78,7 +84,10 @@ impl SharedAtomicOutput {
 
     /// Caller holds the port lock across publication and signal mutation.
     /// Returns true only on the empty-to-nonempty transition.
-    #[cfg(any(not(CONFIG_ARCH_AARCH64), feature = "kernel-self-test"))]
+    #[cfg(any(
+        not(CONFIG_ARCH_AARCH64),
+        all(feature = "kernel-test", feature = "kernel-self-test")
+    ))]
     pub(crate) fn publish(&self, byte: u8) -> bool {
         match self.try_publish(byte) {
             Ok(readable) => readable,

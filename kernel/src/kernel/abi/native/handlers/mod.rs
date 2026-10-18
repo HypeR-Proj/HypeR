@@ -115,7 +115,7 @@ pub(super) use vm::{
     sys_virtual_serial_register_output, sys_virtual_serial_write,
 };
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(super) use ipc::capability_receive_result;
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(super) use vfs::run_wire_self_test;

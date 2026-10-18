@@ -991,7 +991,10 @@ impl ActiveNativeAddressSpace<'_> {
             });
             match result {
                 Err(Error::Residency(ResidencyError::Busy)) => {
-                    #[cfg(all(CONFIG_ARCH_AARCH64, feature = "kernel-self-test"))]
+                    #[cfg(all(
+                        CONFIG_ARCH_AARCH64,
+                        all(feature = "kernel-test", feature = "kernel-self-test")
+                    ))]
                     self_test::observe_busy(self.owner.logical.id().get(), self.cpu);
                     // No MM or scheduler lock is held here. The updater pins
                     // itself across the closed admission cut, so it cannot be
@@ -1046,7 +1049,10 @@ impl PreparedNativeChange<'_> {
         let cut = owner
             .state
             .with(|state| state.residency.begin_update(logical.base_epoch()))?;
-        #[cfg(all(CONFIG_ARCH_AARCH64, feature = "kernel-self-test"))]
+        #[cfg(all(
+            CONFIG_ARCH_AARCH64,
+            all(feature = "kernel-test", feature = "kernel-self-test")
+        ))]
         self_test::after_cut(owner.logical.id().get(), cut.active());
         let committed = match logical.commit_machine() {
             Ok(committed) => committed,
@@ -1229,7 +1235,7 @@ pub(crate) fn service_local_rpc(
 // identity remains registered until acknowledged final retirement.
 unsafe impl hyper::hal::user::UserTranslationOwner for NativeAddressSpace {}
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 mod self_test;
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) use self_test::{prepare_native_entry_self_test, run_dormant_self_test};

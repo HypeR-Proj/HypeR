@@ -4,7 +4,10 @@
 //! Native Thread execution and sleepable synchronous-call policy.
 
 mod fault;
-#[cfg(all(CONFIG_ARCH_AARCH64, feature = "kernel-self-test"))]
+#[cfg(all(
+    CONFIG_ARCH_AARCH64,
+    all(feature = "kernel-test", feature = "kernel-self-test")
+))]
 pub(crate) mod self_test;
 
 use core::cell::UnsafeCell;
@@ -226,7 +229,10 @@ unsafe impl NativeCallHandler for NativeMachineSession<'_> {
         if let Err(error) = scheduler::ensure_sleepable() {
             fail_run("native-user syscall did not enter sleepable context", error);
         }
-        #[cfg(all(CONFIG_ARCH_AARCH64, feature = "kernel-self-test"))]
+        #[cfg(all(
+            CONFIG_ARCH_AARCH64,
+            all(feature = "kernel-test", feature = "kernel-self-test")
+        ))]
         self_test::hold_syscall(&self.session.thread, invocation);
         if self.session.stop_requested() {
             crate::hal::irq::mask_local();
@@ -277,7 +283,10 @@ pub(crate) fn suspend_current() {
     // IRQs are masked, and no scheduler/MM lock remains held. Architecture
     // suspension closes every raw-frame/FP/TLS CPU ownership before MM leave.
     unsafe { crate::hal::user::suspend_current_user() };
-    #[cfg(all(CONFIG_ARCH_AARCH64, feature = "kernel-self-test"))]
+    #[cfg(all(
+        CONFIG_ARCH_AARCH64,
+        all(feature = "kernel-test", feature = "kernel-self-test")
+    ))]
     // SAFETY: The registered outgoing session remains retained as above.
     self_test::record_suspension(unsafe { &session.as_ref().session.thread });
     // SAFETY: The outgoing Thread still exclusively owns its registered cell;

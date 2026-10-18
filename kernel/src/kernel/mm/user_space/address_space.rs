@@ -1785,7 +1785,7 @@ impl<'a, Backend: PageBackend, Account: MemoryAccount> PreparedMappingChange<'a,
         })
     }
 
-    #[cfg(any(test, feature = "kernel-self-test"))]
+    #[cfg(any(test, all(feature = "kernel-test", feature = "kernel-self-test")))]
     #[allow(
         dead_code,
         reason = "shared test helper; hardware coverage is architecture-dependent"
@@ -1855,7 +1855,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> CommittedMappingChange<Backen
         unsafe { ManuallyDrop::drop(&mut self.retired) };
     }
 
-    #[cfg(any(test, feature = "kernel-self-test"))]
+    #[cfg(any(test, all(feature = "kernel-test", feature = "kernel-self-test")))]
     #[allow(
         dead_code,
         reason = "shared test helper; hardware coverage is architecture-dependent"

@@ -638,9 +638,9 @@ impl<const N: usize> ProcessHandleReservation<N> {
         }
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     #[cfg_attr(
-        feature = "kernel-self-test",
+        all(feature = "kernel-test", feature = "kernel-self-test"),
         allow(
             dead_code,
             reason = "Used by the AArch64 Native self-tests; other HAL self-tests exercise different entry paths"
@@ -651,7 +651,7 @@ impl<const N: usize> ProcessHandleReservation<N> {
     }
 
     /// Future generation-tagged values which resolve only after publication.
-    #[cfg(not(feature = "kernel-self-test"))]
+    #[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
     pub(crate) fn values(&self) -> [HandleValue; N] {
         match self.reservation.as_ref() {
             Some(reservation) => reservation.values(),
@@ -667,9 +667,9 @@ impl ProcessHandleBatchReservation {
         }
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     #[cfg_attr(
-        feature = "kernel-self-test",
+        all(feature = "kernel-test", feature = "kernel-self-test"),
         allow(
             dead_code,
             reason = "Used by the AArch64 Native self-tests; other HAL self-tests exercise different entry paths"

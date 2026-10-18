@@ -332,7 +332,7 @@ impl UserThread {
         })
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     #[allow(
         dead_code,
         reason = "Join helpers are consumed by architecture-specific Native self-tests"
@@ -345,7 +345,7 @@ impl UserThread {
         }
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     #[allow(
         dead_code,
         reason = "Join helpers are consumed by architecture-specific Native self-tests"

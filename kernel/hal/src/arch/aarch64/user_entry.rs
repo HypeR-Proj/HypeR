@@ -14,7 +14,7 @@ use core::ptr::NonNull;
 
 use hyper::abi::native::NativeInvocation;
 use hyper::hal::user::{NativeCallAction, NativeCallService, UserFault, UserRunBinding};
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 use hyper::sync::atomic::AtomicUsize;
 use hyper::sync::atomic::{AtomicPtr, AtomicU64, Ordering};
 
@@ -189,14 +189,14 @@ impl RunPublication {
 }
 
 static ACTIVE_RUNS: [RunPublication; MAX_CPUS] = [const { RunPublication::new() }; MAX_CPUS];
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 static DIRECT_NATIVE_CALLS: AtomicUsize = AtomicUsize::new(0);
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 static MACHINE_RUNS: AtomicUsize = AtomicUsize::new(0);
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 static SYSCALL_SUSPENSIONS: AtomicUsize = AtomicUsize::new(0);
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn native_run_counts_for_test() -> (usize, usize) {
     (
         MACHINE_RUNS.load(Ordering::Relaxed),
@@ -204,7 +204,7 @@ pub(crate) fn native_run_counts_for_test() -> (usize, usize) {
     )
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn syscall_fp_resident_for_test() -> bool {
     let Ok(publication) = local_publication() else {
         return false;
@@ -256,7 +256,7 @@ pub(crate) unsafe fn run_user<'context>(
         context.machine.state = registers::USER_CONTEXT_STATE_READY;
         return Err(error);
     }
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     MACHINE_RUNS.fetch_add(1, Ordering::Relaxed);
     // SAFETY: The caller owns the stable Thread context and service. Scheduling
     // transfers only the kernel continuation after suspend_current_user has
@@ -345,7 +345,7 @@ pub(crate) fn suspend_current_user() {
     {
         fail_stop();
     }
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     SYSCALL_SUSPENSIONS.fetch_add(1, Ordering::Relaxed);
     super::fp::save(&mut context.fp, frame);
     frame.return_cptr &= !registers::CPTR_EL2_FPEN_ENABLED;
@@ -567,7 +567,7 @@ pub(super) fn handle_synchronous(
                         .syscall_frame
                         .store(core::ptr::null_mut(), Ordering::Relaxed);
                 }
-                #[cfg(feature = "kernel-self-test")]
+                #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
                 DIRECT_NATIVE_CALLS.fetch_add(1, Ordering::Relaxed);
                 frame.general[0] = result.status() as u64;
                 frame.general[1] = result.values()[0];
@@ -632,7 +632,7 @@ pub(super) const fn unwind_callback() -> unsafe extern "C" fn() {
     aarch64_unwind_native_user
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn direct_native_call_count_for_test() -> usize {
     DIRECT_NATIVE_CALLS.load(Ordering::Relaxed)
 }

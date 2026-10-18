@@ -20,10 +20,10 @@ mod dispatch;
 
 pub(in crate::kernel) use dispatch::dispatch;
 mod handlers;
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 mod self_test;
 mod status;
 mod wire;
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) use self_test::{SelfTestError, run_self_test};

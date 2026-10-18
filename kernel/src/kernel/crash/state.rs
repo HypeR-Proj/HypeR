@@ -160,7 +160,7 @@ pub(super) fn contexts() -> &'static [CrashSlot; MAX_CPUS] {
     &CPU_CONTEXTS
 }
 
-#[cfg(CONFIG_CRASH_CONSOLE)]
+#[cfg(feature = "crash-console")]
 pub(super) fn context(cpu: usize) -> Option<CrashContext> {
     CPU_CONTEXTS.get(cpu).and_then(CrashSlot::read)
 }

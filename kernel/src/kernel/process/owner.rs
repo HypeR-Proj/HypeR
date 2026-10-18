@@ -736,7 +736,7 @@ impl Process {
     }
 
     #[cfg_attr(
-        feature = "kernel-self-test",
+        all(feature = "kernel-test", feature = "kernel-self-test"),
         allow(
             dead_code,
             reason = "Native lifecycle self-tests require a HAL with user execution support"
@@ -778,7 +778,7 @@ impl Process {
             });
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     #[allow(
         dead_code,
         reason = "Join helpers are consumed by architecture-specific Native self-tests"
@@ -791,7 +791,7 @@ impl Process {
         }
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     #[allow(
         dead_code,
         reason = "Join helpers are consumed by architecture-specific Native self-tests"
@@ -807,13 +807,13 @@ impl Process {
     }
 
     #[cfg_attr(
-        feature = "kernel-self-test",
+        all(feature = "kernel-test", feature = "kernel-self-test"),
         allow(
             dead_code,
             reason = "Used by the AArch64 Native self-tests; other HAL self-tests exercise different entry paths"
         )
     )]
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn create_initial_user_thread(
         &self,
         name: &str,
@@ -866,7 +866,7 @@ impl Process {
     }
 
     /// Holds the real creation rollback owner across a controlled test interleaving.
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     #[allow(
         dead_code,
         reason = "Used by Native lifecycle integration tests where user execution is available"

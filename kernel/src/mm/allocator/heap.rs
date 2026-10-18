@@ -713,7 +713,7 @@ impl<'a> PreparedRemove<'a> {
 }
 
 pub struct SlabAllocator {
-    #[cfg(CONFIG_HEAP_PROFILING)]
+    #[cfg(feature = "heap-profiling")]
     profile_backing: [profile::Backing; profile::BUCKETS],
     buddy: BuddyAllocator,
     partial: [PartialSlabLists<SLAB_CLASS_COUNT>; 2],
@@ -749,7 +749,7 @@ impl SlabAllocator {
             return Err(BuddyError::Unaddressable);
         }
         Ok(Self {
-            #[cfg(CONFIG_HEAP_PROFILING)]
+            #[cfg(feature = "heap-profiling")]
             profile_backing: [profile::Backing::EMPTY; profile::BUCKETS],
             // SAFETY: This constructor inherits and preserves its caller's
             // permanent writable direct-map contract for the buddy lifetime.
@@ -904,7 +904,7 @@ impl SlabAllocator {
         if let Some(removal) = removal {
             removal.commit();
         }
-        #[cfg(CONFIG_HEAP_PROFILING)]
+        #[cfg(feature = "heap-profiling")]
         {
             self.profile_backing[profile::bucket(pool, Some(class))].reserved += 1;
         }
@@ -1000,7 +1000,7 @@ impl SlabAllocator {
             (*slab.pointer.as_ptr()).in_use = in_use;
         }
         transition.commit();
-        #[cfg(CONFIG_HEAP_PROFILING)]
+        #[cfg(feature = "heap-profiling")]
         {
             self.profile_backing[profile::bucket(pool, Some(class))].reserved -= 1;
         }
@@ -1011,7 +1011,7 @@ impl SlabAllocator {
             // this allocator until the buddy deallocation below.
             unsafe { (*slab.pointer.as_ptr()).magic = 0 };
             self.slab_pages -= 1;
-            #[cfg(CONFIG_HEAP_PROFILING)]
+            #[cfg(feature = "heap-profiling")]
             {
                 let backing = &mut self.profile_backing[profile::bucket(pool, Some(class))];
                 backing.pages -= 1;
@@ -1118,7 +1118,7 @@ impl SlabAllocator {
         permit.commit();
         let _ = pending.publish();
         self.slab_pages = slab_pages;
-        #[cfg(CONFIG_HEAP_PROFILING)]
+        #[cfg(feature = "heap-profiling")]
         {
             let backing = &mut self.profile_backing[profile::bucket(pool, Some(class))];
             backing.pages += 1;
@@ -1199,7 +1199,7 @@ impl SlabAllocator {
         if pool == HeapPool::FileCache {
             self.file_cache_large_pages += 1usize << order;
         }
-        #[cfg(CONFIG_HEAP_PROFILING)]
+        #[cfg(feature = "heap-profiling")]
         {
             self.profile_backing[profile::bucket(pool, None)].pages += 1usize << order;
         }
@@ -1254,7 +1254,7 @@ impl SlabAllocator {
             allocator_fault(AllocatorFault::BuddyDeallocation);
         }
         self.large_heap_pages -= pages;
-        #[cfg(CONFIG_HEAP_PROFILING)]
+        #[cfg(feature = "heap-profiling")]
         {
             self.profile_backing[profile::bucket(HeapPool::from_raw(header.pool), None)].pages -=
                 pages;

@@ -31,10 +31,10 @@ mod cache;
 mod directory;
 mod records;
 use records::{PreparedRecord, Records};
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 #[path = "../../../tests/kernel/vfs_records.rs"]
 mod records_test;
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(super) use records_test::run as test_record_storage;
 
 pub(super) struct Node {

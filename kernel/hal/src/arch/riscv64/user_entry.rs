@@ -12,7 +12,7 @@ use core::ptr::NonNull;
 use hyper::abi::native::NativeInvocation;
 use hyper::hal::interrupt::{EntryAction, InterruptId, InterruptOrigin};
 use hyper::hal::user::{NativeCallAction, NativeCallService, UserFault, UserRunBinding};
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 use hyper::sync::atomic::AtomicUsize;
 use hyper::sync::atomic::{AtomicPtr, AtomicU64, Ordering};
 
@@ -133,14 +133,14 @@ impl RunPublication {
 }
 static ACTIVE: [RunPublication; hyper::config::MAX_CPUS as usize] =
     [const { RunPublication::new() }; hyper::config::MAX_CPUS as usize];
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 static DIRECT_NATIVE_CALLS: AtomicUsize = AtomicUsize::new(0);
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 static MACHINE_RUNS: AtomicUsize = AtomicUsize::new(0);
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 static SYSCALL_SUSPENSIONS: AtomicUsize = AtomicUsize::new(0);
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn native_run_counts_for_test() -> (usize, usize) {
     (
         MACHINE_RUNS.load(Ordering::Relaxed),
@@ -148,7 +148,7 @@ pub(crate) fn native_run_counts_for_test() -> (usize, usize) {
     )
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn direct_native_call_count_for_test() -> usize {
     DIRECT_NATIVE_CALLS.load(Ordering::Relaxed)
 }
@@ -206,7 +206,7 @@ pub(crate) unsafe fn run_user<'context>(
         context.machine.state = READY;
         return Err(error);
     }
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     MACHINE_RUNS.fetch_add(1, Ordering::Relaxed);
     // SAFETY: The caller retains this stable Thread context and service. A
     // switch saves its bank and withdraws CPU publication before transferring
@@ -288,7 +288,7 @@ pub(crate) fn suspend_current_user() {
     if context.state != RUNNING || context.run_generation != active.generation {
         fail_stop();
     }
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     SYSCALL_SUSPENSIONS.fetch_add(1, Ordering::Relaxed);
     super::fp::save(&mut context.fp, frame.status);
     frame.status &= !registers::SSTATUS_FS_MASK;
@@ -556,7 +556,7 @@ fn dispatch_synchronous(frame: &mut NativeFrame) -> Result<u64, Error> {
                 frame.general[10] = result.status() as u64;
                 frame.general[11] = result.values()[0];
                 frame.general[12] = result.values()[1];
-                #[cfg(feature = "kernel-self-test")]
+                #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
                 DIRECT_NATIVE_CALLS.fetch_add(1, Ordering::Relaxed);
                 return Ok(0);
             }
@@ -628,7 +628,7 @@ const _: () = {
 };
 
 /// Raw LP64D register-isolation payload, copied into test-owned user memory.
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn native_register_test_program_for_test() -> &'static [u8] {
     unsafe extern "C" {
         static riscv64_native_register_test_start: u8;
@@ -645,7 +645,7 @@ pub(crate) fn native_register_test_program_for_test() -> &'static [u8] {
 /// Containment probes: supervisor-only load through a0, then privileged SATP.
 /// A forbidden instruction which incorrectly completes exits with -99, so an
 /// unrelated later instruction fault cannot masquerade as successful isolation.
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn native_fault_test_programs_for_test() -> [&'static [u8]; 2] {
     const SUPERVISOR_LOAD: [u8; 16] = [
         0x83, 0x32, 0x05, 0x00, // ld t0, 0(a0).

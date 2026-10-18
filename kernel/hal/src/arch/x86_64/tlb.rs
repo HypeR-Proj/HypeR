@@ -17,7 +17,7 @@ use hyper::sync::atomic::{AtomicU64, Ordering};
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(0);
 static REQUESTED_GENERATION: AtomicU64 = AtomicU64::new(0);
 static ACKNOWLEDGED_GENERATION: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 static COMPLETED_SHOOTDOWNS: AtomicU64 = AtomicU64::new(0);
 
 /// Invalidates translations from the shared host hierarchy on every online CPU.
@@ -65,11 +65,11 @@ pub(super) fn flush_all_online() {
             core::hint::spin_loop();
         }
     }
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     COMPLETED_SHOOTDOWNS.fetch_add(1, Ordering::Release);
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(super) fn completed_count_for_test() -> u64 {
     COMPLETED_SHOOTDOWNS.load(Ordering::Acquire)
 }

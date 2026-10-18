@@ -12,7 +12,7 @@ use hyper::mm::{PAGE_SIZE, PhysicalAddress};
 
 use super::Error;
 use super::backing::Layout as SharedGuestMemory;
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 use crate::hal::vm::Stage2AddressSpace;
 use crate::kernel::accounting::{
     CommittedCharge, ResourceAmount, ResourceDomain, ResourceError, ResourceKind,
@@ -20,12 +20,12 @@ use crate::kernel::accounting::{
 use crate::kernel::mm::page_block::PageBlock;
 use crate::kernel::mm::reclaim::Target;
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 #[path = "../../../../tests/kernel/vm_memory_storage.rs"]
 mod tests;
 
 pub(super) enum GuestMemoryBacking {
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     KernelOwned(Vec<Option<PageBlock>>),
     SharedVmo(alloc::boxed::Box<SharedGuestMemory>),
 }
@@ -42,7 +42,7 @@ pub(crate) struct ResidentInstructionSnapshot {
     pub(super) _metadata_charge: CommittedCharge,
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 impl ResidentInstructionSnapshot {
     pub(crate) fn retained_metadata_bytes_for_test(&self) -> u64 {
         self.pages.retained_bytes() as u64
@@ -288,7 +288,7 @@ pub(super) fn accumulate_charge(owner: &mut Option<CommittedCharge>, charge: Com
     }
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(super) fn address_space_metadata_layout(
     ipa_base: u64,
     size: u64,

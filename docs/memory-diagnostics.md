@@ -80,13 +80,12 @@ VM/object ownership observations.
 
 ## Optional heap profiling
 
-`CONFIG_HEAP_PROFILING` defaults to `n`. Add the following to a separate kernel
-configuration and build using the ordinary configuration override:
+The `heap-profiling` kernel feature is disabled by default. Add it to the
+selected production feature set for a diagnostic build:
 
 ```sh
-cp kernel/configs/qemu_aarch64_defconfig /tmp/memory-profile.config
-printf '\nCONFIG_HEAP_PROFILING=y\n' >> /tmp/memory-profile.config
-make image ARCH=aarch64 CONFIG_FILE=/tmp/memory-profile.config
+make image ARCH=aarch64 \
+  KERNEL_FEATURES=rtc,runtime-symbols,crash-console,heap-profiling
 ```
 
 This enables 18 fixed buckets (two pools, eight slab classes and one large bucket).

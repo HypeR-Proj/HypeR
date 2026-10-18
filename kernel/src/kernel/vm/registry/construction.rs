@@ -184,7 +184,7 @@ impl PreparedVm {
 
         Ok(InstalledVm {
             id,
-            #[cfg(feature = "kernel-self-test")]
+            #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
             boot_vcpu: _boot_vcpu,
             control: VmControl::mint_for_install(id),
             lifecycle,
@@ -215,19 +215,19 @@ impl VmControl {
 #[must_use = "bind the installed VM identity, vCPU, and lifecycle authority"]
 pub(crate) struct InstalledVm {
     id: VmId,
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     boot_vcpu: ThreadId,
     control: VmControl,
     lifecycle: FallibleArc<crate::kernel::vm::installed::InstalledMachine>,
 }
 
 impl InstalledVm {
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(super) const fn id_for_test(&self) -> VmId {
         self.id
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(in crate::kernel::vm) fn into_boot_parts(self) -> (VmId, ThreadId, VmControl) {
         (self.id, self.boot_vcpu, self.control)
     }
@@ -239,7 +239,7 @@ impl InstalledVm {
         self.lifecycle
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     #[allow(
         dead_code,
         reason = "the executable migration fixture has only AArch64 and RISC-V guest payloads"
@@ -256,14 +256,14 @@ impl InstalledVm {
         Ok(running)
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) const fn boot_vcpu_for_test(&self) -> ThreadId {
         self.boot_vcpu
     }
 }
 
 /// Retains test RAM until the test explicitly requests administrative stop.
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 #[allow(
     dead_code,
     reason = "the executable migration fixture has only AArch64 and RISC-V guest payloads"
@@ -273,7 +273,7 @@ pub(crate) struct RunningVmForTest {
     owner: FallibleArc<crate::kernel::vm::installed::InstalledMachine>,
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 impl RunningVmForTest {
     #[allow(
         dead_code,

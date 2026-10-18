@@ -137,7 +137,7 @@ impl Core {
         }
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(super) fn is_ready_for_test(&self) -> bool {
         match timers::with_callout_queue(self.cpu, |_, _| {
             // SAFETY: the phase is read under its source queue lock.

@@ -62,7 +62,7 @@ impl DirectoryObject {
 
     /// Bind resident data without copying it. Remote transports cannot be
     /// aliased because their current unmount contract retires the whole mount.
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn bind_ramfs(
         &self,
         source: &str,

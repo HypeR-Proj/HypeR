@@ -293,7 +293,7 @@ const fn classify_machine_error(error: crate::kernel::mm::user_space::MachineErr
 
 const fn classify_registry_error(error: super::registry::Error) -> Error {
     match error {
-        #[cfg(feature = "kernel-self-test")]
+        #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
         super::registry::Error::AdministrativeStopUnsupported => Error::NotSupported,
         super::registry::Error::Allocation => Error::NoMemory,
         super::registry::Error::IdentityExhausted | super::registry::Error::RegistryFull => {

@@ -4,10 +4,10 @@
 //! Linear quiescence and architecture-retirement authorities.
 
 use super::super::retirement_observation::RetirementError;
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 use super::construction::InstalledVm;
 use super::construction::VmControl;
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 use super::reserve;
 use super::{Error, REGISTRY, VmId};
 
@@ -268,7 +268,7 @@ fn poll_quiescent_control(id: VmId) -> Result<bool, Error> {
     REGISTRY.with(|registry| registry.try_hold_quiescent(id))
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum DormantVcpuQuiesceError {
     Registry(Error),
@@ -277,28 +277,28 @@ pub(crate) enum DormantVcpuQuiesceError {
     Timeout,
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 impl From<Error> for DormantVcpuQuiesceError {
     fn from(error: Error) -> Self {
         Self::Registry(error)
     }
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 impl From<crate::kernel::task::SleepError> for DormantVcpuQuiesceError {
     fn from(error: crate::kernel::task::SleepError) -> Self {
         Self::Sleep(error)
     }
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 impl From<crate::kernel::time::Error> for DormantVcpuQuiesceError {
     fn from(error: crate::kernel::time::Error) -> Self {
         Self::Time(error)
     }
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn verify_dormant_vcpu_quiesce(
     installed: InstalledVm,
 ) -> Result<(), DormantVcpuQuiesceError> {
@@ -344,7 +344,7 @@ pub(crate) fn verify_dormant_vcpu_quiesce(
 }
 
 /// Exercises the production queue while retaining the handle-visible VM owner.
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn verify_observed_vm_quiesce(
     installed: InstalledVm,
 ) -> Result<

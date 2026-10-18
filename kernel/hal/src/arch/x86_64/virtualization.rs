@@ -56,7 +56,7 @@ impl Backend {
     }
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(super) fn validate() -> Result<Backend, super::guest::ValidationError> {
     if let Some(backend) = selected() {
         return Ok(backend);
@@ -120,7 +120,7 @@ pub(super) fn fail_stop(operation: &str, detail: impl core::fmt::Debug) -> ! {
     )
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 const fn encode(backend: Backend) -> u8 {
     match backend {
         Backend::Vmx => VMX,

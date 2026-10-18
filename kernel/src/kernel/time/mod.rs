@@ -19,7 +19,7 @@ mod worker;
 )]
 pub(crate) use callout::CancelOutcome;
 pub(crate) use callout::{Callout, CalloutRef};
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) use worker::permanent_worker_count_for_test;
 pub(crate) use worker::{initialize as initialize_workers, service_irq_prompt};
 

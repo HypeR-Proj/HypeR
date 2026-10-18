@@ -12,7 +12,7 @@
 mod console;
 mod coordination;
 mod fixed_text;
-#[cfg(CONFIG_CRASH_CONSOLE)]
+#[cfg(feature = "crash-console")]
 mod monitor;
 mod report;
 mod state;

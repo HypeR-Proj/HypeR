@@ -555,7 +555,7 @@ pub(crate) struct MemoryInspector {
 
 impl MemoryInspector {
     #[cfg_attr(
-        feature = "kernel-self-test",
+        all(feature = "kernel-test", feature = "kernel-self-test"),
         expect(
             dead_code,
             reason = "The kernel self-test image does not enter Native process bootstrap"
@@ -636,7 +636,7 @@ pub(crate) struct CpuInspector {
 
 impl CpuInspector {
     #[cfg_attr(
-        feature = "kernel-self-test",
+        all(feature = "kernel-test", feature = "kernel-self-test"),
         expect(
             dead_code,
             reason = "The kernel self-test image does not enter Native process bootstrap"

@@ -213,7 +213,7 @@ fn handle_interrupt(_interrupt: VirtualInterrupt, _context: usize) -> HandlerRes
     HandlerResult::Handled
 }
 
-#[cfg(not(feature = "kernel-self-test"))]
+#[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
 pub(super) fn runtime_input_available() -> bool {
     HOST_CONSOLE.with(|slot| slot.is_some())
 }

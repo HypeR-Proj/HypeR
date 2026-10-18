@@ -38,7 +38,10 @@ pub(crate) struct DeviceAssignmentAuthority {
     _charge: CommittedCharge,
 }
 impl DeviceAssignmentAuthority {
-    #[cfg_attr(feature = "kernel-self-test", allow(dead_code))]
+    #[cfg_attr(
+        all(feature = "kernel-test", feature = "kernel-self-test"),
+        allow(dead_code)
+    )]
     pub(crate) fn try_new(domain: &ResourceDomain) -> Result<Self, Error> {
         Ok(Self {
             _charge: charge::<Self>(domain)?,

@@ -22,6 +22,11 @@ QEMU loads this archive from the host; Pi firmware needs it on the FAT data
 partition too, where it remains visible as `/data/bootstrap.cpio`.
 Guest partitions contain whole virtual disks, including any guest partition table.
 
+A QEMU deployment without persistent data or configured guests may omit the data
+partition. If it retains VM manager, its empty initial fleet is packaged at
+`/etc/hyper/vms.json` in the formal system filesystem. Deployments with a data
+partition continue to load the editable fleet from `/data/vms.json`.
+
 Linux drives the physical controller and enumerates whole physical block devices.
 Native io-runtime reads their GPT headers and entry arrays through bounded block
 reads, verifies CRCs, UUIDs and extents, and resolves `PARTUUID=` or `PARTLABEL=`

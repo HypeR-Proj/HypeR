@@ -639,14 +639,14 @@ impl Stage2AddressSpace {
         }
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub fn leaf_size_for_test(&self, ipa: u64) -> Result<Option<u64>, Error> {
         Ok(self
             .leaf_at(ipa)?
             .map(|(_, _, level)| registers::STAGE2_LEVEL_SIZES_4K[level]))
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub fn normal_leaf_for_test(
         &self,
         ipa: u64,

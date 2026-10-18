@@ -134,7 +134,7 @@ Run the standalone kernel mechanism tests separately:
 make test-qemu ARCH=aarch64
 ```
 
-This builds the kernel with `kernel-self-test` and starts a four-CPU QEMU
+This explicitly enables `kernel-test,kernel-self-test` and starts a four-CPU QEMU
 `virt` machine. Kernel self-tests do not load Linux or create a default VM.
 Use `make test-native` for userspace-managed Linux guest integration. Its guest
 downloads are cached under the platform temporary directory and generated

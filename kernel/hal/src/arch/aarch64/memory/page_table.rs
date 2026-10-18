@@ -12,7 +12,7 @@
 use core::arch::asm;
 use core::ptr::{read_volatile, write_bytes, write_volatile};
 
-#[cfg(CONFIG_CRASH_CONSOLE)]
+#[cfg(feature = "crash-console")]
 use hyper::hal::memory::Stage1Mapping;
 use hyper::mm::{BootAllocator, BootAllocatorError, PAGE_SIZE, PhysicalAddress, VirtualAddress};
 use hyper::platform::PhysicalRange;
@@ -234,7 +234,7 @@ pub(super) fn runtime_address_is_mapped(
     Ok(false)
 }
 
-#[cfg(CONFIG_CRASH_CONSOLE)]
+#[cfg(feature = "crash-console")]
 pub(super) fn inspect_runtime_mapping(
     root: PhysicalAddress,
     address: u64,

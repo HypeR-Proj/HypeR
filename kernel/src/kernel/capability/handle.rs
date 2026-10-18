@@ -90,7 +90,7 @@ impl HandleValue {
 
     /// Returns the first value published by a fresh table.
     #[cfg(not(test))]
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     #[allow(
         dead_code,
         reason = "only the AArch64 Native-entry self-test needs the first handle value"

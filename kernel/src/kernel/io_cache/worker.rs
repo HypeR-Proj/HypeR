@@ -22,7 +22,7 @@ static WAKE: crate::kernel::sync::Completion = crate::kernel::sync::Completion::
 static READY: AtomicBool = AtomicBool::new(false);
 static EMERGENCY_RECLAIM: AtomicBool = AtomicBool::new(false);
 static DRAINING: AtomicBool = AtomicBool::new(false);
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 static TEST_PRESSURE: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn reclaim(target: Target) -> Option<ReclaimGuard> {
@@ -101,18 +101,18 @@ pub(crate) fn try_reclaim(requested_pages: usize) -> usize {
     freed
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn permanent_worker_count_for_test() -> usize {
     usize::from(READY.load(Ordering::Acquire))
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn pressure_for_test(enabled: bool) {
     TEST_PRESSURE.store(enabled, Ordering::Release);
     request();
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn draining_for_test() -> bool {
     DRAINING.load(Ordering::Acquire)
 }
@@ -185,7 +185,7 @@ fn service_batch(
     } else if free_pages >= watermarks.resume_pages {
         *draining = false;
     }
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     if TEST_PRESSURE.load(Ordering::Acquire) {
         *draining = true;
     }

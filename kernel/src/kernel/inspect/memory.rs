@@ -42,7 +42,7 @@ impl super::MemoryInspector {
         let allocator = &crate::kernel::mm::allocator::GLOBAL_ALLOCATOR;
         let data = match query {
             Query::HeapClass(index) => {
-                if !hyper::config::HEAP_PROFILING {
+                if !cfg!(feature = "heap-profiling") {
                     return Err(super::Error::Unsupported);
                 }
                 Data::HeapClass(
@@ -136,7 +136,7 @@ impl From<HeapStats> for HeapSummary {
             pressure_reclaims: s.cache.pressure_reclaims,
             reclaimed_objects: s.cache.reclaimed_objects,
             cache_cpus: s.cache.enabled_cpus as u64,
-            profiling_enabled: hyper::config::HEAP_PROFILING as u64,
+            profiling_enabled: cfg!(feature = "heap-profiling") as u64,
             page_allocations: s.buddy.allocation_requests,
             page_failures: s.buddy.allocation_failures,
             page_deallocations: s.buddy.deallocations,

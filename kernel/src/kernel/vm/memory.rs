@@ -20,7 +20,7 @@ mod retirement;
 mod storage;
 mod synchronize;
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 use hyper::mm::ForeignCopyError;
 use hyper::mm::{AddressSpaceResidency, BuddyError, ResidencyError};
 use hyper::sync::atomic::AtomicU64;
@@ -89,7 +89,7 @@ impl From<ResourceError> for Error {
     }
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 impl From<ForeignCopyError<Error>> for Error {
     fn from(error: ForeignCopyError<Error>) -> Self {
         match error {
@@ -151,7 +151,7 @@ pub(crate) struct GuestAddressSpace {
     table_pages: Stage2PagePool,
     identifier: Stage2Identifier,
     guest_page_charge: Option<CommittedCharge>,
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     backing_page_charge: Option<CommittedCharge>,
     _metadata_charge: CommittedCharge,
 }

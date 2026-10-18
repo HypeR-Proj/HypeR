@@ -241,7 +241,10 @@ impl Iterator for ResourceAmountEntries<'_> {
 struct ResourceVector([u64; RESOURCE_KIND_COUNT]);
 
 impl ResourceVector {
-    #[cfg_attr(not(test), cfg(feature = "kernel-self-test"))]
+    #[cfg_attr(
+        not(test),
+        cfg(all(feature = "kernel-test", feature = "kernel-self-test"))
+    )]
     const ZERO: Self = Self([0; RESOURCE_KIND_COUNT]);
 
     const fn get(self, kind: ResourceKind) -> u64 {
@@ -278,13 +281,19 @@ impl Default for ResourceLimits {
 /// pending/committed split conservatively stale, so that split is diagnostic;
 /// admission and local-limit changes use `total` under the control lock.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[cfg_attr(not(test), cfg(feature = "kernel-self-test"))]
+#[cfg_attr(
+    not(test),
+    cfg(all(feature = "kernel-test", feature = "kernel-self-test"))
+)]
 pub(crate) struct ResourceUsage {
     total: ResourceVector,
     pending: ResourceVector,
 }
 
-#[cfg_attr(not(test), cfg(feature = "kernel-self-test"))]
+#[cfg_attr(
+    not(test),
+    cfg(all(feature = "kernel-test", feature = "kernel-self-test"))
+)]
 impl ResourceUsage {
     pub(crate) fn committed(self, kind: ResourceKind) -> u64 {
         match self.total.get(kind).checked_sub(self.pending.get(kind)) {
@@ -325,7 +334,7 @@ pub(crate) enum ResourceError {
     #[cfg_attr(
         not(test),
         cfg_attr(
-            not(feature = "kernel-self-test"),
+            not(all(feature = "kernel-test", feature = "kernel-self-test")),
             expect(
                 dead_code,
                 reason = "Limit updates currently have only contract-test consumers"
@@ -597,7 +606,10 @@ impl ResourceDomain {
         })
     }
 
-    #[cfg_attr(not(test), cfg(feature = "kernel-self-test"))]
+    #[cfg_attr(
+        not(test),
+        cfg(all(feature = "kernel-test", feature = "kernel-self-test"))
+    )]
     pub(crate) fn usage(&self) -> ResourceUsage {
         self.inner.control.with(|_| ResourceUsage {
             total: load_total_counters(&self.inner.total),
@@ -633,7 +645,10 @@ impl ResourceDomain {
     /// Child ceilings may exceed an ancestor ceiling: the effective limit is
     /// the minimum remaining capacity along the path. This permits a parent
     /// policy to tighten or relax without rewriting every descendant.
-    #[cfg_attr(not(test), cfg(feature = "kernel-self-test"))]
+    #[cfg_attr(
+        not(test),
+        cfg(all(feature = "kernel-test", feature = "kernel-self-test"))
+    )]
     pub(crate) fn set_local_limits(&self, limits: ResourceLimits) -> Result<(), ResourceError> {
         self.inner.control.with(|control| {
             if control.lifecycle != DomainLifecycle::Active {
@@ -840,7 +855,10 @@ impl<'domain> DomainPath<'domain> {
     }
 }
 
-#[cfg_attr(not(test), cfg(feature = "kernel-self-test"))]
+#[cfg_attr(
+    not(test),
+    cfg(all(feature = "kernel-test", feature = "kernel-self-test"))
+)]
 fn load_counters(counters: &[AtomicU64; RESOURCE_KIND_COUNT]) -> ResourceVector {
     let mut amount = ResourceVector::ZERO;
     for kind in ResourceKind::ALL {
@@ -849,7 +867,10 @@ fn load_counters(counters: &[AtomicU64; RESOURCE_KIND_COUNT]) -> ResourceVector 
     amount
 }
 
-#[cfg_attr(not(test), cfg(feature = "kernel-self-test"))]
+#[cfg_attr(
+    not(test),
+    cfg(all(feature = "kernel-test", feature = "kernel-self-test"))
+)]
 fn load_total_counters(counters: &[AtomicU64; RESOURCE_KIND_COUNT]) -> ResourceVector {
     let mut amount = ResourceVector::ZERO;
     for kind in ResourceKind::ALL {

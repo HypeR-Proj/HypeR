@@ -24,7 +24,7 @@ static WORK: DeferredWork = DeferredWork::new();
 static WAKE: Completion = Completion::new();
 static WORKER_READY: AtomicBool = AtomicBool::new(false);
 static IRQ_COUNT: AtomicUsize = AtomicUsize::new(0);
-#[cfg(feature = "kernel-smmuv3-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-smmuv3-test"))]
 static FAILURE_REPORTED: AtomicBool = AtomicBool::new(false);
 const BATCH: usize = 32;
 
@@ -218,17 +218,17 @@ pub(crate) fn owner() -> Option<FallibleArc<Runtime>> {
     OWNER.with(|owner| owner.clone())
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn permanent_worker_count_for_test() -> usize {
     usize::from(owner().is_some())
 }
 
-#[cfg(feature = "kernel-smmuv3-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-smmuv3-test"))]
 pub(crate) fn interrupt_count() -> usize {
     IRQ_COUNT.load(Ordering::Relaxed)
 }
 
-#[cfg(feature = "kernel-smmuv3-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-smmuv3-test"))]
 pub(crate) fn failure_reported() -> bool {
     FAILURE_REPORTED.load(Ordering::Acquire)
 }
@@ -314,7 +314,7 @@ fn service(runtime: &Runtime) -> bool {
             "HypeR: SMMUv3 controller quarantined: {failure:?}; command error {:?}; backing retained",
             failure.command_error()
         );
-        #[cfg(feature = "kernel-smmuv3-test")]
+        #[cfg(all(feature = "kernel-test", feature = "kernel-smmuv3-test"))]
         FAILURE_REPORTED.store(true, Ordering::Release);
         // Hardware IRQs disabled and all backing retained. A failed controller
         // cannot automatically resume; leave both controller routes masked.

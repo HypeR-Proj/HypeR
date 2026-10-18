@@ -14,7 +14,7 @@ mod resources;
 
 pub(super) use construction::VmControl;
 pub(crate) use construction::{PreparedVm, VcpuPreparationError, VmBuilder};
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) use control::{
     DormantVcpuQuiesceError, verify_dormant_vcpu_quiesce, verify_observed_vm_quiesce,
 };
@@ -66,7 +66,7 @@ impl VmId {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Error {
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     AdministrativeStopUnsupported,
     Allocation,
     EndpointClosed,
@@ -103,7 +103,7 @@ pub(crate) struct VmReservation {
 }
 
 impl VmReservation {
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) const fn id(&self) -> VmId {
         self.id
     }
@@ -441,7 +441,7 @@ pub(crate) fn reserve() -> Result<VmReservation, Error> {
     })
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn verify_reservation_rollback() -> Result<(), Error> {
     let first = reserve()?;
     let first_id = first.id();

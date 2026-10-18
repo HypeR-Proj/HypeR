@@ -120,7 +120,7 @@ impl VirtualSerial {
         })
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn observed_signals(&self) -> u64 {
         self.signals
             .observe(Self::READABLE.union(Self::WRITABLE).union(Self::CLOSED))
@@ -165,7 +165,10 @@ impl VirtualSerial {
 
     /// No allocation or data copy into a kernel queue. Only the first byte of
     /// an unread batch publishes readiness; subsequent bytes do not notify.
-    #[cfg(any(not(CONFIG_ARCH_AARCH64), feature = "kernel-self-test"))]
+    #[cfg(any(
+        not(CONFIG_ARCH_AARCH64),
+        all(feature = "kernel-test", feature = "kernel-self-test")
+    ))]
     pub(crate) fn publish_guest_output(&self, byte: u8) {
         self.state.with(|_| {
             if !self

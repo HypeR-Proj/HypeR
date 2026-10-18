@@ -135,7 +135,7 @@ impl Console for ConsoleDevice {
 
 impl ConsoleDevice {
     /// Attempts to read one byte without blocking.
-    #[cfg(CONFIG_CRASH_CONSOLE)]
+    #[cfg(feature = "crash-console")]
     pub fn try_read_byte(&self) -> Option<u8> {
         match self {
             Self::Pl011(device) => device.try_read().map(|received| received.byte),

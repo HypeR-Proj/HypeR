@@ -3,6 +3,7 @@
 
 //! Architecture-independent debugging and symbolization primitives.
 
+#[cfg(feature = "runtime-symbols")]
 pub mod kallsyms;
 
 /// Reports an unrecoverable internal invariant through the binary panic policy.

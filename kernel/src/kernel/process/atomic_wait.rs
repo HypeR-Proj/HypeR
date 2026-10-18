@@ -314,9 +314,9 @@ pub(crate) fn sleep(
     Ok(outcome)
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 #[cfg_attr(
-    feature = "kernel-self-test",
+    all(feature = "kernel-test", feature = "kernel-self-test"),
     allow(
         dead_code,
         reason = "Used by the AArch64 Native self-tests; other HAL self-tests exercise different entry paths"
@@ -341,7 +341,10 @@ pub(crate) fn waiter_count(process: &Process, address: u64) -> Result<usize, Err
 
 /// Exercises the interval after scheduler completion but before condition
 /// unlink: an idle arbitration record alone must not authorize Thread exit.
-#[cfg(all(feature = "kernel-self-test", CONFIG_ARCH_AARCH64))]
+#[cfg(all(
+    all(feature = "kernel-test", feature = "kernel-self-test"),
+    CONFIG_ARCH_AARCH64
+))]
 pub(crate) fn verify_exit_guard(process: &Process, address: u64) -> Result<bool, Error> {
     let word =
         process.retry_user_memory(|space| space.pin_atomic_u32(UserAddress::new(address)))?;

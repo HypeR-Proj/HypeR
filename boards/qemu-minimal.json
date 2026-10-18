@@ -1,0 +1,35 @@
+{
+  "SPDX-FileCopyrightText": "2026 roolrz",
+  "SPDX-License-Identifier": "Apache-2.0",
+  "format": "hyper.board.v1",
+  "board": "qemu-minimal",
+  "architecture": "aarch64",
+  "boot": "qemu-direct",
+  "disk": {
+    "uuid": "09f8feba-c8e5-46df-bb97-ceba1c4f334b",
+    "partitions": [
+      {
+        "label": "hyper-system",
+        "size-mib": 64,
+        "filesystem": "erofs",
+        "content": "system"
+      }
+    ]
+  },
+  "files": {},
+  "virtual-machines": [],
+  "io-vm": {
+    "runtime": "io-runtime",
+    "name": "io",
+    "image": "/vm/io.itb",
+    "configuration": {
+      "memory-bytes": 67108864,
+      "vcpus": 1,
+      "bootargs": "console=ttyAMA0 earlycon rdinit=/init loglevel=4 hyper.role=io hyper.mode=standby"
+    },
+    "io-device": {
+      "profile": "pci-function",
+      "pci-id": "1af4:1048"
+    }
+  }
+}

@@ -574,7 +574,7 @@ pub(in crate::kernel::abi::native) use metadata::{
     sys_file_get_metadata, sys_file_set_metadata,
 };
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(in crate::kernel::abi::native) use metadata::run_wire_self_test;
 
 #[inline(never)]

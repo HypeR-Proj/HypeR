@@ -110,7 +110,10 @@ impl AddressSpace {
         self.grant_leases(token, core::iter::once(lease))
     }
 
-    #[cfg(all(CONFIG_ARCH_AARCH64, feature = "io-dma-revoke-test"))]
+    #[cfg(all(
+        CONFIG_ARCH_AARCH64,
+        all(feature = "kernel-test", feature = "io-dma-revoke-test")
+    ))]
     pub(super) fn revoke_test_page(&self, iova: u64) -> Result<Buffer, Error> {
         let state = self.lock();
         // The fixture uses the ordinary physical-net function in PCI slot 2.

@@ -46,7 +46,7 @@ impl Region {
 /// No VM address-space or lifecycle lock is held during the VMO scans.
 pub(crate) struct ResidentMemory {
     regions: [Option<Region>; 8],
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     owned_bytes: u64,
 }
 
@@ -70,7 +70,7 @@ impl ResidentMemory {
         }
         Ok(leases)
     }
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(super) fn owned(bytes: u64) -> Self {
         Self {
             regions: [const { None }; 8],
@@ -79,9 +79,9 @@ impl ResidentMemory {
     }
 
     pub(crate) fn bytes(&self) -> Result<u64, MemoryObjectError> {
-        #[cfg(not(feature = "kernel-self-test"))]
+        #[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
         let mut total = 0u64;
-        #[cfg(feature = "kernel-self-test")]
+        #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
         let mut total = self.owned_bytes;
         for (index, region) in self.regions.iter().enumerate() {
             let Some(region) = region else { continue };
@@ -115,7 +115,7 @@ impl ResidentMemory {
     }
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 impl super::GuestAddressSpace {
     pub(crate) fn verify_resident_memory_for_test(
         domain: &ResourceDomain,
@@ -229,7 +229,7 @@ impl Layout {
     pub(crate) fn resident_memory(&self) -> ResidentMemory {
         ResidentMemory {
             regions: self.regions.clone(),
-            #[cfg(feature = "kernel-self-test")]
+            #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
             owned_bytes: 0,
         }
     }

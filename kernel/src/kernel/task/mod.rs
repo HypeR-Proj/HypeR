@@ -11,7 +11,7 @@ pub(crate) mod preempt;
 mod reschedule;
 pub mod scheduler;
 mod sleep;
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 mod test_progress;
 pub mod thread;
 mod thread_object;
@@ -30,7 +30,7 @@ pub(crate) const fn system_thread_object_allocation_size() -> Option<usize> {
 }
 
 pub use sleep::{SleepError, sleep_ms, sleep_ns, sleep_s, sleep_until, sleep_us};
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) use test_progress::{
     DEFAULT_TIMEOUT_NS as TEST_PROGRESS_TIMEOUT_NS, wait_until as wait_for_test_progress,
 };

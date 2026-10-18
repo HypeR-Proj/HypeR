@@ -181,7 +181,7 @@ impl ByteChannel {
         Pair::claim(&self.pair, self.side, expected)
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn signal_level_for_test(&self) -> u64 {
         self.pair
             .signal_state(self.side)
@@ -189,7 +189,7 @@ impl ByteChannel {
             .map_or(0, |snapshot| snapshot.signals().bits())
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn close_for_test(&self) {
         let mut retirement = ObjectRetirement::new();
         self.pair.close(self.side, &mut retirement);

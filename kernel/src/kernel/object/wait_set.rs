@@ -430,7 +430,7 @@ fn invariant() -> ! {
 }
 
 /// Exercises the copyout transaction without architecture-specific user mappings.
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn test_delivery_rollback(domain: &ResourceDomain) -> Result<(), WaitSetError> {
     let set = WaitSet::try_new(1, domain)?;
     let charge = domain
