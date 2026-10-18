@@ -126,7 +126,7 @@ jobs:
       - uses: ./.github/actions/setup
       - uses: ./.github/actions/tools
         with:
-          packages: cpio qemu-system-arm
+          packages: clang lld cpio qemu-system-arm
       - name: Check real DMA, revocation and failure containment
         run: make test-smmuv3 ARCH=aarch64 QEMU_CPUS=4
       - name: Clean up QEMU

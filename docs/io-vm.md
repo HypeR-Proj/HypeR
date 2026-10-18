@@ -68,7 +68,9 @@ the VM manager with its configured fleet. Business
 VMs are started only when their configuration requests autostart or through
 `vmm start`. `make run RUN_PROFILE=io` retains the explicit standby diagnostic
 profile: it boots a resident backend without mounting Native storage or
-provisioning business clients.
+provisioning business clients. This QEMU diagnostic uses physical virtio-MMIO
+storage with no network uplink, independently of the production board's PCI
+selection.
 
 Building the default board profile creates `target/board/qemu/disk.img` once
 and preserves existing disks. `make run` validates the disk's GPT against the

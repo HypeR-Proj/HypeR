@@ -19,9 +19,36 @@ spec = importlib.util.spec_from_file_location(
     'io_runner', Path(__file__).resolve().parents[2] / 'scripts/run-io-vm.py')
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
+spec = importlib.util.spec_from_file_location(
+    'io_images', Path(__file__).resolve().parents[2] / 'scripts/io-vm-images.py')
+images = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(images)
 
 
 class DiskTests(unittest.TestCase):
+    def test_standby_device_matches_boardless_mmio_launcher(self):
+        from board_config import Board
+        root = Path(__file__).resolve().parents[2]
+        board = Board.load(root / 'boards/qemu.json')
+        standby = images.deployment_board(board, 'standby')
+        self.assertEqual(standby.source['io-vm']['io-device'], {
+            'profile': 'virtio-mmio-scsi', 'compatible': 'virtio,mmio',
+        })
+        self.assertEqual(runner.storage_controller(standby), runner.storage_controller(None))
+        self.assertEqual(runner.network_arguments(standby), runner.network_arguments(None))
+        self.assertEqual(runner.machine_arguments(standby, 'virt'), 'virt')
+        self.assertEqual(board.source['io-vm']['io-device']['profile'], 'pci-function')
+
+    def test_standby_override_does_not_change_production_or_pi_storage(self):
+        from board_config import Board
+        root = Path(__file__).resolve().parents[2]
+        for name, mode in (('qemu.json', 'storage'), ('rpi5-native.json', 'standby')):
+            with self.subTest(board=name, mode=mode):
+                board = Board.load(root / 'boards' / name)
+                deployed = images.deployment_board(board, mode)
+                self.assertEqual(deployed.source['io-vm']['io-device'],
+                                 board.source['io-vm']['io-device'])
+
     def test_network_uplink_requires_explicit_board_policy(self):
         from board_config import Board
         root = Path(__file__).resolve().parents[2]

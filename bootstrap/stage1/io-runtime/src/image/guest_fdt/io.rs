@@ -98,10 +98,10 @@ impl IoDevices<'_> {
     }
 
     pub(super) fn validate(self, boot: Aarch64LinuxBoot<'_>) -> Result<(), Error> {
-        if let [Some(a), Some(b)] = self.pci {
-            if a.aperture.base == b.aperture.base {
-                return Err(Error::InvalidInput);
-            }
+        if let [Some(a), Some(b)] = self.pci
+            && a.aperture.base == b.aperture.base
+        {
+            return Err(Error::InvalidInput);
         }
         if let Some(pci) = self.hotplug_pci {
             pci.validate(self, boot)?;

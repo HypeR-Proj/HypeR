@@ -7,6 +7,13 @@ description: Install the pinned Rust toolchain and bare-metal targets
 runs:
   using: composite
   steps:
+    - name: Allow Git access to the checked-out workspace
+      shell: bash
+      run: |
+        # Container jobs run as root against a runner-owned bind mount.
+        # Checkout's temporary Git config does not persist into build steps.
+        git config --global --add safe.directory "$GITHUB_WORKSPACE"
+        git ls-files --stage >/dev/null
     - name: Cache Cargo downloads
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
