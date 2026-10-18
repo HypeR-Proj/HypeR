@@ -871,6 +871,21 @@ The protected PCI configuration requires QEMU 9.2+ and its `virt-9.2` or newer
 machine model. Older models expose a stage-1-only SMMU and are rejected by the
 stage-2 driver; selecting an old model is not a supported isolation fallback.
 
+### DMA fault reporting
+
+On SMMUv3-backed physical PCI devices, the kernel blocks the offending stream
+and retains device-local fault evidence. Formal `io-runtime` reads that evidence
+after adoption and observes later fault signals. It writes one report per device
+to its stderr journal stream, visible with `journalctl -c /io-runtime`. Reports
+include the device role, SID, fault code, available address/direction and original
+boot timestamp. Bootstrap does not consume or report these notifications.
+
+This reporting does not stop or restart the I/O VM. The quarantined device cannot
+resume DMA until host reboot; unaffected devices can continue working. Kernel
+serial logs remain available independently. Platforms without SMMU enforcement
+do not gain DMA protection from the reporting API. See
+[SMMUv3 fault handling](../kernel/docs/smmuv3.md#formal-io-runtime-notification).
+
 ### Hotplugged agent transport
 
 The formal runtime can insert a named virtio serial port into the running I/O

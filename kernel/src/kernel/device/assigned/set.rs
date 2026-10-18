@@ -96,6 +96,17 @@ impl AssignmentOwners {
                 .and_then(|(owner, _)| owner.object().dma_stream())
         })
     }
+    pub(crate) fn observe_dma_faults(&self) -> Result<(), hyper::drivers::iommu::smmuv3::Error> {
+        let Some(runtime) = super::super::iommu::runtime::owner() else {
+            return Err(hyper::drivers::iommu::smmuv3::Error::Unsupported);
+        };
+        for (owner, _) in self.entries.iter().flatten() {
+            if let Some(stream) = owner.object().dma_stream() {
+                runtime.observe(stream, &owner.object().events)?;
+            }
+        }
+        Ok(())
+    }
     /// A failure may leave earlier controllers active. The installation
     /// transaction must quiesce the entire set before dropping its VM.
     pub(crate) fn activate_for(&self, vm: VmId) -> Result<(), Error> {

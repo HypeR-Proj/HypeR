@@ -212,6 +212,21 @@ pub(in crate::kernel::abi::native) fn sys_device_irq_complete(
 }
 
 #[inline(never)]
+pub(in crate::kernel::abi::native) fn sys_device_dma_fault_info(
+    services: &impl DeviceServices,
+    arguments: &Arguments,
+) -> NativeAction {
+    let result = (|| {
+        let output = prepare_info_request(arguments, 40, 40)?;
+        let bytes = services
+            .device_dma_fault_info(output.value)
+            .map_err(status_from_vm_service_error)?;
+        copy_info_record(services, output, &bytes)
+    })();
+    NativeAction::Return(info_result(result))
+}
+
+#[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_device_profile_info(
     services: &impl DeviceServices,
     arguments: &Arguments,

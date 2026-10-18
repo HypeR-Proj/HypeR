@@ -958,6 +958,14 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             Err(crate::kernel::vm::service::Error::NotSupported)
         }
 
+        fn device_dma_fault_info(
+            &self,
+            device: HandleValue,
+        ) -> Result<[u8; 40], crate::kernel::vm::service::Error> {
+            let _ = device;
+            Err(crate::kernel::vm::service::Error::NotSupported)
+        }
+
         fn device_profile_info(
             &self,
             device: HandleValue,
@@ -1715,6 +1723,60 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             .with(crate::kernel::accounting::ResourceKind::Threads, 0),
     )
     .map_err(|_| SelfTestError::VmErrorMapping)?;
+    {
+        use crate::kernel::device::assigned::events::Events;
+        use crate::kernel::object::SignalMask;
+        use hyper::abi::native::{
+            HYPER_NATIVE_SIGNAL_PHYSICAL_DEVICE_DMA_FAULT,
+            HYPER_NATIVE_SIGNAL_PHYSICAL_DEVICE_READABLE,
+        };
+        let original = Events::new(&quota_domain).map_err(|_| SelfTestError::RecordEncoding)?;
+        let fault_bit =
+            SignalMask::from_trusted_bits(HYPER_NATIVE_SIGNAL_PHYSICAL_DEVICE_DMA_FAULT);
+        if original.snapshot() != [0; 40] || original.signals.observe(fault_bit).is_some() {
+            return Err(SelfTestError::RecordEncoding);
+        }
+        original.publish(hyper::abi::native::HyperNativeDeviceDmaFaultInfo {
+            timestamp_ns: 123,
+            address: 0x4560,
+            stream_id: 16,
+            source: 1,
+            scope: 1,
+            code: 0x10,
+            flags: 5,
+            reserved: 0,
+        });
+        let first = original.snapshot();
+        let successor = original.clone();
+        let weak = original.downgrade();
+        drop(original);
+        successor.publish(hyper::abi::native::HyperNativeDeviceDmaFaultInfo {
+            timestamp_ns: 456,
+            address: 0,
+            stream_id: 16,
+            source: 1,
+            scope: 2,
+            code: 1,
+            flags: 0,
+            reserved: 0,
+        });
+        let readable = SignalMask::from_trusted_bits(HYPER_NATIVE_SIGNAL_PHYSICAL_DEVICE_READABLE);
+        successor
+            .signals
+            .update(SignalMask::EMPTY, readable)
+            .map_err(|_| SelfTestError::RecordEncoding)?;
+        successor
+            .signals
+            .update(readable, SignalMask::EMPTY)
+            .map_err(|_| SelfTestError::RecordEncoding)?;
+        if successor.snapshot() != first || successor.signals.observe(fault_bit).is_none() {
+            return Err(SelfTestError::RecordEncoding);
+        }
+        drop(successor);
+        if weak.upgrade().is_some() {
+            return Err(SelfTestError::RecordEncoding);
+        }
+    }
     let quota_error = match quota_domain.reserve(
         crate::kernel::accounting::ResourceAmount::ZERO
             .with(crate::kernel::accounting::ResourceKind::Threads, 1),

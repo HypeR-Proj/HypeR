@@ -8,7 +8,7 @@ use crate::kernel::accounting::{CommittedCharge, ResourceAmount, ResourceDomain,
 use crate::kernel::authority::Rights;
 use crate::kernel::irq::interrupt::{self, Registration};
 use crate::kernel::object::{
-    KernelObject, ObjectKind, SignalMask, SignalSource, SignalState, TransferClass, private,
+    KernelObject, ObjectKind, SignalMask, SignalSource, TransferClass, private,
 };
 use crate::kernel::vm::registry::VmId;
 use hyper::drivers::pci::{FunctionState, MAX_VECTORS};
@@ -78,7 +78,7 @@ pub(crate) struct PhysicalDevice {
     registrations: Lock<[Option<Registration>; MAX_VECTORS]>,
     contexts: [interrupts::InterruptContext; MAX_VECTORS],
     pci: Lock<Option<FunctionState>>,
-    readable: SignalState,
+    pub(crate) events: hyper::mm::FallibleArc<super::events::Events>,
     _charge: CommittedCharge,
 }
 impl PhysicalDevice {
@@ -88,7 +88,7 @@ impl PhysicalDevice {
         }
         let charge = charge::<Self>(domain)?;
         let claim = super::super::platform_bus::claim(index).ok_or(Error::BadState)?;
-        Self::try_claimed(claim, charge)
+        Self::try_claimed(claim, charge, domain)
     }
     pub(crate) fn claim_matching(
         profile: u32,
@@ -98,7 +98,8 @@ impl PhysicalDevice {
     ) -> Result<Box<Self>, super::service::MatchError> {
         let charge = charge::<Self>(domain).map_err(super::service::classify)?;
         let claim = super::super::platform_bus::claim_matching(profile, identity_kind, identity)?;
-        Self::try_claimed(claim, charge).map_err(|error| super::service::classify(error).into())
+        Self::try_claimed(claim, charge, domain)
+            .map_err(|error| super::service::classify(error).into())
     }
     pub(crate) fn claim_bundle(
         entries: &[(u32, u32, u64)],
@@ -110,12 +111,17 @@ impl PhysicalDevice {
         }
         let charge = charge::<Self>(domain)?;
         let claim = super::super::platform_bus::claim_bundle(entries, irq_node)?;
-        Self::try_claimed(claim, charge)
+        Self::try_claimed(claim, charge, domain)
     }
 
     /// Keep the register and interrupt arrays in their final object storage.
     /// Both the physical claim and its charge roll back if allocation fails.
-    fn try_claimed(claim: Claim, charge: CommittedCharge) -> Result<Box<Self>, Error> {
+    fn try_claimed(
+        claim: Claim,
+        charge: CommittedCharge,
+        domain: &ResourceDomain,
+    ) -> Result<Box<Self>, Error> {
+        let events = super::events::Events::new(domain)?;
         let mut storage = hyper::mm::try_box_uninit::<Self>().map_err(|_| Error::Resource)?;
         let target = storage.as_mut_ptr();
         // SAFETY: storage uniquely owns an aligned, uninitialized Self. Every
@@ -135,7 +141,7 @@ impl PhysicalDevice {
                     .write(interrupts::InterruptContext::new(index));
             }
             core::ptr::addr_of_mut!((*target).pci).write(Lock::new(None));
-            core::ptr::addr_of_mut!((*target).readable).write(SignalState::new());
+            core::ptr::addr_of_mut!((*target).events).write(events);
             core::ptr::addr_of_mut!((*target)._charge).write(charge);
             Ok(storage.assume_init())
         }
@@ -158,7 +164,8 @@ impl PhysicalDevice {
     }
     fn set_readable(&self, ready: bool) {
         if self
-            .readable
+            .events
+            .signals
             .update(
                 SignalMask::from_trusted_bits(1),
                 SignalMask::from_trusted_bits(u64::from(ready)),
@@ -300,8 +307,11 @@ impl KernelObject for PhysicalDevice {
         .union(Rights::WAIT);
     fn signal_source(&self) -> Option<SignalSource<'_>> {
         Some(SignalSource::new(
-            &self.readable,
-            SignalMask::from_trusted_bits(1),
+            &self.events.signals,
+            SignalMask::from_trusted_bits(
+                hyper::abi::native::HYPER_NATIVE_SIGNAL_PHYSICAL_DEVICE_READABLE
+                    | hyper::abi::native::HYPER_NATIVE_SIGNAL_PHYSICAL_DEVICE_DMA_FAULT,
+            ),
         ))
     }
 }

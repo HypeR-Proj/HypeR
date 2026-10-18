@@ -181,6 +181,7 @@ pub const HYPER_NATIVE_RIGHTS_MASK: u64 = 0x7fffffffff;
 pub const HYPER_NATIVE_SIGNAL_PROCESS_RETIREMENT_READY: u64 = 1_u64 << 0;
 pub const HYPER_NATIVE_SIGNAL_PROCESS_RETIREMENT_RELEASED: u64 = 1_u64 << 1;
 pub const HYPER_NATIVE_SIGNAL_PHYSICAL_DEVICE_READABLE: u64 = 1_u64 << 0;
+pub const HYPER_NATIVE_SIGNAL_PHYSICAL_DEVICE_DMA_FAULT: u64 = 1_u64 << 1;
 pub const HYPER_NATIVE_SIGNAL_NATIVE_BLOCK_PEER_CLOSED: u64 = 1_u64 << 0;
 pub const HYPER_NATIVE_SIGNAL_VIRTUAL_SERIAL_READABLE: u64 = 1_u64 << 0;
 pub const HYPER_NATIVE_SIGNAL_VIRTUAL_SERIAL_WRITABLE: u64 = 1_u64 << 1;
@@ -207,6 +208,12 @@ pub const HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_READABLE: u64 = 1_u64 << 0;
 pub const HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_WRITABLE: u64 = 1_u64 << 1;
 pub const HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_PEER_CLOSED: u64 = 1_u64 << 2;
 
+pub const HYPER_NATIVE_DMA_FAULT_SOURCE_SMMUV3: u64 = 1;
+pub const HYPER_NATIVE_DMA_FAULT_SCOPE_STREAM: u64 = 1;
+pub const HYPER_NATIVE_DMA_FAULT_SCOPE_CONTROLLER: u64 = 2;
+pub const HYPER_NATIVE_DMA_FAULT_ADDRESS_VALID: u64 = 1;
+pub const HYPER_NATIVE_DMA_FAULT_READ: u64 = 2;
+pub const HYPER_NATIVE_DMA_FAULT_WRITE: u64 = 4;
 pub const HYPER_NATIVE_PROCESS_RETIREMENT_PREPARED: u64 = 0;
 pub const HYPER_NATIVE_PROCESS_RETIREMENT_RUNNING: u64 = 1;
 pub const HYPER_NATIVE_PROCESS_RETIREMENT_STOPPING: u64 = 2;
@@ -617,6 +624,7 @@ pub const HYPER_NATIVE_SYS_CRASH_VIEW_THREAD: u64 = 179;
 pub const HYPER_NATIVE_SYS_CRASH_VIEW_MAPPING: u64 = 180;
 pub const HYPER_NATIVE_SYS_CRASH_VIEW_HANDLE: u64 = 181;
 pub const HYPER_NATIVE_SYS_THREAD_SET_CURRENT_NAME: u64 = 182;
+pub const HYPER_NATIVE_SYS_DEVICE_DMA_FAULT_INFO: u64 = 183;
 pub const HYPER_NATIVE_SYS_NATIVE_BLOCK_TRANSFER: u64 = 496;
 
 pub const fn hyper_native_failure_result_mask(
@@ -998,6 +1006,30 @@ const _: () = assert!(core::mem::offset_of!(HyperNativeObjectDetails, object_kin
 const _: () = assert!(core::mem::offset_of!(HyperNativeObjectDetails, record_kind) == 12);
 const _: () = assert!(core::mem::offset_of!(HyperNativeObjectDetails, next_cursor) == 16);
 const _: () = assert!(core::mem::offset_of!(HyperNativeObjectDetails, payload) == 24);
+
+pub const HYPER_NATIVE_DEVICE_DMA_FAULT_INFO_MIN_SIZE: usize = 40;
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HyperNativeDeviceDmaFaultInfo {
+    pub timestamp_ns: u64,
+    pub address: u64,
+    pub stream_id: u32,
+    pub source: u32,
+    pub scope: u32,
+    pub code: u32,
+    pub flags: u32,
+    pub reserved: u32,
+}
+const _: () = assert!(core::mem::size_of::<HyperNativeDeviceDmaFaultInfo>() == 40);
+const _: () = assert!(core::mem::align_of::<HyperNativeDeviceDmaFaultInfo>() == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeDeviceDmaFaultInfo, timestamp_ns) == 0);
+const _: () = assert!(core::mem::offset_of!(HyperNativeDeviceDmaFaultInfo, address) == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeDeviceDmaFaultInfo, stream_id) == 16);
+const _: () = assert!(core::mem::offset_of!(HyperNativeDeviceDmaFaultInfo, source) == 20);
+const _: () = assert!(core::mem::offset_of!(HyperNativeDeviceDmaFaultInfo, scope) == 24);
+const _: () = assert!(core::mem::offset_of!(HyperNativeDeviceDmaFaultInfo, code) == 28);
+const _: () = assert!(core::mem::offset_of!(HyperNativeDeviceDmaFaultInfo, flags) == 32);
+const _: () = assert!(core::mem::offset_of!(HyperNativeDeviceDmaFaultInfo, reserved) == 36);
 
 pub const HYPER_NATIVE_DEVICE_PROFILE_INFO_MIN_SIZE: usize = 32;
 #[repr(C)]

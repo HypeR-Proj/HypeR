@@ -412,6 +412,24 @@ impl<E: Environment, B: DmaBuffer> Controller<E, B> {
             .memory)
     }
 
+    /// Test-only removal of one page from a live production mapping. Both the
+    /// original mapping and the returned owner retain backing. Uses the same
+    /// domain invalidation and `CMD_SYNC` as ordinary mapping revocation.
+    #[cfg(feature = "io-dma-revoke-test")]
+    pub fn revoke_test_page(&mut self, id: DomainId, iova: u64) -> Result<B, Error>
+    where
+        B: Clone,
+    {
+        self.check()?;
+        let index = self.domain_index(id)?;
+        let retained = self.resources.domains[index]
+            .as_mut()
+            .ok_or(Error::InvalidDomain)?
+            .revoke_test_page::<E>(iova, self.capabilities.address_bits)?;
+        self.invalidate_domain(id)?;
+        Ok(retained)
+    }
+
     /// The caller must quiesce the device before assignment and handle every
     /// consumed event before changing bindings. Events identify only a SID,
     /// not its assignment generation; pending old evidence blocks admission.

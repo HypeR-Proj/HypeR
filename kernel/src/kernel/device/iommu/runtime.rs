@@ -3,7 +3,7 @@
 
 //! One sleeping owner of the command/event queues; IRQs only prompt work.
 
-use super::{Controller, Error};
+use super::{Controller, Error, notifications};
 use crate::kernel::{
     irq::interrupt,
     sync::{Completion, Mutex},
@@ -30,10 +30,28 @@ const BATCH: usize = 32;
 
 pub(crate) struct Runtime {
     controller: Mutex<Controller>,
+    observers: notifications::Observers,
     registrations: [Option<interrupt::Registration>; 2],
 }
 
 impl Runtime {
+    pub(crate) fn observe(
+        &self,
+        stream: u32,
+        events: &FallibleArc<crate::kernel::device::assigned::events::Events>,
+    ) -> Result<(), smmuv3::Error> {
+        self.observers.register(stream, events)?;
+        // A controller may have failed before this observer registered. Register
+        // first, then inspect: a racing worker either reports it or this snapshot
+        // does. The device retains only the first report, so both are harmless.
+        if let Some(failure) = self.with_controller(|controller| controller.failure()) {
+            let mut record = notifications::controller_record(failure);
+            record.stream_id = stream;
+            events.publish(record);
+        }
+        Ok(())
+    }
+
     /// Queue access and failure policy share one boundary. A command timeout
     /// need not raise an IRQ, so the caller must not leave a failed controller
     /// unnoticed behind a sleeping fault worker.
@@ -72,6 +90,7 @@ pub(super) fn install(
     };
     let runtime = Runtime {
         controller: Mutex::new(controller),
+        observers: notifications::Observers::new(),
         registrations,
     };
     let runtime = match FallibleArc::try_new_or_return(runtime) {
@@ -275,6 +294,9 @@ fn service(runtime: &Runtime) -> bool {
         controller.failure()
     });
     for (event, domain) in reports.into_iter().flatten() {
+        runtime
+            .observers
+            .publish(Some(event.stream()), notifications::stream_record(event));
         crate::pr_err!(
             "HypeR: SMMUv3 quarantined SID {} domain {:?}: {:?}, address {:#x}, read={}",
             event.stream(),
@@ -285,6 +307,9 @@ fn service(runtime: &Runtime) -> bool {
         );
     }
     if let Some(failure) = failure {
+        runtime
+            .observers
+            .publish(None, notifications::controller_record(failure));
         crate::pr_err!(
             "HypeR: SMMUv3 controller quarantined: {failure:?}; command error {:?}; backing retained",
             failure.command_error()

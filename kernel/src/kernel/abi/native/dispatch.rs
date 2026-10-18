@@ -340,6 +340,9 @@ pub(in crate::kernel) fn dispatch(
         abi::HYPER_NATIVE_SYS_DEVICE_IRQ_COMPLETE => {
             handlers::sys_device_irq_complete(services, invocation.arguments())
         }
+        abi::HYPER_NATIVE_SYS_DEVICE_DMA_FAULT_INFO => {
+            handlers::sys_device_dma_fault_info(services, invocation.arguments())
+        }
         abi::HYPER_NATIVE_SYS_DEVICE_PROFILE_INFO => {
             handlers::sys_device_profile_info(services, invocation.arguments())
         }

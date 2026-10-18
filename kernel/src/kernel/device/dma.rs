@@ -97,6 +97,7 @@ impl BackendMemoryLease {
 
 /// A checked slice retains the complete lease while exposing only the pages
 /// authorized by one contiguous IOVA extent to the translation driver.
+#[cfg_attr(feature = "io-dma-revoke-test", derive(Clone))]
 pub(crate) struct Buffer {
     lease: Lease,
     offset: u64,

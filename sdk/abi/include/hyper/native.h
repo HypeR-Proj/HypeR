@@ -193,6 +193,7 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
 #define HYPER_NATIVE_SIGNAL_PROCESS_RETIREMENT_READY (UINT64_C(1) << 0)
 #define HYPER_NATIVE_SIGNAL_PROCESS_RETIREMENT_RELEASED (UINT64_C(1) << 1)
 #define HYPER_NATIVE_SIGNAL_PHYSICAL_DEVICE_READABLE (UINT64_C(1) << 0)
+#define HYPER_NATIVE_SIGNAL_PHYSICAL_DEVICE_DMA_FAULT (UINT64_C(1) << 1)
 #define HYPER_NATIVE_SIGNAL_NATIVE_BLOCK_PEER_CLOSED (UINT64_C(1) << 0)
 #define HYPER_NATIVE_SIGNAL_VIRTUAL_SERIAL_READABLE (UINT64_C(1) << 0)
 #define HYPER_NATIVE_SIGNAL_VIRTUAL_SERIAL_WRITABLE (UINT64_C(1) << 1)
@@ -219,6 +220,12 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
 #define HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_WRITABLE (UINT64_C(1) << 1)
 #define HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_PEER_CLOSED (UINT64_C(1) << 2)
 
+#define HYPER_NATIVE_DMA_FAULT_SOURCE_SMMUV3 UINT64_C(1)
+#define HYPER_NATIVE_DMA_FAULT_SCOPE_STREAM UINT64_C(1)
+#define HYPER_NATIVE_DMA_FAULT_SCOPE_CONTROLLER UINT64_C(2)
+#define HYPER_NATIVE_DMA_FAULT_ADDRESS_VALID UINT64_C(1)
+#define HYPER_NATIVE_DMA_FAULT_READ UINT64_C(2)
+#define HYPER_NATIVE_DMA_FAULT_WRITE UINT64_C(4)
 #define HYPER_NATIVE_PROCESS_RETIREMENT_PREPARED UINT64_C(0)
 #define HYPER_NATIVE_PROCESS_RETIREMENT_RUNNING UINT64_C(1)
 #define HYPER_NATIVE_PROCESS_RETIREMENT_STOPPING UINT64_C(2)
@@ -629,6 +636,7 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
 #define HYPER_NATIVE_SYS_CRASH_VIEW_MAPPING UINT64_C(180)
 #define HYPER_NATIVE_SYS_CRASH_VIEW_HANDLE UINT64_C(181)
 #define HYPER_NATIVE_SYS_THREAD_SET_CURRENT_NAME UINT64_C(182)
+#define HYPER_NATIVE_SYS_DEVICE_DMA_FAULT_INFO UINT64_C(183)
 #define HYPER_NATIVE_SYS_NATIVE_BLOCK_TRANSFER UINT64_C(496)
 
 static inline uint64_t hyper_native_failure_result_mask(
@@ -958,6 +966,28 @@ HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_object_details_t, object_kind) == 
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_object_details_t, record_kind) == 12, "object_details.record_kind offset");
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_object_details_t, next_cursor) == 16, "object_details.next_cursor offset");
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_object_details_t, payload) == 24, "object_details.payload offset");
+
+#define HYPER_NATIVE_DEVICE_DMA_FAULT_INFO_MIN_SIZE UINT64_C(40)
+typedef struct hyper_native_device_dma_fault_info_t {
+    uint64_t timestamp_ns;
+    uint64_t address;
+    uint32_t stream_id;
+    uint32_t source;
+    uint32_t scope;
+    uint32_t code;
+    uint32_t flags;
+    uint32_t reserved;
+} hyper_native_device_dma_fault_info_t;
+HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_device_dma_fault_info_t) == 40, "device_dma_fault_info size");
+HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_device_dma_fault_info_t) == 8, "device_dma_fault_info alignment");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_device_dma_fault_info_t, timestamp_ns) == 0, "device_dma_fault_info.timestamp_ns offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_device_dma_fault_info_t, address) == 8, "device_dma_fault_info.address offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_device_dma_fault_info_t, stream_id) == 16, "device_dma_fault_info.stream_id offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_device_dma_fault_info_t, source) == 20, "device_dma_fault_info.source offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_device_dma_fault_info_t, scope) == 24, "device_dma_fault_info.scope offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_device_dma_fault_info_t, code) == 28, "device_dma_fault_info.code offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_device_dma_fault_info_t, flags) == 32, "device_dma_fault_info.flags offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_device_dma_fault_info_t, reserved) == 36, "device_dma_fault_info.reserved offset");
 
 #define HYPER_NATIVE_DEVICE_PROFILE_INFO_MIN_SIZE UINT64_C(32)
 typedef struct hyper_native_device_profile_info_t {

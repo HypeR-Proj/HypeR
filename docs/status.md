@@ -173,10 +173,13 @@ enabling bus mastering, admits only its RAM and explicit live backend grants,
 and retains backing until DMA invalidation completes. Separate operation rights
 gate device inspection, assignment, DMA-address disclosure, register access and
 interrupt acknowledgement. These mechanisms protect ungranted HypeR memory;
-guests still trust the backend for data and availability. Functional PCI
-storage/network acceptance and the separate EDU DMA-denial fixture do not yet
-qualify an attack initiated inside the Linux I/O VM through its production
-assignment and grant path.
+guests still trust the backend for data and availability. In addition to
+functional PCI storage/network acceptance and the EDU DMA-denial fixture, a
+[production NIC test](../kernel/docs/smmuv3.md#production-io-vm-mapping-revocation)
+revokes a warmed Linux RX buffer mapping and verifies actual DMA write denial,
+unchanged destination bytes, continued storage DMA and journal reporting across
+bootstrap handoff. Other device/read paths and physical hardware retirement
+remain outside that test's coverage.
 
 `board-storage` tests persistent Native files, Alpine ext4 root, ordinary VM
 disks, broker isolation and userspace device access. `test-io-vm` checks the

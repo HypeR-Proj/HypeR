@@ -110,6 +110,18 @@ impl AddressSpace {
         self.grant_leases(token, core::iter::once(lease))
     }
 
+    #[cfg(all(CONFIG_ARCH_AARCH64, feature = "io-dma-revoke-test"))]
+    pub(super) fn revoke_test_page(&self, iova: u64) -> Result<Buffer, Error> {
+        let state = self.lock();
+        // The fixture uses the ordinary physical-net function in PCI slot 2.
+        // Reject a stale or unrelated VM; never create a second test domain.
+        if state.closed || !state.attached.contains(&Some(16)) {
+            return Err(Error::InvalidDomain);
+        }
+        self.runtime
+            .with_controller(|controller| controller.revoke_test_page(self.id, iova))
+    }
+
     fn grant_leases<'a>(
         &self,
         token: u64,

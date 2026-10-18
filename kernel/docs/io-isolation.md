@@ -110,10 +110,14 @@ and check that failed revocation clears leaves while retaining their payload
 owners. See [SMMUv3](smmuv3.md).
 
 Production virtio-PCI storage and networking have functional acceptance tests.
-The EDU tests exercise DMA denial through test-created domains; they do not
-submit out-of-range virtio descriptors from inside the running Linux I/O VM
-through the production assignment and grant path. That end-to-end negative
-case remains unqualified.
+The separate [physical NIC revocation fixture](smmuv3.md#production-io-vm-mapping-revocation)
+also exercises the production assignment and grant path: it warms a Linux RX
+buffer through successful DMA, withdraws that page's mapping, and checks that
+the next device write faults without changing the transfer's destination bytes.
+Storage DMA continues, and formal io-runtime reports the fault through journal
+without stopping the I/O VM. Faults both before and after bootstrap handoff are
+covered. This does not cover every descriptor/device/read path or establish
+physical DMA retirement on hardware.
 
 ## Pi 5 coverage and remaining integration
 

@@ -36,13 +36,14 @@ exhausted construction must be aborted or closed and recreated, not retried.
 | DeviceAssignmentAuthority | Claim by index, match or resource bundle | `ASSIGN_DEVICE` |
 | DeviceAssignmentAuthority | Inspect a resident VMO's DMA extent | `MAP_DMA` (also `READ\|MAP` on the VMO) |
 | PhysicalDevice | Metadata and resource descriptions | `INSPECT` |
+| PhysicalDevice | Inspect retained DMA fault evidence | `INSPECT\|ASSIGN_DEVICE` |
 | PhysicalDevice | Bind to a pending VM | `ASSIGN_DEVICE` (also `WRITE` on the VM) |
 | PhysicalDevice | Read / write a userspace register | `READ` / `WRITE` |
 | PhysicalDevice | Inspect a pending IRQ sequence | `WAIT` |
 | PhysicalDevice | Acknowledge/rearm or assert the guest IRQ | `ACK_INTERRUPT` |
 
-Claim-by-index/match returns `TRANSFER|DUPLICATE|INSPECT|ASSIGN_DEVICE`.
-A userspace resource bundle additionally grants `READ|WRITE|WAIT|ACK_INTERRUPT`.
+Claim-by-index/match returns `TRANSFER|DUPLICATE|INSPECT|ASSIGN_DEVICE|WAIT`.
+A userspace resource bundle additionally grants `READ|WRITE|ACK_INTERRUPT`.
 Delegation can only preserve or reduce rights. An `INSPECT` duplicate cannot
 claim hardware, attach a device, query VMO physical addresses or operate an IRQ.
 Register reads may have side effects: `READ` is device operation authority and
@@ -119,3 +120,18 @@ Neither IRQ acknowledgement nor a userspace reset report proves DMA quiescence.
 Without a kernel-verifiable isolation/reset boundary, active userspace assignments
 remain quarantined on teardown and retain their DMA backing. Removing CPU access
 or stopping the driver does not permit releasing pages still reachable by DMA.
+
+## DMA fault observation
+
+`device_dma_fault_info` (183) returns the first retained containment report for
+this device; its 40-byte record is defined in the [Native ABI](native.md).
+`DMA_FAULT` (bit 1) is a sticky wait signal, independent of IRQ `READABLE`.
+Inspection and IRQ acknowledgement neither consume this report nor clear that
+signal. A zero record means no report, not proof that the device is isolated.
+
+The report belongs to the physical-device object and survives handle transfer.
+The formal io-runtime reads any existing evidence on adoption, then waits for
+new faults and reports them through its journal stream. Bootstrap needs no
+consumer. Observation does not stop or restart the VM, release backing, or
+restore a quarantined stream. Controller-wide failures expose the same failure
+scope through each observed device without disclosing another device's address.

@@ -72,6 +72,13 @@ impl crate::kernel::abi::native::DeviceServices for ProcessServices<'_> {
         )
     }
 
+    fn device_dma_fault_info(
+        &self,
+        device: HandleValue,
+    ) -> Result<[u8; 40], crate::kernel::vm::service::Error> {
+        crate::kernel::device::assigned::service::dma_fault_info(self.process, device)
+    }
+
     fn device_profile_info(
         &self,
         device: HandleValue,
