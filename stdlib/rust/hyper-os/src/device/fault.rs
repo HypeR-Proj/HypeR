@@ -20,7 +20,7 @@ pub struct DmaFault {
     pub timestamp_ns: u64,
     pub stream_id: u32,
     pub scope: DmaFaultScope,
-    /// SMMUv3 event ID for a stream fault, captured GERROR bits for a controller
+    /// `SMMUv3` event ID for a stream fault, captured GERROR bits for a controller
     /// failure. Zero GERROR bits are possible for software-detected failure.
     pub code: u32,
     /// Available only when the event identifies a DMA translation/access fault.

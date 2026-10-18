@@ -18,23 +18,33 @@ fn report() -> abi::HyperNativeDeviceDmaFaultInfo {
 
 #[test]
 fn dma_write_and_controller_reports_keep_their_distinct_meaning() {
-    let Some(fault) = decode(report()).unwrap() else {
-        panic!("missing report")
-    };
-    assert_eq!(fault.address, Some(0x1234));
-    assert_eq!(fault.read, Some(false));
-    assert_eq!(fault.timestamp_ns, 123);
+    assert_eq!(
+        decode(report()),
+        Ok(Some(DmaFault {
+            timestamp_ns: 123,
+            stream_id: 16,
+            scope: DmaFaultScope::Stream,
+            code: 0x10,
+            address: Some(0x1234),
+            read: Some(false),
+        }))
+    );
     let mut record = report();
     record.scope = 2;
     record.code = 0;
     record.flags = 0;
     record.address = 0;
-    let Some(fault) = decode(record).unwrap() else {
-        panic!("missing report")
-    };
-    assert_eq!(fault.scope, DmaFaultScope::Controller);
-    assert_eq!(fault.address, None);
-    assert_eq!(fault.read, None);
+    assert_eq!(
+        decode(record),
+        Ok(Some(DmaFault {
+            timestamp_ns: 123,
+            stream_id: 16,
+            scope: DmaFaultScope::Controller,
+            code: 0,
+            address: None,
+            read: None,
+        }))
+    );
 }
 
 #[test]
