@@ -886,11 +886,15 @@ impl PendingCapabilityReceive {
                     WaitOutcome::Cancelled => CapabilityChannelError::Cancelled,
                     WaitOutcome::Notified => registration_invariant(),
                 };
-                if !self
+                let cancelled = self
                     .pair
-                    .cancel_with_error(self.side, &self.registration, error)
-                    && !self.registration.completion.is_complete()
-                    && let Err(join_error) = self.registration.completion.wait()
+                    .cancel_with_error(self.side, &self.registration, error);
+                // A matched sender owns the reserved output mappings and
+                // handle slots. Repeated process-stop requests may cancel
+                // this join too; they cannot retire those resources before
+                // the sender commits or rolls back the matched transfer.
+                if !cancelled
+                    && let Err(join_error) = self.registration.completion.wait_uninterruptible()
                 {
                     registration_scheduler_invariant("matched receive join", join_error);
                 }
