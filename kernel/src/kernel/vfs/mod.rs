@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #![cfg_attr(
-    feature = "kernel-self-test",
+    all(feature = "kernel-test", feature = "kernel-self-test"),
     allow(
         dead_code,
         reason = "Native VFS consumers are replaced by the bare-metal self-test"
@@ -20,7 +20,7 @@ mod lock_state;
 pub(crate) mod locks;
 mod mount_admission;
 mod mounts;
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) mod namespace_test;
 mod objects;
 mod protection;
@@ -41,7 +41,7 @@ pub(crate) mod service;
 pub(crate) use directory::DirectoryStream;
 pub(crate) use executable::ExecutableSnapshot;
 pub(crate) use file_record::CachePage;
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) use objects::NodeLocationInfo;
 pub(crate) use objects::{
     DirectoryEntrySnapshot, DirectoryInfo, DirectoryObject, DirectoryPage, Error,
@@ -108,7 +108,7 @@ pub(crate) fn reclaim_idle_records(domain: Option<super::accounting::ResourceDom
     }
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn cache_test_record(
     id: u64,
     domain: &super::accounting::ResourceDomain,

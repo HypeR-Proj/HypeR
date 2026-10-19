@@ -5,7 +5,10 @@
 
 pub(crate) mod address_space;
 mod notifications;
-#[cfg(all(CONFIG_ARCH_AARCH64, feature = "io-dma-revoke-test"))]
+#[cfg(all(
+    CONFIG_ARCH_AARCH64,
+    all(feature = "kernel-test", feature = "io-dma-revoke-test")
+))]
 pub(crate) mod revoke_test;
 pub(crate) mod runtime;
 
@@ -112,7 +115,10 @@ pub(super) fn initialize(
         caps.stream_bits,
         caps.address_bits
     );
-    #[cfg(all(CONFIG_ARCH_AARCH64, feature = "kernel-smmuv3-test"))]
+    #[cfg(all(
+        CONFIG_ARCH_AARCH64,
+        all(feature = "kernel-test", feature = "kernel-smmuv3-test")
+    ))]
     let controller = {
         let mut controller = controller;
         crate::kernel_tests::smmuv3::run(&mut controller, node, nodes, services)?;

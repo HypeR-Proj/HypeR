@@ -25,11 +25,11 @@ use crate::kernel::task::{WaitOutcome, WaitQueue, WaitTicket, scheduler};
 
 pub(crate) use super::lock_state::LockMode;
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 #[path = "lock_self_test.rs"]
 mod self_test;
 use super::lock_state::{Admission, Grants, OwnerState};
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) use self_test::run as run_self_test;
 
 // Bounds the work done by authority retirement with interrupts masked. Waiter

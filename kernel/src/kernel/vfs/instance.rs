@@ -225,7 +225,7 @@ pub(super) struct EntrySnapshot {
 }
 
 impl FilesystemInstance {
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn try_from_ramfs(ramfs: RamFs<'static>) -> Result<FallibleArc<Self>, Error> {
         Self::archive(ramfs, None)
     }

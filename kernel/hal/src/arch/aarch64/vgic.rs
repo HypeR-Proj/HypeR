@@ -270,11 +270,10 @@ pub unsafe fn activate(context: &CpuContext) -> Result<(), Error> {
     // QEMU advertises TDIR even for Cortex-A76, so the TC-test image forces
     // the wider compatibility trap to exercise PMR/CTLR/RPR emulation. Normal
     // images retain the destination CPU's most selective supported trap.
-    let trap_type = if cfg!(feature = "kernel-vgic-tc-test") {
-        local_type & !registers::ICH_VTR_TRAP_DIR_SUPPORTED
-    } else {
-        local_type
-    };
+    #[cfg(all(feature = "kernel-test", feature = "kernel-vgic-tc-test"))]
+    let trap_type = local_type & !registers::ICH_VTR_TRAP_DIR_SUPPORTED;
+    #[cfg(not(all(feature = "kernel-test", feature = "kernel-vgic-tc-test")))]
+    let trap_type = local_type;
     // SAFETY: Guest delivery is disabled while the complete banked virtual CPU
     // interface state is installed. HCR is enabled only after all state writes.
     unsafe {

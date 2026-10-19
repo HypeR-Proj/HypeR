@@ -372,14 +372,14 @@ impl CapabilityChannel {
         CapabilityPair::try_match(&self.pair, self.side, byte_count, handle_count)
     }
 
-    #[cfg(any(test, feature = "kernel-self-test"))]
+    #[cfg(any(test, all(feature = "kernel-test", feature = "kernel-self-test")))]
     pub(crate) fn signal_level_for_test(&self) -> u64 {
         self.pair.signals[self.side.index()]
             .observe(Self::SUPPORTED_SIGNALS)
             .map_or(0, |snapshot| snapshot.signals().bits())
     }
 
-    #[cfg(any(test, feature = "kernel-self-test"))]
+    #[cfg(any(test, all(feature = "kernel-test", feature = "kernel-self-test")))]
     pub(crate) fn close_for_test(&self) {
         self.pair.close(self.side);
     }
@@ -446,7 +446,7 @@ impl CapabilityPair {
         }
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     fn register(
         &self,
         side: Side,
@@ -536,7 +536,7 @@ impl CapabilityPair {
         })
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     fn cancel(&self, side: Side, registration: &ReceiveRegistration) -> bool {
         self.cancel_with_error(side, registration, CapabilityChannelError::Cancelled)
     }
@@ -705,7 +705,7 @@ impl PreparedCapabilityReceive {
     }
 
     /// Registers without parking for deterministic rendezvous contract tests.
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn publish(mut self) -> Result<PendingCapabilityReceive, CapabilityChannelError> {
         let node = match self.node.take() {
             Some(node) => node,
@@ -863,7 +863,7 @@ pub(crate) struct PendingCapabilityReceive {
 
 impl PendingCapabilityReceive {
     /// Cancels only if no sender has already won the match arbitration.
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn cancel(&self) -> bool {
         self.pair.cancel(self.side, &self.registration)
     }

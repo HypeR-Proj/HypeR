@@ -21,7 +21,7 @@ impl Archive {
         self.bytes
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn static_fixture(bytes: &'static [u8]) -> Self {
         Self::new(bytes, RegionList::new())
     }

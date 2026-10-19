@@ -72,7 +72,7 @@ use super::wire::{
     parse_builder_handle, prepare_info_request,
 };
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SelfTestError {
     AbiQuery,
@@ -95,7 +95,7 @@ pub(crate) enum SelfTestError {
     DispatchAction,
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
     super::handlers::run_wire_self_test().map_err(|_| SelfTestError::RecordEncoding)?;
     if super::wire::parse_object_kind(hyper::abi::native::HYPER_NATIVE_OBJECT_NATIVE_BLOCK)

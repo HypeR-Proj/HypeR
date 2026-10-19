@@ -274,7 +274,7 @@ impl MountTable {
         self.attach_mount(old, covered, mounted, sponsor)
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(super) fn bind_ramfs(
         &self,
         old: &View,

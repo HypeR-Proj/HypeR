@@ -16,7 +16,7 @@ mod capabilities;
 const INIT_PATH: &str = "/init";
 pub(crate) enum Error {
     RootDirectory(crate::kernel::vfs::VfsError),
-    #[cfg(not(feature = "kernel-self-test"))]
+    #[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
     ConsoleObject(crate::kernel::device::console::ObjectError),
     Handle(HandleError),
     Image(crate::kernel::process::LoaderError),
@@ -45,7 +45,7 @@ impl core::fmt::Debug for Error {
             Self::RootDirectory(error) => {
                 formatter.debug_tuple("RootDirectory").field(error).finish()
             }
-            #[cfg(not(feature = "kernel-self-test"))]
+            #[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
             Self::ConsoleObject(error) => {
                 formatter.debug_tuple("ConsoleObject").field(error).finish()
             }

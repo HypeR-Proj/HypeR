@@ -4,7 +4,7 @@
 use core::ptr::{read_volatile, write_bytes, write_volatile};
 
 use hyper::hal::memory::{AddressTranslation, KernelImageLayout, VirtualMemoryLayout};
-#[cfg(CONFIG_CRASH_CONSOLE)]
+#[cfg(feature = "crash-console")]
 use hyper::hal::memory::{Stage1Mapping, Stage1MemoryType};
 use hyper::mm::{BootAllocator, BootAllocatorError, PAGE_SIZE, PhysicalAddress, VirtualAddress};
 use hyper::platform::{PhysicalRange, PlatformInfo};
@@ -456,7 +456,7 @@ fn walk_leaf(root: PhysicalAddress, address: u64) -> Result<(PhysicalAddress, us
     Err(Error::Conflict)
 }
 
-#[cfg(CONFIG_CRASH_CONSOLE)]
+#[cfg(feature = "crash-console")]
 /// Inspects a mapping rooted at an externally supplied page table.
 ///
 /// # Safety

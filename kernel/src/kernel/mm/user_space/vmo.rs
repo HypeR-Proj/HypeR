@@ -703,7 +703,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> WritableVmo<Backend, Account>
     /// reports `Busy` while a writer is active. The returned type exposes no
     /// write operation, and no source page is shared with executable backing.
     #[cfg_attr(
-        not(any(test, feature = "kernel-self-test")),
+        not(any(test, all(feature = "kernel-test", feature = "kernel-self-test"))),
         expect(
             dead_code,
             reason = "executable snapshot conversion currently exercised by memory self-tests"

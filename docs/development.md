@@ -88,6 +88,7 @@ Use these repository-root commands for short feedback loops:
 | Portable kernel mechanisms | `make -C kernel test ARCH=aarch64` |
 | App deployment and packaging | `sh tests/ci/run.sh scripts` |
 | Kernel or app runtime behavior | The relevant QEMU target below |
+| Product trimming and kernel test gates | `sh tests/ci/run.sh scripts` and `sh tests/ci/run.sh kernel-configurations` |
 
 `app-test` uses SDK source patches within both Native workspaces, an explicit
 host target, and ordinary Cargo. It does not assemble an SDK or require patched
@@ -110,6 +111,12 @@ excluded from host test linking. `make app-fixtures` selects the development bui
 static/dynamic linking probes
 and Rust std smoke programs. Specialized VM smoke binaries remain owned by their
 acceptance targets.
+
+Use `SYSTEM_CONFIG` to select a smaller product without editing the component
+registry. It controls both compilation and deployment; selecting only an image
+profile is no longer the only way to remove applications or filesystem workers.
+The [configuration guide](configuration.md) covers explicit allowlists, required
+runtime children, kernel features and independent output directories.
 
 Feature-specific fixtures build the selected component graph and stage its
 executables and DSOs together. `APP_FEATURES` selects package-qualified Cargo

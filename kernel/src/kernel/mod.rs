@@ -18,7 +18,7 @@ pub mod crash;
 pub mod debug;
 pub mod device;
 pub(crate) mod entry;
-#[cfg(not(feature = "kernel-self-test"))]
+#[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
 pub(crate) mod init;
 pub(crate) mod inspect;
 pub(crate) mod io_cache;

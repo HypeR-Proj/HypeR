@@ -103,7 +103,7 @@ pub(crate) fn service_irq_prompt() {
     }
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn permanent_worker_count_for_test() -> usize {
     WORKERS
         .iter()

@@ -4,6 +4,7 @@
 //! Wall time seeded from RTC, or Unix epoch at monotonic zero when uncalibrated.
 
 use hyper::drivers::platform::{DriverServices, PlatformDevice};
+#[cfg(feature = "rtc")]
 use hyper::drivers::rtc::{Goldfish, Pl031};
 use hyper::sync::PublishedOnce;
 use hyper::time::Timestamp;
@@ -17,6 +18,7 @@ static ANCHOR: PublishedOnce<Anchor> = PublishedOnce::new();
 
 /// Optional boot-time discovery. Platform policy owns DTB resources and their
 /// permanent mappings; physical register access remains in the RTC driver.
+#[cfg(feature = "rtc")]
 pub(crate) fn initialize(devices: &[PlatformDevice], services: &impl DriverServices) {
     for device in devices {
         let Some(mut rtc) = Clock::bind(device, services) else {
@@ -57,6 +59,11 @@ pub(crate) fn initialize(devices: &[PlatformDevice], services: &impl DriverServi
     crate::pr_warn!("HypeR: no usable RTC; wall clock is uncalibrated (Unix epoch + uptime)");
 }
 
+#[cfg(not(feature = "rtc"))]
+pub(crate) fn initialize(_devices: &[PlatformDevice], _services: &impl DriverServices) {
+    crate::pr_info!("HypeR: RTC support disabled; wall clock is Unix epoch + uptime");
+}
+
 pub(crate) fn now() -> Option<Timestamp> {
     let fallback = Anchor {
         utc: Timestamp::new(0, 0)?,
@@ -71,11 +78,13 @@ pub(crate) fn now() -> Option<Timestamp> {
 
 // Device selection and the UTC anchor are policy. Ordered register sampling
 // remains in the physical drivers. Boot owns the sole Goldfish latch reader.
+#[cfg(feature = "rtc")]
 enum Clock {
     Pl031(Pl031),
     Goldfish(Goldfish<crate::hal::memory::Barrier>),
 }
 
+#[cfg(feature = "rtc")]
 impl Clock {
     fn bind(device: &PlatformDevice, services: &impl DriverServices) -> Option<Self> {
         let pl031 = device.is_compatible("arm,pl031");

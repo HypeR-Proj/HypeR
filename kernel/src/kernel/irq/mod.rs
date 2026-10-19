@@ -77,7 +77,7 @@ pub(crate) fn initialize(
 }
 
 /// Observes reschedule-SGI dispatch for the bare-metal runtime proof.
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 #[allow(
     dead_code,
     reason = "IPI delivery counters are exercised by AArch64 and x86 runtime tests"

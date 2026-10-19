@@ -11,18 +11,18 @@ use super::report::StopSummary;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum InitializationError {
-    #[cfg(CONFIG_CRASH_CONSOLE)]
+    #[cfg(feature = "crash-console")]
     Monitor(super::monitor::InitializationError),
 }
 
 pub(super) fn initialize() -> Result<(), InitializationError> {
-    #[cfg(CONFIG_CRASH_CONSOLE)]
+    #[cfg(feature = "crash-console")]
     super::monitor::initialize().map_err(InitializationError::Monitor)?;
     Ok(())
 }
 
 pub(super) fn run(owner: usize, stop: StopSummary) {
-    #[cfg(CONFIG_CRASH_CONSOLE)]
+    #[cfg(feature = "crash-console")]
     if super::super::log::crash_console_available() {
         super::super::log::emergency(format_args!(
             "crash console enabled; entering interactive monitor"
@@ -34,6 +34,6 @@ pub(super) fn run(owner: usize, stop: StopSummary) {
         ));
     }
 
-    #[cfg(not(CONFIG_CRASH_CONSOLE))]
+    #[cfg(not(feature = "crash-console"))]
     let _ = (owner, stop);
 }

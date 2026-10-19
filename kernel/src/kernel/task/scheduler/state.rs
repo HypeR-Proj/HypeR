@@ -517,7 +517,7 @@ impl Drop for PreparedContextSwitch {
 }
 
 impl Scheduler {
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub fn thread_object_snapshot(
         &self,
         id: ThreadId,
@@ -873,7 +873,7 @@ impl Scheduler {
         Ok(())
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub fn take_dormant_kernel_thread(&mut self, id: ThreadId) -> Result<Box<Thread>, Error> {
         self.take_dormant_thread(id, crate::kernel::task::thread::ExecutionKind::Kernel)
     }
@@ -1642,7 +1642,7 @@ impl Scheduler {
         stats
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub const fn registry_slot_count(&self) -> usize {
         self.registry.high_water()
     }

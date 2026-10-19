@@ -297,7 +297,10 @@ pub(crate) struct Notification {
     shared: FallibleArc<Shared>,
 }
 impl Notification {
-    #[cfg(all(CONFIG_ARCH_AARCH64, feature = "kernel-self-test"))]
+    #[cfg(all(
+        CONFIG_ARCH_AARCH64,
+        all(feature = "kernel-test", feature = "kernel-self-test")
+    ))]
     pub(crate) fn verify_delivery_for_test(
         front: super::super::registry::PreparedVm,
         back: super::super::registry::PreparedVm,
@@ -558,7 +561,10 @@ impl Notification {
     }
 }
 
-#[cfg(all(CONFIG_ARCH_AARCH64, feature = "kernel-self-test"))]
+#[cfg(all(
+    CONFIG_ARCH_AARCH64,
+    all(feature = "kernel-test", feature = "kernel-self-test")
+))]
 #[path = "../../../../tests/kernel/guest_notification.rs"]
 mod delivery_test;
 impl private::Sealed for Notification {}

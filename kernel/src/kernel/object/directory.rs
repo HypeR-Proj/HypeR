@@ -221,7 +221,7 @@ pub(crate) fn lookup_diagnostic(koid: u64) -> Option<ErasedKernelRef<Diagnostic>
 /// Production diagnostics intentionally return pointer-free snapshots. This
 /// hook exists solely to prove that object-owned accounting follows the exact
 /// refcounted allocation rather than its scheduler registry entry.
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn retain_for_test(koid: Koid) -> Option<ErasedKernelRef<Diagnostic>> {
     lookup_diagnostic(koid.get())
 }

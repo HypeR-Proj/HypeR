@@ -43,7 +43,7 @@ pub(crate) struct Callout<T: Send + Sync + 'static> {
 }
 
 #[cfg_attr(
-    not(feature = "kernel-self-test"),
+    not(all(feature = "kernel-test", feature = "kernel-self-test")),
     allow(
         dead_code,
         reason = "general callout lifecycle is exercised by kernel self-tests"
@@ -113,7 +113,7 @@ impl<T: Send + Sync + 'static> Callout<T> {
         self.core.synchronize(true)
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn is_ready_for_test(&self) -> bool {
         self.core.is_ready_for_test()
     }
@@ -132,7 +132,7 @@ impl<T: Send + Sync + 'static> Drop for Callout<T> {
 /// Callback-scoped control without a synchronous self-wait operation.
 #[derive(Clone, Copy)]
 #[cfg_attr(
-    not(feature = "kernel-self-test"),
+    not(all(feature = "kernel-test", feature = "kernel-self-test")),
     allow(
         dead_code,
         reason = "callback rearm control is exercised by kernel self-tests"
@@ -144,7 +144,7 @@ pub(crate) struct CalloutRef<'a> {
 }
 
 #[cfg_attr(
-    not(feature = "kernel-self-test"),
+    not(all(feature = "kernel-test", feature = "kernel-self-test")),
     allow(
         dead_code,
         reason = "callback rearm control is exercised by kernel self-tests"

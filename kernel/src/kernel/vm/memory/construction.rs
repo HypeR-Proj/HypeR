@@ -11,19 +11,19 @@ use super::storage::{
     AdmittedAddressSpaceMetadata, GuestMemoryBacking, Stage2PagePool, admit_metadata,
     validate_region,
 };
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 use super::storage::{address_space_metadata_layout, try_exact_capacity_vec};
 use super::{
     ActiveStage2Identifier, Error, GuestAddressSpace, Stage2Identifier, Stage2IdentifierReservation,
 };
 use crate::hal::vm::Stage2AddressSpace;
 use crate::kernel::accounting::ResourceDomain;
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 use crate::kernel::mm::page_block::PageBlock;
 use crate::kernel::vm::residency_state::Stage2Incarnation;
 
 impl GuestAddressSpace {
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn new(
         hardware_vmid: Stage2IdentifierReservation,
         ipa_base: u64,
@@ -144,13 +144,13 @@ impl GuestAddressSpace {
             table_pages,
             identifier: Stage2Identifier::Reserved(Some(hardware_vmid)),
             guest_page_charge: None,
-            #[cfg(feature = "kernel-self-test")]
+            #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
             backing_page_charge: None,
             _metadata_charge: metadata_charge,
         })
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn metadata_requirements_for_test(
         ipa_base: u64,
         size: u64,
@@ -165,7 +165,7 @@ impl GuestAddressSpace {
         Ok((common, kernel_owned))
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn retained_metadata_bytes_for_test(&self) -> Result<u64, Error> {
         let bitmap_bytes = self
             .mapped_pages

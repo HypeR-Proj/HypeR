@@ -9,11 +9,11 @@ use crate::kernel::accounting::{
 use crate::kernel::object::{
     KernelObject, ObjectKind, TransferClass, object_allocation_size, private,
 };
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 use crate::kernel::task::scheduler::WaitRegistration;
 
 use super::Rights;
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 use super::signals::{PreparedSignalWait, SignalSnapshot, SignalWaitOutcome};
 use super::signals::{SignalMask, SignalSource, SignalState, SignalWaitError};
 
@@ -91,7 +91,7 @@ impl Event {
     }
 
     /// Observes an already-satisfied wait without allocation or scheduler use.
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn observe(&self, requested: u64) -> Result<Option<SignalSnapshot>, EventError> {
         let requested =
             Self::validate_signals(requested, false).ok_or(EventError::InvalidSignals)?;
@@ -99,7 +99,7 @@ impl Event {
     }
 
     /// Fallibly prepares storage before a scheduler wait is armed.
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn prepare_wait(
         &self,
         requested: u64,
@@ -111,7 +111,7 @@ impl Event {
     }
 
     /// Commits one already-armed scheduler wait to this Event.
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn wait_registered(
         &self,
         prepared: PreparedSignalWait,
@@ -128,12 +128,12 @@ impl Event {
         Some(signals)
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn waiter_count(&self) -> usize {
         self.signals.waiter_count()
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn set_sequence_for_test(&self, sequence: u64) {
         self.signals.set_sequence_for_test(sequence)
     }

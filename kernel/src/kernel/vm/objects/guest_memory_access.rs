@@ -137,10 +137,10 @@ fn scalar_object(
     Ok(result)
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 #[path = "../../../../tests/kernel/delegated_guest_memory.rs"]
 mod test;
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn verify_for_test(
     domain: &crate::kernel::accounting::ResourceDomain,
 ) -> Result<(), &'static str> {

@@ -119,14 +119,14 @@ impl ThreadRetirement {
     }
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 struct RetirementAccountingProbe {
     domain: crate::kernel::accounting::ResourceDomain,
     baseline: u64,
     retained: u64,
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 impl ThreadRetirementAction for RetirementAccountingProbe {
     fn complete(self: Box<Self>) -> Result<(), ThreadRetirementError> {
         let observed = self
@@ -143,7 +143,7 @@ impl ThreadRetirementAction for RetirementAccountingProbe {
 
 /// Verifies that an extracted retirement action remains charged while its
 /// terminal callback executes and releases the charge immediately afterward.
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn verify_retirement_charge_lifetime() -> bool {
     use crate::kernel::accounting::{ResourceAmount, ResourceDomain, ResourceKind, ResourceLimits};
 

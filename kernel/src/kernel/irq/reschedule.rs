@@ -10,13 +10,13 @@
 use hyper::cpu::CpuIndex;
 use hyper::hal::interrupt::{InterruptPriority, InterruptTrigger};
 use hyper::sync::atomic::{AtomicBool, Ordering};
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 use hyper::{cpu::PerCpu, sync::atomic::AtomicUsize};
 
 use super::interrupt::{HandlerResult, IrqDomainId, VirtualInterrupt};
 
 static READY: AtomicBool = AtomicBool::new(false);
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 static DELIVERY_COUNT: PerCpu<AtomicUsize> =
     PerCpu::new([const { AtomicUsize::new(0) }; hyper::cpu::MAX_CPUS]);
 
@@ -92,7 +92,7 @@ pub(crate) fn notify(cpu: CpuIndex) {
 }
 
 fn handle(_interrupt: VirtualInterrupt, _context: usize) -> HandlerResult {
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     if let Some(cpu) = crate::kernel::cpu::current_index() {
         // The counter is only an observation point; it publishes no protected
         // state and therefore requires no ordering beyond atomic coherence.
@@ -106,7 +106,7 @@ fn handle(_interrupt: VirtualInterrupt, _context: usize) -> HandlerResult {
 /// Returns the number of reschedule interrupts dispatched on `cpu`.
 ///
 /// This observation seam is compiled only into the bare-metal self-test image.
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 #[allow(
     dead_code,
     reason = "IPI delivery counters are exercised by AArch64 and x86 runtime tests"

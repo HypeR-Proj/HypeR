@@ -4,7 +4,7 @@
 //! Production accounting and physical-page adapters for native user memory.
 
 use core::ptr::{copy_nonoverlapping, with_exposed_provenance_mut};
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use hyper::mm::allocator::heap::PageOwner;
@@ -69,7 +69,7 @@ impl From<BuddyError> for KernelPageError {
 #[derive(Clone, Copy)]
 pub(crate) struct KernelPageBackend;
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 static FAIL_EXPOSED_WRITE_AFTER_COPY_COUNTDOWN: AtomicUsize = AtomicUsize::new(0);
 
 /// Injects a post-copy failure on one future exposed write.
@@ -78,7 +78,7 @@ static FAIL_EXPOSED_WRITE_AFTER_COPY_COUNTDOWN: AtomicUsize = AtomicUsize::new(0
 /// contract, while the caller must treat the selected write as failed. A
 /// countdown of one selects the next write, two the write after that, and zero
 /// disables injection.
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 #[allow(
     dead_code,
     reason = "fault injection is currently exercised by AArch64 channel tests"
@@ -320,13 +320,13 @@ impl PageBackend for KernelPageBackend {
         // provides the external-memory sequence described above.
         unsafe { crate::hal::user::copy_to_exposed(source.as_ptr(), destination, source.len()) }
             .map_err(|_| KernelPageError::Unsupported)?;
-        #[cfg(feature = "kernel-self-test")]
+        #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
         let selected = FAIL_EXPOSED_WRITE_AFTER_COPY_COUNTDOWN.fetch_update(
             Ordering::AcqRel,
             Ordering::Acquire,
             |countdown| countdown.checked_sub(1),
         );
-        #[cfg(feature = "kernel-self-test")]
+        #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
         if matches!(selected, Ok(1)) {
             return Err(KernelPageError::Unsupported);
         }

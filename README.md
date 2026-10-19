@@ -291,6 +291,8 @@ when adopting changed board policy or guest startup files.
   IPC, virtualization, storage and image packaging.
 - [Development guide](docs/development.md): editor setup, testing, source layout,
   and contribution requirements.
+- [Product configuration](docs/configuration.md): optional kernel capabilities,
+  userspace component selection and a minimal QEMU system.
 - [Architecture](kernel/docs/architecture.md): kernel boundaries and ownership.
 - [Pi 5 image distribution](docs/image-distribution.md): image builds, release
   artifacts, dependency pins, and component licensing.

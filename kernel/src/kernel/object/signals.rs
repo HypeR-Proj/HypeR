@@ -326,7 +326,7 @@ impl SignalState {
         })
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(super) fn waiter_count(&self) -> usize {
         self.state.with(|state| {
             let mut count = 0usize;
@@ -339,7 +339,7 @@ impl SignalState {
         })
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(super) fn set_sequence_for_test(&self, sequence: u64) {
         self.state.with(|state| {
             if state.registrations.is_some() {

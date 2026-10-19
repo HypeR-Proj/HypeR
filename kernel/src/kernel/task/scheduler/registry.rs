@@ -653,7 +653,7 @@ impl ThreadRegistry {
     }
 
     /// Returns canonical object identity for an occupied or retiring Thread.
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub fn object_snapshot(
         &self,
         id: ThreadId,
@@ -751,7 +751,7 @@ impl ThreadRegistry {
     }
 
     /// Number of slots ever exposed by the monotonic backing high-water mark.
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub const fn high_water(&self) -> usize {
         self.high_water
     }

@@ -16,7 +16,10 @@ pub(crate) use object::{Assignment, DeviceAssignmentAuthority, PhysicalDevice};
 pub(crate) use service::{DmaExtent, Info};
 pub(crate) use set::{AssignmentOwners, AssignmentSet};
 
-#[cfg_attr(feature = "kernel-self-test", allow(dead_code))]
+#[cfg_attr(
+    all(feature = "kernel-test", feature = "kernel-self-test"),
+    allow(dead_code)
+)]
 pub(crate) const fn available() -> bool {
     crate::hal::vm::supports_guest_device_assignment()
 }

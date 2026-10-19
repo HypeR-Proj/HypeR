@@ -9,7 +9,7 @@ mod balance_policy;
 mod cpu_time;
 mod queue;
 mod registry;
-#[cfg(feature = "kernel-stack-audit")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-stack-audit"))]
 mod stack_audit;
 mod state;
 mod switch_handoff;
@@ -82,7 +82,10 @@ pub(crate) fn with_wait_context<R>(
 
 /// Negative test of the real exit gate with an idle scheduler wait record and
 /// a still-linked condition node. Unexpected success cannot be rolled back.
-#[cfg(all(feature = "kernel-self-test", CONFIG_ARCH_AARCH64))]
+#[cfg(all(
+    all(feature = "kernel-test", feature = "kernel-self-test"),
+    CONFIG_ARCH_AARCH64
+))]
 pub(crate) fn verify_wait_exit_rejected() -> Result<bool, Error> {
     let cpu = current_cpu()?;
     SCHEDULER.with(|slot| {
@@ -113,7 +116,7 @@ fn read_scheduler<R>(operation: impl FnOnce(&Scheduler) -> Result<R, Error>) -> 
 
 /// Holds one reader lane for the SMP progress proof. The callback must not
 /// enter scheduler APIs or retain the IRQ mask beyond this call.
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn hold_reader_for_test(operation: impl FnOnce()) -> Result<(), Error> {
     read_scheduler(|_scheduler| {
         operation();
@@ -520,7 +523,7 @@ pub fn initialize() -> Result<Capabilities, Error> {
 }
 
 /// Permanent scheduler service population used by lifecycle self-tests.
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) const fn permanent_worker_count_for_test() -> usize {
     1
 }
@@ -557,7 +560,7 @@ pub(crate) fn set_thread_name(id: ThreadId, name: &str) -> Result<(), Error> {
 }
 
 /// Returns authority-free canonical object identity for a scheduler Thread.
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn thread_object_snapshot(
     id: ThreadId,
 ) -> Result<crate::kernel::task::ThreadObjectSnapshot, Error> {
@@ -779,7 +782,7 @@ pub(crate) fn thread_migration_state(id: ThreadId) -> Result<(CpuIndex, Option<C
     })
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn registry_slot_count() -> Result<usize, Error> {
     SCHEDULER.with(|slot| {
         slot.as_ref()
@@ -788,7 +791,7 @@ pub(crate) fn registry_slot_count() -> Result<usize, Error> {
     })
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn discard_dormant_kernel_thread(id: ThreadId) -> Result<(), Error> {
     let thread = SCHEDULER.with(|slot| {
         slot.as_mut()
@@ -1121,7 +1124,7 @@ fn update_thread_fifo_policy(
 }
 
 /// Applies FIFO policy and reports whether the transition requested a switch.
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn set_thread_fifo_policy_for_test(
     id: ThreadId,
     priority: ThreadPriority,
@@ -1498,7 +1501,7 @@ pub(crate) fn wake_all(wait_queue: &WaitQueue) -> Result<usize, Error> {
 
 /// Exercises the public wake paths with inconsistent queue metadata, without
 /// linking actual waiters or exposing a corruption hook to production callers.
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn test_wait_queue_topology() -> Result<(), Error> {
     use super::wait::ThreadQueue;
 
@@ -1722,7 +1725,7 @@ pub(crate) fn reap_one_thread(
         return Ok(None);
     };
 
-    #[cfg(feature = "kernel-stack-audit")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-stack-audit"))]
     stack_audit::record_retired(&thread);
     retire_detached_thread(thread);
     let more = SCHEDULER.with(|slot| {

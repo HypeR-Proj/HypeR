@@ -24,7 +24,7 @@ pub(crate) enum Refill {
     #[cfg_attr(
         not(test),
         cfg_attr(
-            not(feature = "kernel-self-test"),
+            not(all(feature = "kernel-test", feature = "kernel-self-test")),
             expect(
                 dead_code,
                 reason = "generic payloads may need recreation; physical file pages always fit"

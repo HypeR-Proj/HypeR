@@ -27,7 +27,8 @@ The console attachment also exercises interactive guest input. For diagnosis,
 `verify-stack.py --stage inspect|memory|process` isolates a workload stage so
 its terminated thread can be measured independently.
 
-The target builds with `kernel-stack-audit`. Acceptance uses observed stack
+The target explicitly enables both `kernel-test` and `kernel-stack-audit`.
+Acceptance uses observed stack
 watermarks, canaries, and reserve limits for complete workloads. Individual
 compiler-generated function frames are not CI budgets: inlining and compiler
 versions change their layout without necessarily changing end-to-end usage.

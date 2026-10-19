@@ -5,16 +5,17 @@ SPDX-License-Identifier: Apache-2.0
 
 # Crash console
 
-`CONFIG_CRASH_CONSOLE=y` adds an interactive, allocation-free monitor to the
-fatal crash path. The default QEMU defconfigs leave it disabled. When disabled,
+The `crash-console` Cargo feature adds an interactive, allocation-free monitor
+to the fatal crash path. The default AArch64 feature set enables it; other
+architectures leave it disabled. When disabled,
 the monitor module, command strings, emergency UART input path, and stage-1
 mapping inspection support are not compiled into the kernel image.
 
 ## Configuration
 
-Run `make config`, enable `Interactive crash console` under the `Kernel` menu,
-and build normally with `make image`. No separate defconfig or build target is
-required. Interactive operation also requires an `earlycon=` argument matching
+Include `crash-console` in the complete `KERNEL_FEATURES` selection, for example
+`make image KERNEL_FEATURES='rtc runtime-symbols crash-console'`. No separate
+defconfig or build target is required. Interactive operation also requires an `earlycon=` argument matching
 an accessible UART in the platform DTB.
 
 The crash owner masks local interrupts, switches to its emergency stack,

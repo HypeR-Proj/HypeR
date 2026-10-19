@@ -156,7 +156,7 @@ pub(crate) fn try_write_console_tx(bytes: &[u8]) -> usize {
 }
 
 /// Returns the permanent scheduler population owned by runtime logging.
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) const fn permanent_worker_count_for_test() -> usize {
     1
 }
@@ -201,17 +201,17 @@ pub(crate) fn enter_emergency_mode() {
     }
 }
 
-#[cfg(CONFIG_CRASH_CONSOLE)]
+#[cfg(feature = "crash-console")]
 pub(crate) fn crash_console_available() -> bool {
     console::emergency_available()
 }
 
-#[cfg(CONFIG_CRASH_CONSOLE)]
+#[cfg(feature = "crash-console")]
 pub(crate) fn crash_console_write(bytes: &[u8]) {
     console::emergency_write_raw(bytes);
 }
 
-#[cfg(CONFIG_CRASH_CONSOLE)]
+#[cfg(feature = "crash-console")]
 pub(crate) fn crash_console_read() -> Option<u8> {
     console::emergency_read_raw()
 }

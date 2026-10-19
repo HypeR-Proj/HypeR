@@ -14,9 +14,9 @@ use crate::kernel::vm::objects::VirtualMachineCreationAuthority;
 use super::Error;
 use super::bootstrap::{self, BootProcess};
 
-#[cfg(not(feature = "kernel-self-test"))]
+#[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
 const CORE_HANDLE_COUNT: usize = 11;
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 const CORE_HANDLE_COUNT: usize = 10;
 
 const HAS_VM_AUTHORITY: bool = crate::hal::vm::userspace_vm_lifecycle_available();
@@ -35,7 +35,7 @@ const CORE_PURPOSES: [u32; CORE_HANDLE_COUNT] = [
     purpose(hyper::abi::native::HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_CPU_INSPECTOR),
     purpose(hyper::abi::native::HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_ROOT_VMAR),
     purpose(hyper::abi::native::HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_INITIAL_STACK_VMAR),
-    #[cfg(not(feature = "kernel-self-test"))]
+    #[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
     purpose(hyper::abi::native::HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_CONSOLE),
 ];
 
@@ -166,7 +166,7 @@ fn prepare_handles(
             VirtualMachineCreationAuthority::SUPPORTED_RIGHTS,
         )?);
     }
-    #[cfg(not(feature = "kernel-self-test"))]
+    #[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
     {
         handles[10] = Some(prepare_handle(
             crate::kernel::device::console::SystemConsole::try_publication(domain)

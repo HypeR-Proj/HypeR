@@ -28,11 +28,11 @@ pub(crate) use core::{
     UserExportableObject, VmDeviceBinding, final_reap_pending, object_allocation_size, private,
     reap_one_final_object,
 };
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) use directory::retain_for_test;
 pub(crate) use directory::{ObjectScanCursor, lookup_diagnostic, scan};
 pub(crate) use event::{Event, EventError};
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) use signals::PreparedSignalWait;
 pub(crate) use signals::{
     SignalMask, SignalSource, SignalState, SignalWaitError, SignalWaitOutcome,
@@ -42,5 +42,5 @@ pub(crate) use wait::{
     SignalWaitRequest, TimedWaitPreparation, prepare_timed_wait, wait_many, wait_one,
 };
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) use wait_set::test_delivery_rollback;

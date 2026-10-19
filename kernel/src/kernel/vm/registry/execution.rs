@@ -485,7 +485,10 @@ impl VirtualMachine {
             streams, &leases, domain,
         )
         .map_err(|_| Error::Allocation)?;
-        #[cfg(all(CONFIG_ARCH_AARCH64, feature = "io-dma-revoke-test"))]
+        #[cfg(all(
+            CONFIG_ARCH_AARCH64,
+            all(feature = "kernel-test", feature = "io-dma-revoke-test")
+        ))]
         if streams.contains(&Some(16)) {
             crate::kernel::device::iommu::revoke_test::start(dma.clone());
         }

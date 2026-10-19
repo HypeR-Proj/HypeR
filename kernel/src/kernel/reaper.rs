@@ -12,7 +12,10 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use hyper::sync::{DeferredWork, PublishedOnce, WorkDisposition};
 
-#[cfg(all(feature = "kernel-self-test", CONFIG_ARCH_AARCH64))]
+#[cfg(all(
+    all(feature = "kernel-test", feature = "kernel-self-test"),
+    CONFIG_ARCH_AARCH64
+))]
 pub(crate) mod retry_test;
 
 const REAP_BATCH: usize = 16;
@@ -27,18 +30,18 @@ static IRQ_PROMPTS_READY: AtomicBool = AtomicBool::new(false);
 static RETRY_TIMER: PublishedOnce<crate::kernel::time::Callout<()>> = PublishedOnce::new();
 static RETRY_DUE: AtomicBool = AtomicBool::new(false);
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 static TEST_WORKER: hyper::sync::InterruptSpinLock<
     Option<crate::kernel::task::thread::ThreadId>,
     crate::hal::irq::LocalMask,
 > = hyper::sync::InterruptSpinLock::new(None);
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 static TEST_RETRY_CPU: core::sync::atomic::AtomicUsize =
     core::sync::atomic::AtomicUsize::new(usize::MAX);
 
 // The current process-retirement integration case needs Native user mappings,
 // so only the AArch64 self-test binary calls these architecture-neutral hooks.
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 #[allow(dead_code)]
 pub(crate) fn set_affinity_for_test(
     affinity: crate::kernel::task::scheduler::CpuMask,
@@ -51,7 +54,7 @@ pub(crate) fn set_affinity_for_test(
     Ok(())
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 #[allow(dead_code)]
 pub(crate) fn retry_observed_on_for_test(cpu: hyper::cpu::CpuIndex) -> bool {
     TEST_RETRY_CPU.load(Ordering::Acquire) == cpu.get()
@@ -72,7 +75,7 @@ pub(crate) fn initialize() -> Result<(), crate::kernel::task::scheduler::Error> 
     {
         return Err(crate::kernel::task::scheduler::Error::AlreadyInitialized);
     }
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     TEST_WORKER.with(|slot| *slot = Some(worker));
     // The initial worker owns every request published before this point.
     // Clear their unissued prompt before the worker can drain and sleep, or a
@@ -180,7 +183,10 @@ extern "C" fn worker_entry(_argument: usize) {
             retry_pending = false;
             crate::kernel::process::promote_delayed_retirements(&mut access);
         }
-        #[cfg(all(feature = "kernel-self-test", CONFIG_ARCH_AARCH64))]
+        #[cfg(all(
+            all(feature = "kernel-test", feature = "kernel-self-test"),
+            CONFIG_ARCH_AARCH64
+        ))]
         retry_test::pause_after_retry_check(retry_pending);
         crate::kernel::process::reap_one_process(&mut access);
         let first_vm_pass = crate::kernel::vm::lifecycle::reap_batch(&mut access);
@@ -300,7 +306,7 @@ fn retry_expired(
     _callout: crate::kernel::time::CalloutRef<'_>,
     _event: crate::kernel::time::TimerEvent,
 ) {
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     TEST_RETRY_CPU.store(
         crate::kernel::cpu::current_index().map_or(usize::MAX, |cpu| cpu.get()),
         Ordering::Release,

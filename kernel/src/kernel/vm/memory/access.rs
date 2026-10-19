@@ -3,15 +3,15 @@
 
 //! Guest page commitment, copying, fault resolution, and publication.
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 use core::ptr::copy_nonoverlapping;
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 use core::ptr::write_bytes;
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 use hyper::mm::allocator::heap::PageOwner;
 use hyper::mm::{ForeignMemory, PAGE_SIZE, PhysicalAddress};
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 use hyper::mm::{copy_from_foreign, copy_to_foreign};
 use hyper::sync::atomic::Ordering;
 use hyper::vm::exit::{GuestMemoryFault, MemoryAccess};
@@ -19,7 +19,7 @@ use hyper::vm::translation::{
     ActiveMappingError, Stage2FaultResolution, Stage2PagePermissions, resolve_stage2_fault,
 };
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 use super::GuestMemoryStats;
 use super::residency::publish_current_residency;
 use super::storage::{
@@ -28,7 +28,7 @@ use super::storage::{
 };
 use super::{Error, GuestAddressSpace};
 use crate::kernel::accounting::{ResourceAmount, ResourceKind};
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 use crate::kernel::mm::page_block::PageBlock;
 
 struct ResidentBlock {
@@ -51,7 +51,7 @@ impl LeafPublication<'_> {
 }
 
 impl GuestAddressSpace {
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn verify_resident_blocks_for_test() -> Result<(), &'static str> {
         use super::backing::{Layout, Region};
         use crate::kernel::accounting::{ResourceDomain, ResourceLimits};
@@ -175,7 +175,7 @@ impl GuestAddressSpace {
     /// Returns a raw pointer into retained test RAM, without creating a borrow.
     /// Dereferencing requires retaining this VM and using only atomic accesses.
     #[cfg(all(
-        feature = "kernel-self-test",
+        all(feature = "kernel-test", feature = "kernel-self-test"),
         any(CONFIG_ARCH_AARCH64, CONFIG_ARCH_RISCV64)
     ))]
     pub(crate) fn atomic_counter_for_test(
@@ -194,13 +194,13 @@ impl GuestAddressSpace {
         Ok(address as *const core::sync::atomic::AtomicU64)
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub fn copy_from(&mut self, ipa: u64, destination: &mut [u8]) -> Result<(), Error> {
         self.ensure_healthy()?;
         copy_from_foreign(self, ipa, destination).map_err(Error::from)
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub fn copy_to(&mut self, ipa: u64, source: &[u8]) -> Result<(), Error> {
         self.ensure_healthy()?;
         copy_to_foreign(self, ipa, source).map_err(Error::from)
@@ -330,14 +330,14 @@ impl GuestAddressSpace {
         Ok(())
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn instruction_snapshot_for_test(
         &self,
     ) -> Result<ResidentInstructionSnapshot, Error> {
         self.snapshot_resident_instruction_pages()
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn publish_instruction_snapshot_for_test(
         &mut self,
         pin: &dyn hyper::cpu::PinnedExecution,
@@ -346,7 +346,7 @@ impl GuestAddressSpace {
         self.publish_instruction_snapshot(pin, snapshot)
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn prepare_active_leaf_page_for_test(
         &mut self,
         page_index: usize,
@@ -356,7 +356,7 @@ impl GuestAddressSpace {
         self.publish_instruction_page(page_index, physical, pin)
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn instruction_page_ready_for_test(&self, page_index: usize) -> bool {
         self.instruction_ready_pages
             .get(page_index)
@@ -366,14 +366,14 @@ impl GuestAddressSpace {
     pub(crate) fn resident_memory(&self) -> super::backing::ResidentMemory {
         match &self.backing {
             GuestMemoryBacking::SharedVmo(layout) => layout.resident_memory(),
-            #[cfg(feature = "kernel-self-test")]
+            #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
             GuestMemoryBacking::KernelOwned(pages) => super::backing::ResidentMemory::owned(
                 pages.iter().filter(|page| page.is_some()).count() as u64 * PAGE_SIZE,
             ),
         }
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub fn statistics(&self) -> GuestMemoryStats {
         GuestMemoryStats {
             addressable_pages: self.mapped_pages.len(),
@@ -565,9 +565,9 @@ impl GuestAddressSpace {
         let Some(offset) = ipa.checked_sub(self.ipa_base) else {
             return Ok(None);
         };
-        #[cfg(not(feature = "kernel-self-test"))]
+        #[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
         let GuestMemoryBacking::SharedVmo(backing) = &self.backing;
-        #[cfg(feature = "kernel-self-test")]
+        #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
         let backing = match &self.backing {
             GuestMemoryBacking::SharedVmo(backing) => backing,
             GuestMemoryBacking::KernelOwned(_) => return Ok(None),
@@ -746,7 +746,7 @@ impl GuestAddressSpace {
         Ok(())
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     fn publish_instruction_page(
         &mut self,
         page_index: usize,
@@ -823,7 +823,7 @@ impl GuestAddressSpace {
     fn prepare_backing_page(&mut self, page_index: usize) -> Result<PhysicalAddress, Error> {
         let offset = self.backing_offset(page_index)?;
         match &mut self.backing {
-            #[cfg(feature = "kernel-self-test")]
+            #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
             GuestMemoryBacking::KernelOwned(pages) => {
                 let slot = pages.get_mut(page_index).ok_or(Error::InvalidRange)?;
                 if slot.is_none() {
@@ -861,7 +861,7 @@ impl GuestAddressSpace {
     fn backing_page_is_resident(&self, page_index: usize) -> Result<bool, Error> {
         let offset = self.backing_offset(page_index)?;
         match &self.backing {
-            #[cfg(feature = "kernel-self-test")]
+            #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
             GuestMemoryBacking::KernelOwned(pages) => pages
                 .get(page_index)
                 .map(Option::is_some)
@@ -875,7 +875,7 @@ impl GuestAddressSpace {
     fn backing_physical_page(&self, page_index: usize) -> Result<PhysicalAddress, Error> {
         let offset = self.backing_offset(page_index)?;
         match &self.backing {
-            #[cfg(feature = "kernel-self-test")]
+            #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
             GuestMemoryBacking::KernelOwned(pages) => pages
                 .get(page_index)
                 .and_then(Option::as_ref)
@@ -893,7 +893,7 @@ impl GuestAddressSpace {
             return None;
         }
         match &self.backing {
-            #[cfg(feature = "kernel-self-test")]
+            #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
             GuestMemoryBacking::KernelOwned(_) => usize::try_from(offset / PAGE_SIZE).ok(),
             GuestMemoryBacking::SharedVmo(backing) => backing.page_index(offset),
         }
@@ -901,7 +901,7 @@ impl GuestAddressSpace {
 
     fn backing_offset(&self, page_index: usize) -> Result<u64, Error> {
         match &self.backing {
-            #[cfg(feature = "kernel-self-test")]
+            #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
             GuestMemoryBacking::KernelOwned(_) => (page_index as u64)
                 .checked_mul(PAGE_SIZE)
                 .ok_or(Error::AddressOverflow),
@@ -934,7 +934,7 @@ impl GuestAddressSpace {
         }
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn verify_table_maintenance_for_test(&mut self) -> Result<(), &'static str> {
         let tables = self.table_pages.pages.len();
         let committed = self.committed_pages;
@@ -1002,7 +1002,7 @@ impl ForeignMemory for GuestAddressSpace {
             .checked_add(page_offset as u64)
             .ok_or(Error::AddressOverflow)?;
         match &self.backing {
-            #[cfg(feature = "kernel-self-test")]
+            #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
             GuestMemoryBacking::KernelOwned(_) => {
                 let physical = self.backing_physical_page(page_index)?;
                 let source = linear_address(physical)?
@@ -1050,7 +1050,7 @@ impl ForeignMemory for GuestAddressSpace {
             .checked_add(page_offset as u64)
             .ok_or(Error::AddressOverflow)?;
         match &self.backing {
-            #[cfg(feature = "kernel-self-test")]
+            #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
             GuestMemoryBacking::KernelOwned(_) => {
                 let physical = self.backing_physical_page(page_index)?;
                 let destination = linear_address(physical)?

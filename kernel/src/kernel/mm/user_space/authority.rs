@@ -14,7 +14,7 @@ use crate::kernel::object::{
 /// Failure while preparing an accounted executable-authority object.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(
-    not(feature = "kernel-self-test"),
+    not(all(feature = "kernel-test", feature = "kernel-self-test")),
     expect(
         dead_code,
         reason = "reserved authority is currently constructed only by capability self-tests"
@@ -37,7 +37,7 @@ impl From<ResourceError> for ExecutableAuthorityError {
 /// proves only identity; the `CREATE_EXECUTABLE` right on the resolving handle
 /// grants the operation. Writable VMO authority is a distinct required input.
 #[cfg_attr(
-    not(feature = "kernel-self-test"),
+    not(all(feature = "kernel-test", feature = "kernel-self-test")),
     expect(
         dead_code,
         reason = "reserved authority is currently constructed only by capability self-tests"
@@ -49,7 +49,7 @@ pub(crate) struct ExecutableAuthority {
 
 impl ExecutableAuthority {
     #[cfg_attr(
-        not(feature = "kernel-self-test"),
+        not(all(feature = "kernel-test", feature = "kernel-self-test")),
         expect(
             dead_code,
             reason = "reserved authority is currently constructed only by capability self-tests"

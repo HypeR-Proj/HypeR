@@ -11,18 +11,18 @@
 
 use hyper::log::ByteRing;
 use hyper::sync::InterruptSpinLock;
-#[cfg(not(feature = "kernel-self-test"))]
+#[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
 use hyper::sync::atomic::AtomicBool;
 use hyper::sync::atomic::{AtomicU64, Ordering};
 
 use crate::kernel::accounting::CommittedCharge;
-#[cfg(not(feature = "kernel-self-test"))]
+#[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
 use crate::kernel::accounting::{ResourceAmount, ResourceDomain, ResourceError, ResourceKind};
 use crate::kernel::authority::Rights;
 use crate::kernel::object::{
     KernelObject, ObjectKind, SignalMask, SignalSource, SignalState, TransferClass, private,
 };
-#[cfg(not(feature = "kernel-self-test"))]
+#[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
 use crate::kernel::object::{ObjectCreationError, ObjectPublication, object_allocation_size};
 
 type InputLock<T> = InterruptSpinLock<T, crate::hal::irq::LocalMask>;
@@ -36,7 +36,7 @@ struct ConsoleState {
     input: InputLock<InputState>,
     signals: SignalState,
     receive_errors: AtomicU64,
-    #[cfg(not(feature = "kernel-self-test"))]
+    #[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
     object_published: AtomicBool,
 }
 
@@ -46,7 +46,7 @@ impl ConsoleState {
             input: InputLock::new(InputState::new()),
             signals: SignalState::with_initial_level(SystemConsole::WRITABLE),
             receive_errors: AtomicU64::new(0),
-            #[cfg(not(feature = "kernel-self-test"))]
+            #[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
             object_published: AtomicBool::new(false),
         }
     }
@@ -91,7 +91,7 @@ struct ClaimState {
 
 /// Failure while constructing the singleton system-console object.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[cfg(not(feature = "kernel-self-test"))]
+#[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
 pub(crate) enum ObjectError {
     AllocationSize,
     AlreadyPublished,
@@ -100,14 +100,14 @@ pub(crate) enum ObjectError {
     Unavailable,
 }
 
-#[cfg(not(feature = "kernel-self-test"))]
+#[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
 impl From<ObjectCreationError> for ObjectError {
     fn from(error: ObjectCreationError) -> Self {
         Self::Object(error)
     }
 }
 
-#[cfg(not(feature = "kernel-self-test"))]
+#[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
 impl From<ResourceError> for ObjectError {
     fn from(error: ResourceError) -> Self {
         Self::Resource(error)
@@ -137,13 +137,13 @@ impl SystemConsole {
     pub(crate) const SUPPORTED_SIGNALS: SignalMask = Self::READABLE.union(Self::WRITABLE);
 
     /// Reports whether boot selected a physical console with runtime input.
-    #[cfg(not(feature = "kernel-self-test"))]
+    #[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
     pub(crate) fn is_available() -> bool {
         super::serial::runtime_input_available()
     }
 
     /// Prepares the system console's sole userspace object publication.
-    #[cfg(not(feature = "kernel-self-test"))]
+    #[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
     pub(crate) fn try_publication(
         domain: &ResourceDomain,
     ) -> Result<ObjectPublication<Self>, ObjectError> {
@@ -167,7 +167,7 @@ impl SystemConsole {
         result
     }
 
-    #[cfg(not(feature = "kernel-self-test"))]
+    #[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
     fn try_new(domain: &ResourceDomain) -> Result<Self, ObjectError> {
         let bytes = object_allocation_size::<Self>()
             .and_then(|value| u64::try_from(value).ok())

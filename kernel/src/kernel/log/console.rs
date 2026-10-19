@@ -132,12 +132,12 @@ pub(super) fn emergency_write(prefix: &[u8], message: &[u8]) {
     }
 }
 
-#[cfg(CONFIG_CRASH_CONSOLE)]
+#[cfg(feature = "crash-console")]
 pub(super) fn emergency_available() -> bool {
     emergency_device().is_some()
 }
 
-#[cfg(CONFIG_CRASH_CONSOLE)]
+#[cfg(feature = "crash-console")]
 pub(super) fn emergency_write_raw(bytes: &[u8]) {
     if let Some(device) = emergency_device() {
         let mut attempts = EMERGENCY_UART_ATTEMPTS;
@@ -145,7 +145,7 @@ pub(super) fn emergency_write_raw(bytes: &[u8]) {
     }
 }
 
-#[cfg(CONFIG_CRASH_CONSOLE)]
+#[cfg(feature = "crash-console")]
 pub(super) fn emergency_read_raw() -> Option<u8> {
     emergency_device().and_then(|device| device.try_read_byte())
 }
@@ -369,7 +369,7 @@ pub(super) fn wait_for_drain(
     }
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn register_pending_flush_barrier_for_test() -> Result<FlushBarrier, DrainBarrierError> {
     CONSOLE.with(
         |state| match state.barriers.register(state.next_sequence, u64::MAX)? {
@@ -381,14 +381,14 @@ pub(crate) fn register_pending_flush_barrier_for_test() -> Result<FlushBarrier, 
     )
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn wait_pending_flush_barrier_for_test(
     barrier: FlushBarrier,
 ) -> Result<ConsoleFlushOutcome, crate::kernel::sync::Error> {
     wait_for_drain(barrier)
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn flush_barrier_waiter_count_for_test(
     slot: usize,
 ) -> Result<usize, crate::kernel::task::scheduler::Error> {
@@ -398,7 +398,7 @@ pub(crate) fn flush_barrier_waiter_count_for_test(
     })
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn cancel_flush_barrier_waiter_for_test(
     slot: usize,
     thread: crate::kernel::task::thread::ThreadId,
@@ -409,7 +409,7 @@ pub(crate) fn cancel_flush_barrier_waiter_for_test(
     })
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn active_flush_barrier_count_for_test() -> usize {
     CONSOLE.with(|state| state.barriers.active_count())
 }
@@ -432,7 +432,7 @@ impl FlushBarrier {
         }
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn slot_for_test(&self) -> usize {
         self.token_or_invariant().slot()
     }

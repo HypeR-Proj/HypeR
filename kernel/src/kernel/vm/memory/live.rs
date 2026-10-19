@@ -265,7 +265,7 @@ impl super::GuestAddressSpace {
                 super::storage::GuestMemoryBacking::SharedVmo(layout) => {
                     layout.overlaps(extent.alias - self.ipa_base, extent.length)
                 }
-                #[cfg(feature = "kernel-self-test")]
+                #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
                 super::storage::GuestMemoryBacking::KernelOwned(_) => true,
             };
             if overlaps {

@@ -443,7 +443,7 @@ fn complete_publication(
     }
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 mod self_test {
     use hyper::cpu::CpuIndex;
     use hyper::sync::PublishedOnce;
@@ -577,5 +577,5 @@ mod self_test {
     }
 }
 
-#[cfg(feature = "kernel-self-test")]
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) use self_test::{Error as WaitSelfTestError, run as run_wait_self_test};

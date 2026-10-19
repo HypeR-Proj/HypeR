@@ -415,7 +415,7 @@ impl<E: Environment, B: DmaBuffer> Controller<E, B> {
     /// Test-only removal of one page from a live production mapping. Both the
     /// original mapping and the returned owner retain backing. Uses the same
     /// domain invalidation and `CMD_SYNC` as ordinary mapping revocation.
-    #[cfg(feature = "io-dma-revoke-test")]
+    #[cfg(all(feature = "kernel-test", feature = "io-dma-revoke-test"))]
     pub fn revoke_test_page(&mut self, id: DomainId, iova: u64) -> Result<B, Error>
     where
         B: Clone,

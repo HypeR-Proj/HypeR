@@ -171,7 +171,7 @@ impl<M: DmaMemory, B: DmaBuffer> Domain<M, B> {
         Ok(mapping)
     }
 
-    #[cfg(feature = "io-dma-revoke-test")]
+    #[cfg(all(feature = "kernel-test", feature = "io-dma-revoke-test"))]
     pub(super) fn revoke_test_page<E: Environment<Memory = M>>(
         &mut self,
         iova: u64,

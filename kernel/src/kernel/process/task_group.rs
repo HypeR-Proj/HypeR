@@ -70,14 +70,14 @@ pub(crate) enum TaskGroupError {
     GenerationExhausted,
     Inactive,
     #[cfg_attr(
-        not(feature = "kernel-self-test"),
+        not(all(feature = "kernel-test", feature = "kernel-self-test")),
         expect(
             dead_code,
             reason = "Explicit group retirement is exercised by kernel self-tests"
         )
     )]
     #[cfg_attr(
-        feature = "kernel-self-test",
+        all(feature = "kernel-test", feature = "kernel-self-test"),
         allow(
             dead_code,
             reason = "Native lifecycle self-tests require a HAL with user execution support"
@@ -277,9 +277,9 @@ impl TaskGroup {
         })
     }
 
-    #[cfg(feature = "kernel-self-test")]
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     #[cfg_attr(
-        feature = "kernel-self-test",
+        all(feature = "kernel-test", feature = "kernel-self-test"),
         allow(
             dead_code,
             reason = "Native lifecycle self-tests require a HAL with user execution support"

@@ -73,28 +73,28 @@ fn walk_frame_chain(mut frame: usize, bottom: usize, top: usize) {
     ));
 }
 
-fn emit_trace_entry(depth: usize, address: u64, lookup_address: u64) {
-    match usize::try_from(lookup_address).ok().and_then(|address| {
+fn emit_trace_entry(depth: usize, address: u64, _lookup_address: u64) {
+    #[cfg(feature = "runtime-symbols")]
+    if let Some(symbol) = usize::try_from(_lookup_address).ok().and_then(|address| {
         super::super::debug::kallsyms::lookup(address)
             .ok()
             .flatten()
     }) {
-        Some(symbol) => {
-            super::super::log::emergency(format_args!("  #{depth:02} [<{address:#018x}>] {symbol}"))
-        }
-        None => super::super::log::emergency(format_args!("  #{depth:02} [<{address:#018x}>]")),
+        super::super::log::emergency(format_args!("  #{depth:02} [<{address:#018x}>] {symbol}"));
+        return;
     }
+    super::super::log::emergency(format_args!("  #{depth:02} [<{address:#018x}>]"));
 }
 
-pub(super) fn emit_symbolized(label: &str, address: u64, lookup_address: u64) {
-    match usize::try_from(lookup_address).ok().and_then(|address| {
+pub(super) fn emit_symbolized(label: &str, address: u64, _lookup_address: u64) {
+    #[cfg(feature = "runtime-symbols")]
+    if let Some(symbol) = usize::try_from(_lookup_address).ok().and_then(|address| {
         super::super::debug::kallsyms::lookup(address)
             .ok()
             .flatten()
     }) {
-        Some(symbol) => {
-            super::super::log::emergency(format_args!("{label}: {address:#018x} <{symbol}>"))
-        }
-        None => super::super::log::emergency(format_args!("{label}: {address:#018x}")),
+        super::super::log::emergency(format_args!("{label}: {address:#018x} <{symbol}>"));
+        return;
     }
+    super::super::log::emergency(format_args!("{label}: {address:#018x}"));
 }
