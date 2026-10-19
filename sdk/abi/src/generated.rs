@@ -509,6 +509,9 @@ pub const HYPER_NATIVE_OP_VMAR_UNMAP: u64 = 259;
 pub const HYPER_NATIVE_OP_VMAR_DESTROY: u64 = 260;
 pub const HYPER_NATIVE_OP_DIRECTORY_READ: u64 = 256;
 pub const HYPER_NATIVE_OP_MEMORY_INSPECTOR_READ: u64 = 256;
+pub const HYPER_NATIVE_OP_CPU_INSPECTOR_PROFILE_START: u64 = 257;
+pub const HYPER_NATIVE_OP_CPU_INSPECTOR_PROFILE_STOP: u64 = 258;
+pub const HYPER_NATIVE_OP_CPU_INSPECTOR_PROFILE_READ: u64 = 259;
 pub const HYPER_NATIVE_OP_CPU_INSPECTOR_READ: u64 = 256;
 pub const HYPER_NATIVE_OP_FILE_GET_INFO: u64 = 257;
 pub const HYPER_NATIVE_OP_DIRECTORY_GET_INFO: u64 = 258;
@@ -694,6 +697,9 @@ pub enum NativeOperation {
     VmarDestroy,
     DirectoryRead,
     MemoryInspectorRead,
+    CpuInspectorProfileStart,
+    CpuInspectorProfileStop,
+    CpuInspectorProfileRead,
     CpuInspectorRead,
     FileGetInfo,
     DirectoryGetInfo,
@@ -927,6 +933,9 @@ impl NativeOperation {
             (HYPER_NATIVE_OBJECT_VMAR, HYPER_NATIVE_OP_VMAR_DESTROY) => Some(Self::VmarDestroy),
             (HYPER_NATIVE_OBJECT_DIRECTORY_STREAM, HYPER_NATIVE_OP_DIRECTORY_READ) => Some(Self::DirectoryRead),
             (HYPER_NATIVE_OBJECT_MEMORY_INSPECTOR, HYPER_NATIVE_OP_MEMORY_INSPECTOR_READ) => Some(Self::MemoryInspectorRead),
+            (HYPER_NATIVE_OBJECT_CPU_INSPECTOR, HYPER_NATIVE_OP_CPU_INSPECTOR_PROFILE_START) => Some(Self::CpuInspectorProfileStart),
+            (HYPER_NATIVE_OBJECT_CPU_INSPECTOR, HYPER_NATIVE_OP_CPU_INSPECTOR_PROFILE_STOP) => Some(Self::CpuInspectorProfileStop),
+            (HYPER_NATIVE_OBJECT_CPU_INSPECTOR, HYPER_NATIVE_OP_CPU_INSPECTOR_PROFILE_READ) => Some(Self::CpuInspectorProfileRead),
             (HYPER_NATIVE_OBJECT_CPU_INSPECTOR, HYPER_NATIVE_OP_CPU_INSPECTOR_READ) => Some(Self::CpuInspectorRead),
             (HYPER_NATIVE_OBJECT_FILE, HYPER_NATIVE_OP_FILE_GET_INFO) => Some(Self::FileGetInfo),
             (HYPER_NATIVE_OBJECT_DIRECTORY, HYPER_NATIVE_OP_DIRECTORY_GET_INFO) => Some(Self::DirectoryGetInfo),
@@ -1114,6 +1123,9 @@ impl NativeOperation {
             Self::VmarDestroy => HYPER_NATIVE_OP_VMAR_DESTROY,
             Self::DirectoryRead => HYPER_NATIVE_OP_DIRECTORY_READ,
             Self::MemoryInspectorRead => HYPER_NATIVE_OP_MEMORY_INSPECTOR_READ,
+            Self::CpuInspectorProfileStart => HYPER_NATIVE_OP_CPU_INSPECTOR_PROFILE_START,
+            Self::CpuInspectorProfileStop => HYPER_NATIVE_OP_CPU_INSPECTOR_PROFILE_STOP,
+            Self::CpuInspectorProfileRead => HYPER_NATIVE_OP_CPU_INSPECTOR_PROFILE_READ,
             Self::CpuInspectorRead => HYPER_NATIVE_OP_CPU_INSPECTOR_READ,
             Self::FileGetInfo => HYPER_NATIVE_OP_FILE_GET_INFO,
             Self::DirectoryGetInfo => HYPER_NATIVE_OP_DIRECTORY_GET_INFO,
@@ -1300,6 +1312,9 @@ impl NativeOperation {
             Self::VmarDestroy => Some(HYPER_NATIVE_OBJECT_VMAR),
             Self::DirectoryRead => Some(HYPER_NATIVE_OBJECT_DIRECTORY_STREAM),
             Self::MemoryInspectorRead => Some(HYPER_NATIVE_OBJECT_MEMORY_INSPECTOR),
+            Self::CpuInspectorProfileStart => Some(HYPER_NATIVE_OBJECT_CPU_INSPECTOR),
+            Self::CpuInspectorProfileStop => Some(HYPER_NATIVE_OBJECT_CPU_INSPECTOR),
+            Self::CpuInspectorProfileRead => Some(HYPER_NATIVE_OBJECT_CPU_INSPECTOR),
             Self::CpuInspectorRead => Some(HYPER_NATIVE_OBJECT_CPU_INSPECTOR),
             Self::FileGetInfo => Some(HYPER_NATIVE_OBJECT_FILE),
             Self::DirectoryGetInfo => Some(HYPER_NATIVE_OBJECT_DIRECTORY),
@@ -1486,6 +1501,9 @@ impl NativeOperation {
             Self::VmarDestroy => 0,
             Self::DirectoryRead => 4,
             Self::MemoryInspectorRead => 2,
+            Self::CpuInspectorProfileStart => 2,
+            Self::CpuInspectorProfileStop => 1,
+            Self::CpuInspectorProfileRead => 5,
             Self::CpuInspectorRead => 2,
             Self::FileGetInfo => 2,
             Self::DirectoryGetInfo => 2,
@@ -1672,6 +1690,9 @@ impl NativeOperation {
             Self::VmarDestroy => 64,
             Self::DirectoryRead => 16,
             Self::MemoryInspectorRead => 8,
+            Self::CpuInspectorProfileStart => 2147483648,
+            Self::CpuInspectorProfileStop => 2147483648,
+            Self::CpuInspectorProfileRead => 8589934592,
             Self::CpuInspectorRead => 8,
             Self::FileGetInfo => 8,
             Self::DirectoryGetInfo => 8,
@@ -1823,6 +1844,62 @@ pub const fn hyper_native_failure_result_mask(
         None => 0,
     }
 }
+
+pub const HYPER_NATIVE_CPU_PROFILE_INFO_MIN_SIZE: usize = 144;
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HyperNativeCpuProfileInfo {
+    pub generation: u64,
+    pub period: u64,
+    pub deadline_ns: u64,
+    pub cpu_count: u64,
+    pub running_generation: u64,
+    pub armed_mask: u64,
+    pub capacity: u64,
+    pub depth: u64,
+    pub active_cpus: u64,
+    pub dropped: u64,
+    pub revision: [u8; 64],
+}
+const _: () = assert!(core::mem::size_of::<HyperNativeCpuProfileInfo>() == 144);
+const _: () = assert!(core::mem::align_of::<HyperNativeCpuProfileInfo>() == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuProfileInfo, generation) == 0);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuProfileInfo, period) == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuProfileInfo, deadline_ns) == 16);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuProfileInfo, cpu_count) == 24);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuProfileInfo, running_generation) == 32);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuProfileInfo, armed_mask) == 40);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuProfileInfo, capacity) == 48);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuProfileInfo, depth) == 56);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuProfileInfo, active_cpus) == 64);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuProfileInfo, dropped) == 72);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuProfileInfo, revision) == 80);
+
+pub const HYPER_NATIVE_CPU_PROFILE_SAMPLE_MIN_SIZE: usize = 192;
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HyperNativeCpuProfileSample {
+    pub sequence: u64,
+    pub timestamp_ns: u64,
+    pub cpu: u64,
+    pub world: u64,
+    pub depth: u64,
+    pub flags: u64,
+    pub dropped: u64,
+    pub period: u64,
+    pub frames: [u8; 128],
+}
+const _: () = assert!(core::mem::size_of::<HyperNativeCpuProfileSample>() == 192);
+const _: () = assert!(core::mem::align_of::<HyperNativeCpuProfileSample>() == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuProfileSample, sequence) == 0);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuProfileSample, timestamp_ns) == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuProfileSample, cpu) == 16);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuProfileSample, world) == 24);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuProfileSample, depth) == 32);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuProfileSample, flags) == 40);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuProfileSample, dropped) == 48);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuProfileSample, period) == 56);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuProfileSample, frames) == 64);
 
 pub const HYPER_NATIVE_PROCESS_RETIREMENT_INFO_MIN_SIZE: usize = 104;
 #[repr(C)]

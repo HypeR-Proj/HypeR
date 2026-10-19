@@ -293,6 +293,8 @@ when adopting changed board policy or guest startup files.
   and contribution requirements.
 - [Product configuration](docs/configuration.md): optional kernel capabilities,
   userspace component selection and a minimal QEMU system.
+- [PMU profiling](docs/profiling.md): opt-in AArch64 cycle sampling, kernel
+  call chains, folded-stack export and flame graphs.
 - [Architecture](kernel/docs/architecture.md): kernel boundaries and ownership.
 - [Pi 5 image distribution](docs/image-distribution.md): image builds, release
   artifacts, dependency pins, and component licensing.

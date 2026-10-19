@@ -118,3 +118,8 @@ pub(super) use vm::{
 pub(super) use ipc::capability_receive_result;
 #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(super) use vfs::run_wire_self_test;
+
+mod profile;
+pub(super) use profile::{
+    sys_cpu_inspector_profile_read, sys_cpu_inspector_profile_start, sys_cpu_inspector_profile_stop,
+};

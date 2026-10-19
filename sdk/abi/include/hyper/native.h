@@ -521,6 +521,9 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
 #define HYPER_NATIVE_OP_VMAR_DESTROY UINT64_C(260)
 #define HYPER_NATIVE_OP_DIRECTORY_READ UINT64_C(256)
 #define HYPER_NATIVE_OP_MEMORY_INSPECTOR_READ UINT64_C(256)
+#define HYPER_NATIVE_OP_CPU_INSPECTOR_PROFILE_START UINT64_C(257)
+#define HYPER_NATIVE_OP_CPU_INSPECTOR_PROFILE_STOP UINT64_C(258)
+#define HYPER_NATIVE_OP_CPU_INSPECTOR_PROFILE_READ UINT64_C(259)
 #define HYPER_NATIVE_OP_CPU_INSPECTOR_READ UINT64_C(256)
 #define HYPER_NATIVE_OP_FILE_GET_INFO UINT64_C(257)
 #define HYPER_NATIVE_OP_DIRECTORY_GET_INFO UINT64_C(258)
@@ -674,6 +677,58 @@ static inline uint64_t hyper_native_failure_result_mask(
     }
     return UINT64_C(0);
 }
+
+#define HYPER_NATIVE_CPU_PROFILE_INFO_MIN_SIZE UINT64_C(144)
+typedef struct hyper_native_cpu_profile_info_t {
+    uint64_t generation;
+    uint64_t period;
+    uint64_t deadline_ns;
+    uint64_t cpu_count;
+    uint64_t running_generation;
+    uint64_t armed_mask;
+    uint64_t capacity;
+    uint64_t depth;
+    uint64_t active_cpus;
+    uint64_t dropped;
+    uint8_t revision[64];
+} hyper_native_cpu_profile_info_t;
+HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_cpu_profile_info_t) == 144, "cpu_profile_info size");
+HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_cpu_profile_info_t) == 8, "cpu_profile_info alignment");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, generation) == 0, "cpu_profile_info.generation offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, period) == 8, "cpu_profile_info.period offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, deadline_ns) == 16, "cpu_profile_info.deadline_ns offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, cpu_count) == 24, "cpu_profile_info.cpu_count offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, running_generation) == 32, "cpu_profile_info.running_generation offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, armed_mask) == 40, "cpu_profile_info.armed_mask offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, capacity) == 48, "cpu_profile_info.capacity offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, depth) == 56, "cpu_profile_info.depth offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, active_cpus) == 64, "cpu_profile_info.active_cpus offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, dropped) == 72, "cpu_profile_info.dropped offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, revision) == 80, "cpu_profile_info.revision offset");
+
+#define HYPER_NATIVE_CPU_PROFILE_SAMPLE_MIN_SIZE UINT64_C(192)
+typedef struct hyper_native_cpu_profile_sample_t {
+    uint64_t sequence;
+    uint64_t timestamp_ns;
+    uint64_t cpu;
+    uint64_t world;
+    uint64_t depth;
+    uint64_t flags;
+    uint64_t dropped;
+    uint64_t period;
+    uint8_t frames[128];
+} hyper_native_cpu_profile_sample_t;
+HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_cpu_profile_sample_t) == 192, "cpu_profile_sample size");
+HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_cpu_profile_sample_t) == 8, "cpu_profile_sample alignment");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_sample_t, sequence) == 0, "cpu_profile_sample.sequence offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_sample_t, timestamp_ns) == 8, "cpu_profile_sample.timestamp_ns offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_sample_t, cpu) == 16, "cpu_profile_sample.cpu offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_sample_t, world) == 24, "cpu_profile_sample.world offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_sample_t, depth) == 32, "cpu_profile_sample.depth offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_sample_t, flags) == 40, "cpu_profile_sample.flags offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_sample_t, dropped) == 48, "cpu_profile_sample.dropped offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_sample_t, period) == 56, "cpu_profile_sample.period offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_sample_t, frames) == 64, "cpu_profile_sample.frames offset");
 
 #define HYPER_NATIVE_PROCESS_RETIREMENT_INFO_MIN_SIZE UINT64_C(104)
 typedef struct hyper_native_process_retirement_info_t {

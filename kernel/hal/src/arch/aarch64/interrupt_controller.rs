@@ -81,6 +81,24 @@ impl From<GicError> for Error {
 }
 
 impl Aarch64InterruptController {
+    /// Called under the registry lock with the owned SPI still disabled.
+    pub fn route_to_cpu(
+        &mut self,
+        interrupt: InterruptId,
+        cpu: hyper::cpu::CpuIndex,
+    ) -> Result<(), Error> {
+        let affinity = super::smp::gic_affinity(cpu.get()).ok_or(Error::Unsupported)?;
+        match &mut self.0 {
+            ControllerKind::V2(c) => c
+                .route_spi(
+                    interrupt,
+                    super::gic_cpu_interface::v2_target(affinity).ok_or(Error::Unsupported)?,
+                )
+                .map_err(Into::into),
+            ControllerKind::V3(c) => c.route_spi(interrupt, affinity).map_err(Into::into),
+        }
+    }
+
     /// Binds and initializes the firmware-selected GIC instance.
     ///
     /// # Safety

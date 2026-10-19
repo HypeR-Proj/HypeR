@@ -772,6 +772,26 @@ impl IrqDomainId {
     }
 }
 
+#[cfg(all(CONFIG_ARCH_AARCH64, feature = "pmu-profiling"))]
+pub(crate) fn route_prepared_to_cpu(
+    prepared: &PreparedRegistration,
+    cpu: hyper::cpu::CpuIndex,
+) -> Result<(), Error> {
+    with_state(|state| {
+        let (domain, index) = state
+            .mapping_position_by_virtual(prepared.registration.interrupt)
+            .ok_or(Error::InterruptNotMapped)?;
+        let mapping = &state.domains[domain].mappings[index];
+        if mapping.lifecycle != MappingLifecycle::Prepared {
+            return Err(Error::MappingBusy);
+        }
+        state
+            .controller
+            .route_to_cpu(mapping.hardware, cpu)
+            .map_err(Into::into)
+    })
+}
+
 pub fn activate(prepared: PreparedRegistration) -> Result<Registration, ActivationFailure> {
     let _transaction = match LocalLifecycleTransaction::acquire() {
         Ok(transaction) => transaction,
