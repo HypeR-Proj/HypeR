@@ -75,6 +75,11 @@ fn snapshot(
     )?;
     writeln!(
         output,
+        "          non-reclaimable={} (included in used and buffered/cached)",
+        estimate(summary.cache_non_reclaimable),
+    )?;
+    writeln!(
+        output,
         "Ramfs:    capacity={} (logical; included in kernel)",
         quantity(observation.ramfs_capacity_bytes),
     )?;

@@ -584,6 +584,16 @@ impl MemoryInspector {
         // into the physical counters here.
         let file_reclaimable =
             crate::kernel::vfs::file_cache().and_then(|cache| cache.reclaimable_pages());
+        // The shrinker owns both payloads and their index/header backing.
+        // Metadata grows with cached files and contracts when they are evicted;
+        // excluding it makes a warmed cache look like permanently used RAM.
+        // This is a shrinkable-pool estimate, not a promise that every page can
+        // be freed immediately: live pins can retain a minimum index/slab set.
+        let file_reclaimable = file_reclaimable.map(|payloads| {
+            payloads.min(runtime.file_cache_pages.pages)
+                + runtime.file_cache_slab_pages
+                + runtime.file_cache_large_pages
+        });
         let slab_reclaimable = runtime.cache.reclaimable_pages;
         Ok(MemoryObservation {
             captured_at_ns: crate::kernel::time::monotonic_nanoseconds().unwrap_or_default(),
@@ -607,11 +617,7 @@ impl MemoryInspector {
             )?,
             slab_reclaimable_bytes: pages_to_bytes(slab_reclaimable.unwrap_or(0))?,
             slab_sample_complete: u64::from(slab_reclaimable.is_some()),
-            file_cache_reclaimable_bytes: pages_to_bytes(
-                file_reclaimable
-                    .unwrap_or(0)
-                    .min(runtime.file_cache_pages.pages),
-            )?,
+            file_cache_reclaimable_bytes: pages_to_bytes(file_reclaimable.unwrap_or(0))?,
             file_cache_sample_complete: u64::from(file_reclaimable.is_some()),
             ramfs_capacity_bytes: crate::kernel::vfs::ramfs_capacity_bytes(),
         })

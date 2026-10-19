@@ -34,6 +34,7 @@ fn summaries_do_not_double_count_shared_guest_pages_or_caches() {
     assert_eq!(report.reserved, 10 * 4096);
     assert_eq!(report.kernel, Some(23 * 4096));
     assert_eq!(report.buffered_cached, Some(17 * 4096));
+    assert_eq!(report.cache_non_reclaimable, Some(5 * 4096));
     assert_eq!(report.user, 10 * 4096);
     assert_eq!(report.guest, 20 * 4096);
     assert_eq!(report.other, 0);
@@ -43,6 +44,18 @@ fn summaries_do_not_double_count_shared_guest_pages_or_caches() {
             .kernel
             .zip(report.buffered_cached)
             .map(|(kernel, cache)| kernel + cache + report.user + report.guest + report.other)
+    );
+    assert_eq!(
+        report.used,
+        report
+            .kernel
+            .zip(report.cache_non_reclaimable)
+            .map(|(kernel, cache)| report.reserved
+                + kernel
+                + report.user
+                + report.guest
+                + cache
+                + report.other)
     );
 }
 
@@ -61,6 +74,10 @@ fn unavailable_census_does_not_erase_physical_totals_or_mean_zero() {
         assert_eq!(report.allocated, 70 * 4096);
         assert_eq!(report.kernel, slab.map(|bytes| 25 * 4096 - bytes));
         assert_eq!(report.buffered_cached, slab.map(|bytes| 15 * 4096 + bytes));
+        assert_eq!(
+            report.cache_non_reclaimable,
+            file.map(|bytes| 15 * 4096 - bytes)
+        );
         assert_eq!(report.user, 10 * 4096);
         assert_eq!(report.guest, 20 * 4096);
         assert_eq!(report.other, 0);

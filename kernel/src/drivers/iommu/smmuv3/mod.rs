@@ -403,13 +403,23 @@ impl<E: Environment, B: DmaBuffer> Controller<E, B> {
             .as_mut()
             .ok_or(Error::InvalidDomain)?
             .invalidate::<E>(iova, self.capabilities.address_bits)?;
+        if let Err(error) = self.resources.domains[index]
+            .as_mut()
+            .ok_or(Error::InvalidDomain)?
+            .detach_empty_tables()
+        {
+            // Partial detachment must not permit a new parent to be published
+            // before invalidation. Quarantine every owner on corruption.
+            self.fail_closed(error);
+            return Err(error);
+        }
+        // S12_VMALL invalidates intermediate walk caches as well as leaves.
+        // CMD_SYNC completes those walks before table or payload pages reuse.
         self.invalidate_domain(id)?;
         Ok(self.resources.domains[index]
             .as_mut()
             .ok_or(Error::InvalidDomain)?
-            .mappings
-            .remove(mapping)
-            .memory)
+            .finish_unmap(mapping))
     }
 
     /// Test-only removal of one page from a live production mapping. Both the
@@ -460,8 +470,7 @@ impl<E: Environment, B: DmaBuffer> Controller<E, B> {
         let root = self.resources.domains[domain]
             .as_ref()
             .ok_or(Error::InvalidDomain)?
-            .tables[0]
-            .physical();
+            .root_address();
         let word = stream as usize * 8;
         // IHI 0070 §3.21.3.1: hardware may prefetch an invalid STE's words in
         // any order. Synchronize an invalidation with V still clear, then set V

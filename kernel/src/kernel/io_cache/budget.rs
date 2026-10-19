@@ -83,8 +83,16 @@ impl<Page> OwnedPage<Page> {
         }
     }
     pub(super) fn release_mapping(&self) {
-        if self.mappings.fetch_sub(1, Ordering::AcqRel) == 0 {
+        let previous = self.mappings.fetch_sub(1, Ordering::AcqRel);
+        if previous == 0 {
             super::cache_invariant_violation();
+        }
+        // The cache still owns this page, so releasing its last mapping need
+        // not drop a payload or notify the allocator. Resume a pressure sweep
+        // which previously stopped at this canonical key.
+        #[cfg(not(test))]
+        if previous == 1 {
+            super::worker::page_released();
         }
     }
 

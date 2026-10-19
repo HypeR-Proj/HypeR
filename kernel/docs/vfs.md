@@ -189,7 +189,8 @@ Checks for each physical payload and conservative metadata reservation occur
 under the allocator lock, so concurrent fills cannot overbook cache headroom.
 Live non-cache allocations may still consume that headroom. Loading and
 reader-pinned pages remain charged until their final release, and load
-completion or memory release wakes a pressure-blocked worker. Cache admission
+completion, memory release or retirement of the last mapping pin wakes a
+pressure-blocked worker, even if the cache still owns the payload. Cache admission
 never waits for reclamation: a miss falls back to ordinary backend I/O.
 The background mapping sweep remains finite across those wakeups until free
 memory reaches the resume watermark. Refaults do not restart the sweep and

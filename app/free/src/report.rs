@@ -14,6 +14,7 @@ pub struct Summary {
     pub used: Option<u64>,
     pub kernel: Option<u64>,
     pub buffered_cached: Option<u64>,
+    pub cache_non_reclaimable: Option<u64>,
     pub user: u64,
     pub guest: u64,
     pub other: u64,
@@ -44,6 +45,9 @@ impl Summary {
         let buffered_cached = memory
             .slab_reclaimable_bytes
             .map(|slab| memory.file_cache_bytes + slab);
+        let cache_non_reclaimable = memory
+            .file_cache_reclaimable_bytes
+            .map(|file| memory.file_cache_bytes - file);
         let user = memory.vmo_bytes - memory.guest_loaned_bytes;
         let guest = memory.guest_private_bytes + memory.guest_loaned_bytes;
         let attributed = kernel_backing
@@ -58,6 +62,7 @@ impl Summary {
             used,
             kernel,
             buffered_cached,
+            cache_non_reclaimable,
             user,
             guest,
             other: allocated - attributed,
