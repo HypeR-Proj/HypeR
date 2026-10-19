@@ -65,11 +65,15 @@ fn stop(inspector: &CpuInspector, generation: u64) -> Result<(), Box<dyn std::er
 }
 fn export(
     inspector: &CpuInspector,
+    generation: u64,
     stream: bool,
     output: Option<String>,
     mut child: Option<&mut std::process::Child>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let info = inspector.profile_info()?;
+    if info.generation != generation {
+        return Err("capture replaced before exporting".into());
+    }
     if !stream {
         stop(inspector, info.generation)?;
     }
@@ -177,7 +181,10 @@ fn run() -> Result<std::process::ExitCode, Box<dyn std::error::Error>> {
                 std::str::from_utf8(&info.revision)?.trim_end_matches('\0')
             );
         }
-        Command::Dump { output } => export(&inspector, false, output, None)?,
+        Command::Dump { output } => {
+            let generation = inspector.profile_info()?.generation;
+            export(&inspector, generation, false, output, None)?;
+        }
         Command::Record {
             seconds,
             period,
@@ -205,7 +212,7 @@ fn run() -> Result<std::process::ExitCode, Box<dyn std::error::Error>> {
             } else {
                 None
             };
-            let result = export(&inspector, true, output, child.as_mut());
+            let result = export(&inspector, generation, true, output, child.as_mut());
             let stopped = stop(&inspector, generation);
             if (result.is_err() || stopped.is_err())
                 && let Some(child) = child.as_mut()
