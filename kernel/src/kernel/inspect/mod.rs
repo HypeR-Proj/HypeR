@@ -667,7 +667,9 @@ impl KernelObject for CpuInspector {
     const TRANSFER_CLASS: TransferClass = TransferClass::Leaf;
     const SUPPORTED_RIGHTS: Rights = Rights::DUPLICATE
         .union(Rights::TRANSFER)
-        .union(Rights::INSPECT);
+        .union(Rights::INSPECT)
+        .union(Rights::SET_ATTRIBUTES)
+        .union(Rights::INSPECT_DETAILS);
 }
 
 fn find_process(id: ProcessId) -> Option<ProcessSnapshot> {

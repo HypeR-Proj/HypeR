@@ -4102,6 +4102,69 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
 #define HYPER_NATIVE_OP_MEMORY_INSPECTOR_READ UINT64_C(256)
 
 /**
+ * Object-local method `cpu_inspector_profile_start`.
+ *
+ * | Property | Contract |
+ * | --- | --- |
+ * | Receiver | `inspector: Borrow, kind=cpu_inspector, rights=0x80000000` |
+ * | Operation | 257 |
+ * | Feature | `Core` |
+ * | Arguments | `period: u64`, `seconds: u64` |
+ * | Results | `generation: u64` |
+ * | Capability effects | `inspector: Borrow, kind=cpu_inspector, rights=0x80000000` |
+ * | User memory | — |
+ * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+ * | Audit | `Object` |
+ *
+ * Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+ *
+ * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+ */
+#define HYPER_NATIVE_OP_CPU_INSPECTOR_PROFILE_START UINT64_C(257)
+
+/**
+ * Object-local method `cpu_inspector_profile_stop`.
+ *
+ * | Property | Contract |
+ * | --- | --- |
+ * | Receiver | `inspector: Borrow, kind=cpu_inspector, rights=0x80000000` |
+ * | Operation | 258 |
+ * | Feature | `Core` |
+ * | Arguments | `generation: u64` |
+ * | Results | — |
+ * | Capability effects | `inspector: Borrow, kind=cpu_inspector, rights=0x80000000` |
+ * | User memory | — |
+ * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+ * | Audit | `Object` |
+ *
+ * Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+ *
+ * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+ */
+#define HYPER_NATIVE_OP_CPU_INSPECTOR_PROFILE_STOP UINT64_C(258)
+
+/**
+ * Object-local method `cpu_inspector_profile_read`.
+ *
+ * | Property | Contract |
+ * | --- | --- |
+ * | Receiver | `inspector: Borrow, kind=cpu_inspector, rights=0x200000000` |
+ * | Operation | 259 |
+ * | Feature | `Core` |
+ * | Arguments | `generation: u64`, `cpu: u64`, `cursor: u64`, `output: user_address`, `output_size: byte_count` |
+ * | Results | `supported_size: byte_count` |
+ * | Capability effects | `inspector: Borrow, kind=cpu_inspector, rights=0x200000000` |
+ * | User memory | `output: Write, len=output_size bytes, max-bytes=192; order=0` |
+ * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+ * | Audit | `Object` |
+ *
+ * Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+ *
+ * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+ */
+#define HYPER_NATIVE_OP_CPU_INSPECTOR_PROFILE_READ UINT64_C(259)
+
+/**
  * Object-local method `cpu_inspector_read`.
  *
  * | Property | Contract |
@@ -6799,6 +6862,140 @@ static inline uint64_t hyper_native_failure_result_mask(
     }
     return UINT64_C(0);
 }
+
+/**
+ * Minimum supported prefix of `cpu_profile_info`, in bytes; individual calls define their buffer lengths.
+ */
+#define HYPER_NATIVE_CPU_PROFILE_INFO_MIN_SIZE UINT64_C(144)
+/**
+ * Wire layout for `cpu_profile_info`.
+ *
+ * Size: 144 bytes; alignment: 8 bytes; supported minimum prefix: 144 bytes.
+ * Scalar widths and member offsets are fixed across supported architectures.
+ * The minimum prefix describes extensibility, not permission to truncate every call's buffer;
+ * the consuming operation defines its accepted length.
+ */
+typedef struct hyper_native_cpu_profile_info_t {
+    /**
+     * Wire offset 0 bytes; width 8 bytes.
+     */
+    uint64_t generation;
+    /**
+     * Wire offset 8 bytes; width 8 bytes.
+     */
+    uint64_t period;
+    /**
+     * Wire offset 16 bytes; width 8 bytes.
+     */
+    uint64_t deadline_ns;
+    /**
+     * Wire offset 24 bytes; width 8 bytes.
+     */
+    uint64_t cpu_count;
+    /**
+     * Wire offset 32 bytes; width 8 bytes.
+     */
+    uint64_t running_generation;
+    /**
+     * Wire offset 40 bytes; width 8 bytes.
+     */
+    uint64_t armed_mask;
+    /**
+     * Wire offset 48 bytes; width 8 bytes.
+     */
+    uint64_t capacity;
+    /**
+     * Wire offset 56 bytes; width 8 bytes.
+     */
+    uint64_t depth;
+    /**
+     * Wire offset 64 bytes; width 8 bytes.
+     */
+    uint64_t active_cpus;
+    /**
+     * Wire offset 72 bytes; width 8 bytes.
+     */
+    uint64_t dropped;
+    /**
+     * Wire offset 80 bytes; width 64 bytes.
+     */
+    uint8_t revision[64];
+} hyper_native_cpu_profile_info_t;
+HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_cpu_profile_info_t) == 144, "cpu_profile_info size");
+HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_cpu_profile_info_t) == 8, "cpu_profile_info alignment");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, generation) == 0, "cpu_profile_info.generation offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, period) == 8, "cpu_profile_info.period offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, deadline_ns) == 16, "cpu_profile_info.deadline_ns offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, cpu_count) == 24, "cpu_profile_info.cpu_count offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, running_generation) == 32, "cpu_profile_info.running_generation offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, armed_mask) == 40, "cpu_profile_info.armed_mask offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, capacity) == 48, "cpu_profile_info.capacity offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, depth) == 56, "cpu_profile_info.depth offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, active_cpus) == 64, "cpu_profile_info.active_cpus offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, dropped) == 72, "cpu_profile_info.dropped offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_info_t, revision) == 80, "cpu_profile_info.revision offset");
+
+/**
+ * Minimum supported prefix of `cpu_profile_sample`, in bytes; individual calls define their buffer lengths.
+ */
+#define HYPER_NATIVE_CPU_PROFILE_SAMPLE_MIN_SIZE UINT64_C(192)
+/**
+ * Wire layout for `cpu_profile_sample`.
+ *
+ * Size: 192 bytes; alignment: 8 bytes; supported minimum prefix: 192 bytes.
+ * Scalar widths and member offsets are fixed across supported architectures.
+ * The minimum prefix describes extensibility, not permission to truncate every call's buffer;
+ * the consuming operation defines its accepted length.
+ */
+typedef struct hyper_native_cpu_profile_sample_t {
+    /**
+     * Wire offset 0 bytes; width 8 bytes.
+     */
+    uint64_t sequence;
+    /**
+     * Wire offset 8 bytes; width 8 bytes.
+     */
+    uint64_t timestamp_ns;
+    /**
+     * Wire offset 16 bytes; width 8 bytes.
+     */
+    uint64_t cpu;
+    /**
+     * Wire offset 24 bytes; width 8 bytes.
+     */
+    uint64_t world;
+    /**
+     * Wire offset 32 bytes; width 8 bytes.
+     */
+    uint64_t depth;
+    /**
+     * Wire offset 40 bytes; width 8 bytes.
+     */
+    uint64_t flags;
+    /**
+     * Wire offset 48 bytes; width 8 bytes.
+     */
+    uint64_t dropped;
+    /**
+     * Wire offset 56 bytes; width 8 bytes.
+     */
+    uint64_t period;
+    /**
+     * Wire offset 64 bytes; width 128 bytes.
+     */
+    uint8_t frames[128];
+} hyper_native_cpu_profile_sample_t;
+HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_cpu_profile_sample_t) == 192, "cpu_profile_sample size");
+HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_cpu_profile_sample_t) == 8, "cpu_profile_sample alignment");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_sample_t, sequence) == 0, "cpu_profile_sample.sequence offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_sample_t, timestamp_ns) == 8, "cpu_profile_sample.timestamp_ns offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_sample_t, cpu) == 16, "cpu_profile_sample.cpu offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_sample_t, world) == 24, "cpu_profile_sample.world offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_sample_t, depth) == 32, "cpu_profile_sample.depth offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_sample_t, flags) == 40, "cpu_profile_sample.flags offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_sample_t, dropped) == 48, "cpu_profile_sample.dropped offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_sample_t, period) == 56, "cpu_profile_sample.period offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_profile_sample_t, frames) == 64, "cpu_profile_sample.frames offset");
 
 /**
  * Minimum supported prefix of `process_retirement_info`, in bytes; individual calls define their buffer lengths.

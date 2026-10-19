@@ -127,6 +127,8 @@ pub(super) fn initialize(
             crate::pr_err!("HypeR: firmware catalogue allocation failed");
             Error::DriverRegistration(ProbeError::Resource)
         })?;
+    #[cfg(all(CONFIG_ARCH_AARCH64, feature = "pmu-profiling"))]
+    crate::kernel::profile::initialize(&catalogue.nodes, boot.interrupts().root_domain);
     let services = KernelDriverServices { boot };
     // Activate default-deny translation before publishing any physical device.
     // A discovered but unsupported/failed IOMMU aborts admission, never bypasses.
@@ -185,6 +187,7 @@ pub(super) fn initialize(
     // and does not expose any packet DMA until an assigned VM owns its backing.
     let kernel_owned = |node: &PlatformDevice| {
         node.kernel_claimed()
+            || crate::kernel::profile::owns_node(node)
             || super::iommu::host_owned(node)
             || manager.binding_driver(node.id()).is_some()
             || reserved_console_base.is_some_and(|base| {

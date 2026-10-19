@@ -170,6 +170,16 @@ impl<B: Barrier> GicV2<B> {
         B::data_synchronization(BarrierDomain::FullSystem, BarrierAccess::All);
         Ok(())
     }
+    /// Routes a disabled SPI to a previously discovered GIC CPU target bit.
+    pub fn route_spi(&mut self, id: InterruptId, target: u8) -> Result<(), Error> {
+        if id.get() < 32 || id.get() >= self.local.count || target.count_ones() != 1 {
+            return Err(Error::InvalidCpuTarget);
+        }
+        write_byte(self.local.distributor, TARGET + id.get() as usize, target);
+        B::data_synchronization(BarrierDomain::FullSystem, BarrierAccess::All);
+        Ok(())
+    }
+
     pub fn enable(&mut self, id: InterruptId) -> Result<(), InterruptTransitionError<Error>> {
         self.local.set_enabled(id, true)
     }

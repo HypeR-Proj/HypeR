@@ -154,7 +154,9 @@ fn prepare_handles(
             .map_err(Error::Object)?,
         Rights::DUPLICATE
             .union(Rights::TRANSFER)
-            .union(Rights::INSPECT),
+            .union(Rights::INSPECT)
+            .union(Rights::SET_ATTRIBUTES)
+            .union(Rights::INSPECT_DETAILS),
     )?);
     if HAS_VM_AUTHORITY {
         *optional_authority_slot(handles, CORE_HANDLE_COUNT) = Some(prepare_handle(

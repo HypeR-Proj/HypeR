@@ -34,3 +34,5 @@ pub mod task;
 pub mod time;
 pub(crate) mod vfs;
 pub mod vm;
+
+pub(crate) mod profile;

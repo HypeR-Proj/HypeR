@@ -576,6 +576,32 @@ pub(in crate::kernel) trait VmServices: UserMemoryServices {
 }
 
 pub(in crate::kernel) trait SystemInspectServices: UserMemoryServices {
+    fn profile_start(
+        &self,
+        _receiver: &InvocationReceiver,
+        _period: u64,
+        _seconds: u64,
+    ) -> crate::kernel::profile::Result<u64> {
+        Err(hyper::abi::native::HYPER_NATIVE_STATUS_NOT_SUPPORTED)
+    }
+    fn profile_stop(
+        &self,
+        _receiver: &InvocationReceiver,
+        _generation: u64,
+    ) -> crate::kernel::profile::Result<()> {
+        Err(hyper::abi::native::HYPER_NATIVE_STATUS_NOT_SUPPORTED)
+    }
+    fn profile_read(
+        &self,
+        _receiver: &InvocationReceiver,
+        _generation: u64,
+        _cpu: u64,
+        _cursor: u64,
+        _output: &mut [u8],
+    ) -> crate::kernel::profile::Result<usize> {
+        Err(hyper::abi::native::HYPER_NATIVE_STATUS_NOT_SUPPORTED)
+    }
+
     fn memory_statistics(
         &self,
         inspector: &InvocationReceiver,

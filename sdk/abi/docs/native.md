@@ -1898,6 +1898,66 @@ Arguments and auxiliary results follow the listed register order; neither list i
 
 Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
 
+### `cpu_inspector_profile_start`
+
+Object-local method `cpu_inspector_profile_start`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `inspector: Borrow, kind=cpu_inspector, rights=0x80000000` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `period: u64`, `seconds: u64` |
+| Results | `generation: u64` |
+| Capability effects | `inspector: Borrow, kind=cpu_inspector, rights=0x80000000` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `cpu_inspector_profile_stop`
+
+Object-local method `cpu_inspector_profile_stop`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `inspector: Borrow, kind=cpu_inspector, rights=0x80000000` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | `generation: u64` |
+| Results | — |
+| Capability effects | `inspector: Borrow, kind=cpu_inspector, rights=0x80000000` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `cpu_inspector_profile_read`
+
+Object-local method `cpu_inspector_profile_read`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `inspector: Borrow, kind=cpu_inspector, rights=0x200000000` |
+| Operation | 259 |
+| Feature | `Core` |
+| Arguments | `generation: u64`, `cpu: u64`, `cursor: u64`, `output: user_address`, `output_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `inspector: Borrow, kind=cpu_inspector, rights=0x200000000` |
+| User memory | `output: Write, len=output_size bytes, max-bytes=192; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
 ### `cpu_inspector_read`
 
 Object-local method `cpu_inspector_read`.
@@ -4439,6 +4499,40 @@ Arguments and auxiliary results follow the listed register order; neither list i
 Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
 
 ## Public records
+
+### `cpu_profile_info`
+
+Minimum prefix: 144 bytes; size: 144 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `generation` | `u64` |
+| 8 | `period` | `u64` |
+| 16 | `deadline_ns` | `u64` |
+| 24 | `cpu_count` | `u64` |
+| 32 | `running_generation` | `u64` |
+| 40 | `armed_mask` | `u64` |
+| 48 | `capacity` | `u64` |
+| 56 | `depth` | `u64` |
+| 64 | `active_cpus` | `u64` |
+| 72 | `dropped` | `u64` |
+| 80 | `revision` | `bytes[64]` |
+
+### `cpu_profile_sample`
+
+Minimum prefix: 192 bytes; size: 192 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `sequence` | `u64` |
+| 8 | `timestamp_ns` | `u64` |
+| 16 | `cpu` | `u64` |
+| 24 | `world` | `u64` |
+| 32 | `depth` | `u64` |
+| 40 | `flags` | `u64` |
+| 48 | `dropped` | `u64` |
+| 56 | `period` | `u64` |
+| 64 | `frames` | `bytes[128]` |
 
 ### `process_retirement_info`
 

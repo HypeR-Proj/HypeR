@@ -346,6 +346,19 @@ impl<Cpu: CpuInterface, MemoryBarrier: Barrier, Counter: MonotonicCounter>
         Ok(())
     }
 
+    /// Routes a disabled SPI to one affinity, without enabling 1-of-N delivery.
+    pub fn route_spi(&mut self, interrupt: InterruptId, affinity: u32) -> Result<(), Error> {
+        let id = self.validate_configurable(interrupt)?;
+        if id < 32 {
+            return Err(Error::InvalidInterrupt);
+        }
+        let route = u64::from(affinity & 0x00ff_ffff) | (u64::from(affinity >> 24) << 32);
+        write_u64(self.distributor.base, GICD_IROUTER + id as usize * 8, route);
+        self.wait_for_write(None)?;
+        MemoryBarrier::data_synchronization(BarrierDomain::FullSystem, BarrierAccess::All);
+        Ok(())
+    }
+
     fn initialize_distributor(&mut self) -> Result<(), Error> {
         write_u32(self.distributor.base, GICD_CTLR, 0);
         self.wait_for_distributor_write()?;
