@@ -82,6 +82,16 @@ This covers the affected transactions' architectural completion
 semantics, not just command consumption. ATS translation caches cannot retain
 old translations because ATS is disabled.
 
+Root and L2 owners carry a 512-slot software child index (2 KiB each); leaf
+owners have no child array. Walks use these indices and validate them against
+the hardware descriptors, without searching the domain's table-owner vector.
+Parent indices support linear bottom-up pruning. After `CMD_SYNC`, a linear
+compaction pass repairs parent and child indices before dropping detached owners;
+the relocation scratch is embedded in each owner, so repair cannot fail to
+allocate. A page lookup has fixed depth; unmapping P pages with T table owners
+and M buffer mappings costs O(P + T + M), including the sorted mapping-vector
+removal. Repeated small buffer removals still each scan the live table owners.
+
 Stream reassignment requires detach followed by attach. Detach invalidates the
 STE and completes configuration synchronization before invalidating domain
 translations. The device must be quiescent before assignment, and pending fault
