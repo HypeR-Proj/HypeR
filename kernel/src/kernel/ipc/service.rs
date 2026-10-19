@@ -3,6 +3,8 @@
 
 //! Process-facing IPC transactions and user-memory commit ordering.
 
+use crate::kernel::capability::InvocationReceiver;
+
 use alloc::vec::Vec;
 
 use crate::kernel::accounting::{CommittedCharge, ResourceAmount, ResourceKind};
@@ -124,11 +126,13 @@ pub(crate) fn capability_channel_create(
 /// receiver observes the same precommit error as the sender.
 pub(crate) fn capability_channel_try_send(
     process: &Process,
-    endpoint_value: HandleValue,
+    endpoint_value: &InvocationReceiver,
     bytes: Option<UserSlice>,
     disposition_records: Option<UserSlice>,
 ) -> Result<(), CapabilityChannelServiceError> {
-    let endpoint = process.resolve_handle::<CapabilityChannel>(endpoint_value, Rights::WRITE)?;
+    let endpoint = endpoint_value
+        .resolve::<CapabilityChannel>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let mut prepared = PreparedCapabilitySend::copy_from_user(process, bytes, disposition_records)?;
     let claim = endpoint
         .object()
@@ -231,13 +235,15 @@ pub(crate) fn capability_channel_try_send(
 /// Publishes a fully pinned typed receiver and waits for one sender.
 pub(crate) fn capability_channel_receive(
     process: &Process,
-    endpoint_value: HandleValue,
+    endpoint_value: &InvocationReceiver,
     deadline_nanoseconds: u64,
     byte_output: Option<UserSlice>,
     slot_records: Option<UserSlice>,
     cancellation_requested: impl FnOnce() -> bool,
 ) -> Result<CapabilityReceiveOutcome, CapabilityChannelServiceError> {
-    let endpoint = process.resolve_handle::<CapabilityChannel>(endpoint_value, Rights::READ)?;
+    let endpoint = endpoint_value
+        .resolve::<CapabilityChannel>(Rights::READ)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     if byte_output
         .zip(slot_records)
         .is_some_and(|(bytes, slots)| !bytes.is_disjoint(slots))
@@ -278,10 +284,12 @@ pub(crate) fn byte_channel_create(
 /// Copies and commits one byte message.
 pub(crate) fn byte_channel_write(
     process: &Process,
-    endpoint_value: HandleValue,
+    endpoint_value: &InvocationReceiver,
     bytes: Option<UserSlice>,
 ) -> Result<(), ByteChannelServiceError> {
-    let endpoint = process.resolve_handle::<ByteChannel>(endpoint_value, Rights::WRITE)?;
+    let endpoint = endpoint_value
+        .resolve::<ByteChannel>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let byte_count = bytes
         .map(|range| usize::try_from(range.length()))
         .transpose()
@@ -299,10 +307,12 @@ pub(crate) fn byte_channel_write(
 /// Receives one FIFO byte message after validating its exact output range.
 pub(crate) fn byte_channel_read(
     process: &Process,
-    endpoint_value: HandleValue,
+    endpoint_value: &InvocationReceiver,
     output: Option<UserSlice>,
 ) -> Result<ByteChannelReadOutcome, ByteChannelServiceError> {
-    let endpoint = process.resolve_handle::<ByteChannel>(endpoint_value, Rights::READ)?;
+    let endpoint = endpoint_value
+        .resolve::<ByteChannel>(Rights::READ)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let info = endpoint.object().peek()?;
     let required =
         u64::try_from(info.bytes()).map_err(|_| ByteChannelServiceError::InvalidBuffer)?;

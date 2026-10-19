@@ -22,13 +22,13 @@ pub(in super::super) fn render_rust(schema: &AbiSchema) -> String {
     );
     let _ = writeln!(
         output,
-        "pub const HYPER_NATIVE_SYSCALL_ARGUMENT_REGISTERS: usize = {};",
-        schema::SYSCALL_ARGUMENT_REGISTERS
+        "pub const HYPER_NATIVE_INVOCATION_ARGUMENT_REGISTERS: usize = {};",
+        schema::INVOCATION_ARGUMENT_REGISTERS
     );
     let _ = writeln!(
         output,
-        "pub const HYPER_NATIVE_SYSCALL_RESULT_REGISTERS: usize = {};",
-        schema::SYSCALL_RESULT_REGISTERS
+        "pub const HYPER_NATIVE_INVOCATION_RESULT_REGISTERS: usize = {};",
+        schema::INVOCATION_RESULT_REGISTERS
     );
     output.push_str(
         "pub type HyperNativeHandle = u64;\n\
@@ -91,13 +91,13 @@ pub(in super::super) fn render_rust(schema: &AbiSchema) -> String {
     );
     render_rust_constants(
         &mut output,
-        "HYPER_NATIVE_SYS",
+        "HYPER_NATIVE_OP",
         schema
-            .syscalls
+            .invocations
             .iter()
-            .map(|value| (value.name, u64::from(value.number))),
+            .map(|value| (value.name, u64::from(value.operation))),
     );
-    render_rust_failure_result_mask(&mut output, schema);
+    render_rust_invocations(&mut output, schema);
     for record in schema.records {
         let rust_name = upper_camel(record.name);
         let _ = writeln!(
@@ -194,15 +194,100 @@ fn render_rust_transfer_classes(output: &mut String, schema: &AbiSchema) {
     output.push_str("}\n\n");
 }
 
-fn render_rust_failure_result_mask(output: &mut String, schema: &AbiSchema) {
+fn render_rust_invocations(output: &mut String, schema: &AbiSchema) {
+    output.push_str("/// A decoded object method; enum discriminants are not a machine ABI.\n");
+    output.push_str("#[derive(Clone, Copy, Debug, Eq, PartialEq)]\npub enum NativeOperation {\n");
+    for invocation in schema.invocations {
+        let _ = writeln!(output, "    {},", upper_camel(invocation.name));
+    }
+    output.push_str("}\n\n#[rustfmt::skip]\nimpl NativeOperation {\n");
     output.push_str(
-        "pub const fn hyper_native_failure_result_mask(\n    syscall_number: u64,\n    status: HyperNativeStatus,\n) -> u64 {\n    match (syscall_number, status) {\n",
+        "    pub const fn from_raw(object_kind: u32, operation: u64) -> Option<Self> {\n",
     );
-    for syscall in schema.syscalls {
-        for failure in syscall.failure_results {
+    output.push_str("        match object_kind {\n");
+    for object in schema
+        .object_kinds
+        .iter()
+        .filter(|object| object.value != 0)
+    {
+        let _ = writeln!(
+            output,
+            "            HYPER_NATIVE_OBJECT_{} => {{}},",
+            upper_snake(object.name)
+        );
+    }
+    output.push_str("            _ => return None,\n        }\n");
+    output.push_str("        match (object_kind, operation) {\n");
+    for invocation in schema.invocations {
+        let kind = match invocation.receiver.handle.map(|handle| handle.object) {
+            Some(schema::ObjectConstraint::Kind(kind)) => {
+                format!("HYPER_NATIVE_OBJECT_{}", upper_snake(kind))
+            }
+            _ => String::from("_"),
+        };
+        let _ = writeln!(
+            output,
+            "            ({kind}, HYPER_NATIVE_OP_{}) => Some(Self::{}),",
+            upper_snake(invocation.name),
+            upper_camel(invocation.name)
+        );
+    }
+    output.push_str("            _ => None,\n        }\n    }\n\n");
+    output.push_str("    pub const fn operation(self) -> u64 {\n        match self {\n");
+    for invocation in schema.invocations {
+        let _ = writeln!(
+            output,
+            "            Self::{} => HYPER_NATIVE_OP_{},",
+            upper_camel(invocation.name),
+            upper_snake(invocation.name)
+        );
+    }
+    output.push_str("        }\n    }\n\n");
+    output
+        .push_str("    pub const fn receiver_kind(self) -> Option<u32> {\n        match self {\n");
+    for invocation in schema.invocations {
+        let kind = match invocation.receiver.handle.map(|handle| handle.object) {
+            Some(schema::ObjectConstraint::Kind(kind)) => {
+                format!("Some(HYPER_NATIVE_OBJECT_{})", upper_snake(kind))
+            }
+            _ => String::from("None"),
+        };
+        let _ = writeln!(
+            output,
+            "            Self::{} => {kind},",
+            upper_camel(invocation.name)
+        );
+    }
+    output.push_str("        }\n    }\n\n");
+    output.push_str("    pub const fn argument_count(self) -> usize {\n        match self {\n");
+    for invocation in schema.invocations {
+        let _ = writeln!(
+            output,
+            "            Self::{} => {},",
+            upper_camel(invocation.name),
+            invocation.arguments.len()
+        );
+    }
+    output.push_str("        }\n    }\n\n");
+    output.push_str("    pub const fn receiver_rights(self) -> u64 {\n        match self {\n");
+    for invocation in schema.invocations {
+        let rights = invocation
+            .receiver
+            .handle
+            .map_or(0, |handle| handle.required_rights);
+        let _ = writeln!(
+            output,
+            "            Self::{} => {rights},",
+            upper_camel(invocation.name)
+        );
+    }
+    output.push_str("        }\n    }\n\n");
+    output.push_str("    pub const fn failure_result_mask(self, status: HyperNativeStatus) -> u64 {\n        match (self, status) {\n");
+    for invocation in schema.invocations {
+        for failure in invocation.failure_results {
             let mut mask = 0u64;
             for result_name in failure.results {
-                if let Some(index) = syscall
+                if let Some(index) = invocation
                     .results
                     .iter()
                     .position(|result| result.name == *result_name)
@@ -212,13 +297,14 @@ fn render_rust_failure_result_mask(output: &mut String, schema: &AbiSchema) {
             }
             let _ = writeln!(
                 output,
-                "        (HYPER_NATIVE_SYS_{}, HYPER_NATIVE_STATUS_{}) => {mask},",
-                upper_snake(syscall.name),
+                "            (Self::{}, HYPER_NATIVE_STATUS_{}) => {mask},",
+                upper_camel(invocation.name),
                 upper_snake(failure.status)
             );
         }
     }
-    output.push_str("        _ => 0,\n    }\n}\n\n");
+    output.push_str("            _ => 0,\n        }\n    }\n}\n\n");
+    output.push_str("pub const fn hyper_native_failure_result_mask(\n    object_kind: u32,\n    operation: u64,\n    status: HyperNativeStatus,\n) -> u64 {\n    match NativeOperation::from_raw(object_kind, operation) {\n        Some(method) => method.failure_result_mask(status),\n        None => 0,\n    }\n}\n\n");
 }
 
 fn render_rust_constants<'a>(

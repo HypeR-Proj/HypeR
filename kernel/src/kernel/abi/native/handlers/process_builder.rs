@@ -10,9 +10,10 @@ use crate::kernel::abi::native::status::{
 };
 use crate::kernel::abi::native::wire::{
     parse_affinity_request, parse_builder_create, parse_builder_handle, parse_builder_text,
-    parse_handle, require_zero,
+    require_zero,
 };
 use crate::kernel::capability::HandleValue;
+use crate::kernel::capability::InvocationReceiver;
 use hyper::abi::native::{
     HYPER_NATIVE_PROCESS_NAME_MAX_BYTES, HYPER_NATIVE_PROCESS_STARTUP_DATA_MAX_BYTES,
 };
@@ -20,41 +21,42 @@ use hyper::abi::native::{
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_process_builder_create(
     services: &impl ProcessBuilderServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result =
-        parse_builder_create(arguments).and_then(|[factory, group, domain, executable, loader]| {
-            services
-                .create_process_builder(factory, group, domain, executable, loader)
-                .map_err(status_from_process_builder_service_error)
-        });
+    let result = parse_builder_create(arguments).and_then(|(group, domain, executable, loader)| {
+        services
+            .create_process_builder(receiver, group, domain, executable, loader)
+            .map_err(status_from_process_builder_service_error)
+    });
     NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_process_builder_set_name(
     services: &impl ProcessBuilderServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_builder_text(arguments, HYPER_NATIVE_PROCESS_NAME_MAX_BYTES).and_then(
-        |(builder, text)| {
+    let result =
+        parse_builder_text(arguments, HYPER_NATIVE_PROCESS_NAME_MAX_BYTES).and_then(|text| {
             services
-                .set_process_builder_name(builder, text)
+                .set_process_builder_name(receiver, text)
                 .map_err(status_from_process_builder_service_error)
-        },
-    );
+        });
     NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_process_builder_set_data(
     services: &impl ProcessBuilderServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = parse_builder_text(arguments, HYPER_NATIVE_PROCESS_STARTUP_DATA_MAX_BYTES)
-        .and_then(|(builder, text)| {
+        .and_then(|text| {
             services
-                .set_process_builder_data(builder, text)
+                .set_process_builder_data(receiver, text)
                 .map_err(status_from_process_builder_service_error)
         });
     NativeAction::Return(status_only(result))
@@ -63,11 +65,12 @@ pub(in crate::kernel::abi::native) fn sys_process_builder_set_data(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_process_builder_set_affinity(
     services: &impl ProcessBuilderServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_affinity_request(arguments).and_then(|(builder, words, word_count)| {
+    let result = parse_affinity_request(arguments).and_then(|(words, word_count)| {
         services
-            .set_process_builder_affinity(builder, words, word_count)
+            .set_process_builder_affinity(receiver, words, word_count)
             .map_err(status_from_process_builder_service_error)
     });
     NativeAction::Return(status_only(result))
@@ -76,13 +79,14 @@ pub(in crate::kernel::abi::native) fn sys_process_builder_set_affinity(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_process_builder_add_handle(
     services: &impl ProcessBuilderServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = parse_builder_handle(arguments).and_then(
-        |(builder, source, purpose, expected_kind, requested_rights, operation)| {
+        |(source, purpose, expected_kind, requested_rights, operation)| {
             services
                 .add_process_builder_handle(
-                    builder,
+                    receiver,
                     source,
                     purpose,
                     expected_kind,
@@ -98,26 +102,24 @@ pub(in crate::kernel::abi::native) fn sys_process_builder_add_handle(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_process_builder_seal(
     services: &impl ProcessBuilderServices,
-    arguments: &Arguments,
+    receiver: &InvocationReceiver,
+    _arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_handle(arguments[0]).and_then(|builder| {
-        services
-            .seal_process_builder(builder)
-            .map_err(status_from_process_builder_service_error)
-    });
+    let result = services
+        .seal_process_builder(receiver)
+        .map_err(status_from_process_builder_service_error);
     NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_process_builder_start(
     services: &impl ProcessBuilderServices,
-    arguments: &Arguments,
+    receiver: &InvocationReceiver,
+    _arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_handle(arguments[0]).and_then(|builder| {
-        services
-            .start_process_builder(builder)
-            .map_err(status_from_process_builder_service_error)
-    });
+    let result = services
+        .start_process_builder(receiver)
+        .map_err(status_from_process_builder_service_error);
     NativeAction::Return(match result {
         Ok(handles) => success(handles.map(HandleValue::get)),
         Err(status) => failure(status),
@@ -127,30 +129,30 @@ pub(in crate::kernel::abi::native) fn sys_process_builder_start(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_process_builder_abort(
     services: &impl ProcessBuilderServices,
-    arguments: &Arguments,
+    receiver: &InvocationReceiver,
+    _arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_handle(arguments[0]).and_then(|builder| {
-        services
-            .abort_process_builder(builder)
-            .map_err(status_from_process_builder_service_error)
-    });
+    let result = services
+        .abort_process_builder(receiver)
+        .map_err(status_from_process_builder_service_error);
     NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_process_builder_set_memory_lock(
     services: &impl ProcessBuilderServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[2..])?;
-        let enabled = match arguments[1] {
+        require_zero(&arguments[1..])?;
+        let enabled = match arguments[0] {
             0 => false,
             1 => true,
             _ => return Err(hyper::abi::native::HYPER_NATIVE_STATUS_INVALID_ARGUMENT),
         };
         services
-            .set_process_builder_memory_lock(parse_handle(arguments[0])?, enabled)
+            .set_process_builder_memory_lock(receiver, enabled)
             .map_err(status_from_process_builder_service_error)
     })();
     NativeAction::Return(status_only(result))

@@ -5,12 +5,14 @@
 
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
-use hyper::abi::native::{HYPER_NATIVE_SYS_ABI_QUERY, NativeInvocation};
+use hyper::abi::native::{HYPER_NATIVE_OP_ABI_QUERY, NativeInvocation};
 use hyper::cpu::CpuIndex;
 use hyper::sync::InterruptMaskGuard;
 
+use crate::kernel::capability::{HandleValue, Rights};
 use crate::kernel::mm::user_space::NativeAddressSpace;
-use crate::kernel::process::UserThread;
+use crate::kernel::object::ObjectKind;
+use crate::kernel::process::{Process, UserThread};
 use crate::kernel::task::{self, scheduler, thread::ThreadId};
 
 const NO_CPU: usize = usize::MAX;
@@ -129,8 +131,19 @@ impl Drop for Gate {
     }
 }
 
-pub(super) fn hold_syscall(thread: &UserThread, invocation: NativeInvocation) {
-    if invocation.number() != HYPER_NATIVE_SYS_ABI_QUERY {
+pub(super) fn hold_syscall(process: &Process, thread: &UserThread, invocation: NativeInvocation) {
+    if invocation.operation() != HYPER_NATIVE_OP_ABI_QUERY
+        || !(IRQ.armed(thread) || BUSY.armed(thread))
+    {
+        return;
+    }
+    let Ok(handle) = HandleValue::try_from_raw(invocation.target()) else {
+        return;
+    };
+    if !process
+        .handle_info(handle, Rights::NONE)
+        .is_ok_and(|info| info.kind == ObjectKind::SYSTEM_INFO)
+    {
         return;
     }
     if IRQ.armed(thread) && IRQ.enter() {

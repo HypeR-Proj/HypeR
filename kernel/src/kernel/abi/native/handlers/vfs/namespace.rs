@@ -8,7 +8,8 @@ use crate::kernel::abi::native::services::{NativeAction, VfsServices};
 use crate::kernel::abi::native::status::{
     status_from_address_error, status_from_vfs_service_error, status_only,
 };
-use crate::kernel::abi::native::wire::{parse_handle, require_zero};
+use crate::kernel::abi::native::wire::require_zero;
+use crate::kernel::capability::InvocationReceiver;
 use crate::kernel::mm::user_space::{UserAddress, UserSlice};
 use hyper::abi::native as abi;
 
@@ -22,15 +23,13 @@ fn path(address: u64, length: u64) -> Result<UserSlice, abi::HyperNativeStatus> 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_filesystem_mount_ramfs(
     services: &impl VfsServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[3..])?;
+        require_zero(&arguments[2..])?;
         services
-            .mount_ramfs(
-                parse_handle(arguments[0])?,
-                path(arguments[1], arguments[2])?,
-            )
+            .mount_ramfs(receiver, path(arguments[0], arguments[1])?)
             .map_err(status_from_vfs_service_error)
     })();
     NativeAction::Return(status_only(result))
@@ -39,17 +38,18 @@ pub(in crate::kernel::abi::native) fn sys_filesystem_mount_ramfs(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_filesystem_switch_root(
     services: &impl VfsServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[2..])?;
+        require_zero(&arguments[1..])?;
         let request = UserSlice::new(
-            UserAddress::new(arguments[1]),
+            UserAddress::new(arguments[0]),
             abi::HYPER_NATIVE_FILESYSTEM_ROOT_SWITCH_MIN_SIZE as u64,
         )
         .map_err(status_from_address_error)?;
         services
-            .switch_root(parse_handle(arguments[0])?, request)
+            .switch_root(receiver, request)
             .map_err(status_from_vfs_service_error)
     })();
     NativeAction::Return(status_only(result))
@@ -58,17 +58,18 @@ pub(in crate::kernel::abi::native) fn sys_filesystem_switch_root(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_filesystem_begin_root_switch(
     services: &impl VfsServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[2..])?;
+        require_zero(&arguments[1..])?;
         let request = UserSlice::new(
-            UserAddress::new(arguments[1]),
+            UserAddress::new(arguments[0]),
             abi::HYPER_NATIVE_FILESYSTEM_ROOT_SWITCH_MIN_SIZE as u64,
         )
         .map_err(status_from_address_error)?;
         services
-            .begin_root_switch(parse_handle(arguments[0])?, request)
+            .begin_root_switch(receiver, request)
             .map_err(status_from_vfs_service_error)
     })();
     NativeAction::Return(crate::kernel::abi::native::status::handle_result(result))
@@ -76,17 +77,18 @@ pub(in crate::kernel::abi::native) fn sys_filesystem_begin_root_switch(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_filesystem_finish_root_switch(
     services: &impl VfsServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[2..])?;
-        let commit = match arguments[1] {
+        require_zero(&arguments[1..])?;
+        let commit = match arguments[0] {
             0 => false,
             1 => true,
             _ => return Err(abi::HYPER_NATIVE_STATUS_INVALID_ARGUMENT),
         };
         services
-            .finish_root_switch(parse_handle(arguments[0])?, commit)
+            .finish_root_switch(receiver, commit)
             .map_err(status_from_vfs_service_error)
     })();
     NativeAction::Return(status_only(result))

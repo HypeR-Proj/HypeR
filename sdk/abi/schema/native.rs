@@ -16,8 +16,8 @@
 /// its first supported userspace ABI. Keep this value at zero during
 /// pre-release development, regardless of schema changes.
 pub const ABI_REVISION: u64 = 0;
-pub const SYSCALL_ARGUMENT_REGISTERS: usize = 6;
-pub const SYSCALL_RESULT_REGISTERS: usize = 2;
+pub const INVOCATION_ARGUMENT_REGISTERS: usize = 6;
+pub const INVOCATION_RESULT_REGISTERS: usize = 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AbiSchema {
@@ -29,7 +29,7 @@ pub struct AbiSchema {
     pub signals: &'static [Signal],
     pub constants: &'static [AbiConstant],
     pub records: &'static [Record],
-    pub syscalls: &'static [Syscall],
+    pub invocations: &'static [Invocation],
     pub semantic_rules: &'static [&'static str],
 }
 
@@ -125,8 +125,10 @@ impl FieldKind {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Syscall {
-    pub number: u32,
+pub struct Invocation {
+    pub operation: u32,
+    /// Target capability, carried separately from the business argument registers.
+    pub receiver: Argument,
     pub name: &'static str,
     pub feature: FeatureGate,
     pub arguments: &'static [Argument],
@@ -139,6 +141,26 @@ pub struct Syscall {
     pub flags: FlagPolicy,
     /// Auxiliary results which remain defined for specific failure statuses.
     pub failure_results: &'static [FailureResults],
+}
+
+impl Invocation {
+    /// Logical inputs including the separately carried target capability.
+    pub fn inputs(&self) -> impl Iterator<Item = &Argument> {
+        core::iter::once(&self.receiver).chain(self.arguments.iter())
+    }
+}
+
+const fn invocation_receiver(kind: &'static str, required_rights: u64) -> Argument {
+    Argument {
+        name: "receiver",
+        kind: ValueKind::Handle,
+        handle: Some(HandleArgument {
+            object: ObjectConstraint::Kind(kind),
+            required_rights,
+            disposition: HandleDisposition::Borrow,
+        }),
+        memory: None,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -701,6 +723,21 @@ pub const OBJECT_KINDS: &[ObjectKind] = &[
         name: "backend_memory_lease",
         transfer: TransferClass::Forbidden,
     },
+    ObjectKind {
+        value: 41,
+        name: "execution_context",
+        transfer: TransferClass::Forbidden,
+    },
+    ObjectKind {
+        value: 42,
+        name: "object_factory",
+        transfer: TransferClass::Forbidden,
+    },
+    ObjectKind {
+        value: 43,
+        name: "system_info",
+        transfer: TransferClass::General,
+    },
 ];
 
 pub const DIRECTORY_STREAM_RIGHTS: u64 =
@@ -712,6 +749,10 @@ pub const GUEST_MEMORY_RIGHTS: u64 =
     RIGHT_TRANSFER | RIGHT_DUPLICATE | RIGHT_MAP | RIGHT_INSPECT | RIGHT_READ | RIGHT_WRITE;
 
 pub const RIGHTS: &[Right] = &[
+    Right {
+        bit: 39,
+        name: "create_object",
+    },
     Right {
         bit: 38,
         name: "retire",
@@ -907,6 +948,7 @@ pub const RIGHT_PROTECT: u64 = 1 << 35;
 pub const RIGHT_LOCK_MEMORY: u64 = 1 << 36;
 pub const RIGHT_RETAIN_PROCESS: u64 = 1 << 37;
 pub const RIGHT_RETIRE: u64 = 1 << 38;
+pub const RIGHT_CREATE_OBJECT: u64 = 1 << 39;
 pub const PROCESS_RETIREMENT_RIGHTS: u64 =
     RIGHT_TRANSFER | RIGHT_WAIT | RIGHT_INSPECT | RIGHT_INSPECT_DETAILS | RIGHT_RETIRE;
 pub const CRASH_VIEW_RIGHTS: u64 = RIGHT_DUPLICATE | RIGHT_TRANSFER | RIGHT_INSPECT | RIGHT_READ;
@@ -1127,6 +1169,18 @@ const DIRECTORY_ENTRY_NAME_CAPACITY: u32 = 256;
 const DIRECTORY_ENTRY_RECORD_SIZE: u16 = 24 + DIRECTORY_ENTRY_NAME_CAPACITY as u16;
 
 pub const CONSTANTS: &[AbiConstant] = &[
+    AbiConstant {
+        name: "startup_handle_purpose_execution_context",
+        value: 16,
+    },
+    AbiConstant {
+        name: "startup_handle_purpose_object_factory",
+        value: 17,
+    },
+    AbiConstant {
+        name: "startup_handle_purpose_system_info",
+        value: 18,
+    },
     AbiConstant {
         name: "dma_fault_source_smmuv3",
         value: 1,
@@ -4272,9 +4326,24 @@ pub const RECORDS: &[Record] = &[
                 kind: FieldKind::U64,
                 offset: 64,
             },
+            Field {
+                name: "execution_context",
+                kind: FieldKind::U64,
+                offset: 72,
+            },
+            Field {
+                name: "object_factory",
+                kind: FieldKind::U64,
+                offset: 80,
+            },
+            Field {
+                name: "system_info",
+                kind: FieldKind::U64,
+                offset: 88,
+            },
         ],
-        minimum_size: 72,
-        size: 72,
+        minimum_size: 96,
+        size: 96,
         alignment: 8,
     },
     Record {
@@ -4414,7 +4483,7 @@ const INFO_RECORD_RESULTS: &[ResultValue] = &[ResultValue {
     kind: ValueKind::ByteCount,
     handle: None,
 }];
-const HANDLE_CLOSE_ARGUMENTS: &[Argument] = &[Argument {
+const HANDLE_CLOSE_RECEIVER: Argument = Argument {
     name: "handle",
     kind: ValueKind::Handle,
     handle: Some(HandleArgument {
@@ -4423,25 +4492,23 @@ const HANDLE_CLOSE_ARGUMENTS: &[Argument] = &[Argument {
         disposition: HandleDisposition::ConsumeOnCommit,
     }),
     memory: None,
+};
+const HANDLE_DUPLICATE_RECEIVER: Argument = Argument {
+    name: "source",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Any,
+        required_rights: RIGHT_DUPLICATE,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
+const HANDLE_DUPLICATE_ARGUMENTS: &[Argument] = &[Argument {
+    name: "requested_rights",
+    kind: ValueKind::Rights,
+    handle: None,
+    memory: None,
 }];
-const HANDLE_DUPLICATE_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "source",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Any,
-            required_rights: RIGHT_DUPLICATE,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-    Argument {
-        name: "requested_rights",
-        kind: ValueKind::Rights,
-        handle: None,
-        memory: None,
-    },
-];
 const HANDLE_DUPLICATE_RESULTS: &[ResultValue] = &[ResultValue {
     name: "handle",
     kind: ValueKind::Handle,
@@ -4450,36 +4517,34 @@ const HANDLE_DUPLICATE_RESULTS: &[ResultValue] = &[ResultValue {
         rights: ProducedRights::RequestedSubsetOf("requested_rights"),
     }),
 }];
-const HANDLE_REPLACE_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "source",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Any,
-            required_rights: 0,
-            disposition: HandleDisposition::ConsumeOnCommit,
-        }),
-        memory: None,
-    },
-    Argument {
-        name: "requested_rights",
-        kind: ValueKind::Rights,
-        handle: None,
-        memory: None,
-    },
-];
+const HANDLE_REPLACE_RECEIVER: Argument = Argument {
+    name: "source",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Any,
+        required_rights: 0,
+        disposition: HandleDisposition::ConsumeOnCommit,
+    }),
+    memory: None,
+};
+const HANDLE_REPLACE_ARGUMENTS: &[Argument] = &[Argument {
+    name: "requested_rights",
+    kind: ValueKind::Rights,
+    handle: None,
+    memory: None,
+}];
 const HANDLE_REPLACE_RESULTS: &[ResultValue] = HANDLE_DUPLICATE_RESULTS;
+const HANDLE_GET_INFO_RECEIVER: Argument = Argument {
+    name: "handle",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Any,
+        required_rights: 0,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const HANDLE_GET_INFO_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "handle",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Any,
-            required_rights: 0,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "output",
         kind: ValueKind::UserAddress,
@@ -4502,17 +4567,17 @@ const HANDLE_GET_INFO_ARGUMENTS: &[Argument] = &[
         memory: None,
     },
 ];
+const OBJECT_GET_BASIC_INFO_RECEIVER: Argument = Argument {
+    name: "handle",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Any,
+        required_rights: RIGHT_INSPECT,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const OBJECT_GET_BASIC_INFO_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "handle",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Any,
-            required_rights: RIGHT_INSPECT,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "output",
         kind: ValueKind::UserAddress,
@@ -4555,17 +4620,17 @@ const EVENT_CREATE_RESULTS: &[ResultValue] = &[ResultValue {
         rights: ProducedRights::Fixed(EVENT_RIGHTS),
     }),
 }];
+const EVENT_SIGNAL_RECEIVER: Argument = Argument {
+    name: "event",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("event"),
+        required_rights: RIGHT_SIGNAL,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const EVENT_SIGNAL_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "event",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("event"),
-            required_rights: RIGHT_SIGNAL,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "clear_mask",
         kind: ValueKind::U64,
@@ -4579,17 +4644,17 @@ const EVENT_SIGNAL_ARGUMENTS: &[Argument] = &[
         memory: None,
     },
 ];
+const OBJECT_WAIT_ONE_RECEIVER: Argument = Argument {
+    name: "object",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Any,
+        required_rights: RIGHT_WAIT,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const OBJECT_WAIT_ONE_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "object",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Any,
-            required_rights: RIGHT_WAIT,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "signals",
         kind: ValueKind::U64,
@@ -4679,17 +4744,17 @@ const CHANNEL_CREATE_RESULTS: &[ResultValue] = &[
         }),
     },
 ];
+const CHANNEL_WRITE_RECEIVER: Argument = Argument {
+    name: "endpoint",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("byte_channel"),
+        required_rights: RIGHT_WRITE,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const CHANNEL_WRITE_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "endpoint",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("byte_channel"),
-            required_rights: RIGHT_WRITE,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "options",
         kind: ValueKind::U32,
@@ -4718,17 +4783,17 @@ const CHANNEL_WRITE_ARGUMENTS: &[Argument] = &[
         memory: None,
     },
 ];
+const CHANNEL_READ_RECEIVER: Argument = Argument {
+    name: "endpoint",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("byte_channel"),
+        required_rights: RIGHT_READ,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const CHANNEL_READ_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "endpoint",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("byte_channel"),
-            required_rights: RIGHT_READ,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "options",
         kind: ValueKind::U32,
@@ -4787,17 +4852,17 @@ const CAPABILITY_CHANNEL_CREATE_RESULTS: &[ResultValue] = &[
     },
 ];
 
+const CAPABILITY_CHANNEL_SEND_RECEIVER: Argument = Argument {
+    name: "endpoint",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("capability_channel"),
+        required_rights: RIGHT_WRITE,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const CAPABILITY_CHANNEL_SEND_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "endpoint",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("capability_channel"),
-            required_rights: RIGHT_WRITE,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "options",
         kind: ValueKind::U32,
@@ -4857,17 +4922,17 @@ const CAPABILITY_CHANNEL_SEND_ARGUMENTS: &[Argument] = &[
     },
 ];
 
+const CAPABILITY_CHANNEL_RECEIVE_RECEIVER: Argument = Argument {
+    name: "endpoint",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("capability_channel"),
+        required_rights: RIGHT_READ,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const CAPABILITY_CHANNEL_RECEIVE_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "endpoint",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("capability_channel"),
-            required_rights: RIGHT_READ,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "deadline",
         kind: ValueKind::U64,
@@ -4943,17 +5008,17 @@ const CAPABILITY_CHANNEL_RECEIVE_FAILURE_RESULTS: &[FailureResults] = &[FailureR
     results: CAPABILITY_CHANNEL_RECEIVE_BUFFER_TOO_SMALL_RESULTS,
 }];
 
+const CONSOLE_READ_RECEIVER: Argument = Argument {
+    name: "console",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("console"),
+        required_rights: RIGHT_READ,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const CONSOLE_READ_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "console",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("console"),
-            required_rights: RIGHT_READ,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "options",
         kind: ValueKind::U32,
@@ -4982,17 +5047,17 @@ const CONSOLE_READ_ARGUMENTS: &[Argument] = &[
         memory: None,
     },
 ];
+const CONSOLE_WRITE_RECEIVER: Argument = Argument {
+    name: "console",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("console"),
+        required_rights: RIGHT_WRITE,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const CONSOLE_WRITE_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "console",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("console"),
-            required_rights: RIGHT_WRITE,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "options",
         kind: ValueKind::U32,
@@ -5032,17 +5097,17 @@ const CONSOLE_IO_FAILURE_RESULTS: &[FailureResults] = &[FailureResults {
     results: CONSOLE_IO_WOULD_BLOCK_RESULTS,
 }];
 
+const DIRECTORY_OPEN_FILE_RECEIVER: Argument = Argument {
+    name: "directory",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("directory"),
+        required_rights: RIGHT_READ,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const DIRECTORY_OPEN_FILE_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "directory",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("directory"),
-            required_rights: RIGHT_READ,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "path",
         kind: ValueKind::UserAddress,
@@ -5103,17 +5168,17 @@ const DIRECTORY_OPEN_DIRECTORY_RESULTS: &[ResultValue] = &[ResultValue {
     }),
 }];
 
+const DIRECTORY_READ_RECEIVER: Argument = Argument {
+    name: "stream",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("directory_stream"),
+        required_rights: RIGHT_READ,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const DIRECTORY_READ_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "stream",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("directory_stream"),
-            required_rights: RIGHT_READ,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "cookie",
         kind: ValueKind::U64,
@@ -5163,17 +5228,17 @@ const DIRECTORY_READ_RESULTS: &[ResultValue] = &[
     },
 ];
 
+const FILE_GET_INFO_RECEIVER: Argument = Argument {
+    name: "file",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("file"),
+        required_rights: RIGHT_INSPECT,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const FILE_GET_INFO_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "file",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("file"),
-            required_rights: RIGHT_INSPECT,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "output",
         kind: ValueKind::UserAddress,
@@ -5197,17 +5262,17 @@ const FILE_GET_INFO_ARGUMENTS: &[Argument] = &[
     },
 ];
 
+const DIRECTORY_GET_INFO_RECEIVER: Argument = Argument {
+    name: "directory",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("directory"),
+        required_rights: RIGHT_INSPECT,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const DIRECTORY_GET_INFO_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "directory",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("directory"),
-            required_rights: RIGHT_INSPECT,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "output",
         kind: ValueKind::UserAddress,
@@ -5258,17 +5323,17 @@ const SNAPSHOT_VMO_RESULTS: &[ResultValue] = &[
     scalar_result("byte_size", ValueKind::ByteCount),
 ];
 
+const VMO_READ_RECEIVER: Argument = Argument {
+    name: "vmo",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("vmo"),
+        required_rights: RIGHT_READ,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const VMO_READ_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "vmo",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("vmo"),
-            required_rights: RIGHT_READ,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "offset",
         kind: ValueKind::U64,
@@ -5298,17 +5363,17 @@ const VMO_READ_ARGUMENTS: &[Argument] = &[
     },
 ];
 
+const VMO_WRITE_RECEIVER: Argument = Argument {
+    name: "vmo",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("vmo"),
+        required_rights: RIGHT_WRITE,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const VMO_WRITE_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "vmo",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("vmo"),
-            required_rights: RIGHT_WRITE,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "offset",
         kind: ValueKind::U64,
@@ -5338,8 +5403,8 @@ const VMO_WRITE_ARGUMENTS: &[Argument] = &[
     },
 ];
 
+const VMAR_ALLOCATE_RECEIVER: Argument = vmar_argument(RIGHT_MAP);
 const VMAR_ALLOCATE_ARGUMENTS: &[Argument] = &[
-    vmar_argument(RIGHT_MAP),
     scalar_argument("address", ValueKind::U64),
     scalar_argument("size", ValueKind::ByteCount),
     scalar_argument("options", ValueKind::U64),
@@ -5364,8 +5429,8 @@ const VMAR_ALLOCATE_RESULTS: &[ResultValue] = &[
     },
 ];
 
+const VMAR_MAP_RECEIVER: Argument = vmar_argument(RIGHT_MAP);
 const VMAR_MAP_ARGUMENTS: &[Argument] = &[
-    vmar_argument(RIGHT_MAP),
     vmo_argument(RIGHT_MAP),
     scalar_argument("vmo_offset", ValueKind::U64),
     scalar_argument("address", ValueKind::U64),
@@ -5373,20 +5438,20 @@ const VMAR_MAP_ARGUMENTS: &[Argument] = &[
     scalar_argument("permissions", ValueKind::U32),
 ];
 
+const VMAR_RANGE_RECEIVER: Argument = vmar_argument(RIGHT_MAP);
 const VMAR_RANGE_ARGUMENTS: &[Argument] = &[
-    vmar_argument(RIGHT_MAP),
     scalar_argument("address", ValueKind::U64),
     scalar_argument("size", ValueKind::ByteCount),
     scalar_argument("permissions", ValueKind::U32),
 ];
 
+const VMAR_UNMAP_RECEIVER: Argument = vmar_argument(RIGHT_MAP);
 const VMAR_UNMAP_ARGUMENTS: &[Argument] = &[
-    vmar_argument(RIGHT_MAP),
     scalar_argument("address", ValueKind::U64),
     scalar_argument("size", ValueKind::ByteCount),
 ];
 
-const VMAR_DESTROY_ARGUMENTS: &[Argument] = &[Argument {
+const VMAR_DESTROY_RECEIVER: Argument = Argument {
     name: "vmar",
     kind: ValueKind::Handle,
     handle: Some(HandleArgument {
@@ -5395,19 +5460,19 @@ const VMAR_DESTROY_ARGUMENTS: &[Argument] = &[Argument {
         disposition: HandleDisposition::ConsumeOnCommit,
     }),
     memory: None,
-}];
+};
 
+const FILE_READ_AT_RECEIVER: Argument = Argument {
+    name: "file",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("file"),
+        required_rights: RIGHT_READ,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const FILE_READ_AT_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "file",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("file"),
-            required_rights: RIGHT_READ,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "options",
         kind: ValueKind::U32,
@@ -5442,8 +5507,8 @@ const FILE_READ_AT_ARGUMENTS: &[Argument] = &[
         memory: None,
     },
 ];
+const FILE_WRITE_AT_RECEIVER: Argument = file_argument(RIGHT_WRITE);
 const FILE_WRITE_AT_ARGUMENTS: &[Argument] = &[
-    file_argument(RIGHT_WRITE),
     scalar_argument("options", ValueKind::U32),
     scalar_argument("offset", ValueKind::U64),
     Argument {
@@ -5515,17 +5580,17 @@ const FILE_READ_AT_RESULTS: &[ResultValue] = &[
     },
 ];
 
+const PROCESS_BUILDER_CREATE_RECEIVER: Argument = Argument {
+    name: "factory",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("task_factory"),
+        required_rights: RIGHT_CREATE_PROCESS,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const PROCESS_BUILDER_CREATE_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "factory",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("task_factory"),
-            required_rights: RIGHT_CREATE_PROCESS,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "group",
         kind: ValueKind::Handle,
@@ -5584,8 +5649,9 @@ const PROCESS_BUILDER_CREATE_RESULTS: &[ResultValue] = &[ResultValue {
     }),
 }];
 
+const PROCESS_BUILDER_SET_NAME_RECEIVER: Argument =
+    process_builder_argument(RIGHT_WRITE, HandleDisposition::Borrow);
 const PROCESS_BUILDER_SET_NAME_ARGUMENTS: &[Argument] = &[
-    process_builder_argument(RIGHT_WRITE, HandleDisposition::Borrow),
     Argument {
         name: "name",
         kind: ValueKind::UserAddress,
@@ -5609,8 +5675,9 @@ const PROCESS_BUILDER_SET_NAME_ARGUMENTS: &[Argument] = &[
     },
 ];
 
+const PROCESS_BUILDER_SET_DATA_RECEIVER: Argument =
+    process_builder_argument(RIGHT_WRITE, HandleDisposition::Borrow);
 const PROCESS_BUILDER_SET_DATA_ARGUMENTS: &[Argument] = &[
-    process_builder_argument(RIGHT_WRITE, HandleDisposition::Borrow),
     Argument {
         name: "data",
         kind: ValueKind::UserAddress,
@@ -5634,8 +5701,9 @@ const PROCESS_BUILDER_SET_DATA_ARGUMENTS: &[Argument] = &[
     },
 ];
 
+const PROCESS_BUILDER_SET_AFFINITY_RECEIVER: Argument =
+    process_builder_argument(RIGHT_WRITE, HandleDisposition::Borrow);
 const PROCESS_BUILDER_SET_AFFINITY_ARGUMENTS: &[Argument] = &[
-    process_builder_argument(RIGHT_WRITE, HandleDisposition::Borrow),
     Argument {
         name: "affinity_words",
         kind: ValueKind::UserAddress,
@@ -5660,8 +5728,9 @@ const PROCESS_BUILDER_SET_AFFINITY_ARGUMENTS: &[Argument] = &[
     },
 ];
 
+const PROCESS_BUILDER_ADD_HANDLE_RECEIVER: Argument =
+    process_builder_argument(RIGHT_WRITE, HandleDisposition::Borrow);
 const PROCESS_BUILDER_ADD_HANDLE_ARGUMENTS: &[Argument] = &[
-    process_builder_argument(RIGHT_WRITE, HandleDisposition::Borrow),
     Argument {
         name: "source",
         kind: ValueKind::Handle,
@@ -5701,14 +5770,10 @@ const PROCESS_BUILDER_ADD_HANDLE_ARGUMENTS: &[Argument] = &[
     },
 ];
 
-const PROCESS_BUILDER_SEAL_ARGUMENTS: &[Argument] = &[process_builder_argument(
-    RIGHT_WRITE,
-    HandleDisposition::Borrow,
-)];
-const PROCESS_BUILDER_START_ARGUMENTS: &[Argument] = &[process_builder_argument(
-    RIGHT_START,
-    HandleDisposition::ConsumeOnCommit,
-)];
+const PROCESS_BUILDER_SEAL_RECEIVER: Argument =
+    process_builder_argument(RIGHT_WRITE, HandleDisposition::Borrow);
+const PROCESS_BUILDER_START_RECEIVER: Argument =
+    process_builder_argument(RIGHT_START, HandleDisposition::ConsumeOnCommit);
 const PROCESS_BUILDER_START_RESULTS: &[ResultValue] = &[
     ResultValue {
         name: "process",
@@ -5727,12 +5792,10 @@ const PROCESS_BUILDER_START_RESULTS: &[ResultValue] = &[
         }),
     },
 ];
-const PROCESS_BUILDER_ABORT_ARGUMENTS: &[Argument] = &[process_builder_argument(
-    RIGHT_REQUEST_STOP,
-    HandleDisposition::ConsumeOnCommit,
-)];
+const PROCESS_BUILDER_ABORT_RECEIVER: Argument =
+    process_builder_argument(RIGHT_REQUEST_STOP, HandleDisposition::ConsumeOnCommit);
 
-const PROCESS_REQUEST_STOP_ARGUMENTS: &[Argument] = &[Argument {
+const PROCESS_REQUEST_STOP_RECEIVER: Argument = Argument {
     name: "process",
     kind: ValueKind::Handle,
     handle: Some(HandleArgument {
@@ -5741,19 +5804,19 @@ const PROCESS_REQUEST_STOP_ARGUMENTS: &[Argument] = &[Argument {
         disposition: HandleDisposition::Borrow,
     }),
     memory: None,
-}];
+};
 
+const PROCESS_GET_INFO_RECEIVER: Argument = Argument {
+    name: "process",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("process"),
+        required_rights: RIGHT_INSPECT,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const PROCESS_GET_INFO_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "process",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("process"),
-            required_rights: RIGHT_INSPECT,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "info",
         kind: ValueKind::UserAddress,
@@ -5777,17 +5840,17 @@ const PROCESS_GET_INFO_ARGUMENTS: &[Argument] = &[
     },
 ];
 
+const TASK_INSPECTOR_SCAN_PROCESSES_RECEIVER: Argument = Argument {
+    name: "inspector",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("task_inspector"),
+        required_rights: RIGHT_INSPECT,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const TASK_INSPECTOR_SCAN_PROCESSES_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "inspector",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("task_inspector"),
-            required_rights: RIGHT_INSPECT,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "cursor",
         kind: ValueKind::U64,
@@ -5818,17 +5881,17 @@ const TASK_INSPECTOR_SCAN_PROCESSES_ARGUMENTS: &[Argument] = &[
     },
 ];
 
+const TASK_INSPECTOR_SCAN_THREADS_RECEIVER: Argument = Argument {
+    name: "inspector",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("task_inspector"),
+        required_rights: RIGHT_INSPECT,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const TASK_INSPECTOR_SCAN_THREADS_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "inspector",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("task_inspector"),
-            required_rights: RIGHT_INSPECT,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "cursor",
         kind: ValueKind::U64,
@@ -5859,17 +5922,17 @@ const TASK_INSPECTOR_SCAN_THREADS_ARGUMENTS: &[Argument] = &[
     },
 ];
 
+const OBJECT_INSPECTOR_SCAN_OBJECTS_RECEIVER: Argument = Argument {
+    name: "inspector",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("object_inspector"),
+        required_rights: RIGHT_INSPECT,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const OBJECT_INSPECTOR_SCAN_OBJECTS_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "inspector",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("object_inspector"),
-            required_rights: RIGHT_INSPECT,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "cursor",
         kind: ValueKind::U64,
@@ -5900,17 +5963,17 @@ const OBJECT_INSPECTOR_SCAN_OBJECTS_ARGUMENTS: &[Argument] = &[
     },
 ];
 
+const OBJECT_INSPECTOR_SCAN_HANDLES_RECEIVER: Argument = Argument {
+    name: "inspector",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("object_inspector"),
+        required_rights: RIGHT_INSPECT,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const OBJECT_INSPECTOR_SCAN_HANDLES_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "inspector",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("object_inspector"),
-            required_rights: RIGHT_INSPECT,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "process_koid",
         kind: ValueKind::U64,
@@ -5947,17 +6010,17 @@ const OBJECT_INSPECTOR_SCAN_HANDLES_ARGUMENTS: &[Argument] = &[
     },
 ];
 
+const OBJECT_INSPECTOR_READ_DETAILS_RECEIVER: Argument = Argument {
+    name: "inspector",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("object_inspector"),
+        required_rights: RIGHT_INSPECT | RIGHT_INSPECT_DETAILS,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const OBJECT_INSPECTOR_READ_DETAILS_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "inspector",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("object_inspector"),
-            required_rights: RIGHT_INSPECT | RIGHT_INSPECT_DETAILS,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "process_koid",
         kind: ValueKind::U64,
@@ -6012,28 +6075,26 @@ const INSPECTOR_SCAN_RESULTS: &[ResultValue] = &[
     },
 ];
 
-const TASK_INSPECTOR_DERIVE_PROCESS_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "inspector",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("task_inspector"),
-            required_rights: TASK_INSPECTOR_RIGHTS,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-    Argument {
-        name: "process",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("process"),
-            required_rights: RIGHT_INSPECT,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-];
+const TASK_INSPECTOR_DERIVE_PROCESS_RECEIVER: Argument = Argument {
+    name: "inspector",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("task_inspector"),
+        required_rights: TASK_INSPECTOR_RIGHTS,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
+const TASK_INSPECTOR_DERIVE_PROCESS_ARGUMENTS: &[Argument] = &[Argument {
+    name: "process",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("process"),
+        required_rights: RIGHT_INSPECT,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+}];
 
 const TASK_INSPECTOR_DERIVE_PROCESS_RESULTS: &[ResultValue] = &[ResultValue {
     name: "inspector",
@@ -6044,28 +6105,26 @@ const TASK_INSPECTOR_DERIVE_PROCESS_RESULTS: &[ResultValue] = &[ResultValue {
     }),
 }];
 
-const OBJECT_INSPECTOR_DERIVE_PROCESS_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "inspector",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("object_inspector"),
-            required_rights: OBJECT_INSPECTOR_RIGHTS,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-    Argument {
-        name: "process",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("process"),
-            required_rights: RIGHT_INSPECT,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-];
+const OBJECT_INSPECTOR_DERIVE_PROCESS_RECEIVER: Argument = Argument {
+    name: "inspector",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("object_inspector"),
+        required_rights: OBJECT_INSPECTOR_RIGHTS,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
+const OBJECT_INSPECTOR_DERIVE_PROCESS_ARGUMENTS: &[Argument] = &[Argument {
+    name: "process",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("process"),
+        required_rights: RIGHT_INSPECT,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+}];
 
 const OBJECT_INSPECTOR_DERIVE_PROCESS_RESULTS: &[ResultValue] = &[ResultValue {
     name: "inspector",
@@ -6076,17 +6135,17 @@ const OBJECT_INSPECTOR_DERIVE_PROCESS_RESULTS: &[ResultValue] = &[ResultValue {
     }),
 }];
 
+const MEMORY_INSPECTOR_READ_RECEIVER: Argument = Argument {
+    name: "inspector",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("memory_inspector"),
+        required_rights: RIGHT_INSPECT,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const MEMORY_INSPECTOR_READ_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "inspector",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("memory_inspector"),
-            required_rights: RIGHT_INSPECT,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "observation",
         kind: ValueKind::UserAddress,
@@ -6110,17 +6169,17 @@ const MEMORY_INSPECTOR_READ_ARGUMENTS: &[Argument] = &[
     },
 ];
 
+const CPU_INSPECTOR_READ_RECEIVER: Argument = Argument {
+    name: "inspector",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("cpu_inspector"),
+        required_rights: RIGHT_INSPECT,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const CPU_INSPECTOR_READ_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "inspector",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("cpu_inspector"),
-            required_rights: RIGHT_INSPECT,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "observation",
         kind: ValueKind::UserAddress,
@@ -6144,97 +6203,89 @@ const CPU_INSPECTOR_READ_ARGUMENTS: &[Argument] = &[
     },
 ];
 
-const TASK_INSPECTOR_DERIVE_TASK_GROUP_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "inspector",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("task_inspector"),
-            required_rights: TASK_INSPECTOR_RIGHTS,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-    Argument {
-        name: "task_group",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("task_group"),
-            required_rights: RIGHT_INSPECT,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-];
+const TASK_INSPECTOR_DERIVE_TASK_GROUP_RECEIVER: Argument = Argument {
+    name: "inspector",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("task_inspector"),
+        required_rights: TASK_INSPECTOR_RIGHTS,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
+const TASK_INSPECTOR_DERIVE_TASK_GROUP_ARGUMENTS: &[Argument] = &[Argument {
+    name: "task_group",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("task_group"),
+        required_rights: RIGHT_INSPECT,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+}];
 
-const OBJECT_INSPECTOR_DERIVE_TASK_GROUP_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "inspector",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("object_inspector"),
-            required_rights: OBJECT_INSPECTOR_RIGHTS,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-    Argument {
-        name: "task_group",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("task_group"),
-            required_rights: RIGHT_INSPECT,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-];
+const OBJECT_INSPECTOR_DERIVE_TASK_GROUP_RECEIVER: Argument = Argument {
+    name: "inspector",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("object_inspector"),
+        required_rights: OBJECT_INSPECTOR_RIGHTS,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
+const OBJECT_INSPECTOR_DERIVE_TASK_GROUP_ARGUMENTS: &[Argument] = &[Argument {
+    name: "task_group",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("task_group"),
+        required_rights: RIGHT_INSPECT,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+}];
 
-const TASK_INSPECTOR_DERIVE_RESOURCE_DOMAIN_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "inspector",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("task_inspector"),
-            required_rights: TASK_INSPECTOR_RIGHTS,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-    Argument {
-        name: "resource_domain",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("resource_domain"),
-            required_rights: RIGHT_INSPECT,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-];
+const TASK_INSPECTOR_DERIVE_RESOURCE_DOMAIN_RECEIVER: Argument = Argument {
+    name: "inspector",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("task_inspector"),
+        required_rights: TASK_INSPECTOR_RIGHTS,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
+const TASK_INSPECTOR_DERIVE_RESOURCE_DOMAIN_ARGUMENTS: &[Argument] = &[Argument {
+    name: "resource_domain",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("resource_domain"),
+        required_rights: RIGHT_INSPECT,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+}];
 
-const OBJECT_INSPECTOR_DERIVE_RESOURCE_DOMAIN_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "inspector",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("object_inspector"),
-            required_rights: OBJECT_INSPECTOR_RIGHTS,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-    Argument {
-        name: "resource_domain",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("resource_domain"),
-            required_rights: RIGHT_INSPECT,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-];
+const OBJECT_INSPECTOR_DERIVE_RESOURCE_DOMAIN_RECEIVER: Argument = Argument {
+    name: "inspector",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("object_inspector"),
+        required_rights: OBJECT_INSPECTOR_RIGHTS,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
+const OBJECT_INSPECTOR_DERIVE_RESOURCE_DOMAIN_ARGUMENTS: &[Argument] = &[Argument {
+    name: "resource_domain",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("resource_domain"),
+        required_rights: RIGHT_INSPECT,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+}];
 
 const fn process_builder_argument(
     required_rights: u64,
@@ -6295,28 +6346,26 @@ const fn vmo_argument(required_rights: u64) -> Argument {
     }
 }
 
-const VIRTUAL_MACHINE_CREATION_LEASE_CREATE_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "authority",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("virtual_machine_creation_authority"),
-            required_rights: RIGHT_DERIVE | RIGHT_CREATE_VIRTUAL_MACHINE,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-    Argument {
-        name: "resource_domain",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("resource_domain"),
-            required_rights: RIGHT_RESOURCE_DOMAIN_SPONSOR,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-];
+const VIRTUAL_MACHINE_CREATION_LEASE_CREATE_RECEIVER: Argument = Argument {
+    name: "authority",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("virtual_machine_creation_authority"),
+        required_rights: RIGHT_DERIVE | RIGHT_CREATE_VIRTUAL_MACHINE,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
+const VIRTUAL_MACHINE_CREATION_LEASE_CREATE_ARGUMENTS: &[Argument] = &[Argument {
+    name: "resource_domain",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("resource_domain"),
+        required_rights: RIGHT_RESOURCE_DOMAIN_SPONSOR,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+}];
 const VIRTUAL_MACHINE_CREATION_LEASE_CREATE_RESULTS: &[ResultValue] = &[ResultValue {
     name: "lease",
     kind: ValueKind::Handle,
@@ -6326,17 +6375,17 @@ const VIRTUAL_MACHINE_CREATION_LEASE_CREATE_RESULTS: &[ResultValue] = &[ResultVa
     }),
 }];
 
+const RESOURCE_DOMAIN_CREATE_RECEIVER: Argument = Argument {
+    name: "parent",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("resource_domain"),
+        required_rights: RIGHT_CREATE_RESOURCE_DOMAIN,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const RESOURCE_DOMAIN_CREATE_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "parent",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("resource_domain"),
-            required_rights: RIGHT_CREATE_RESOURCE_DOMAIN,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "limits",
         kind: ValueKind::UserAddress,
@@ -6371,28 +6420,26 @@ const RESOURCE_DOMAIN_CREATE_RESULTS: &[ResultValue] = &[ResultValue {
     }),
 }];
 
-const TASK_GROUP_CREATE_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "factory",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("task_factory"),
-            required_rights: RIGHT_CREATE_TASK_GROUP,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-    Argument {
-        name: "resource_domain",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("resource_domain"),
-            required_rights: RIGHT_RESOURCE_DOMAIN_SPONSOR,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-];
+const TASK_GROUP_CREATE_RECEIVER: Argument = Argument {
+    name: "factory",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("task_factory"),
+        required_rights: RIGHT_CREATE_TASK_GROUP,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
+const TASK_GROUP_CREATE_ARGUMENTS: &[Argument] = &[Argument {
+    name: "resource_domain",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("resource_domain"),
+        required_rights: RIGHT_RESOURCE_DOMAIN_SPONSOR,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+}];
 const TASK_GROUP_CREATE_RESULTS: &[ResultValue] = &[ResultValue {
     name: "group",
     kind: ValueKind::Handle,
@@ -6409,17 +6456,17 @@ const TASK_GROUP_CREATE_RESULTS: &[ResultValue] = &[ResultValue {
     }),
 }];
 
+const VIRTUAL_MACHINE_CREATE_RECEIVER: Argument = Argument {
+    name: "lease",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("virtual_machine_creation_lease"),
+        required_rights: RIGHT_CREATE_VIRTUAL_MACHINE,
+        disposition: HandleDisposition::ConsumeOnCommit,
+    }),
+    memory: None,
+};
 const VIRTUAL_MACHINE_CREATE_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "lease",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("virtual_machine_creation_lease"),
-            required_rights: RIGHT_CREATE_VIRTUAL_MACHINE,
-            disposition: HandleDisposition::ConsumeOnCommit,
-        }),
-        memory: None,
-    },
     Argument {
         name: "configuration",
         kind: ValueKind::UserAddress,
@@ -6451,51 +6498,47 @@ const VIRTUAL_MACHINE_CREATE_RESULTS: &[ResultValue] = &[ResultValue {
     }),
 }];
 
-const PENDING_VIRTUAL_MACHINE_SET_MEMORY_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "pending_virtual_machine",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("pending_virtual_machine"),
-            required_rights: RIGHT_WRITE,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-    Argument {
-        name: "vmo",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("vmo"),
-            required_rights: RIGHT_READ | RIGHT_WRITE | RIGHT_MAP,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-];
+const PENDING_VIRTUAL_MACHINE_SET_MEMORY_RECEIVER: Argument = Argument {
+    name: "pending_virtual_machine",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("pending_virtual_machine"),
+        required_rights: RIGHT_WRITE,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
+const PENDING_VIRTUAL_MACHINE_SET_MEMORY_ARGUMENTS: &[Argument] = &[Argument {
+    name: "vmo",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("vmo"),
+        required_rights: RIGHT_READ | RIGHT_WRITE | RIGHT_MAP,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+}];
 
-const PENDING_VIRTUAL_MACHINE_SET_VIRTUAL_SERIAL_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "pending_virtual_machine",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("pending_virtual_machine"),
-            required_rights: RIGHT_WRITE,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-    Argument {
-        name: "virtual_serial",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("virtual_serial"),
-            required_rights: RIGHT_TRANSFER | RIGHT_ASSIGN_DEVICE,
-            disposition: HandleDisposition::ConsumeOnCommit,
-        }),
-        memory: None,
-    },
-];
+const PENDING_VIRTUAL_MACHINE_SET_VIRTUAL_SERIAL_RECEIVER: Argument = Argument {
+    name: "pending_virtual_machine",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("pending_virtual_machine"),
+        required_rights: RIGHT_WRITE,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
+const PENDING_VIRTUAL_MACHINE_SET_VIRTUAL_SERIAL_ARGUMENTS: &[Argument] = &[Argument {
+    name: "virtual_serial",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("virtual_serial"),
+        required_rights: RIGHT_TRANSFER | RIGHT_ASSIGN_DEVICE,
+        disposition: HandleDisposition::ConsumeOnCommit,
+    }),
+    memory: None,
+}];
 
 const VIRTUAL_SERIAL_CREATE_RESULTS: &[ResultValue] = &[ResultValue {
     name: "virtual_serial",
@@ -6506,40 +6549,38 @@ const VIRTUAL_SERIAL_CREATE_RESULTS: &[ResultValue] = &[ResultValue {
     }),
 }];
 
-const VIRTUAL_SERIAL_REGISTER_OUTPUT_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "virtual_serial",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("virtual_serial"),
-            required_rights: RIGHT_WRITE,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-    Argument {
-        name: "buffer",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("vmo"),
-            required_rights: RIGHT_READ | RIGHT_WRITE | RIGHT_MAP,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
-];
+const VIRTUAL_SERIAL_REGISTER_OUTPUT_RECEIVER: Argument = Argument {
+    name: "virtual_serial",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("virtual_serial"),
+        required_rights: RIGHT_WRITE,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
+const VIRTUAL_SERIAL_REGISTER_OUTPUT_ARGUMENTS: &[Argument] = &[Argument {
+    name: "buffer",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("vmo"),
+        required_rights: RIGHT_READ | RIGHT_WRITE | RIGHT_MAP,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+}];
 
+const VIRTUAL_SERIAL_WRITE_RECEIVER: Argument = Argument {
+    name: "virtual_serial",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("virtual_serial"),
+        required_rights: RIGHT_WRITE,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const VIRTUAL_SERIAL_WRITE_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "virtual_serial",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("virtual_serial"),
-            required_rights: RIGHT_WRITE,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "bytes",
         kind: ValueKind::UserAddress,
@@ -6569,17 +6610,17 @@ const VIRTUAL_SERIAL_IO_RESULTS: &[ResultValue] = &[ResultValue {
     handle: None,
 }];
 
+const PENDING_VIRTUAL_MACHINE_SET_BOOTSTRAP_RECEIVER: Argument = Argument {
+    name: "pending_virtual_machine",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("pending_virtual_machine"),
+        required_rights: RIGHT_WRITE,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const PENDING_VIRTUAL_MACHINE_SET_BOOTSTRAP_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "pending_virtual_machine",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("pending_virtual_machine"),
-            required_rights: RIGHT_WRITE,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "bootstrap",
         kind: ValueKind::UserAddress,
@@ -6619,14 +6660,10 @@ const fn pending_virtual_machine_argument(
     }
 }
 
-const PENDING_VIRTUAL_MACHINE_SEAL_ARGUMENTS: &[Argument] = &[pending_virtual_machine_argument(
-    RIGHT_WRITE,
-    HandleDisposition::Borrow,
-)];
-const PENDING_VIRTUAL_MACHINE_INSTALL_ARGUMENTS: &[Argument] = &[pending_virtual_machine_argument(
-    RIGHT_START,
-    HandleDisposition::ConsumeOnCommit,
-)];
+const PENDING_VIRTUAL_MACHINE_SEAL_RECEIVER: Argument =
+    pending_virtual_machine_argument(RIGHT_WRITE, HandleDisposition::Borrow);
+const PENDING_VIRTUAL_MACHINE_INSTALL_RECEIVER: Argument =
+    pending_virtual_machine_argument(RIGHT_START, HandleDisposition::ConsumeOnCommit);
 const PENDING_VIRTUAL_MACHINE_INSTALL_RESULTS: &[ResultValue] = &[
     ResultValue {
         name: "virtual_machine",
@@ -6645,12 +6682,10 @@ const PENDING_VIRTUAL_MACHINE_INSTALL_RESULTS: &[ResultValue] = &[
         }),
     },
 ];
-const PENDING_VIRTUAL_MACHINE_ABORT_ARGUMENTS: &[Argument] = &[pending_virtual_machine_argument(
-    RIGHT_REQUEST_STOP,
-    HandleDisposition::ConsumeOnCommit,
-)];
+const PENDING_VIRTUAL_MACHINE_ABORT_RECEIVER: Argument =
+    pending_virtual_machine_argument(RIGHT_REQUEST_STOP, HandleDisposition::ConsumeOnCommit);
 
-const VIRTUAL_MACHINE_REQUEST_STOP_ARGUMENTS: &[Argument] = &[Argument {
+const VIRTUAL_MACHINE_REQUEST_STOP_RECEIVER: Argument = Argument {
     name: "virtual_machine",
     kind: ValueKind::Handle,
     handle: Some(HandleArgument {
@@ -6659,19 +6694,19 @@ const VIRTUAL_MACHINE_REQUEST_STOP_ARGUMENTS: &[Argument] = &[Argument {
         disposition: HandleDisposition::Borrow,
     }),
     memory: None,
-}];
+};
 
+const VIRTUAL_MACHINE_GET_INFO_RECEIVER: Argument = Argument {
+    name: "virtual_machine",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("virtual_machine"),
+        required_rights: RIGHT_INSPECT,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const VIRTUAL_MACHINE_GET_INFO_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "virtual_machine",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("virtual_machine"),
-            required_rights: RIGHT_INSPECT,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "info",
         kind: ValueKind::UserAddress,
@@ -6690,17 +6725,17 @@ const VIRTUAL_MACHINE_GET_INFO_ARGUMENTS: &[Argument] = &[
     scalar_argument("info_size", ValueKind::ByteCount),
 ];
 
+const VIRTUAL_CPU_GET_INFO_RECEIVER: Argument = Argument {
+    name: "virtual_cpu",
+    kind: ValueKind::Handle,
+    handle: Some(HandleArgument {
+        object: ObjectConstraint::Kind("virtual_cpu"),
+        required_rights: RIGHT_INSPECT,
+        disposition: HandleDisposition::Borrow,
+    }),
+    memory: None,
+};
 const VIRTUAL_CPU_GET_INFO_ARGUMENTS: &[Argument] = &[
-    Argument {
-        name: "virtual_cpu",
-        kind: ValueKind::Handle,
-        handle: Some(HandleArgument {
-            object: ObjectConstraint::Kind("virtual_cpu"),
-            required_rights: RIGHT_INSPECT,
-            disposition: HandleDisposition::Borrow,
-        }),
-        memory: None,
-    },
     Argument {
         name: "info",
         kind: ValueKind::UserAddress,
@@ -6719,7 +6754,7 @@ const VIRTUAL_CPU_GET_INFO_ARGUMENTS: &[Argument] = &[
     scalar_argument("info_size", ValueKind::ByteCount),
 ];
 
-const VIRTUAL_CPU_START_ARGUMENTS: &[Argument] = &[Argument {
+const VIRTUAL_CPU_START_RECEIVER: Argument = Argument {
     name: "virtual_cpu",
     kind: ValueKind::Handle,
     handle: Some(HandleArgument {
@@ -6728,15 +6763,15 @@ const VIRTUAL_CPU_START_ARGUMENTS: &[Argument] = &[Argument {
         disposition: HandleDisposition::Borrow,
     }),
     memory: None,
-}];
+};
 
 const THREAD_CREATE_ARGUMENTS: &[Argument] = &[
     scalar_argument("entry", ValueKind::U64),
     scalar_argument("stack", ValueKind::U64),
     scalar_argument("tls", ValueKind::U64),
     scalar_argument("argument", ValueKind::U64),
+    PROCESS_BUILDER_SET_AFFINITY_ARGUMENTS[0],
     PROCESS_BUILDER_SET_AFFINITY_ARGUMENTS[1],
-    PROCESS_BUILDER_SET_AFFINITY_ARGUMENTS[2],
 ];
 const THREAD_CREATE_RESULTS: &[ResultValue] = &[ResultValue {
     name: "thread",
@@ -6801,11 +6836,12 @@ const fn crash_output_argument(record: &'static str) -> Argument {
     }
 }
 
-pub const SYSCALLS: &[Syscall] = &[
-    Syscall {
-        number: 0,
+pub const INVOCATIONS: &[Invocation] = &[
+    Invocation {
+        operation: 256,
         name: "abi_query",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("system_info", RIGHT_READ),
         arguments: NO_ARGUMENTS,
         results: ABI_QUERY_RESULTS,
         blocking: BlockingClass::Never,
@@ -6816,11 +6852,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 1,
+    Invocation {
+        operation: 0,
         name: "handle_close",
         feature: FeatureGate::Core,
-        arguments: HANDLE_CLOSE_ARGUMENTS,
+        receiver: HANDLE_CLOSE_RECEIVER,
+        arguments: NO_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
         cancellation: CancellationClass::None,
@@ -6830,10 +6867,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 2,
+    Invocation {
+        operation: 1,
         name: "handle_duplicate",
         feature: FeatureGate::Core,
+        receiver: HANDLE_DUPLICATE_RECEIVER,
         arguments: HANDLE_DUPLICATE_ARGUMENTS,
         results: HANDLE_DUPLICATE_RESULTS,
         blocking: BlockingClass::Never,
@@ -6844,10 +6882,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 3,
+    Invocation {
+        operation: 2,
         name: "handle_replace",
         feature: FeatureGate::Core,
+        receiver: HANDLE_REPLACE_RECEIVER,
         arguments: HANDLE_REPLACE_ARGUMENTS,
         results: HANDLE_REPLACE_RESULTS,
         blocking: BlockingClass::Never,
@@ -6858,10 +6897,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 4,
+    Invocation {
+        operation: 3,
         name: "handle_get_info",
         feature: FeatureGate::Core,
+        receiver: HANDLE_GET_INFO_RECEIVER,
         arguments: HANDLE_GET_INFO_ARGUMENTS,
         results: INFO_RECORD_RESULTS,
         blocking: BlockingClass::Never,
@@ -6872,10 +6912,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 5,
+    Invocation {
+        operation: 4,
         name: "object_get_basic_info",
         feature: FeatureGate::Core,
+        receiver: OBJECT_GET_BASIC_INFO_RECEIVER,
         arguments: OBJECT_GET_BASIC_INFO_ARGUMENTS,
         results: INFO_RECORD_RESULTS,
         blocking: BlockingClass::Never,
@@ -6886,10 +6927,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 6,
+    Invocation {
+        operation: 256,
         name: "thread_yield",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("execution_context", RIGHT_WRITE),
         arguments: NO_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::MayBlock,
@@ -6900,10 +6942,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 7,
+    Invocation {
+        operation: 257,
         name: "thread_exit",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("execution_context", RIGHT_REQUEST_STOP),
         arguments: EXIT_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::MayBlock,
@@ -6914,10 +6957,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 8,
+    Invocation {
+        operation: 258,
         name: "process_exit",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("execution_context", RIGHT_REQUEST_STOP),
         arguments: EXIT_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::MayBlock,
@@ -6928,10 +6972,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 9,
+    Invocation {
+        operation: 256,
         name: "event_create",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("object_factory", RIGHT_CREATE_OBJECT),
         arguments: EVENT_CREATE_ARGUMENTS,
         results: EVENT_CREATE_RESULTS,
         blocking: BlockingClass::Never,
@@ -6942,10 +6987,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 10,
+    Invocation {
+        operation: 256,
         name: "event_signal",
         feature: FeatureGate::Core,
+        receiver: EVENT_SIGNAL_RECEIVER,
         arguments: EVENT_SIGNAL_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
@@ -6956,10 +7002,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 11,
+    Invocation {
+        operation: 5,
         name: "object_wait_one",
         feature: FeatureGate::Core,
+        receiver: OBJECT_WAIT_ONE_RECEIVER,
         arguments: OBJECT_WAIT_ONE_ARGUMENTS,
         results: OBJECT_WAIT_ONE_RESULTS,
         blocking: BlockingClass::MayBlock,
@@ -6970,10 +7017,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 12,
+    Invocation {
+        operation: 257,
         name: "byte_channel_create",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("object_factory", RIGHT_CREATE_OBJECT),
         arguments: CHANNEL_CREATE_ARGUMENTS,
         results: CHANNEL_CREATE_RESULTS,
         blocking: BlockingClass::Never,
@@ -6984,10 +7032,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 13,
+    Invocation {
+        operation: 256,
         name: "byte_channel_write",
         feature: FeatureGate::Core,
+        receiver: CHANNEL_WRITE_RECEIVER,
         arguments: CHANNEL_WRITE_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
@@ -6998,10 +7047,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 14,
+    Invocation {
+        operation: 257,
         name: "byte_channel_read",
         feature: FeatureGate::Core,
+        receiver: CHANNEL_READ_RECEIVER,
         arguments: CHANNEL_READ_ARGUMENTS,
         results: CHANNEL_READ_RESULTS,
         blocking: BlockingClass::Never,
@@ -7012,10 +7062,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: CHANNEL_READ_FAILURE_RESULTS,
     },
-    Syscall {
-        number: 15,
+    Invocation {
+        operation: 256,
         name: "console_read",
         feature: FeatureGate::Core,
+        receiver: CONSOLE_READ_RECEIVER,
         arguments: CONSOLE_READ_ARGUMENTS,
         results: CONSOLE_IO_RESULTS,
         blocking: BlockingClass::Never,
@@ -7026,10 +7077,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: CONSOLE_IO_FAILURE_RESULTS,
     },
-    Syscall {
-        number: 16,
+    Invocation {
+        operation: 257,
         name: "console_write",
         feature: FeatureGate::Core,
+        receiver: CONSOLE_WRITE_RECEIVER,
         arguments: CONSOLE_WRITE_ARGUMENTS,
         results: CONSOLE_IO_RESULTS,
         blocking: BlockingClass::Never,
@@ -7040,10 +7092,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: CONSOLE_IO_FAILURE_RESULTS,
     },
-    Syscall {
-        number: 17,
+    Invocation {
+        operation: 256,
         name: "directory_open_file",
         feature: FeatureGate::Core,
+        receiver: DIRECTORY_OPEN_FILE_RECEIVER,
         arguments: DIRECTORY_OPEN_FILE_ARGUMENTS,
         results: DIRECTORY_OPEN_FILE_RESULTS,
         blocking: BlockingClass::MayBlock,
@@ -7054,10 +7107,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 18,
+    Invocation {
+        operation: 256,
         name: "file_read_at",
         feature: FeatureGate::Core,
+        receiver: FILE_READ_AT_RECEIVER,
         arguments: FILE_READ_AT_ARGUMENTS,
         results: FILE_READ_AT_RESULTS,
         blocking: BlockingClass::MayBlock,
@@ -7068,10 +7122,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 19,
+    Invocation {
+        operation: 258,
         name: "capability_channel_create",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("object_factory", RIGHT_CREATE_OBJECT),
         arguments: CHANNEL_CREATE_ARGUMENTS,
         results: CAPABILITY_CHANNEL_CREATE_RESULTS,
         blocking: BlockingClass::Never,
@@ -7082,10 +7137,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 20,
+    Invocation {
+        operation: 256,
         name: "capability_channel_try_send",
         feature: FeatureGate::Core,
+        receiver: CAPABILITY_CHANNEL_SEND_RECEIVER,
         arguments: CAPABILITY_CHANNEL_SEND_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
@@ -7096,10 +7152,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 21,
+    Invocation {
+        operation: 257,
         name: "capability_channel_receive",
         feature: FeatureGate::Core,
+        receiver: CAPABILITY_CHANNEL_RECEIVE_RECEIVER,
         arguments: CAPABILITY_CHANNEL_RECEIVE_ARGUMENTS,
         results: CAPABILITY_CHANNEL_RECEIVE_RESULTS,
         blocking: BlockingClass::MayBlock,
@@ -7110,10 +7167,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: CAPABILITY_CHANNEL_RECEIVE_FAILURE_RESULTS,
     },
-    Syscall {
-        number: 22,
+    Invocation {
+        operation: 256,
         name: "process_builder_create",
         feature: FeatureGate::Core,
+        receiver: PROCESS_BUILDER_CREATE_RECEIVER,
         arguments: PROCESS_BUILDER_CREATE_ARGUMENTS,
         results: PROCESS_BUILDER_CREATE_RESULTS,
         blocking: BlockingClass::MayBlock,
@@ -7124,10 +7182,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 23,
+    Invocation {
+        operation: 256,
         name: "process_builder_set_name",
         feature: FeatureGate::Core,
+        receiver: PROCESS_BUILDER_SET_NAME_RECEIVER,
         arguments: PROCESS_BUILDER_SET_NAME_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
@@ -7138,10 +7197,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 24,
+    Invocation {
+        operation: 257,
         name: "process_builder_set_data",
         feature: FeatureGate::Core,
+        receiver: PROCESS_BUILDER_SET_DATA_RECEIVER,
         arguments: PROCESS_BUILDER_SET_DATA_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
@@ -7152,10 +7212,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 26,
+    Invocation {
+        operation: 258,
         name: "process_builder_set_affinity",
         feature: FeatureGate::Core,
+        receiver: PROCESS_BUILDER_SET_AFFINITY_RECEIVER,
         arguments: PROCESS_BUILDER_SET_AFFINITY_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
@@ -7166,10 +7227,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 27,
+    Invocation {
+        operation: 259,
         name: "process_builder_add_handle",
         feature: FeatureGate::Core,
+        receiver: PROCESS_BUILDER_ADD_HANDLE_RECEIVER,
         arguments: PROCESS_BUILDER_ADD_HANDLE_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
@@ -7180,11 +7242,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 28,
+    Invocation {
+        operation: 260,
         name: "process_builder_seal",
         feature: FeatureGate::Core,
-        arguments: PROCESS_BUILDER_SEAL_ARGUMENTS,
+        receiver: PROCESS_BUILDER_SEAL_RECEIVER,
+        arguments: NO_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
         cancellation: CancellationClass::None,
@@ -7194,11 +7257,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 29,
+    Invocation {
+        operation: 261,
         name: "process_builder_start",
         feature: FeatureGate::Core,
-        arguments: PROCESS_BUILDER_START_ARGUMENTS,
+        receiver: PROCESS_BUILDER_START_RECEIVER,
+        arguments: NO_ARGUMENTS,
         results: PROCESS_BUILDER_START_RESULTS,
         blocking: BlockingClass::Never,
         cancellation: CancellationClass::None,
@@ -7208,11 +7272,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 30,
+    Invocation {
+        operation: 262,
         name: "process_builder_abort",
         feature: FeatureGate::Core,
-        arguments: PROCESS_BUILDER_ABORT_ARGUMENTS,
+        receiver: PROCESS_BUILDER_ABORT_RECEIVER,
+        arguments: NO_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
         cancellation: CancellationClass::None,
@@ -7222,11 +7287,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 31,
+    Invocation {
+        operation: 256,
         name: "process_request_stop",
         feature: FeatureGate::Core,
-        arguments: PROCESS_REQUEST_STOP_ARGUMENTS,
+        receiver: PROCESS_REQUEST_STOP_RECEIVER,
+        arguments: NO_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
         cancellation: CancellationClass::None,
@@ -7236,10 +7302,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 32,
+    Invocation {
+        operation: 259,
         name: "object_wait_many",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("execution_context", RIGHT_WRITE),
         arguments: OBJECT_WAIT_MANY_ARGUMENTS,
         results: OBJECT_WAIT_MANY_RESULTS,
         blocking: BlockingClass::MayBlock,
@@ -7250,10 +7317,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 33,
+    Invocation {
+        operation: 257,
         name: "process_get_info",
         feature: FeatureGate::Core,
+        receiver: PROCESS_GET_INFO_RECEIVER,
         arguments: PROCESS_GET_INFO_ARGUMENTS,
         results: INFO_RECORD_RESULTS,
         blocking: BlockingClass::Never,
@@ -7264,10 +7332,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 34,
+    Invocation {
+        operation: 256,
         name: "task_inspector_scan_processes",
         feature: FeatureGate::Core,
+        receiver: TASK_INSPECTOR_SCAN_PROCESSES_RECEIVER,
         arguments: TASK_INSPECTOR_SCAN_PROCESSES_ARGUMENTS,
         results: INSPECTOR_SCAN_RESULTS,
         blocking: BlockingClass::Never,
@@ -7278,10 +7347,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 35,
+    Invocation {
+        operation: 257,
         name: "task_inspector_scan_threads",
         feature: FeatureGate::Core,
+        receiver: TASK_INSPECTOR_SCAN_THREADS_RECEIVER,
         arguments: TASK_INSPECTOR_SCAN_THREADS_ARGUMENTS,
         results: INSPECTOR_SCAN_RESULTS,
         blocking: BlockingClass::Never,
@@ -7292,10 +7362,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 36,
+    Invocation {
+        operation: 258,
         name: "task_inspector_derive_process",
         feature: FeatureGate::Core,
+        receiver: TASK_INSPECTOR_DERIVE_PROCESS_RECEIVER,
         arguments: TASK_INSPECTOR_DERIVE_PROCESS_ARGUMENTS,
         results: TASK_INSPECTOR_DERIVE_PROCESS_RESULTS,
         blocking: BlockingClass::Never,
@@ -7306,10 +7377,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 37,
+    Invocation {
+        operation: 256,
         name: "object_inspector_scan_objects",
         feature: FeatureGate::Core,
+        receiver: OBJECT_INSPECTOR_SCAN_OBJECTS_RECEIVER,
         arguments: OBJECT_INSPECTOR_SCAN_OBJECTS_ARGUMENTS,
         results: INSPECTOR_SCAN_RESULTS,
         blocking: BlockingClass::Never,
@@ -7320,10 +7392,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 38,
+    Invocation {
+        operation: 257,
         name: "object_inspector_scan_handles",
         feature: FeatureGate::Core,
+        receiver: OBJECT_INSPECTOR_SCAN_HANDLES_RECEIVER,
         arguments: OBJECT_INSPECTOR_SCAN_HANDLES_ARGUMENTS,
         results: INSPECTOR_SCAN_RESULTS,
         blocking: BlockingClass::Never,
@@ -7334,10 +7407,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 39,
+    Invocation {
+        operation: 258,
         name: "object_inspector_derive_process",
         feature: FeatureGate::Core,
+        receiver: OBJECT_INSPECTOR_DERIVE_PROCESS_RECEIVER,
         arguments: OBJECT_INSPECTOR_DERIVE_PROCESS_ARGUMENTS,
         results: OBJECT_INSPECTOR_DERIVE_PROCESS_RESULTS,
         blocking: BlockingClass::Never,
@@ -7348,10 +7422,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 40,
+    Invocation {
+        operation: 259,
         name: "task_inspector_derive_task_group",
         feature: FeatureGate::Core,
+        receiver: TASK_INSPECTOR_DERIVE_TASK_GROUP_RECEIVER,
         arguments: TASK_INSPECTOR_DERIVE_TASK_GROUP_ARGUMENTS,
         results: TASK_INSPECTOR_DERIVE_PROCESS_RESULTS,
         blocking: BlockingClass::Never,
@@ -7362,10 +7437,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 41,
+    Invocation {
+        operation: 259,
         name: "object_inspector_derive_task_group",
         feature: FeatureGate::Core,
+        receiver: OBJECT_INSPECTOR_DERIVE_TASK_GROUP_RECEIVER,
         arguments: OBJECT_INSPECTOR_DERIVE_TASK_GROUP_ARGUMENTS,
         results: OBJECT_INSPECTOR_DERIVE_PROCESS_RESULTS,
         blocking: BlockingClass::Never,
@@ -7376,10 +7452,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 42,
+    Invocation {
+        operation: 260,
         name: "task_inspector_derive_resource_domain",
         feature: FeatureGate::Core,
+        receiver: TASK_INSPECTOR_DERIVE_RESOURCE_DOMAIN_RECEIVER,
         arguments: TASK_INSPECTOR_DERIVE_RESOURCE_DOMAIN_ARGUMENTS,
         results: TASK_INSPECTOR_DERIVE_PROCESS_RESULTS,
         blocking: BlockingClass::Never,
@@ -7390,10 +7467,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 43,
+    Invocation {
+        operation: 260,
         name: "object_inspector_derive_resource_domain",
         feature: FeatureGate::Core,
+        receiver: OBJECT_INSPECTOR_DERIVE_RESOURCE_DOMAIN_RECEIVER,
         arguments: OBJECT_INSPECTOR_DERIVE_RESOURCE_DOMAIN_ARGUMENTS,
         results: OBJECT_INSPECTOR_DERIVE_PROCESS_RESULTS,
         blocking: BlockingClass::Never,
@@ -7404,10 +7482,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 44,
+    Invocation {
+        operation: 257,
         name: "directory_open_directory",
         feature: FeatureGate::Core,
+        receiver: DIRECTORY_OPEN_FILE_RECEIVER,
         arguments: DIRECTORY_OPEN_FILE_ARGUMENTS,
         results: DIRECTORY_OPEN_DIRECTORY_RESULTS,
         blocking: BlockingClass::MayBlock,
@@ -7418,10 +7497,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 45,
+    Invocation {
+        operation: 259,
         name: "vmo_create",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("object_factory", RIGHT_CREATE_OBJECT),
         arguments: VMO_CREATE_ARGUMENTS,
         results: VMO_CREATE_RESULTS,
         blocking: BlockingClass::Never,
@@ -7432,10 +7512,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 47,
+    Invocation {
+        operation: 256,
         name: "vmo_read",
         feature: FeatureGate::Core,
+        receiver: VMO_READ_RECEIVER,
         arguments: VMO_READ_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
@@ -7446,10 +7527,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 48,
+    Invocation {
+        operation: 257,
         name: "vmo_write",
         feature: FeatureGate::Core,
+        receiver: VMO_WRITE_RECEIVER,
         arguments: VMO_WRITE_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
@@ -7460,10 +7542,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 49,
+    Invocation {
+        operation: 256,
         name: "vmar_allocate",
         feature: FeatureGate::Core,
+        receiver: VMAR_ALLOCATE_RECEIVER,
         arguments: VMAR_ALLOCATE_ARGUMENTS,
         results: VMAR_ALLOCATE_RESULTS,
         blocking: BlockingClass::Never,
@@ -7474,10 +7557,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 50,
+    Invocation {
+        operation: 257,
         name: "vmar_map",
         feature: FeatureGate::Core,
+        receiver: VMAR_MAP_RECEIVER,
         arguments: VMAR_MAP_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
@@ -7488,10 +7572,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 51,
+    Invocation {
+        operation: 258,
         name: "vmar_protect",
         feature: FeatureGate::Core,
+        receiver: VMAR_RANGE_RECEIVER,
         arguments: VMAR_RANGE_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
@@ -7502,10 +7587,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 52,
+    Invocation {
+        operation: 259,
         name: "vmar_unmap",
         feature: FeatureGate::Core,
+        receiver: VMAR_UNMAP_RECEIVER,
         arguments: VMAR_UNMAP_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
@@ -7516,11 +7602,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 53,
+    Invocation {
+        operation: 260,
         name: "vmar_destroy",
         feature: FeatureGate::Core,
-        arguments: VMAR_DESTROY_ARGUMENTS,
+        receiver: VMAR_DESTROY_RECEIVER,
+        arguments: NO_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
         cancellation: CancellationClass::None,
@@ -7530,10 +7617,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 54,
+    Invocation {
+        operation: 256,
         name: "directory_read",
         feature: FeatureGate::Core,
+        receiver: DIRECTORY_READ_RECEIVER,
         arguments: DIRECTORY_READ_ARGUMENTS,
         results: DIRECTORY_READ_RESULTS,
         blocking: BlockingClass::MayBlock,
@@ -7544,10 +7632,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 55,
+    Invocation {
+        operation: 256,
         name: "memory_inspector_read",
         feature: FeatureGate::Core,
+        receiver: MEMORY_INSPECTOR_READ_RECEIVER,
         arguments: MEMORY_INSPECTOR_READ_ARGUMENTS,
         results: INFO_RECORD_RESULTS,
         blocking: BlockingClass::Never,
@@ -7558,10 +7647,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 56,
+    Invocation {
+        operation: 256,
         name: "cpu_inspector_read",
         feature: FeatureGate::Core,
+        receiver: CPU_INSPECTOR_READ_RECEIVER,
         arguments: CPU_INSPECTOR_READ_ARGUMENTS,
         results: INFO_RECORD_RESULTS,
         blocking: BlockingClass::Never,
@@ -7572,10 +7662,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 57,
+    Invocation {
+        operation: 257,
         name: "file_get_info",
         feature: FeatureGate::Core,
+        receiver: FILE_GET_INFO_RECEIVER,
         arguments: FILE_GET_INFO_ARGUMENTS,
         results: INFO_RECORD_RESULTS,
         blocking: BlockingClass::MayBlock,
@@ -7586,10 +7677,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 58,
+    Invocation {
+        operation: 258,
         name: "directory_get_info",
         feature: FeatureGate::Core,
+        receiver: DIRECTORY_GET_INFO_RECEIVER,
         arguments: DIRECTORY_GET_INFO_ARGUMENTS,
         results: INFO_RECORD_RESULTS,
         blocking: BlockingClass::MayBlock,
@@ -7600,10 +7692,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 59,
+    Invocation {
+        operation: 256,
         name: "virtual_machine_creation_lease_create",
         feature: FeatureGate::Core,
+        receiver: VIRTUAL_MACHINE_CREATION_LEASE_CREATE_RECEIVER,
         arguments: VIRTUAL_MACHINE_CREATION_LEASE_CREATE_ARGUMENTS,
         results: VIRTUAL_MACHINE_CREATION_LEASE_CREATE_RESULTS,
         blocking: BlockingClass::Never,
@@ -7614,10 +7707,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 60,
+    Invocation {
+        operation: 256,
         name: "virtual_machine_create",
         feature: FeatureGate::Core,
+        receiver: VIRTUAL_MACHINE_CREATE_RECEIVER,
         arguments: VIRTUAL_MACHINE_CREATE_ARGUMENTS,
         results: VIRTUAL_MACHINE_CREATE_RESULTS,
         blocking: BlockingClass::Never,
@@ -7628,10 +7722,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 61,
+    Invocation {
+        operation: 256,
         name: "pending_virtual_machine_set_memory",
         feature: FeatureGate::Core,
+        receiver: PENDING_VIRTUAL_MACHINE_SET_MEMORY_RECEIVER,
         arguments: PENDING_VIRTUAL_MACHINE_SET_MEMORY_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
@@ -7642,10 +7737,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 62,
+    Invocation {
+        operation: 257,
         name: "pending_virtual_machine_set_bootstrap",
         feature: FeatureGate::Core,
+        receiver: PENDING_VIRTUAL_MACHINE_SET_BOOTSTRAP_RECEIVER,
         arguments: PENDING_VIRTUAL_MACHINE_SET_BOOTSTRAP_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
@@ -7656,11 +7752,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 63,
+    Invocation {
+        operation: 258,
         name: "pending_virtual_machine_seal",
         feature: FeatureGate::Core,
-        arguments: PENDING_VIRTUAL_MACHINE_SEAL_ARGUMENTS,
+        receiver: PENDING_VIRTUAL_MACHINE_SEAL_RECEIVER,
+        arguments: NO_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
         cancellation: CancellationClass::None,
@@ -7670,11 +7767,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 64,
+    Invocation {
+        operation: 259,
         name: "pending_virtual_machine_install",
         feature: FeatureGate::Core,
-        arguments: PENDING_VIRTUAL_MACHINE_INSTALL_ARGUMENTS,
+        receiver: PENDING_VIRTUAL_MACHINE_INSTALL_RECEIVER,
+        arguments: NO_ARGUMENTS,
         results: PENDING_VIRTUAL_MACHINE_INSTALL_RESULTS,
         blocking: BlockingClass::Never,
         cancellation: CancellationClass::None,
@@ -7684,11 +7782,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 65,
+    Invocation {
+        operation: 260,
         name: "pending_virtual_machine_abort",
         feature: FeatureGate::Core,
-        arguments: PENDING_VIRTUAL_MACHINE_ABORT_ARGUMENTS,
+        receiver: PENDING_VIRTUAL_MACHINE_ABORT_RECEIVER,
+        arguments: NO_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
         cancellation: CancellationClass::None,
@@ -7698,11 +7797,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 66,
+    Invocation {
+        operation: 256,
         name: "virtual_machine_request_stop",
         feature: FeatureGate::Core,
-        arguments: VIRTUAL_MACHINE_REQUEST_STOP_ARGUMENTS,
+        receiver: VIRTUAL_MACHINE_REQUEST_STOP_RECEIVER,
+        arguments: NO_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
         cancellation: CancellationClass::None,
@@ -7712,10 +7812,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 67,
+    Invocation {
+        operation: 257,
         name: "virtual_machine_get_info",
         feature: FeatureGate::Core,
+        receiver: VIRTUAL_MACHINE_GET_INFO_RECEIVER,
         arguments: VIRTUAL_MACHINE_GET_INFO_ARGUMENTS,
         results: INFO_RECORD_RESULTS,
         blocking: BlockingClass::Never,
@@ -7726,10 +7827,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 68,
+    Invocation {
+        operation: 256,
         name: "virtual_cpu_get_info",
         feature: FeatureGate::Core,
+        receiver: VIRTUAL_CPU_GET_INFO_RECEIVER,
         arguments: VIRTUAL_CPU_GET_INFO_ARGUMENTS,
         results: INFO_RECORD_RESULTS,
         blocking: BlockingClass::Never,
@@ -7740,10 +7842,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 69,
+    Invocation {
+        operation: 256,
         name: "resource_domain_create",
         feature: FeatureGate::Core,
+        receiver: RESOURCE_DOMAIN_CREATE_RECEIVER,
         arguments: RESOURCE_DOMAIN_CREATE_ARGUMENTS,
         results: RESOURCE_DOMAIN_CREATE_RESULTS,
         blocking: BlockingClass::Never,
@@ -7754,10 +7857,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 70,
+    Invocation {
+        operation: 257,
         name: "task_group_create",
         feature: FeatureGate::Core,
+        receiver: TASK_GROUP_CREATE_RECEIVER,
         arguments: TASK_GROUP_CREATE_ARGUMENTS,
         results: TASK_GROUP_CREATE_RESULTS,
         blocking: BlockingClass::Never,
@@ -7768,11 +7872,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 71,
+    Invocation {
+        operation: 257,
         name: "virtual_cpu_start",
         feature: FeatureGate::Core,
-        arguments: VIRTUAL_CPU_START_ARGUMENTS,
+        receiver: VIRTUAL_CPU_START_RECEIVER,
+        arguments: NO_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
         cancellation: CancellationClass::None,
@@ -7782,10 +7887,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 72,
+    Invocation {
+        operation: 261,
         name: "pending_virtual_machine_set_virtual_serial",
         feature: FeatureGate::Core,
+        receiver: PENDING_VIRTUAL_MACHINE_SET_VIRTUAL_SERIAL_RECEIVER,
         arguments: PENDING_VIRTUAL_MACHINE_SET_VIRTUAL_SERIAL_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
@@ -7796,10 +7902,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 73,
+    Invocation {
+        operation: 257,
         name: "clock_get_monotonic",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("system_info", RIGHT_READ),
         arguments: NO_ARGUMENTS,
         results: CLOCK_GET_MONOTONIC_RESULTS,
         blocking: BlockingClass::Never,
@@ -7810,10 +7917,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 74,
+    Invocation {
+        operation: 260,
         name: "virtual_serial_create",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("object_factory", RIGHT_CREATE_OBJECT),
         arguments: NO_ARGUMENTS,
         results: VIRTUAL_SERIAL_CREATE_RESULTS,
         blocking: BlockingClass::Never,
@@ -7824,10 +7932,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 75,
+    Invocation {
+        operation: 256,
         name: "virtual_serial_register_output",
         feature: FeatureGate::Core,
+        receiver: VIRTUAL_SERIAL_REGISTER_OUTPUT_RECEIVER,
         arguments: VIRTUAL_SERIAL_REGISTER_OUTPUT_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::Never,
@@ -7838,10 +7947,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 76,
+    Invocation {
+        operation: 257,
         name: "virtual_serial_write",
         feature: FeatureGate::Core,
+        receiver: VIRTUAL_SERIAL_WRITE_RECEIVER,
         arguments: VIRTUAL_SERIAL_WRITE_ARGUMENTS,
         results: VIRTUAL_SERIAL_IO_RESULTS,
         blocking: BlockingClass::Never,
@@ -7852,10 +7962,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 77,
+    Invocation {
+        operation: 260,
         name: "thread_create",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("execution_context", RIGHT_CREATE_THREAD),
         arguments: THREAD_CREATE_ARGUMENTS,
         results: THREAD_CREATE_RESULTS,
         blocking: BlockingClass::Never,
@@ -7866,11 +7977,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 78,
+    Invocation {
+        operation: 256,
         name: "thread_start",
         feature: FeatureGate::Core,
-        arguments: &[thread_argument(RIGHT_START)],
+        receiver: thread_argument(RIGHT_START),
+        arguments: &[],
         results: &[],
         blocking: BlockingClass::Never,
         cancellation: CancellationClass::None,
@@ -7880,11 +7992,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 79,
+    Invocation {
+        operation: 257,
         name: "thread_request_stop",
         feature: FeatureGate::Core,
-        arguments: &[thread_argument(RIGHT_REQUEST_STOP)],
+        receiver: thread_argument(RIGHT_REQUEST_STOP),
+        arguments: &[],
         results: &[],
         blocking: BlockingClass::Never,
         cancellation: CancellationClass::None,
@@ -7894,10 +8007,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 80,
+    Invocation {
+        operation: 261,
         name: "atomic_wait",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("execution_context", RIGHT_WRITE),
         arguments: ATOMIC_WAIT_ARGUMENTS,
         results: &[],
         blocking: BlockingClass::MayBlock,
@@ -7908,10 +8022,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 81,
+    Invocation {
+        operation: 262,
         name: "atomic_wake",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("execution_context", RIGHT_WRITE),
         arguments: ATOMIC_WAKE_ARGUMENTS,
         results: &[ResultValue {
             name: "woken",
@@ -7926,10 +8041,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 82,
+    Invocation {
+        operation: 263,
         name: "thread_sleep",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("execution_context", RIGHT_WRITE),
         arguments: &[scalar_argument("deadline", ValueKind::U64)],
         results: &[],
         blocking: BlockingClass::MayBlock,
@@ -7940,10 +8056,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 83,
+    Invocation {
+        operation: 258,
         name: "file_write_at",
         feature: FeatureGate::Core,
+        receiver: FILE_WRITE_AT_RECEIVER,
         arguments: FILE_WRITE_AT_ARGUMENTS,
         results: &[
             scalar_result("actual_bytes", ValueKind::ByteCount),
@@ -7957,14 +8074,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 84,
+    Invocation {
+        operation: 259,
         name: "file_resize",
         feature: FeatureGate::Core,
-        arguments: &[
-            file_argument(RIGHT_WRITE),
-            scalar_argument("size", ValueKind::ByteCount),
-        ],
+        receiver: file_argument(RIGHT_WRITE),
+        arguments: &[scalar_argument("size", ValueKind::ByteCount)],
         results: &[],
         blocking: BlockingClass::MayBlock,
         cancellation: CancellationClass::None,
@@ -7974,24 +8089,24 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 85,
+    Invocation {
+        operation: 259,
         name: "directory_create_file",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "directory",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("directory"),
+                required_rights: RIGHT_READ | RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "directory",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("directory"),
-                    required_rights: RIGHT_READ | RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
+            DIRECTORY_OPEN_FILE_ARGUMENTS[0],
             DIRECTORY_OPEN_FILE_ARGUMENTS[1],
             DIRECTORY_OPEN_FILE_ARGUMENTS[2],
-            DIRECTORY_OPEN_FILE_ARGUMENTS[3],
             scalar_argument("mode", ValueKind::U32),
         ],
         results: DIRECTORY_OPEN_FILE_RESULTS,
@@ -8003,23 +8118,23 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 86,
+    Invocation {
+        operation: 260,
         name: "directory_create_directory",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "directory",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("directory"),
+                required_rights: RIGHT_READ | RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "directory",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("directory"),
-                    required_rights: RIGHT_READ | RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
+            DIRECTORY_OPEN_FILE_ARGUMENTS[0],
             DIRECTORY_OPEN_FILE_ARGUMENTS[1],
-            DIRECTORY_OPEN_FILE_ARGUMENTS[2],
             scalar_argument("mode", ValueKind::U32),
         ],
         results: &[],
@@ -8031,23 +8146,23 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 87,
+    Invocation {
+        operation: 261,
         name: "directory_remove",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "directory",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("directory"),
+                required_rights: RIGHT_READ | RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "directory",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("directory"),
-                    required_rights: RIGHT_READ | RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
+            DIRECTORY_OPEN_FILE_ARGUMENTS[0],
             DIRECTORY_OPEN_FILE_ARGUMENTS[1],
-            DIRECTORY_OPEN_FILE_ARGUMENTS[2],
             scalar_argument("options", ValueKind::U32),
         ],
         results: &[],
@@ -8059,10 +8174,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 88,
+    Invocation {
+        operation: 261,
         name: "wait_set_create",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("object_factory", RIGHT_CREATE_OBJECT),
         arguments: &[scalar_argument("capacity", ValueKind::ElementCount)],
         results: &[ResultValue {
             name: "wait_set",
@@ -8082,13 +8198,13 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 89,
+    Invocation {
+        operation: 256,
         name: "wait_set_add",
         feature: FeatureGate::Core,
+        receiver: wait_set_argument(RIGHT_BIND_WAIT),
         arguments: &[
-            wait_set_argument(RIGHT_BIND_WAIT),
-            OBJECT_WAIT_ONE_ARGUMENTS[0],
+            OBJECT_WAIT_ONE_RECEIVER,
             scalar_argument("signals", ValueKind::U64),
         ],
         results: &[scalar_result("registration", ValueKind::U64)],
@@ -8100,14 +8216,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 90,
+    Invocation {
+        operation: 257,
         name: "wait_set_rearm",
         feature: FeatureGate::Core,
-        arguments: &[
-            wait_set_argument(RIGHT_BIND_WAIT),
-            scalar_argument("registration", ValueKind::U64),
-        ],
+        receiver: wait_set_argument(RIGHT_BIND_WAIT),
+        arguments: &[scalar_argument("registration", ValueKind::U64)],
         results: &[],
         blocking: BlockingClass::MayBlock,
         cancellation: CancellationClass::None,
@@ -8117,14 +8231,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 91,
+    Invocation {
+        operation: 258,
         name: "wait_set_remove",
         feature: FeatureGate::Core,
-        arguments: &[
-            wait_set_argument(RIGHT_BIND_WAIT),
-            scalar_argument("registration", ValueKind::U64),
-        ],
+        receiver: wait_set_argument(RIGHT_BIND_WAIT),
+        arguments: &[scalar_argument("registration", ValueKind::U64)],
         results: &[],
         blocking: BlockingClass::MayBlock,
         cancellation: CancellationClass::None,
@@ -8134,12 +8246,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 92,
+    Invocation {
+        operation: 259,
         name: "wait_set_wait",
         feature: FeatureGate::Core,
+        receiver: wait_set_argument(RIGHT_WAIT),
         arguments: &[
-            wait_set_argument(RIGHT_WAIT),
             scalar_argument("deadline", ValueKind::U64),
             Argument {
                 name: "output",
@@ -8167,10 +8279,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 93,
+    Invocation {
+        operation: 264,
         name: "process_get_current_id",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("execution_context", RIGHT_READ),
         arguments: &[],
         results: &[scalar_result("koid", ValueKind::U64)],
         blocking: BlockingClass::Never,
@@ -8181,23 +8294,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 94,
+    Invocation {
+        operation: 258,
         name: "virtual_serial_acknowledge_output",
         feature: FeatureGate::Core,
-        arguments: &[
-            Argument {
-                name: "virtual_serial",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("virtual_serial"),
-                    required_rights: RIGHT_READ,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
-            scalar_argument("consumed", ValueKind::U64),
-        ],
+        receiver: Argument {
+            name: "virtual_serial",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("virtual_serial"),
+                required_rights: RIGHT_READ,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
+        arguments: &[scalar_argument("consumed", ValueKind::U64)],
         results: &[],
         blocking: BlockingClass::Never,
         cancellation: CancellationClass::None,
@@ -8207,21 +8318,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 95,
+    Invocation {
+        operation: 262,
         name: "directory_scope_create",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "root",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("directory"),
+                required_rights: RIGHT_READ,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "root",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("directory"),
-                    required_rights: RIGHT_READ,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "start",
                 kind: ValueKind::Handle,
@@ -8254,21 +8365,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 96,
+    Invocation {
+        operation: 263,
         name: "directory_get_metadata",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "directory",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("directory"),
+                required_rights: RIGHT_READ | RIGHT_INSPECT,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "directory",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("directory"),
-                    required_rights: RIGHT_READ | RIGHT_INSPECT,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "path",
                 kind: ValueKind::UserAddress,
@@ -8312,21 +8423,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 97,
+    Invocation {
+        operation: 260,
         name: "file_get_metadata",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "file",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("file"),
+                required_rights: RIGHT_INSPECT,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "file",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("file"),
-                    required_rights: RIGHT_INSPECT,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "output",
                 kind: ValueKind::UserAddress,
@@ -8353,21 +8464,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 98,
+    Invocation {
+        operation: 264,
         name: "directory_get_self_metadata",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "directory",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("directory"),
+                required_rights: RIGHT_INSPECT,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "directory",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("directory"),
-                    required_rights: RIGHT_INSPECT,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "output",
                 kind: ValueKind::UserAddress,
@@ -8394,21 +8505,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 99,
+    Invocation {
+        operation: 265,
         name: "directory_set_metadata",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "directory",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("directory"),
+                required_rights: RIGHT_READ | RIGHT_SET_ATTRIBUTES,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "directory",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("directory"),
-                    required_rights: RIGHT_READ | RIGHT_SET_ATTRIBUTES,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "path",
                 kind: ValueKind::UserAddress,
@@ -8452,21 +8563,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 100,
+    Invocation {
+        operation: 261,
         name: "file_set_metadata",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "file",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("file"),
+                required_rights: RIGHT_SET_ATTRIBUTES,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "file",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("file"),
-                    required_rights: RIGHT_SET_ATTRIBUTES,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "input",
                 kind: ValueKind::UserAddress,
@@ -8493,21 +8604,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 101,
+    Invocation {
+        operation: 266,
         name: "directory_rename",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "source",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("directory"),
+                required_rights: RIGHT_READ | RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "source",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("directory"),
-                    required_rights: RIGHT_READ | RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "path",
                 kind: ValueKind::UserAddress,
@@ -8560,21 +8671,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 102,
+    Invocation {
+        operation: 267,
         name: "directory_link",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "source",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("directory"),
+                required_rights: RIGHT_READ | RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "source",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("directory"),
-                    required_rights: RIGHT_READ | RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "path",
                 kind: ValueKind::UserAddress,
@@ -8627,21 +8738,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 103,
+    Invocation {
+        operation: 268,
         name: "directory_symlink",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "directory",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("directory"),
+                required_rights: RIGHT_READ | RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "directory",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("directory"),
-                    required_rights: RIGHT_READ | RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "path",
                 kind: ValueKind::UserAddress,
@@ -8684,21 +8795,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 104,
+    Invocation {
+        operation: 269,
         name: "directory_read_link",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "directory",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("directory"),
+                required_rights: RIGHT_READ,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "directory",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("directory"),
-                    required_rights: RIGHT_READ,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "path",
                 kind: ValueKind::UserAddress,
@@ -8741,21 +8852,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 105,
+    Invocation {
+        operation: 270,
         name: "directory_canonicalize",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "directory",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("directory"),
+                required_rights: RIGHT_READ,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "directory",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("directory"),
-                    required_rights: RIGHT_READ,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "path",
                 kind: ValueKind::UserAddress,
@@ -8798,21 +8909,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 106,
+    Invocation {
+        operation: 271,
         name: "directory_remove_if",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "directory",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("directory"),
+                required_rights: RIGHT_READ | RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "directory",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("directory"),
-                    required_rights: RIGHT_READ | RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "path",
                 kind: ValueKind::UserAddress,
@@ -8841,21 +8952,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 107,
+    Invocation {
+        operation: 272,
         name: "directory_open_directory_nofollow",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "directory",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("directory"),
+                required_rights: RIGHT_READ,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "directory",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("directory"),
-                    required_rights: RIGHT_READ,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "path",
                 kind: ValueKind::UserAddress,
@@ -8894,23 +9005,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 108,
+    Invocation {
+        operation: 262,
         name: "file_sync",
         feature: FeatureGate::Core,
-        arguments: &[
-            Argument {
-                name: "file",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("file"),
-                    required_rights: RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
-            scalar_argument("scope", ValueKind::U32),
-        ],
+        receiver: Argument {
+            name: "file",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("file"),
+                required_rights: RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
+        arguments: &[scalar_argument("scope", ValueKind::U32)],
         results: &[],
         blocking: BlockingClass::MayBlock,
         cancellation: CancellationClass::None,
@@ -8920,21 +9029,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 109,
+    Invocation {
+        operation: 263,
         name: "file_lock",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "file",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("file"),
+                required_rights: RIGHT_LOCK_FILE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "file",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("file"),
-                    required_rights: RIGHT_LOCK_FILE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             scalar_argument("mode", ValueKind::U32),
             scalar_argument("deadline", ValueKind::U64),
         ],
@@ -8947,11 +9056,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 110,
+    Invocation {
+        operation: 264,
         name: "file_unlock",
         feature: FeatureGate::Core,
-        arguments: &[Argument {
+        receiver: Argument {
             name: "file",
             kind: ValueKind::Handle,
             handle: Some(HandleArgument {
@@ -8960,7 +9069,8 @@ pub const SYSCALLS: &[Syscall] = &[
                 disposition: HandleDisposition::Borrow,
             }),
             memory: None,
-        }],
+        },
+        arguments: &[],
         results: &[],
         blocking: BlockingClass::MayBlock,
         cancellation: CancellationClass::None,
@@ -8970,10 +9080,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 111,
+    Invocation {
+        operation: 258,
         name: "clock_get_realtime",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("system_info", RIGHT_READ),
         arguments: &[],
         results: &[
             scalar_result("seconds", ValueKind::I64),
@@ -8987,21 +9098,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 112,
+    Invocation {
+        operation: 273,
         name: "directory_open_file_with_options",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "directory",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("directory"),
+                required_rights: RIGHT_READ,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "directory",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("directory"),
-                    required_rights: RIGHT_READ,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "path",
                 kind: ValueKind::UserAddress,
@@ -9042,21 +9153,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::Strict,
         failure_results: &[],
     },
-    Syscall {
-        number: 113,
+    Invocation {
+        operation: 257,
         name: "virtual_machine_creation_lease_get_platform_info",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "lease",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("virtual_machine_creation_lease"),
+                required_rights: RIGHT_INSPECT,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "lease",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("virtual_machine_creation_lease"),
-                    required_rights: RIGHT_INSPECT,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             scalar_argument("platform_profile", ValueKind::U32),
             Argument {
                 name: "info",
@@ -9084,11 +9195,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 114,
+    Invocation {
+        operation: 258,
         name: "vmo_create_snapshot",
         feature: FeatureGate::Core,
-        arguments: &[vmo_argument(RIGHT_READ)],
+        receiver: vmo_argument(RIGHT_READ),
+        arguments: &[],
         results: SNAPSHOT_VMO_RESULTS,
         blocking: BlockingClass::MayBlock,
         cancellation: CancellationClass::None,
@@ -9098,12 +9210,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 116,
+    Invocation {
+        operation: 261,
         name: "vmar_map_private",
         feature: FeatureGate::Core,
+        receiver: vmar_argument(RIGHT_MAP),
         arguments: &[
-            vmar_argument(RIGHT_MAP),
             vmo_argument(RIGHT_READ | RIGHT_MAP),
             Argument {
                 name: "mapping",
@@ -9131,21 +9243,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 117,
+    Invocation {
+        operation: 258,
         name: "virtual_machine_get_power_request",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "virtual_machine",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("virtual_machine"),
+                required_rights: RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "virtual_machine",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("virtual_machine"),
-                    required_rights: RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "request",
                 kind: ValueKind::UserAddress,
@@ -9172,21 +9284,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 118,
+    Invocation {
+        operation: 259,
         name: "virtual_machine_complete_power_request",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "virtual_machine",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("virtual_machine"),
+                required_rights: RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "virtual_machine",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("virtual_machine"),
-                    required_rights: RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             scalar_argument("request_id", ValueKind::U64),
             scalar_argument("accept", ValueKind::U32),
         ],
@@ -9199,23 +9311,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 119,
+    Invocation {
+        operation: 260,
         name: "virtual_machine_open_vcpu",
         feature: FeatureGate::Core,
-        arguments: &[
-            Argument {
-                name: "virtual_machine",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("virtual_machine"),
-                    required_rights: RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
-            scalar_argument("vcpu_id", ValueKind::U32),
-        ],
+        receiver: Argument {
+            name: "virtual_machine",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("virtual_machine"),
+                required_rights: RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
+        arguments: &[scalar_argument("vcpu_id", ValueKind::U32)],
         results: &[ResultValue {
             name: "virtual_cpu",
             kind: ValueKind::Handle,
@@ -9232,21 +9342,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 120,
+    Invocation {
+        operation: 261,
         name: "virtual_machine_register_mmio",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "virtual_machine",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("virtual_machine"),
+                required_rights: RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "virtual_machine",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("virtual_machine"),
-                    required_rights: RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             scalar_argument("base", ValueKind::U64),
             scalar_argument("length", ValueKind::U64),
             scalar_argument("device", ValueKind::U64),
@@ -9260,21 +9370,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 121,
+    Invocation {
+        operation: 258,
         name: "virtual_cpu_get_mmio_request",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "virtual_cpu",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("virtual_cpu"),
+                required_rights: RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "virtual_cpu",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("virtual_cpu"),
-                    required_rights: RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "request",
                 kind: ValueKind::UserAddress,
@@ -9301,21 +9411,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 122,
+    Invocation {
+        operation: 259,
         name: "virtual_cpu_complete_mmio",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "virtual_cpu",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("virtual_cpu"),
+                required_rights: RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "virtual_cpu",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("virtual_cpu"),
-                    required_rights: RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             scalar_argument("request_id", ValueKind::U64),
             scalar_argument("operation", ValueKind::U32),
             scalar_argument("value", ValueKind::U64),
@@ -9329,11 +9439,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 123,
+    Invocation {
+        operation: 259,
         name: "guest_memory_create",
         feature: FeatureGate::Core,
-        arguments: &[vmo_argument(RIGHT_READ | RIGHT_WRITE | RIGHT_MAP)],
+        receiver: vmo_argument(RIGHT_READ | RIGHT_WRITE | RIGHT_MAP),
+        arguments: &[],
         results: &[ResultValue {
             name: "memory",
             kind: ValueKind::Handle,
@@ -9350,12 +9461,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 124,
+    Invocation {
+        operation: 262,
         name: "pending_virtual_machine_map_memory",
         feature: FeatureGate::Core,
+        receiver: pending_virtual_machine_argument(RIGHT_WRITE, HandleDisposition::Borrow),
         arguments: &[
-            pending_virtual_machine_argument(RIGHT_WRITE, HandleDisposition::Borrow),
             Argument {
                 name: "memory",
                 kind: ValueKind::Handle,
@@ -9379,10 +9490,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 125,
+    Invocation {
+        operation: 262,
         name: "vmo_create_contiguous",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("object_factory", RIGHT_CREATE_OBJECT),
         arguments: VMO_CREATE_ARGUMENTS,
         results: VMO_CREATE_RESULTS,
         blocking: BlockingClass::Never,
@@ -9393,23 +9505,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 126,
+    Invocation {
+        operation: 256,
         name: "device_claim",
         feature: FeatureGate::Core,
-        arguments: &[
-            Argument {
-                name: "authority",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("device_assignment_authority"),
-                    required_rights: RIGHT_ASSIGN_DEVICE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
-            scalar_argument("index", ValueKind::U32),
-        ],
+        receiver: Argument {
+            name: "authority",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("device_assignment_authority"),
+                required_rights: RIGHT_ASSIGN_DEVICE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
+        arguments: &[scalar_argument("index", ValueKind::U32)],
         results: &[ResultValue {
             name: "physical_device",
             kind: ValueKind::Handle,
@@ -9432,21 +9542,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 127,
+    Invocation {
+        operation: 256,
         name: "physical_device_info",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "device",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("physical_device"),
+                required_rights: RIGHT_INSPECT,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "device",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("physical_device"),
-                    required_rights: RIGHT_INSPECT,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "output",
                 kind: ValueKind::UserAddress,
@@ -9473,21 +9583,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 128,
+    Invocation {
+        operation: 257,
         name: "vmo_get_dma_extent",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "authority",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("device_assignment_authority"),
+                required_rights: RIGHT_MAP_DMA,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "authority",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("device_assignment_authority"),
-                    required_rights: RIGHT_MAP_DMA,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "vmo",
                 kind: ValueKind::Handle,
@@ -9526,21 +9636,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 129,
+    Invocation {
+        operation: 263,
         name: "pending_virtual_machine_assign_device",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "pending",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("pending_virtual_machine"),
+                required_rights: RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "pending",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("pending_virtual_machine"),
-                    required_rights: RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "device",
                 kind: ValueKind::Handle,
@@ -9563,21 +9673,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 130,
+    Invocation {
+        operation: 262,
         name: "guest_mailbox_create",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "machine",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("virtual_machine"),
+                required_rights: RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "machine",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("virtual_machine"),
-                    required_rights: RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             scalar_argument("base", ValueKind::U64),
             scalar_argument("irq", ValueKind::U32),
         ],
@@ -9599,21 +9709,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 131,
+    Invocation {
+        operation: 256,
         name: "guest_mailbox_send",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "mailbox",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("guest_mailbox"),
+                required_rights: RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "mailbox",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("guest_mailbox"),
-                    required_rights: RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "bytes",
                 kind: ValueKind::UserAddress,
@@ -9640,21 +9750,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 132,
+    Invocation {
+        operation: 257,
         name: "guest_mailbox_receive",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "mailbox",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("guest_mailbox"),
+                required_rights: RIGHT_READ,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "mailbox",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("guest_mailbox"),
-                    required_rights: RIGHT_READ,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "bytes",
                 kind: ValueKind::UserAddress,
@@ -9685,21 +9795,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 133,
+    Invocation {
+        operation: 263,
         name: "guest_notification_create",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "frontend",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("virtual_machine"),
+                required_rights: RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "frontend",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("virtual_machine"),
-                    required_rights: RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "backend",
                 kind: ValueKind::Handle,
@@ -9733,23 +9843,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 134,
+    Invocation {
+        operation: 256,
         name: "guest_notification_control",
         feature: FeatureGate::Core,
-        arguments: &[
-            Argument {
-                name: "notification",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("guest_notification"),
-                    required_rights: RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
-            scalar_argument("operation", ValueKind::U32),
-        ],
+        receiver: Argument {
+            name: "notification",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("guest_notification"),
+                required_rights: RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
+        arguments: &[scalar_argument("operation", ValueKind::U32)],
         results: &[ResultValue {
             name: "epoch",
             kind: ValueKind::U32,
@@ -9763,21 +9871,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 135,
+    Invocation {
+        operation: 256,
         name: "native_block_create",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "memory",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("guest_memory"),
+                required_rights: RIGHT_MAP,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "memory",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("guest_memory"),
-                    required_rights: RIGHT_MAP,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "backend",
                 kind: ValueKind::Handle,
@@ -9815,23 +9923,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 136,
+    Invocation {
+        operation: 256,
         name: "native_block_activate",
         feature: FeatureGate::Core,
-        arguments: &[
-            Argument {
-                name: "block",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("native_block"),
-                    required_rights: RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
-            scalar_argument("readonly", ValueKind::U32),
-        ],
+        receiver: Argument {
+            name: "block",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("native_block"),
+                required_rights: RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
+        arguments: &[scalar_argument("readonly", ValueKind::U32)],
         results: &[
             ResultValue {
                 name: "sectors",
@@ -9852,10 +9958,20 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 137,
+    Invocation {
+        operation: 274,
         name: "filesystem_mount",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "directory",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("directory"),
+                required_rights: RIGHT_WRITE | RIGHT_EXECUTE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
             Argument {
                 name: "channel",
@@ -9873,16 +9989,6 @@ pub const SYSCALLS: &[Syscall] = &[
                 handle: Some(HandleArgument {
                     object: ObjectConstraint::Kind("vmo"),
                     required_rights: RIGHT_READ | RIGHT_WRITE | RIGHT_MAP,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
-            Argument {
-                name: "directory",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("directory"),
-                    required_rights: RIGHT_WRITE | RIGHT_EXECUTE,
                     disposition: HandleDisposition::Borrow,
                 }),
                 memory: None,
@@ -9914,21 +10020,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 138,
+    Invocation {
+        operation: 264,
         name: "guest_mapping_create",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "backend",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("virtual_machine"),
+                required_rights: RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "backend",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("virtual_machine"),
-                    required_rights: RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "memory",
                 kind: ValueKind::Handle,
@@ -9964,11 +10070,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 139,
+    Invocation {
+        operation: 256,
         name: "guest_mapping_release",
         feature: FeatureGate::Core,
-        arguments: &[Argument {
+        receiver: Argument {
             name: "mapping",
             kind: ValueKind::Handle,
             handle: Some(HandleArgument {
@@ -9977,7 +10083,8 @@ pub const SYSCALLS: &[Syscall] = &[
                 disposition: HandleDisposition::Borrow,
             }),
             memory: None,
-        }],
+        },
+        arguments: &[],
         results: &[],
         blocking: BlockingClass::Never,
         cancellation: CancellationClass::None,
@@ -9987,21 +10094,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 140,
+    Invocation {
+        operation: 258,
         name: "device_claim_matching",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "authority",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("device_assignment_authority"),
+                required_rights: RIGHT_ASSIGN_DEVICE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "authority",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("device_assignment_authority"),
-                    required_rights: RIGHT_ASSIGN_DEVICE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             scalar_argument("profile", ValueKind::U32),
             scalar_argument("identity_kind", ValueKind::U32),
             Argument {
@@ -10043,21 +10150,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 141,
+    Invocation {
+        operation: 257,
         name: "device_profile_info",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "device",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("physical_device"),
+                required_rights: RIGHT_INSPECT,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "device",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("physical_device"),
-                    required_rights: RIGHT_INSPECT,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "output",
                 kind: ValueKind::UserAddress,
@@ -10084,21 +10191,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 142,
+    Invocation {
+        operation: 258,
         name: "device_resource_info",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "device",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("physical_device"),
+                required_rights: RIGHT_INSPECT,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "device",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("physical_device"),
-                    required_rights: RIGHT_INSPECT,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             scalar_argument("index", ValueKind::U32),
             Argument {
                 name: "output",
@@ -10126,20 +10233,20 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 143,
+    Invocation {
+        operation: 259,
         name: "device_firmware_read",
+        receiver: Argument {
+            name: "authority",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("device_assignment_authority"),
+                required_rights: RIGHT_INSPECT,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "authority",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("device_assignment_authority"),
-                    required_rights: RIGHT_INSPECT,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "query",
                 kind: ValueKind::UserAddress,
@@ -10183,20 +10290,20 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 144,
+    Invocation {
+        operation: 260,
         name: "device_claim_bundle",
+        receiver: Argument {
+            name: "authority",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("device_assignment_authority"),
+                required_rights: RIGHT_ASSIGN_DEVICE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "authority",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("device_assignment_authority"),
-                    required_rights: RIGHT_ASSIGN_DEVICE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "entries",
                 kind: ValueKind::UserAddress,
@@ -10242,20 +10349,20 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 145,
+    Invocation {
+        operation: 259,
         name: "device_mmio",
+        receiver: Argument {
+            name: "device",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("physical_device"),
+                required_rights: 0,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "device",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("physical_device"),
-                    required_rights: 0,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             scalar_argument("offset", ValueKind::U64),
             scalar_argument("width", ValueKind::U32),
             scalar_argument("operation", ValueKind::U32),
@@ -10275,10 +10382,10 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 146,
+    Invocation {
+        operation: 260,
         name: "device_irq_pending",
-        arguments: &[Argument {
+        receiver: Argument {
             name: "device",
             kind: ValueKind::Handle,
             handle: Some(HandleArgument {
@@ -10287,7 +10394,8 @@ pub const SYSCALLS: &[Syscall] = &[
                 disposition: HandleDisposition::Borrow,
             }),
             memory: None,
-        }],
+        },
+        arguments: &[],
         results: &[ResultValue {
             name: "value",
             kind: ValueKind::U64,
@@ -10302,20 +10410,20 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 147,
+    Invocation {
+        operation: 261,
         name: "device_irq_complete",
+        receiver: Argument {
+            name: "device",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("physical_device"),
+                required_rights: RIGHT_ACK_INTERRUPT,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "device",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("physical_device"),
-                    required_rights: RIGHT_ACK_INTERRUPT,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             scalar_argument("sequence", ValueKind::U64),
             scalar_argument("asserted", ValueKind::U32),
         ],
@@ -10329,22 +10437,22 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 148,
+    Invocation {
+        operation: 260,
         name: "virtual_cpu_set_affinity",
+        receiver: Argument {
+            name: "virtual_cpu",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("virtual_cpu"),
+                required_rights: RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "virtual_cpu",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("virtual_cpu"),
-                    required_rights: RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
+            PROCESS_BUILDER_SET_AFFINITY_ARGUMENTS[0],
             PROCESS_BUILDER_SET_AFFINITY_ARGUMENTS[1],
-            PROCESS_BUILDER_SET_AFFINITY_ARGUMENTS[2],
         ],
         results: &[],
         feature: FeatureGate::Core,
@@ -10356,10 +10464,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 149,
+    Invocation {
+        operation: 259,
         name: "system_config",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("system_info", RIGHT_READ),
         arguments: &[scalar_argument("key", ValueKind::U64)],
         results: &[ResultValue {
             name: "value",
@@ -10374,10 +10483,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 150,
+    Invocation {
+        operation: 261,
         name: "object_inspector_read_details",
         feature: FeatureGate::Core,
+        receiver: OBJECT_INSPECTOR_READ_DETAILS_RECEIVER,
         arguments: OBJECT_INSPECTOR_READ_DETAILS_ARGUMENTS,
         results: &[ResultValue {
             name: "supported_size",
@@ -10392,21 +10502,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 151,
+    Invocation {
+        operation: 275,
         name: "filesystem_unmount",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "directory",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("directory"),
+                required_rights: RIGHT_WRITE | RIGHT_EXECUTE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "directory",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("directory"),
-                    required_rights: RIGHT_WRITE | RIGHT_EXECUTE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "path",
                 kind: ValueKind::UserAddress,
@@ -10433,21 +10543,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 152,
+    Invocation {
+        operation: 276,
         name: "filesystem_mount_ramfs",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "directory",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("directory"),
+                required_rights: RIGHT_MANAGE_NAMESPACE | RIGHT_WRITE | RIGHT_EXECUTE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "directory",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("directory"),
-                    required_rights: RIGHT_MANAGE_NAMESPACE | RIGHT_WRITE | RIGHT_EXECUTE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "path",
                 kind: ValueKind::UserAddress,
@@ -10474,34 +10584,32 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 154,
+    Invocation {
+        operation: 277,
         name: "filesystem_switch_root",
         feature: FeatureGate::Core,
-        arguments: &[
-            Argument {
-                name: "directory",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("directory"),
-                    required_rights: RIGHT_MANAGE_NAMESPACE | RIGHT_WRITE | RIGHT_EXECUTE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
-            Argument {
-                name: "request",
-                kind: ValueKind::UserAddress,
-                handle: None,
-                memory: Some(UserMemory {
-                    direction: MemoryDirection::Read,
-                    length: MemoryLength::FixedBytes { bytes: 48 },
-                    record: Some("filesystem_root_switch"),
-                    handles: None,
-                    validation_order: 0,
-                }),
-            },
-        ],
+        receiver: Argument {
+            name: "directory",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("directory"),
+                required_rights: RIGHT_MANAGE_NAMESPACE | RIGHT_WRITE | RIGHT_EXECUTE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
+        arguments: &[Argument {
+            name: "request",
+            kind: ValueKind::UserAddress,
+            handle: None,
+            memory: Some(UserMemory {
+                direction: MemoryDirection::Read,
+                length: MemoryLength::FixedBytes { bytes: 48 },
+                record: Some("filesystem_root_switch"),
+                handles: None,
+                validation_order: 0,
+            }),
+        }],
         results: &[],
         blocking: BlockingClass::MayBlock,
         cancellation: CancellationClass::Explicit,
@@ -10511,11 +10619,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 155,
+    Invocation {
+        operation: 265,
         name: "file_protect",
         feature: FeatureGate::Core,
-        arguments: &[file_argument(RIGHT_PROTECT)],
+        receiver: file_argument(RIGHT_PROTECT),
+        arguments: &[],
         results: &[
             ResultValue {
                 name: "protection",
@@ -10535,12 +10644,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 156,
+    Invocation {
+        operation: 262,
         name: "vmar_map_file",
         feature: FeatureGate::Core,
+        receiver: vmar_argument(RIGHT_MAP),
         arguments: &[
-            vmar_argument(RIGHT_MAP),
             file_argument(RIGHT_READ),
             Argument {
                 name: "protection",
@@ -10578,11 +10687,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 157,
+    Invocation {
+        operation: 278,
         name: "directory_begin_read",
         feature: FeatureGate::Core,
-        arguments: &[directory_argument(RIGHT_READ)],
+        receiver: directory_argument(RIGHT_READ),
+        arguments: &[],
         results: &[ResultValue {
             name: "stream",
             kind: ValueKind::Handle,
@@ -10602,11 +10712,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 158,
+    Invocation {
+        operation: 258,
         name: "process_derive_observer",
         feature: FeatureGate::Core,
-        arguments: &[Argument {
+        receiver: Argument {
             name: "process",
             kind: ValueKind::Handle,
             handle: Some(HandleArgument {
@@ -10615,7 +10725,8 @@ pub const SYSCALLS: &[Syscall] = &[
                 disposition: HandleDisposition::Borrow,
             }),
             memory: None,
-        }],
+        },
+        arguments: &[],
         results: &[ResultValue {
             name: "observer",
             kind: ValueKind::Handle,
@@ -10632,11 +10743,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 159,
+    Invocation {
+        operation: 256,
         name: "task_group_request_stop",
         feature: FeatureGate::Core,
-        arguments: &[Argument {
+        receiver: Argument {
             name: "task_group",
             kind: ValueKind::Handle,
             handle: Some(HandleArgument {
@@ -10645,7 +10756,8 @@ pub const SYSCALLS: &[Syscall] = &[
                 disposition: HandleDisposition::Borrow,
             }),
             memory: None,
-        }],
+        },
+        arguments: &[],
         results: &[],
         blocking: BlockingClass::Never,
         cancellation: CancellationClass::None,
@@ -10655,11 +10767,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 160,
+    Invocation {
+        operation: 258,
         name: "console_discard_input",
         feature: FeatureGate::Core,
-        arguments: &[Argument {
+        receiver: Argument {
             name: "console",
             kind: ValueKind::Handle,
             handle: Some(HandleArgument {
@@ -10668,7 +10780,8 @@ pub const SYSCALLS: &[Syscall] = &[
                 disposition: HandleDisposition::Borrow,
             }),
             memory: None,
-        }],
+        },
+        arguments: &[],
         results: &[ResultValue {
             name: "discarded",
             kind: ValueKind::ByteCount,
@@ -10682,21 +10795,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 161,
+    Invocation {
+        operation: 265,
         name: "guest_notification_configure",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "machine",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("virtual_machine"),
+                required_rights: RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "machine",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("virtual_machine"),
-                    required_rights: RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             scalar_argument("original_base", ValueKind::U64),
             scalar_argument("base", ValueKind::U64),
             scalar_argument("flags", ValueKind::U32),
@@ -10710,21 +10823,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 162,
+    Invocation {
+        operation: 266,
         name: "guest_notification_access",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "machine",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("virtual_machine"),
+                required_rights: RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "machine",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("virtual_machine"),
-                    required_rights: RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             scalar_argument("original_base", ValueKind::U64),
             scalar_argument("operation", ValueKind::U32),
             scalar_argument("value", ValueKind::U32),
@@ -10742,12 +10855,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 163,
+    Invocation {
+        operation: 263,
         name: "vmar_lock_memory",
         feature: FeatureGate::Core,
+        receiver: vmar_argument(RIGHT_LOCK_MEMORY),
         arguments: &[
-            vmar_argument(RIGHT_LOCK_MEMORY),
             scalar_argument("address", ValueKind::U64),
             scalar_argument("size", ValueKind::ByteCount),
             scalar_argument("flags", ValueKind::U32),
@@ -10761,12 +10874,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 164,
+    Invocation {
+        operation: 264,
         name: "vmar_unlock_memory",
         feature: FeatureGate::Core,
+        receiver: vmar_argument(RIGHT_LOCK_MEMORY),
         arguments: &[
-            vmar_argument(RIGHT_LOCK_MEMORY),
             scalar_argument("address", ValueKind::U64),
             scalar_argument("size", ValueKind::ByteCount),
             scalar_argument("flags", ValueKind::U32),
@@ -10780,14 +10893,15 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 165,
+    Invocation {
+        operation: 263,
         name: "process_builder_set_memory_lock",
         feature: FeatureGate::Core,
-        arguments: &[
-            process_builder_argument(RIGHT_WRITE | RIGHT_LOCK_MEMORY, HandleDisposition::Borrow),
-            scalar_argument("enabled", ValueKind::U32),
-        ],
+        receiver: process_builder_argument(
+            RIGHT_WRITE | RIGHT_LOCK_MEMORY,
+            HandleDisposition::Borrow,
+        ),
+        arguments: &[scalar_argument("enabled", ValueKind::U32)],
         results: &[],
         blocking: BlockingClass::MayBlock,
         cancellation: CancellationClass::None,
@@ -10797,34 +10911,32 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 166,
+    Invocation {
+        operation: 279,
         name: "filesystem_begin_root_switch",
         feature: FeatureGate::Core,
-        arguments: &[
-            Argument {
-                name: "directory",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("directory"),
-                    required_rights: RIGHT_MANAGE_NAMESPACE | RIGHT_WRITE | RIGHT_EXECUTE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
-            Argument {
-                name: "request",
-                kind: ValueKind::UserAddress,
-                handle: None,
-                memory: Some(UserMemory {
-                    direction: MemoryDirection::Read,
-                    length: MemoryLength::FixedBytes { bytes: 48 },
-                    record: Some("filesystem_root_switch"),
-                    handles: None,
-                    validation_order: 0,
-                }),
-            },
-        ],
+        receiver: Argument {
+            name: "directory",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("directory"),
+                required_rights: RIGHT_MANAGE_NAMESPACE | RIGHT_WRITE | RIGHT_EXECUTE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
+        arguments: &[Argument {
+            name: "request",
+            kind: ValueKind::UserAddress,
+            handle: None,
+            memory: Some(UserMemory {
+                direction: MemoryDirection::Read,
+                length: MemoryLength::FixedBytes { bytes: 48 },
+                record: Some("filesystem_root_switch"),
+                handles: None,
+                validation_order: 0,
+            }),
+        }],
         results: &[ResultValue {
             name: "transition",
             kind: ValueKind::Handle,
@@ -10841,23 +10953,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 167,
+    Invocation {
+        operation: 256,
         name: "filesystem_finish_root_switch",
         feature: FeatureGate::Core,
-        arguments: &[
-            Argument {
-                name: "transition",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("root_transition"),
-                    required_rights: RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
-            scalar_argument("commit", ValueKind::U32),
-        ],
+        receiver: Argument {
+            name: "transition",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("root_transition"),
+                required_rights: RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
+        arguments: &[scalar_argument("commit", ValueKind::U32)],
         results: &[],
         blocking: BlockingClass::MayBlock,
         cancellation: CancellationClass::None,
@@ -10867,21 +10977,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 168,
+    Invocation {
+        operation: 257,
         name: "guest_memory_transfer",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "memory",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("guest_memory"),
+                required_rights: 0,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "memory",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("guest_memory"),
-                    required_rights: 0,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             scalar_argument("operation", ValueKind::U32),
             scalar_argument("offset", ValueKind::U64),
             Argument {
@@ -10910,21 +11020,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 169,
+    Invocation {
+        operation: 258,
         name: "guest_memory_scalar",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "memory",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("guest_memory"),
+                required_rights: 0,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "memory",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("guest_memory"),
-                    required_rights: 0,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             scalar_argument("operation", ValueKind::U32),
             scalar_argument("offset", ValueKind::U64),
             scalar_argument("width", ValueKind::U32),
@@ -10943,23 +11053,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 170,
+    Invocation {
+        operation: 267,
         name: "guest_interrupt_create",
         feature: FeatureGate::Core,
-        arguments: &[
-            Argument {
-                name: "machine",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("virtual_machine"),
-                    required_rights: RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
-            scalar_argument("irq", ValueKind::U32),
-        ],
+        receiver: Argument {
+            name: "machine",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("virtual_machine"),
+                required_rights: RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
+        arguments: &[scalar_argument("irq", ValueKind::U32)],
         results: &[ResultValue {
             name: "interrupt",
             kind: ValueKind::Handle,
@@ -10976,23 +11084,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 171,
+    Invocation {
+        operation: 256,
         name: "guest_interrupt_set_level",
         feature: FeatureGate::Core,
-        arguments: &[
-            Argument {
-                name: "interrupt",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("guest_interrupt"),
-                    required_rights: RIGHT_WRITE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
-            scalar_argument("asserted", ValueKind::U32),
-        ],
+        receiver: Argument {
+            name: "interrupt",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("guest_interrupt"),
+                required_rights: RIGHT_WRITE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
+        arguments: &[scalar_argument("asserted", ValueKind::U32)],
         results: &[],
         blocking: BlockingClass::Never,
         cancellation: CancellationClass::None,
@@ -11002,21 +11108,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 172,
+    Invocation {
+        operation: 257,
         name: "memory_inspector_read_statistics",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "inspector",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("memory_inspector"),
+                required_rights: RIGHT_INSPECT,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "inspector",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("memory_inspector"),
-                    required_rights: RIGHT_INSPECT,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             scalar_argument("topic", ValueKind::U32),
             scalar_argument("index", ValueKind::U32),
             Argument {
@@ -11045,15 +11151,15 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 173,
+    Invocation {
+        operation: 264,
         name: "process_builder_retain",
         feature: FeatureGate::Core,
+        receiver: process_builder_argument(
+            RIGHT_WRITE | RIGHT_RETAIN_PROCESS,
+            HandleDisposition::Borrow,
+        ),
         arguments: &[
-            process_builder_argument(
-                RIGHT_WRITE | RIGHT_RETAIN_PROCESS,
-                HandleDisposition::Borrow,
-            ),
             scalar_argument("max_bytes", ValueKind::ByteCount),
             scalar_argument("timeout_ns", ValueKind::U64),
         ],
@@ -11073,12 +11179,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 174,
+    Invocation {
+        operation: 256,
         name: "process_retirement_get_info",
         feature: FeatureGate::Core,
+        receiver: retained_object_argument("process_retirement", RIGHT_INSPECT),
         arguments: &[
-            retained_object_argument("process_retirement", RIGHT_INSPECT),
             crash_output_argument("process_retirement_info"),
             scalar_argument("output_size", ValueKind::ByteCount),
         ],
@@ -11091,14 +11197,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 175,
+    Invocation {
+        operation: 257,
         name: "process_retirement_open_view",
         feature: FeatureGate::Core,
-        arguments: &[retained_object_argument(
-            "process_retirement",
-            RIGHT_INSPECT_DETAILS,
-        )],
+        receiver: retained_object_argument("process_retirement", RIGHT_INSPECT_DETAILS),
+        arguments: &[],
         results: &[ResultValue {
             name: "handle",
             kind: ValueKind::Handle,
@@ -11115,11 +11219,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 176,
+    Invocation {
+        operation: 258,
         name: "process_retirement_release",
         feature: FeatureGate::Core,
-        arguments: &[retained_object_argument("process_retirement", RIGHT_RETIRE)],
+        receiver: retained_object_argument("process_retirement", RIGHT_RETIRE),
+        arguments: &[],
         results: &[],
         blocking: BlockingClass::MayBlock,
         cancellation: CancellationClass::None,
@@ -11129,12 +11234,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 177,
+    Invocation {
+        operation: 256,
         name: "crash_view_get_info",
         feature: FeatureGate::Core,
+        receiver: retained_object_argument("crash_view", RIGHT_INSPECT),
         arguments: &[
-            retained_object_argument("crash_view", RIGHT_INSPECT),
             crash_output_argument("process_retirement_info"),
             scalar_argument("output_size", ValueKind::ByteCount),
         ],
@@ -11147,12 +11252,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 178,
+    Invocation {
+        operation: 257,
         name: "crash_view_read",
         feature: FeatureGate::Core,
+        receiver: retained_object_argument("crash_view", RIGHT_READ),
         arguments: &[
-            retained_object_argument("crash_view", RIGHT_READ),
             scalar_argument("address", ValueKind::U64),
             Argument {
                 name: "output",
@@ -11184,12 +11289,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 179,
+    Invocation {
+        operation: 258,
         name: "crash_view_thread",
         feature: FeatureGate::Core,
+        receiver: retained_object_argument("crash_view", RIGHT_READ),
         arguments: &[
-            retained_object_argument("crash_view", RIGHT_READ),
             scalar_argument("index", ValueKind::U64),
             crash_output_argument("crash_thread"),
             scalar_argument("output_size", ValueKind::ByteCount),
@@ -11214,12 +11319,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 180,
+    Invocation {
+        operation: 259,
         name: "crash_view_mapping",
         feature: FeatureGate::Core,
+        receiver: retained_object_argument("crash_view", RIGHT_READ),
         arguments: &[
-            retained_object_argument("crash_view", RIGHT_READ),
             scalar_argument("index", ValueKind::U64),
             crash_output_argument("crash_mapping"),
             scalar_argument("output_size", ValueKind::ByteCount),
@@ -11244,12 +11349,12 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 181,
+    Invocation {
+        operation: 260,
         name: "crash_view_handle",
         feature: FeatureGate::Core,
+        receiver: retained_object_argument("crash_view", RIGHT_READ),
         arguments: &[
-            retained_object_argument("crash_view", RIGHT_READ),
             scalar_argument("index", ValueKind::U64),
             crash_output_argument("crash_handle"),
             scalar_argument("output_size", ValueKind::ByteCount),
@@ -11274,10 +11379,11 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 182,
+    Invocation {
+        operation: 265,
         name: "thread_set_current_name",
         feature: FeatureGate::Core,
+        receiver: invocation_receiver("execution_context", RIGHT_WRITE),
         arguments: &[
             Argument {
                 name: "name",
@@ -11305,21 +11411,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 183,
+    Invocation {
+        operation: 262,
         name: "device_dma_fault_info",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "device",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("physical_device"),
+                required_rights: RIGHT_INSPECT | RIGHT_ASSIGN_DEVICE,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "device",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("physical_device"),
-                    required_rights: RIGHT_INSPECT | RIGHT_ASSIGN_DEVICE,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             Argument {
                 name: "output",
                 kind: ValueKind::UserAddress,
@@ -11346,21 +11452,21 @@ pub const SYSCALLS: &[Syscall] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
-    Syscall {
-        number: 496,
+    Invocation {
+        operation: 257,
         name: "native_block_transfer",
         feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "block",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("native_block"),
+                required_rights: 0,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
         arguments: &[
-            Argument {
-                name: "block",
-                kind: ValueKind::Handle,
-                handle: Some(HandleArgument {
-                    object: ObjectConstraint::Kind("native_block"),
-                    required_rights: 0,
-                    disposition: HandleDisposition::Borrow,
-                }),
-                memory: None,
-            },
             scalar_argument("operation", ValueKind::U32),
             scalar_argument("first_sector", ValueKind::U64),
             Argument {
@@ -11400,13 +11506,15 @@ pub const NATIVE_ABI: AbiSchema = AbiSchema {
     signals: SIGNALS,
     constants: CONSTANTS,
     records: RECORDS,
-    syscalls: SYSCALLS,
+    invocations: INVOCATIONS,
     semantic_rules: SEMANTIC_RULES,
 };
 
 pub const SEMANTIC_RULES: &[&str] = &[
+    "Native invocations carry a process-local target handle in the selector register, a separate object-local operation, and six business argument registers. AArch64 uses x8/x6/x0..x5; RISC-V uses a7/a6/a0..a5. No global syscall number or implicit privileged target exists. Common handle operations use 0..5; object-specific operations start at 256 and may repeat across object kinds. Unknown target handles fail before operation dispatch; unknown operations return NOT_SUPPORTED. The receiver is not duplicated in the business arguments.",
+    "ExecutionContext and ObjectFactory are ordinary process-local, nontransferable capabilities bound to their creating Process. They never grant operations on another Process, Thread, address space or resource domain. ExecutionContext methods act on the invoking Thread or its Process; ObjectFactory charges every allocation to that Process's resource domain. SystemInfo grants public read-only ABI, configuration and clock observations. Closing or attenuating a capability does not implicitly recreate its authority.",
     "device_dma_fault_info requires INSPECT and ASSIGN_DEVICE on the physical-device handle. It returns the first retained DMA containment report without consuming it; an all-zero record means no report. DMA_FAULT is a persistent level signal observed with WAIT. Claim and claim_matching grant WAIT. Fault evidence follows the device object across handle transfer; querying does not acknowledge or resume DMA. The kernel never selects a userspace process or stops a VM for this notification. The formal I/O runtime queries after adoption and journals each device's first report; bootstrap does not consume it. timestamp_ns is monotonic boot time. source 1 identifies SMMUv3. scope 1 means stream quarantine, with code holding the SMMUv3 event ID; scope 2 means controller containment, with code holding the captured GERROR bits (zero is possible for a software-detected failure). stream_id always identifies this handle's device. ADDRESS_VALID, READ and WRITE describe the address only for translation/access faults; controller reports disclose no other device's address. reserved is zero. A first stream report remains unchanged if the whole controller later fails. Quarantine and backing retention remain independent of observer presence or progress.",
-    "thread_set_current_name changes only the calling Native Thread's diagnostic label. No handle or extra authority is needed and no other Thread or Process can be renamed. Input is 1..thread_name_max_bytes (64) bytes of UTF-8 without control characters, excluding any NUL terminator. Empty, oversized, invalid UTF-8, control-containing names and nonzero unused arguments return INVALID_ARGUMENT without changing the old name. Inspectors receive complete old or new snapshots; names confer no identity or authority. Process names remain unchanged.",
+    "thread_set_current_name changes only the calling Native Thread's diagnostic label. The caller must hold its ExecutionContext with WRITE; no other Thread or Process can be renamed. Input is 1..thread_name_max_bytes (64) bytes of UTF-8 without control characters, excluding any NUL terminator. Empty, oversized, invalid UTF-8, control-containing names and nonzero unused arguments return INVALID_ARGUMENT without changing the old name. Inspectors receive complete old or new snapshots; names confer no identity or authority. Process names remain unchanged.",
     "memory_inspector_read_statistics requires MemoryInspector INSPECT; it is observational and never drains caches or initiates reclaim. Topic selects a typed extensible record: heap (index 0), buddy (orders 0..18), owner (0 kernel, 1 page tables, 2 guest, 3 user, 4 file cache), file_cache (index 0), or heap_class (0..8 kernel, 9..17 file-cache pool; eight slab sizes 16..2048 then large allocations). Unknown topic/index and a nonzero unused argument are INVALID_ARGUMENT. Heap-class records require CONFIG_HEAP_PROFILING, otherwise NOT_SUPPORTED. Other records are always available after allocator initialization.",
     "Memory statistics are independently sampled, including fields sourced from atomic counters; they are not a transaction across topics, CPUs, or logical and physical accounting. Page counts use memory_observation.page_size. Heap-class reserved slots include live objects, magazine objects and in-flight transfers; large buckets report zero capacity/reserved/cached and object_size=0. File-cache metadata physical pages and reservations overlap other accounting and must not be added twice. Cumulative heap-class allocation/deallocation counters saturate and reset only on reboot. No address or allocation authority is exposed.",
     "object_inspector_read_details requires INSPECT and INSPECT_DETAILS on an ObjectInspector. With process_koid zero, target is a KOID and only system scope is allowed. Otherwise target is a generation-qualified handle in the named, scope-visible process. Inspection takes a diagnostic reference under the lookup lock, releases that lock, and copies object-local metadata only; it does not grant operation authority. Cursor zero starts a query; next_cursor zero finishes it. Empty records may advance a bounded scan without yielding a mapping. Concurrent mutation makes pages weakly consistent. Unsupported object kinds return NOT_SUPPORTED; inaccessible or expired identities return NOT_FOUND. Inspector derivation continues to produce only the original basic rights, never implicitly acquiring INSPECT_DETAILS.",
@@ -11418,7 +11526,7 @@ pub const SEMANTIC_RULES: &[&str] = &[
     "system_config queries a public scalar system property by u64 key. PAGE_SIZE (1) returns the Native mapping granule in bytes, immutable for the lifetime of a process. Unknown keys return NOT_SUPPORTED. Unused argument registers must be zero. Success returns the value in value0 and zero in value1. This query requires no inspector capability and does not expose privileged observations.",
     "vmar_allocate(parent, address, size, options) uses address as the low end. Options zero treats nonzero address as a hint, choosing the nearest fitting free interval with lower-base tie breaking; address zero selects the lowest free interval. VMAR_ALLOCATE_EXACT requires the exact address, including zero. Unknown flags are invalid. Size is nonzero, addresses and size page aligned, and intervals must not overflow. Success returns child in value0 and actual base in value1. Selection and reservation commit atomically within parent authority. No fitting free interval returns NO_MEMORY.",
     "system_config key SYSTEM_CONFIG_APPLICATION_ADDRESS_LIMIT returns the HAL application-exclusive address limit in value0 and zero in value1. It describes profile geometry, not VMAR authority. The kernel grants ROOT_VMAR from one page to that limit.",
-    "Every Native process enters a caller-selected loader. Process-builder create derives the executable File into the child using explicit READ|EXECUTE|PROTECT|DUPLICATE|TRANSFER authority, and borrows the loader with READ|EXECUTE. The target is not frozen by builder creation. The kernel takes only a temporary stable loader image while preparing its restricted bootstrap mappings. Seal validates and maps only the loader's restricted Native ET_DYN bootstrap image and an empty guarded stack; the first argument register holds a ByteChannel handle. Only initial boot selects a loader by pathname: /lib/userspace-loader-hyper-<architecture> launches /init from the ramdisk root. The queued message contains loader_startup, handle_count startup_handle records, then data_size opaque bytes. size is 72; flags permits only loader_startup_reply. Executable is an ordinary File with READ|EXECUTE|PROTECT. The user loader acquires content protection before querying size or parsing ELF. root_vmar and stack_vmar identify child-owned mapping authority; stack_base and stack_size describe mapped usable stack bytes with an unmapped guard at each end. loader_base and loader_size describe the loader mappings. Library directories are ordinary explicitly supplied startup capabilities; the kernel neither selects nor opens them. No argv, environment, auxv, application ELF parsing or relocation belongs to this kernel entry contract. The selected runtime owns bootstrap-handle closure and mapping retirement. Closing a VMAR handle alone does not unmap or destroy its reservation.",
+    "Every Native process enters a caller-selected loader. Process-builder create derives the executable File into the child using explicit READ|EXECUTE|PROTECT|DUPLICATE|TRANSFER authority, and borrows the loader with READ|EXECUTE. The target is not frozen by builder creation. The kernel takes only a temporary stable loader image while preparing its restricted bootstrap mappings. Seal validates and maps only the loader's restricted Native ET_DYN bootstrap image and an empty guarded stack; the first argument register holds a ByteChannel handle. Only initial boot selects a loader by pathname: /lib/userspace-loader-hyper-<architecture> launches /init from the ramdisk root. The queued message contains loader_startup, handle_count startup_handle records, then data_size opaque bytes. size is 96; flags permits only loader_startup_reply. execution_context, object_factory and system_info are process-installed capabilities for current execution, local object allocation and public system queries. Executable is an ordinary File with READ|EXECUTE|PROTECT. The user loader acquires content protection before querying size or parsing ELF. root_vmar and stack_vmar identify child-owned mapping authority; stack_base and stack_size describe mapped usable stack bytes with an unmapped guard at each end. loader_base and loader_size describe the loader mappings. Library directories are ordinary explicitly supplied startup capabilities; the kernel neither selects nor opens them. No argv, environment, auxv, application ELF parsing or relocation belongs to this kernel entry contract. The selected runtime owns bootstrap-handle closure and mapping retirement. Closing a VMAR handle alone does not unmap or destroy its reservation.",
     "Virtual CPU set_affinity borrows a VirtualCpu with WRITE and accepts the same nonempty little-endian u64 CPU-mask word array as process-builder affinity. Bits above the kernel CPU limit are rejected; the mask must contain a schedulable CPU. The affinity update retains the current assignment when allowed; otherwise the scheduler selects an allowed registered CPU and safely migrates the saved context. Automatic Fair balancing may later move a Ready vCPU within this allowed set; a singleton mask prevents automatic movement. OK means the update or required handoff was accepted; migration may complete before or after return. An overlapping incompatible handoff or CPU-local wait returns busy. VM stop or guest power operations may supersede the request. Stopping, detached, and reaped endpoints reject new affinity updates. VirtualCpu info extends its 24-byte prefix with host_cpu and migration_target at offsets 24 and 28, one scheduler placement observation rather than running state or a completion token. Value 0xffffffff means unavailable assignment or no pending migration; older kernels return only the original prefix.",
     "Guest mapping creation borrows backend VirtualMachine WRITE and GuestMemory MAP, populates the full stable grant, and returns an owned mapping handle plus a backend-VM-local non-reused token. The backend IPA envelope must contain all sparse aliases: alias = 64 GiB + host physical address, with host addresses below 256 GiB. Unadmitted envelope holes have no RAM or page bitmap entries. The kernel constructs immutable frontend-ordered, coalesced physical extents; neither Native policy nor Linux may replace their addresses. Backend notification write64 0x28 admits one token exactly once to that unique notification route; read64 0x30/0x38/0x40/0x48 return frontend base, total bytes, status, extent count. Write64 0x50 selects an extent index; read64 0x58/0x60/0x68/0x70 return alias, frontend-relative offset, byte length, and query status. Rejection clears the old reply. Extents cover the entire frontend range without holes or overlapping physical pages. After draining vhost and releasing all page pins, only that backend route may write64 the token at 0x20 to certify quiescence. Mapping release accepts never-admitted or quiescent tokens, withdraws lookup, clears leaves, waits for every CPU translation acknowledgement and, for an IOMMU-bound backend, completed DMA invalidation, then releases backing. Closing a mapping handle alone quarantines its pages until backend VM retirement. Notification control operation 3 permanently disconnects both routes, only when no admitted mapping remains; a disconnected route never affects an address or IRQ reused by a subsequent connection.",
     "Native block creation dedicates one fully resident 1048576-byte guest-memory grant permanently to one kernel virtio-scsi initiator; repeated creation from that grant fails. The backend VM must retain the matching mapping until execution and physical DMA are quiescent. Six standard split queues (control, event, and four request queues) have size 8, descriptor offsets n*4096, available offsets n*4096+256, and used offsets n*4096+512, relative to guest_base. Userspace negotiates VERSION_1 with the backend before activation. Activation enables notifications and issues READ CAPACITY(16), accepting only 512-byte sectors; capacity is never supplied by userspace. The block capability remains the data-plane owner across filesystem worker handoff; a clean unmount returns the same activated object rather than creating or activating a replacement. Reads use bounded batches across the four request queues; writes and flushes remain ordered. Requests use shared queues and blocking kernel notifications, not per-request userspace RPC. Unretired request failures permanently disconnect the initiator and never recycle its buffer. PEER_CLOSED reports disconnection. The physical pages remain retained by backend mappings until VM/DMA retirement; notification closure alone never proves DMA quiescence.",
@@ -11437,7 +11545,7 @@ pub const SEMANTIC_RULES: &[&str] = &[
     "Thread creation prepares a dormant thread in the calling Process and returns duplicate, wait, inspect, start and request_stop authority. Entry, 16-byte-aligned stack, TLS and an opaque first argument define its initial context. Affinity pointer/count zero together inherit the calling Thread current allowed CPU set; otherwise they name one to four little-endian u64 bitmap words. An explicit mask must be nonempty, fit supported CPU indices and include at least one schedulable CPU. The child remains dormant until start, with affinity already applied. The caller retains stack/TLS ownership through the thread terminated signal. Start publishes runnable execution; request_stop abandons execution without language destructors. Closing the last handle to a dormant thread cancels it; running threads continue independently of handle ownership. Existing thread_exit terminates only the caller, while process_exit stops every thread.",
     "Atomic wait/wake currently operate on aligned writable u32 words in the calling Process. Wait checks the value and publishes its generation atomically with respect to wake; mismatch returns ok, and spurious wakes are allowed. Wait uses an absolute monotonic nanosecond deadline, with UINT64_MAX meaning infinite; timeout returns timed_out and cancellation returns cancelled. Wake returns the number of registrations actually notified, bounded by count. Wake does not replace the caller's release operation or the waiter's acquire predicate check. Keys include the non-reused mapping identity and virtual address; aliases and other Processes have separate wait domains. Keep the mapping live while waiting: unmap/protect does not move an existing wait to a replacement mapping. Pinned backing survives concurrent unmap until admitted accesses finish; process stop cancels outstanding waits.",
     "Thread sleep accepts an absolute monotonic nanosecond deadline and returns ok when it expires, including an already elapsed deadline. UINT64_MAX sleeps until cancellation. It parks the current thread through scheduler timeout arbitration rather than polling or yielding.",
-    "The monotonic clock syscall returns absolute nanoseconds from the kernel's monotonic clock domain. Ambient monotonic observation is intentionally not a capability because reading it conveys no mutable authority; future virtual or adjustable clocks may be represented by handle objects without changing this clock domain.",
+    "The monotonic clock operation requires SystemInfo READ and returns absolute nanoseconds from the kernel's monotonic clock domain. The read-only capability confers no mutable clock authority.",
     "Extensible input records carry their caller size in the syscall's explicit byte-count argument. The size must be at least the record's published minimum prefix and no greater than extensible_record_max_bytes; missing bytes through the kernel's current record size default to zero, while bytes beyond that size must be zero. Extensible information outputs accept any capacity from the record's minimum prefix through extensible_record_max_bytes, write only the intersection of caller capacity and kernel-supported size, and return the kernel-supported size in value0 on ok. Bytes beyond that intersection remain untouched.",
     "Directory lookup is capability-relative. A leading slash restarts at that Directory's traversal root, and parent components cannot escape it. Every open requires read traversal authority, and every requested File right must already be present on the source Directory before the result is further bounded by the File object's node-specific ceiling.",
     "directory_begin_read requires only Directory READ and creates an independent DirectoryStream. Its grant is the source Directory grant intersected with READ|DUPLICATE|TRANSFER|INSPECT, so attenuated propagation or inspection authority is never restored. Each stream retains its opened namespace location and small trusted backend position, never directory cache pages. Duplicated or transferred stream handles share progress. directory_read now requires DirectoryStream READ and the exact published page capacity. Cookie zero reads the first page; subsequent cookies must have been returned by that stream. Nonzero cookies are globally monotonic and never reused. Only the most recent input cookie can be replayed for copyout retry; older, forged or foreign-stream cookies are invalid. A zero next_cookie marks EOF; short nonempty pages may still have a continuation. Every name is one valid path component encoded as name_length UTF-8 bytes followed by zero-filled capacity. Remote mutations of the scanned directory, or renames of that directory or an ancestor, invalidate its ongoing scans and require a new stream; mutations of unrelated directories and file-content changes preserve traversal. Ramfs enumeration remains weakly consistent across mutations. No scan is an immutable directory snapshot. Callers must not interpret or synthesize cookies. Closing the final stream handle releases the position and namespace pin.",
@@ -11465,7 +11573,7 @@ pub const SEMANTIC_RULES: &[&str] = &[
     "Capability disposition move consumes its source only on ok and requires transfer. Capability disposition duplicate retains its source and requires transfer plus duplicate. Unknown operations, repeated source handles, kind mismatches, and rights violations reject the complete transaction.",
     "Capability-channel try_send returns peer_closed when no peer remains; otherwise it returns would_block only when no receiver is queued. It FIFO-matches the oldest fully published receiver. A size, kind, rights, operation, or copy mismatch rejects that transaction for both participants without scanning later receivers.",
     "Capability-channel timeout, cancellation, and peer close can win only before a receiver is matched. Once matched, sender completion or rejection owns the transaction through commit, including races with the deadline, cancellation, or close; both participants observe the same committed outcome.",
-    "Process-builder create borrows its authority handles, retains the target File identity for an attenuated child grant, and captures a kernel-only stable copy of the selected bootstrap loader. Closing or replacing either source handle does not change the captured identities. The target File contents may change until the userspace loader acquires PROTECT; builder creation does not freeze them. Failure before builder publication releases these owners without consuming either input File. Builders are mutable only before seal. Every successful mutator applies completely; every failure leaves the builder unchanged. Seal is irreversible, prepares only the bootstrap process image and releases the temporary loader copy. Start requires a sealed builder, consumes it atomically, and returns a supervisor Process plus a READ/WAIT startup ByteChannel. It commits child publication, not successful application loading. Syscall failure preserves the builder; asynchronous bootstrap failure does not restore it. The SDK waits for its loader result protocol and stops failed children before returning a committed launch error.",
+    "Process-builder create borrows its authority handles, retains the target File identity for an attenuated child grant, and captures a kernel-only stable copy of the selected bootstrap loader. Closing or replacing either source handle does not change the captured identities. The target File contents may change until the userspace loader acquires PROTECT; builder creation does not freeze them. Failure before builder publication releases these owners without consuming either input File. Builders are mutable only before seal. Every successful mutator applies completely; every failure leaves the builder unchanged. Seal is irreversible, prepares only the bootstrap process image and releases the temporary loader copy. Start requires a sealed builder, consumes it atomically, and returns a supervisor Process plus a READ/WAIT startup ByteChannel. It commits child publication, not successful application loading. Invocation failure preserves the builder; asynchronous bootstrap failure does not restore it. The SDK waits for its loader result protocol and stops failed children before returning a committed launch error.",
     "A process-builder name is nonempty UTF-8 without embedded NUL bytes. set_data replaces bounded opaque bytes, up to process_startup_data_max_bytes, without kernel interpretation. Arguments, environment, their limits and the loader result protocol are SDK policy. Boot init receives an empty payload.",
     "Process-builder set_name, set_data and set_affinity replace their prior values. Affinity is a nonempty little-endian array of u64 CPU-mask words. Bits above process_affinity_max_cpus and bits which cannot designate an allowed CPU are rejected.",
     "Process-builder add_handle requires a nonzero purpose unique within the builder, an expected nonzero exact object kind, and either exact granted rights or capability_disposition_same_rights. Move consumes the source only when the mutator returns ok; duplicate retains it and additionally requires duplicate. Failure preserves both builder and source.",
@@ -11481,5 +11589,5 @@ pub const SEMANTIC_RULES: &[&str] = &[
     "guest_notification_configure requires frontend VirtualMachine WRITE. original_base identifies an existing connection by its creation address; base is a page-aligned 4 KiB window wholly contained in an installed userspace MMIO reservation and, while decoding is enabled, may not overlap another enabled I/O route. Flags 0 select the original virtio-MMIO register layout; bit 0 selects modern virtio-PCI, bit 1 enables memory decoding, bit 2 masks INTx, and bit 3 enables queue notifications (bus master). Unknown flags or PCI flags without bit 0 are rejected. PCI uses a 16-bit queue-index write at BAR+0x50 and a read-to-clear 8-bit ISR at BAR+0x60. Relocation, decode, and IRQ-mask changes serialize with source state and VM retirement. The operation cannot change the admitted backend, IRQs, DMA ownership, or epoch; disabling decode is not proof of backend quiescence.",
 ];
 
-const _: () = assert!(SYSCALL_ARGUMENT_REGISTERS == 6);
-const _: () = assert!(SYSCALL_RESULT_REGISTERS == 2);
+const _: () = assert!(INVOCATION_ARGUMENT_REGISTERS == 6);
+const _: () = assert!(INVOCATION_RESULT_REGISTERS == 2);

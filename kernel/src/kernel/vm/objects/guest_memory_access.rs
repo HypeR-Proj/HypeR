@@ -3,9 +3,10 @@
 
 //! Bounded Native access to explicitly delegated, hardware-owned guest backing.
 
+use crate::kernel::capability::InvocationReceiver;
+
 use super::GuestMemoryObject;
 use crate::kernel::authority::Rights;
-use crate::kernel::capability::HandleValue;
 use crate::kernel::mm::user_space::UserSlice;
 use crate::kernel::process::Process;
 use crate::kernel::vm::service::Error;
@@ -22,13 +23,15 @@ fn memory_error(error: crate::kernel::mm::user_space::MemoryObjectError) -> Erro
 #[inline(never)]
 pub(crate) fn transfer(
     process: &Process,
-    memory: HandleValue,
+    memory: &InvocationReceiver,
     write: bool,
     offset: u64,
     buffer: UserSlice,
 ) -> Result<(), Error> {
     let rights = if write { Rights::WRITE } else { Rights::READ };
-    let memory = process.resolve_handle::<GuestMemoryObject>(memory, rights)?;
+    let memory = memory
+        .resolve::<GuestMemoryObject>(rights)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let object = memory.object();
     let length = usize::try_from(buffer.length()).map_err(|_| Error::InvalidArgument)?;
     if length == 0 || length > COPY_BYTES {
@@ -67,15 +70,16 @@ pub(crate) fn transfer(
 /// Naturally aligned queue words require one machine access. Byte copies are
 /// deliberately separate: they do not promise an atomic snapshot of guest data.
 pub(crate) fn scalar(
-    process: &Process,
-    memory: HandleValue,
+    memory: &InvocationReceiver,
     write: bool,
     offset: u64,
     width: u32,
     value: u64,
 ) -> Result<u64, Error> {
     let rights = if write { Rights::WRITE } else { Rights::READ };
-    let memory = process.resolve_handle::<GuestMemoryObject>(memory, rights)?;
+    let memory = memory
+        .resolve::<GuestMemoryObject>(rights)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     scalar_object(memory.object(), write, offset, width, value)
 }
 

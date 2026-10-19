@@ -3,6 +3,8 @@
 
 //! Native inspection service calls under borrowed Process authority.
 
+use crate::kernel::capability::InvocationReceiver;
+
 use super::ProcessServices;
 use crate::kernel::abi::native::{InspectServices, SystemInspectServices};
 use crate::kernel::accounting::ResourceDomainObject;
@@ -14,34 +16,34 @@ use crate::kernel::process::{ProcessObject, ProcessSnapshot, TaskGroupObject};
 impl SystemInspectServices for ProcessServices<'_> {
     fn memory_statistics(
         &self,
-        inspector: HandleValue,
+        inspector: &InvocationReceiver,
         query: crate::kernel::inspect::memory::Query,
     ) -> Result<crate::kernel::inspect::memory::Statistics, crate::kernel::inspect::Error> {
-        let inspector = self
-            .process
-            .resolve_handle::<MemoryInspector>(inspector, Rights::INSPECT)
+        let inspector = inspector
+            .resolve::<MemoryInspector>(Rights::INSPECT)
+            .map_err(crate::kernel::process::ProcessError::from)
             .map_err(crate::kernel::inspect::Error::Process)?;
         inspector.object().statistics(query)
     }
     fn memory_observation(
         &self,
-        inspector: HandleValue,
+        inspector: &InvocationReceiver,
     ) -> Result<crate::kernel::inspect::MemoryObservation, crate::kernel::inspect::Error> {
-        let inspector = self
-            .process
-            .resolve_handle::<MemoryInspector>(inspector, Rights::INSPECT)
+        let inspector = inspector
+            .resolve::<MemoryInspector>(Rights::INSPECT)
+            .map_err(crate::kernel::process::ProcessError::from)
             .map_err(crate::kernel::inspect::Error::Process)?;
         inspector.object().snapshot()
     }
 
     fn cpu_observation(
         &self,
-        inspector: HandleValue,
+        inspector: &InvocationReceiver,
     ) -> Result<crate::kernel::task::scheduler::CpuTimeSnapshot, crate::kernel::inspect::Error>
     {
-        let inspector = self
-            .process
-            .resolve_handle::<CpuInspector>(inspector, Rights::INSPECT)
+        let inspector = inspector
+            .resolve::<CpuInspector>(Rights::INSPECT)
+            .map_err(crate::kernel::process::ProcessError::from)
             .map_err(crate::kernel::inspect::Error::Process)?;
         Ok(inspector.object().snapshot())
     }
@@ -50,73 +52,70 @@ impl SystemInspectServices for ProcessServices<'_> {
 impl InspectServices for ProcessServices<'_> {
     fn scan_processes(
         &self,
-        inspector: HandleValue,
+        inspector: &InvocationReceiver,
         cursor: u64,
         output: &mut crate::kernel::inspect::Page<
             ProcessSnapshot,
             { crate::kernel::inspect::PROCESS_PAGE_CAPACITY },
         >,
     ) -> Result<(), crate::kernel::inspect::Error> {
-        let inspector = self
-            .process
-            .resolve_handle::<TaskInspector>(inspector, Rights::INSPECT)
+        let inspector = inspector
+            .resolve::<TaskInspector>(Rights::INSPECT)
+            .map_err(crate::kernel::process::ProcessError::from)
             .map_err(crate::kernel::inspect::Error::Process)?;
         inspector.object().scan_processes(cursor, output)
     }
 
     fn scan_threads(
         &self,
-        inspector: HandleValue,
+        inspector: &InvocationReceiver,
         cursor: u64,
         output: &mut crate::kernel::inspect::Page<
             crate::kernel::inspect::TaskThreadSnapshot,
             { crate::kernel::inspect::THREAD_PAGE_CAPACITY },
         >,
     ) -> Result<(), crate::kernel::inspect::Error> {
-        let inspector = self
-            .process
-            .resolve_handle::<TaskInspector>(inspector, Rights::INSPECT)
+        let inspector = inspector
+            .resolve::<TaskInspector>(Rights::INSPECT)
+            .map_err(crate::kernel::process::ProcessError::from)
             .map_err(crate::kernel::inspect::Error::Process)?;
         inspector.object().scan_threads(cursor, output)
     }
 
     fn read_object_details(
         &self,
-        inspector: HandleValue,
+        inspector: &InvocationReceiver,
         process: u64,
         target: u64,
         cursor: u64,
     ) -> Result<crate::kernel::object::diagnostics::ObjectDetails, crate::kernel::inspect::Error>
     {
-        let inspector = self
-            .process
-            .resolve_handle::<ObjectInspector>(
-                inspector,
-                Rights::INSPECT.union(Rights::INSPECT_DETAILS),
-            )
+        let inspector = inspector
+            .resolve::<ObjectInspector>(Rights::INSPECT.union(Rights::INSPECT_DETAILS))
+            .map_err(crate::kernel::process::ProcessError::from)
             .map_err(crate::kernel::inspect::Error::Process)?;
         inspector.object().read_details(process, target, cursor)
     }
 
     fn scan_objects(
         &self,
-        inspector: HandleValue,
+        inspector: &InvocationReceiver,
         cursor: u64,
         output: &mut crate::kernel::inspect::Page<
             crate::kernel::object::ObjectSnapshot,
             { crate::kernel::inspect::OBJECT_PAGE_CAPACITY },
         >,
     ) -> Result<(), crate::kernel::inspect::Error> {
-        let inspector = self
-            .process
-            .resolve_handle::<ObjectInspector>(inspector, Rights::INSPECT)
+        let inspector = inspector
+            .resolve::<ObjectInspector>(Rights::INSPECT)
+            .map_err(crate::kernel::process::ProcessError::from)
             .map_err(crate::kernel::inspect::Error::Process)?;
         inspector.object().scan_objects(cursor, output)
     }
 
     fn scan_process_handles(
         &self,
-        inspector: HandleValue,
+        inspector: &InvocationReceiver,
         process_koid: u64,
         cursor: u64,
     ) -> Result<
@@ -126,9 +125,9 @@ impl InspectServices for ProcessServices<'_> {
         >,
         crate::kernel::inspect::Error,
     > {
-        let inspector = self
-            .process
-            .resolve_handle::<ObjectInspector>(inspector, Rights::INSPECT)
+        let inspector = inspector
+            .resolve::<ObjectInspector>(Rights::INSPECT)
+            .map_err(crate::kernel::process::ProcessError::from)
             .map_err(crate::kernel::inspect::Error::Process)?;
         inspector
             .object()
@@ -137,15 +136,12 @@ impl InspectServices for ProcessServices<'_> {
 
     fn derive_task_inspector(
         &self,
-        inspector: HandleValue,
+        inspector: &InvocationReceiver,
         process: HandleValue,
     ) -> Result<HandleValue, crate::kernel::inspect::Error> {
-        let inspector = self
-            .process
-            .resolve_handle::<TaskInspector>(
-                inspector,
-                <TaskInspector as KernelObject>::SUPPORTED_RIGHTS,
-            )
+        let inspector = inspector
+            .resolve::<TaskInspector>(<TaskInspector as KernelObject>::SUPPORTED_RIGHTS)
+            .map_err(crate::kernel::process::ProcessError::from)
             .map_err(crate::kernel::inspect::Error::Process)?;
         let target = self
             .process
@@ -161,12 +157,12 @@ impl InspectServices for ProcessServices<'_> {
 
     fn derive_object_inspector(
         &self,
-        inspector: HandleValue,
+        inspector: &InvocationReceiver,
         process: HandleValue,
     ) -> Result<HandleValue, crate::kernel::inspect::Error> {
-        let inspector = self
-            .process
-            .resolve_handle::<ObjectInspector>(inspector, ObjectInspector::DERIVATION_RIGHTS)
+        let inspector = inspector
+            .resolve::<ObjectInspector>(ObjectInspector::DERIVATION_RIGHTS)
+            .map_err(crate::kernel::process::ProcessError::from)
             .map_err(crate::kernel::inspect::Error::Process)?;
         let target = self
             .process
@@ -182,15 +178,12 @@ impl InspectServices for ProcessServices<'_> {
 
     fn derive_task_inspector_for_task_group(
         &self,
-        inspector: HandleValue,
+        inspector: &InvocationReceiver,
         group: HandleValue,
     ) -> Result<HandleValue, crate::kernel::inspect::Error> {
-        let inspector = self
-            .process
-            .resolve_handle::<TaskInspector>(
-                inspector,
-                <TaskInspector as KernelObject>::SUPPORTED_RIGHTS,
-            )
+        let inspector = inspector
+            .resolve::<TaskInspector>(<TaskInspector as KernelObject>::SUPPORTED_RIGHTS)
+            .map_err(crate::kernel::process::ProcessError::from)
             .map_err(crate::kernel::inspect::Error::Process)?;
         let target = self
             .process
@@ -206,12 +199,12 @@ impl InspectServices for ProcessServices<'_> {
 
     fn derive_object_inspector_for_task_group(
         &self,
-        inspector: HandleValue,
+        inspector: &InvocationReceiver,
         group: HandleValue,
     ) -> Result<HandleValue, crate::kernel::inspect::Error> {
-        let inspector = self
-            .process
-            .resolve_handle::<ObjectInspector>(inspector, ObjectInspector::DERIVATION_RIGHTS)
+        let inspector = inspector
+            .resolve::<ObjectInspector>(ObjectInspector::DERIVATION_RIGHTS)
+            .map_err(crate::kernel::process::ProcessError::from)
             .map_err(crate::kernel::inspect::Error::Process)?;
         let target = self
             .process
@@ -227,15 +220,12 @@ impl InspectServices for ProcessServices<'_> {
 
     fn derive_task_inspector_for_resource_domain(
         &self,
-        inspector: HandleValue,
+        inspector: &InvocationReceiver,
         domain: HandleValue,
     ) -> Result<HandleValue, crate::kernel::inspect::Error> {
-        let inspector = self
-            .process
-            .resolve_handle::<TaskInspector>(
-                inspector,
-                <TaskInspector as KernelObject>::SUPPORTED_RIGHTS,
-            )
+        let inspector = inspector
+            .resolve::<TaskInspector>(<TaskInspector as KernelObject>::SUPPORTED_RIGHTS)
+            .map_err(crate::kernel::process::ProcessError::from)
             .map_err(crate::kernel::inspect::Error::Process)?;
         let target = self
             .process
@@ -251,12 +241,12 @@ impl InspectServices for ProcessServices<'_> {
 
     fn derive_object_inspector_for_resource_domain(
         &self,
-        inspector: HandleValue,
+        inspector: &InvocationReceiver,
         domain: HandleValue,
     ) -> Result<HandleValue, crate::kernel::inspect::Error> {
-        let inspector = self
-            .process
-            .resolve_handle::<ObjectInspector>(inspector, ObjectInspector::DERIVATION_RIGHTS)
+        let inspector = inspector
+            .resolve::<ObjectInspector>(ObjectInspector::DERIVATION_RIGHTS)
+            .map_err(crate::kernel::process::ProcessError::from)
             .map_err(crate::kernel::inspect::Error::Process)?;
         let target = self
             .process

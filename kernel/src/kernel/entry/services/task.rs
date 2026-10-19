@@ -3,13 +3,15 @@
 
 //! Native task service calls under borrowed Process authority.
 
+use crate::kernel::capability::InvocationReceiver;
+
 use super::ProcessServices;
 use super::affinity::AffinityInputError;
 use crate::kernel::abi::native::{ObjectServiceError, TaskServices};
 use crate::kernel::capability::{HandleValue, Rights};
 use crate::kernel::mm::user_space::{UserAddress, UserSlice};
 use crate::kernel::process::{
-    ProcessError, ProcessObject, ProcessSnapshot, TerminalReason, UserThreadPhase,
+    ProcessError, ProcessObject, ProcessSnapshot, TerminalReason, UserThread, UserThreadPhase,
 };
 
 impl TaskServices for ProcessServices<'_> {
@@ -75,17 +77,13 @@ impl TaskServices for ProcessServices<'_> {
             }
         }
     }
-    fn start_thread(&self, value: HandleValue) -> Result<(), ProcessError> {
-        let thread = self
-            .process
-            .resolve_user_thread_handle(value, Rights::START)?;
+    fn start_thread(&self, value: &InvocationReceiver) -> Result<(), ProcessError> {
+        let thread = UserThread::resolve_receiver(value, Rights::START)?;
         thread.ready()?;
         Ok(())
     }
-    fn stop_thread(&self, value: HandleValue) -> Result<(), ProcessError> {
-        let thread = self
-            .process
-            .resolve_user_thread_handle(value, Rights::REQUEST_STOP)?;
+    fn stop_thread(&self, value: &InvocationReceiver) -> Result<(), ProcessError> {
+        let thread = UserThread::resolve_receiver(value, Rights::REQUEST_STOP)?;
         if thread.snapshot().phase == UserThreadPhase::Detached {
             return Ok(());
         }
@@ -127,33 +125,33 @@ impl TaskServices for ProcessServices<'_> {
         .map_err(atomic_wait_error)
     }
 
-    fn process_info(&self, process: HandleValue) -> Result<ProcessSnapshot, ProcessError> {
-        Ok(self
-            .process
-            .resolve_handle::<ProcessObject>(process, Rights::INSPECT)?
+    fn process_info(&self, process: &InvocationReceiver) -> Result<ProcessSnapshot, ProcessError> {
+        Ok(process
+            .resolve::<ProcessObject>(Rights::INSPECT)
+            .map_err(crate::kernel::process::ProcessError::from)?
             .object()
             .snapshot())
     }
 
-    fn derive_process_observer(&self, process: HandleValue) -> Result<HandleValue, ProcessError> {
-        self.process.derive_process_observer(process)
+    fn derive_process_observer(
+        &self,
+        process: &InvocationReceiver,
+    ) -> Result<HandleValue, ProcessError> {
+        self.process.derive_process_observer(process.handle())
     }
 
-    fn request_task_group_stop(&self, group: HandleValue) -> Result<(), ProcessError> {
-        let group = self
-            .process
-            .resolve_handle::<crate::kernel::process::TaskGroupObject>(
-                group,
-                Rights::REQUEST_STOP,
-            )?;
+    fn request_task_group_stop(&self, group: &InvocationReceiver) -> Result<(), ProcessError> {
+        let group = group
+            .resolve::<crate::kernel::process::TaskGroupObject>(Rights::REQUEST_STOP)
+            .map_err(crate::kernel::process::ProcessError::from)?;
         group.object().group().request_stop()?;
         Ok(())
     }
 
-    fn request_process_stop(&self, process: HandleValue) -> Result<(), ProcessError> {
-        let process = self
-            .process
-            .resolve_handle::<ProcessObject>(process, Rights::REQUEST_STOP)?;
+    fn request_process_stop(&self, process: &InvocationReceiver) -> Result<(), ProcessError> {
+        let process = process
+            .resolve::<ProcessObject>(Rights::REQUEST_STOP)
+            .map_err(crate::kernel::process::ProcessError::from)?;
         process.object().request_stop(TerminalReason::Requested);
         Ok(())
     }

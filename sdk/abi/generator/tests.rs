@@ -71,7 +71,7 @@ fn generated_bit_constants_preserve_schema_bit_positions() {
     assert!(
         generated
             .rust
-            .contains("HYPER_NATIVE_RIGHTS_MASK: u64 = 0x7fffffffff;")
+            .contains("HYPER_NATIVE_RIGHTS_MASK: u64 = 0xffffffffff;")
     );
     assert!(
         generated
@@ -86,7 +86,7 @@ fn generated_bit_constants_preserve_schema_bit_positions() {
     assert!(
         generated
             .c
-            .contains("HYPER_NATIVE_RIGHTS_MASK UINT64_C(0x7fffffffff)")
+            .contains("HYPER_NATIVE_RIGHTS_MASK UINT64_C(0xffffffffff)")
     );
 }
 
@@ -144,7 +144,7 @@ fn accepts_trailing_fields_after_the_minimum_prefix() {
 #[test]
 fn fixed_query_memory_requires_a_nonzero_complete_record() {
     for bytes in [0, 16, 24] {
-        let mut calls = schema::SYSCALLS.to_vec();
+        let mut calls = schema::INVOCATIONS.to_vec();
         let selected = calls
             .iter_mut()
             .find(|call| call.name == "device_firmware_read");
@@ -153,12 +153,12 @@ fn fixed_query_memory_requires_a_nonzero_complete_record() {
             return;
         };
         let mut arguments = call.arguments.to_vec();
-        if let Some(memory) = &mut arguments[1].memory {
+        if let Some(memory) = &mut arguments[0].memory {
             memory.length = MemoryLength::FixedBytes { bytes };
         }
         call.arguments = Box::leak(arguments.into_boxed_slice());
         let candidate = AbiSchema {
-            syscalls: Box::leak(calls.into_boxed_slice()),
+            invocations: Box::leak(calls.into_boxed_slice()),
             ..schema::NATIVE_ABI
         };
         assert_eq!(validate(&candidate).is_ok(), bytes == 24);
@@ -167,8 +167,8 @@ fn fixed_query_memory_requires_a_nonzero_complete_record() {
 
 #[test]
 fn every_info_record_call_reports_its_supported_size() {
-    for syscall in schema::SYSCALLS {
-        let has_info_output = syscall.arguments.iter().any(|argument| {
+    for invocation in schema::INVOCATIONS {
+        let has_info_output = invocation.arguments.iter().any(|argument| {
             argument.memory.is_some_and(|memory| {
                 memory.direction == MemoryDirection::Write
                     && memory
@@ -179,53 +179,117 @@ fn every_info_record_call_reports_its_supported_size() {
         });
         if has_info_output {
             let indexed = matches!(
-                syscall.name,
+                invocation.name,
                 "crash_view_thread" | "crash_view_mapping" | "crash_view_handle"
             );
             assert_eq!(
-                syscall.results.len(),
+                invocation.results.len(),
                 if indexed { 2 } else { 1 },
                 "{}",
-                syscall.name
+                invocation.name
             );
             if indexed {
-                assert_eq!(syscall.results[1].name, "next_index");
-                assert_eq!(syscall.results[1].kind, ValueKind::U64);
+                assert_eq!(invocation.results[1].name, "next_index");
+                assert_eq!(invocation.results[1].kind, ValueKind::U64);
             }
             assert_eq!(
-                syscall.results[0].name, "supported_size",
+                invocation.results[0].name, "supported_size",
                 "{}",
-                syscall.name
+                invocation.name
             );
             assert_eq!(
-                syscall.results[0].kind,
+                invocation.results[0].kind,
                 ValueKind::ByteCount,
                 "{}",
-                syscall.name
+                invocation.name
             );
         }
     }
 }
 
 #[test]
-fn rejects_duplicate_permanent_numbers() {
-    let mut duplicate = schema::SYSCALLS.to_vec();
-    duplicate[1].number = duplicate[0].number;
+fn rejects_duplicate_operations_within_receiver_kind() {
+    let mut duplicate = schema::INVOCATIONS.to_vec();
+    duplicate[2].operation = duplicate[1].operation;
     let duplicate = Box::leak(duplicate.into_boxed_slice());
     let candidate = AbiSchema {
-        syscalls: duplicate,
+        invocations: duplicate,
         ..schema::NATIVE_ABI
     };
     assert!(
-        matches!(validate(&candidate), Err(Error::InvalidSchema(message)) if message.contains("number"))
+        matches!(validate(&candidate), Err(Error::InvalidSchema(message)) if message.contains("operation"))
     );
 }
 
 #[test]
+fn receiver_namespace_allows_repeated_local_operations() {
+    let file = schema::INVOCATIONS
+        .iter()
+        .find(|call| call.name == "file_read_at");
+    let console = schema::INVOCATIONS
+        .iter()
+        .find(|call| call.name == "console_read");
+    assert!(
+        file.is_some() && console.is_some(),
+        "required receiver interfaces are absent"
+    );
+    let (Some(file), Some(console)) = (file, console) else {
+        return;
+    };
+    assert_eq!(file.operation, console.operation);
+    assert_ne!(file.receiver.handle, console.receiver.handle);
+    assert!(validate(&schema::NATIVE_ABI).is_ok());
+}
+
+#[test]
+fn receiver_and_business_arguments_have_distinct_register_ownership() {
+    for call in schema::INVOCATIONS {
+        assert_eq!(call.receiver.kind, ValueKind::Handle, "{}", call.name);
+        assert!(call.receiver.handle.is_some(), "{}", call.name);
+        assert!(
+            call.arguments
+                .iter()
+                .all(|argument| argument.name != call.receiver.name),
+            "{} duplicates its receiver",
+            call.name
+        );
+        assert!(call.arguments.len() <= schema::INVOCATION_ARGUMENT_REGISTERS);
+    }
+    let create_thread = schema::INVOCATIONS
+        .iter()
+        .find(|call| call.name == "thread_create");
+    assert!(matches!(create_thread, Some(call) if call.arguments.len() == 6));
+    let mount = schema::INVOCATIONS
+        .iter()
+        .find(|call| call.name == "filesystem_mount");
+    assert!(
+        matches!(mount, Some(call) if call.receiver.name == "directory"
+        && call.arguments[0].name == "channel" && call.arguments[1].name == "buffer")
+    );
+}
+
+#[test]
+fn rejects_receiver_without_handle_metadata_and_local_common_overlap() {
+    for missing_receiver in [true, false] {
+        let mut calls = schema::INVOCATIONS.to_vec();
+        if missing_receiver {
+            calls[0].receiver.handle = None;
+        } else {
+            calls[0].operation = 0;
+        }
+        let candidate = AbiSchema {
+            invocations: Box::leak(calls.into_boxed_slice()),
+            ..schema::NATIVE_ABI
+        };
+        assert!(validate(&candidate).is_err());
+    }
+}
+
+#[test]
 fn rejects_unlinked_user_memory() {
-    let mut calls = schema::SYSCALLS.to_vec();
+    let mut calls = schema::INVOCATIONS.to_vec();
     let mut arguments = calls[4].arguments.to_vec();
-    if let Some(memory) = arguments[1].memory.as_mut()
+    if let Some(memory) = arguments[0].memory.as_mut()
         && let MemoryLength::Bytes { argument, .. } = &mut memory.length
     {
         *argument = "missing";
@@ -233,7 +297,7 @@ fn rejects_unlinked_user_memory() {
     calls[4].arguments = Box::leak(arguments.into_boxed_slice());
     let calls = Box::leak(calls.into_boxed_slice());
     let candidate = AbiSchema {
-        syscalls: calls,
+        invocations: calls,
         ..schema::NATIVE_ABI
     };
     assert!(
@@ -243,13 +307,13 @@ fn rejects_unlinked_user_memory() {
 
 #[test]
 fn rejects_element_memory_with_byte_count_length() {
-    let mut calls = schema::SYSCALLS.to_vec();
+    let mut calls = schema::INVOCATIONS.to_vec();
     let mut arguments = calls[21].arguments.to_vec();
-    arguments[5].kind = ValueKind::ByteCount;
+    arguments[4].kind = ValueKind::ByteCount;
     calls[21].arguments = Box::leak(arguments.into_boxed_slice());
     let calls = Box::leak(calls.into_boxed_slice());
     let candidate = AbiSchema {
-        syscalls: calls,
+        invocations: calls,
         ..schema::NATIVE_ABI
     };
     assert!(
@@ -259,9 +323,9 @@ fn rejects_element_memory_with_byte_count_length() {
 
 #[test]
 fn rejects_element_stride_which_disagrees_with_record() {
-    let mut calls = schema::SYSCALLS.to_vec();
+    let mut calls = schema::INVOCATIONS.to_vec();
     let mut arguments = calls[21].arguments.to_vec();
-    if let Some(memory) = arguments[4].memory.as_mut()
+    if let Some(memory) = arguments[3].memory.as_mut()
         && let MemoryLength::Elements { element_size, .. } = &mut memory.length
     {
         *element_size = 8;
@@ -269,7 +333,7 @@ fn rejects_element_stride_which_disagrees_with_record() {
     calls[21].arguments = Box::leak(arguments.into_boxed_slice());
     let calls = Box::leak(calls.into_boxed_slice());
     let candidate = AbiSchema {
-        syscalls: calls,
+        invocations: calls,
         ..schema::NATIVE_ABI
     };
     assert!(
@@ -279,16 +343,16 @@ fn rejects_element_stride_which_disagrees_with_record() {
 
 #[test]
 fn rejects_unknown_indirect_handle_record_field() {
-    let mut calls = schema::SYSCALLS.to_vec();
-    let syscall = calls
+    let mut calls = schema::INVOCATIONS.to_vec();
+    let invocation = calls
         .iter_mut()
-        .find(|syscall| syscall.name == "capability_channel_try_send");
-    assert!(syscall.is_some());
-    let Some(syscall) = syscall else {
+        .find(|invocation| invocation.name == "capability_channel_try_send");
+    assert!(invocation.is_some());
+    let Some(invocation) = invocation else {
         return;
     };
-    let mut arguments = syscall.arguments.to_vec();
-    if let Some(memory) = arguments[4].memory.as_mut() {
+    let mut arguments = invocation.arguments.to_vec();
+    if let Some(memory) = arguments[3].memory.as_mut() {
         memory.handles = Some(IndirectHandles::ConsumeRecords {
             handle_field: "missing",
             rights_field: "rights",
@@ -299,10 +363,10 @@ fn rejects_unknown_indirect_handle_record_field() {
             commit: CapabilityCommit::AtomicOnOk,
         });
     }
-    syscall.arguments = Box::leak(arguments.into_boxed_slice());
+    invocation.arguments = Box::leak(arguments.into_boxed_slice());
     let calls = Box::leak(calls.into_boxed_slice());
     let candidate = AbiSchema {
-        syscalls: calls,
+        invocations: calls,
         ..schema::NATIVE_ABI
     };
     assert!(
@@ -312,7 +376,7 @@ fn rejects_unknown_indirect_handle_record_field() {
 
 #[test]
 fn rejects_failure_results_for_unknown_status() {
-    let mut calls = schema::SYSCALLS.to_vec();
+    let mut calls = schema::INVOCATIONS.to_vec();
     let failures = Box::leak(
         vec![schema::FailureResults {
             status: "missing",
@@ -323,7 +387,7 @@ fn rejects_failure_results_for_unknown_status() {
     calls[14].failure_results = failures;
     let calls = Box::leak(calls.into_boxed_slice());
     let candidate = AbiSchema {
-        syscalls: calls,
+        invocations: calls,
         ..schema::NATIVE_ABI
     };
     assert!(
@@ -332,25 +396,102 @@ fn rejects_failure_results_for_unknown_status() {
 }
 
 #[test]
+fn common_failure_results_accept_only_declared_receiver_kinds()
+-> Result<(), Box<dyn std::error::Error>> {
+    use std::fmt::Write as _;
+    use std::process::Command;
+
+    let mut calls = schema::INVOCATIONS.to_vec();
+    let call = calls
+        .iter_mut()
+        .find(|call| call.name == "handle_get_info")
+        .ok_or("missing common information method")?;
+    call.failure_results = &[schema::FailureResults {
+        status: "buffer_too_small",
+        results: &["supported_size"],
+    }];
+    let candidate = AbiSchema {
+        invocations: Box::leak(calls.into_boxed_slice()),
+        ..schema::NATIVE_ABI
+    };
+    let generated = generate(&candidate)?;
+    let mut source = String::from("#include \"native.h\"\n\nint main(void) {\n");
+    for object in candidate.object_kinds {
+        let expected = u64::from(object.value != 0);
+        writeln!(
+            source,
+            "    if (hyper_native_failure_result_mask(UINT32_C({}), HYPER_NATIVE_OP_HANDLE_GET_INFO, HYPER_NATIVE_STATUS_BUFFER_TOO_SMALL) != UINT64_C({expected})) return 1;",
+            object.value
+        )?;
+    }
+    source.push_str(
+        r#"
+    if (hyper_native_failure_result_mask(UINT32_MAX, HYPER_NATIVE_OP_HANDLE_GET_INFO, HYPER_NATIVE_STATUS_BUFFER_TOO_SMALL)) return 2;
+    if (hyper_native_failure_result_mask(HYPER_NATIVE_OBJECT_FILE, HYPER_NATIVE_OP_HANDLE_GET_INFO, HYPER_NATIVE_STATUS_OK)) return 3;
+    if (hyper_native_failure_result_mask(HYPER_NATIVE_OBJECT_FILE, HYPER_NATIVE_OP_HANDLE_CLOSE, HYPER_NATIVE_STATUS_BUFFER_TOO_SMALL)) return 4;
+    return 0;
+}
+"#,
+    );
+    let scratch =
+        std::env::temp_dir().join(format!("hyper-abi-common-result-{}", std::process::id()));
+    std::fs::create_dir_all(&scratch)?;
+    let input = scratch.join("common-result.c");
+    let executable = scratch.join("common-result");
+    std::fs::write(scratch.join("native.h"), generated.c)?;
+    std::fs::write(&input, source)?;
+    // This fixture executes on the host. CLANG selects the cross toolchain and
+    // may carry a different sysroot, so use the same HOST_CC contract as C tests.
+    let compiler = std::env::var_os("HOST_CC").unwrap_or_else(|| {
+        if cfg!(target_os = "macos") {
+            "/usr/bin/clang".into()
+        } else {
+            "clang".into()
+        }
+    });
+    let compiled = Command::new(compiler)
+        .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
+        .arg(&input)
+        .arg("-o")
+        .arg(&executable)
+        .output()?;
+    assert!(
+        compiled.status.success(),
+        "common failure-result C fixture did not compile: {}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let executed = Command::new(&executable).output()?;
+    assert!(
+        executed.status.success(),
+        "common failure-result C fixture failed: {executed:?}"
+    );
+    std::fs::remove_dir_all(scratch)?;
+    Ok(())
+}
+
+#[test]
 fn byte_channel_read_declares_buffer_size_result_on_failure() {
-    let syscall = &schema::SYSCALLS[14];
-    assert_eq!(syscall.name, "byte_channel_read");
-    assert_eq!(syscall.failure_results.len(), 1);
-    assert_eq!(syscall.failure_results[0].status, "buffer_too_small");
-    assert_eq!(syscall.failure_results[0].results, &["actual_bytes"]);
+    let invocation = &schema::INVOCATIONS[14];
+    assert_eq!(invocation.name, "byte_channel_read");
+    assert_eq!(invocation.failure_results.len(), 1);
+    assert_eq!(invocation.failure_results[0].status, "buffer_too_small");
+    assert_eq!(invocation.failure_results[0].results, &["actual_bytes"]);
 }
 
 #[test]
 fn capability_receive_is_flattened_and_transactionally_typed() {
-    let syscall = schema::SYSCALLS
+    let invocation = schema::INVOCATIONS
         .iter()
-        .find(|syscall| syscall.name == "capability_channel_receive");
-    assert!(syscall.is_some());
-    let Some(syscall) = syscall else {
+        .find(|invocation| invocation.name == "capability_channel_receive");
+    assert!(invocation.is_some());
+    let Some(invocation) = invocation else {
         return;
     };
-    assert_eq!(syscall.arguments.len(), schema::SYSCALL_ARGUMENT_REGISTERS);
-    let slots = syscall
+    assert_eq!(
+        invocation.arguments.len() + 1,
+        schema::INVOCATION_ARGUMENT_REGISTERS
+    );
+    let slots = invocation
         .arguments
         .iter()
         .find(|argument| argument.name == "capability_slots")
@@ -375,14 +516,14 @@ fn capability_receive_is_flattened_and_transactionally_typed() {
 
 #[test]
 fn object_wait_many_declares_borrowed_wait_authority() {
-    let syscall = schema::SYSCALLS
+    let invocation = schema::INVOCATIONS
         .iter()
-        .find(|syscall| syscall.name == "object_wait_many");
-    assert!(syscall.is_some());
-    let Some(syscall) = syscall else {
+        .find(|invocation| invocation.name == "object_wait_many");
+    assert!(invocation.is_some());
+    let Some(invocation) = invocation else {
         return;
     };
-    let items = syscall
+    let items = invocation
         .arguments
         .iter()
         .find(|argument| argument.name == "items")
@@ -404,10 +545,10 @@ fn object_wait_many_declares_borrowed_wait_authority() {
 
 #[test]
 fn console_write_borrows_but_vm_binding_consumes_device_authority() {
-    let console_write = schema::SYSCALLS
+    let console_write = schema::INVOCATIONS
         .iter()
-        .find(|syscall| syscall.name == "console_write")
-        .and_then(|syscall| syscall.arguments.first())
+        .find(|invocation| invocation.name == "console_write")
+        .map(|invocation| &invocation.receiver)
         .and_then(|argument| argument.handle);
     assert_eq!(
         console_write,
@@ -418,10 +559,10 @@ fn console_write_borrows_but_vm_binding_consumes_device_authority() {
         })
     );
 
-    let vm_serial = schema::SYSCALLS
+    let vm_serial = schema::INVOCATIONS
         .iter()
-        .find(|syscall| syscall.name == "pending_virtual_machine_set_virtual_serial")
-        .and_then(|syscall| syscall.arguments.get(1))
+        .find(|invocation| invocation.name == "pending_virtual_machine_set_virtual_serial")
+        .and_then(|invocation| invocation.arguments.first())
         .and_then(|argument| argument.handle);
     assert_eq!(
         vm_serial,
@@ -435,15 +576,15 @@ fn console_write_borrows_but_vm_binding_consumes_device_authority() {
 
 #[test]
 fn rejects_write_only_transferred_capability_slots() {
-    let mut calls = schema::SYSCALLS.to_vec();
-    let syscall = calls
+    let mut calls = schema::INVOCATIONS.to_vec();
+    let invocation = calls
         .iter_mut()
-        .find(|syscall| syscall.name == "capability_channel_receive");
-    assert!(syscall.is_some());
-    let Some(syscall) = syscall else {
+        .find(|invocation| invocation.name == "capability_channel_receive");
+    assert!(invocation.is_some());
+    let Some(invocation) = invocation else {
         return;
     };
-    let mut arguments = syscall.arguments.to_vec();
+    let mut arguments = invocation.arguments.to_vec();
     let slots = arguments
         .iter_mut()
         .find(|argument| argument.name == "capability_slots")
@@ -453,9 +594,9 @@ fn rejects_write_only_transferred_capability_slots() {
         return;
     };
     slots.direction = MemoryDirection::Write;
-    syscall.arguments = Box::leak(arguments.into_boxed_slice());
+    invocation.arguments = Box::leak(arguments.into_boxed_slice());
     let candidate = AbiSchema {
-        syscalls: Box::leak(calls.into_boxed_slice()),
+        invocations: Box::leak(calls.into_boxed_slice()),
         ..schema::NATIVE_ABI
     };
     assert!(
@@ -479,15 +620,15 @@ fn rejects_transfer_operations_without_duplicate_authority() {
             additional_rights: 0,
         },
     ];
-    let mut calls = schema::SYSCALLS.to_vec();
-    let syscall = calls
+    let mut calls = schema::INVOCATIONS.to_vec();
+    let invocation = calls
         .iter_mut()
-        .find(|syscall| syscall.name == "capability_channel_try_send");
-    assert!(syscall.is_some());
-    let Some(syscall) = syscall else {
+        .find(|invocation| invocation.name == "capability_channel_try_send");
+    assert!(invocation.is_some());
+    let Some(invocation) = invocation else {
         return;
     };
-    let mut arguments = syscall.arguments.to_vec();
+    let mut arguments = invocation.arguments.to_vec();
     let dispositions = arguments
         .iter_mut()
         .find(|argument| argument.name == "dispositions")
@@ -505,9 +646,9 @@ fn rejects_transfer_operations_without_duplicate_authority() {
         return;
     };
     *operations = INVALID_OPERATIONS;
-    syscall.arguments = Box::leak(arguments.into_boxed_slice());
+    invocation.arguments = Box::leak(arguments.into_boxed_slice());
     let candidate = AbiSchema {
-        syscalls: Box::leak(calls.into_boxed_slice()),
+        invocations: Box::leak(calls.into_boxed_slice()),
         ..schema::NATIVE_ABI
     };
     assert!(
@@ -517,15 +658,15 @@ fn rejects_transfer_operations_without_duplicate_authority() {
 
 #[test]
 fn directory_open_file_grants_exact_bounded_rights() {
-    let syscall = schema::SYSCALLS
+    let invocation = schema::INVOCATIONS
         .iter()
-        .find(|syscall| syscall.name == "directory_open_file");
-    assert!(syscall.is_some());
-    let Some(syscall) = syscall else {
+        .find(|invocation| invocation.name == "directory_open_file");
+    assert!(invocation.is_some());
+    let Some(invocation) = invocation else {
         return;
     };
     assert!(matches!(
-        syscall.results[0].handle,
+        invocation.results[0].handle,
         Some(schema::ProducedHandle {
             object: ProducedObject::Kind("file"),
             rights: ProducedRights::ExactRequested {
@@ -539,15 +680,15 @@ fn directory_open_file_grants_exact_bounded_rights() {
 
 #[test]
 fn rejects_exact_rights_outside_the_object_allowlist() {
-    let mut calls = schema::SYSCALLS.to_vec();
-    let syscall = calls
+    let mut calls = schema::INVOCATIONS.to_vec();
+    let invocation = calls
         .iter_mut()
-        .find(|syscall| syscall.name == "directory_open_file");
-    assert!(syscall.is_some());
-    let Some(syscall) = syscall else {
+        .find(|invocation| invocation.name == "directory_open_file");
+    assert!(invocation.is_some());
+    let Some(invocation) = invocation else {
         return;
     };
-    let mut results = syscall.results.to_vec();
+    let mut results = invocation.results.to_vec();
     let handle = results[0].handle.as_mut();
     assert!(handle.is_some());
     let Some(handle) = handle else {
@@ -558,9 +699,9 @@ fn rejects_exact_rights_outside_the_object_allowlist() {
         allowed_rights: 1u64 << 63,
         authority_source: Some("directory"),
     };
-    syscall.results = Box::leak(results.into_boxed_slice());
+    invocation.results = Box::leak(results.into_boxed_slice());
     let candidate = AbiSchema {
-        syscalls: Box::leak(calls.into_boxed_slice()),
+        invocations: Box::leak(calls.into_boxed_slice()),
         ..schema::NATIVE_ABI
     };
     assert!(
@@ -570,15 +711,15 @@ fn rejects_exact_rights_outside_the_object_allowlist() {
 
 #[test]
 fn rejects_an_unknown_exact_rights_authority_source() {
-    let mut calls = schema::SYSCALLS.to_vec();
-    let syscall = calls
+    let mut calls = schema::INVOCATIONS.to_vec();
+    let invocation = calls
         .iter_mut()
-        .find(|syscall| syscall.name == "directory_open_file");
-    assert!(syscall.is_some());
-    let Some(syscall) = syscall else {
+        .find(|invocation| invocation.name == "directory_open_file");
+    assert!(invocation.is_some());
+    let Some(invocation) = invocation else {
         return;
     };
-    let mut results = syscall.results.to_vec();
+    let mut results = invocation.results.to_vec();
     let handle = results[0].handle.as_mut();
     assert!(handle.is_some());
     let Some(handle) = handle else {
@@ -589,9 +730,9 @@ fn rejects_an_unknown_exact_rights_authority_source() {
         allowed_rights: schema::FILE_RIGHTS,
         authority_source: Some("missing_source"),
     };
-    syscall.results = Box::leak(results.into_boxed_slice());
+    invocation.results = Box::leak(results.into_boxed_slice());
     let candidate = AbiSchema {
-        syscalls: Box::leak(calls.into_boxed_slice()),
+        invocations: Box::leak(calls.into_boxed_slice()),
         ..schema::NATIVE_ABI
     };
     assert!(
@@ -600,7 +741,7 @@ fn rejects_an_unknown_exact_rights_authority_source() {
 }
 
 #[test]
-fn process_builder_is_linear_and_uses_staged_syscalls() {
+fn process_builder_is_linear_and_uses_staged_invocations() {
     let builder = schema::OBJECT_KINDS
         .iter()
         .find(|object| object.name == "process_builder");
@@ -611,34 +752,36 @@ fn process_builder_is_linear_and_uses_staged_syscalls() {
     assert_eq!(builder.value, 15);
     assert_eq!(builder.transfer, TransferClass::RendezvousOnly);
     assert_eq!(schema::PROCESS_BUILDER_RIGHTS & schema::RIGHT_DUPLICATE, 0);
-    let calls: Vec<_> = schema::SYSCALLS
+    let calls: Vec<_> = schema::INVOCATIONS
         .iter()
-        .filter(|syscall| syscall.name.starts_with("process_builder_"))
-        .map(|syscall| (syscall.number, syscall.name))
+        .filter(|invocation| invocation.name.starts_with("process_builder_"))
+        .map(|invocation| (invocation.operation, invocation.name))
         .collect();
     assert_eq!(
         calls,
         vec![
-            (22, "process_builder_create"),
-            (23, "process_builder_set_name"),
-            (24, "process_builder_set_data"),
-            (26, "process_builder_set_affinity"),
-            (27, "process_builder_add_handle"),
-            (28, "process_builder_seal"),
-            (29, "process_builder_start"),
-            (30, "process_builder_abort"),
-            (165, "process_builder_set_memory_lock"),
-            (173, "process_builder_retain"),
+            (256, "process_builder_create"),
+            (256, "process_builder_set_name"),
+            (257, "process_builder_set_data"),
+            (258, "process_builder_set_affinity"),
+            (259, "process_builder_add_handle"),
+            (260, "process_builder_seal"),
+            (261, "process_builder_start"),
+            (262, "process_builder_abort"),
+            (263, "process_builder_set_memory_lock"),
+            (264, "process_builder_retain"),
         ]
     );
     for name in ["process_builder_start", "process_builder_abort"] {
-        let syscall = schema::SYSCALLS.iter().find(|syscall| syscall.name == name);
-        assert!(syscall.is_some());
-        let Some(syscall) = syscall else {
+        let invocation = schema::INVOCATIONS
+            .iter()
+            .find(|invocation| invocation.name == name);
+        assert!(invocation.is_some());
+        let Some(invocation) = invocation else {
             return;
         };
         assert!(matches!(
-            syscall.arguments[0].handle,
+            invocation.receiver.handle,
             Some(schema::HandleArgument {
                 object: ObjectConstraint::Kind("process_builder"),
                 disposition: HandleDisposition::ConsumeOnCommit,
@@ -650,9 +793,9 @@ fn process_builder_is_linear_and_uses_staged_syscalls() {
 
 #[test]
 fn monotonic_clock_has_the_declared_nonblocking_contract() {
-    let clock = schema::SYSCALLS
+    let clock = schema::INVOCATIONS
         .iter()
-        .find(|syscall| syscall.name == "clock_get_monotonic");
+        .find(|invocation| invocation.name == "clock_get_monotonic");
     assert!(clock.is_some());
     let Some(clock) = clock else {
         return;
@@ -700,13 +843,15 @@ fn inspector_derivation_cannot_amplify_handle_rights() {
             schema::OBJECT_INSPECTOR_RIGHTS,
         ),
     ] {
-        let syscall = schema::SYSCALLS.iter().find(|syscall| syscall.name == name);
-        assert!(syscall.is_some());
-        let Some(syscall) = syscall else {
+        let invocation = schema::INVOCATIONS
+            .iter()
+            .find(|invocation| invocation.name == name);
+        assert!(invocation.is_some());
+        let Some(invocation) = invocation else {
             continue;
         };
         assert!(matches!(
-            syscall.arguments[0].handle,
+            invocation.receiver.handle,
             Some(schema::HandleArgument {
                 object: ObjectConstraint::Kind(found),
                 required_rights,
@@ -714,7 +859,7 @@ fn inspector_derivation_cannot_amplify_handle_rights() {
             }) if found == object && required_rights == rights
         ));
         assert!(matches!(
-            syscall.results[0].handle,
+            invocation.results[0].handle,
             Some(schema::ProducedHandle {
                 object: ProducedObject::Kind(found),
                 rights: ProducedRights::Fixed(produced),
@@ -725,7 +870,7 @@ fn inspector_derivation_cannot_amplify_handle_rights() {
 
 #[test]
 fn inspector_scan_limits_match_their_published_page_capacities() {
-    for (syscall_name, constant_name, expected) in [
+    for (invocation_name, constant_name, expected) in [
         (
             "task_inspector_scan_processes",
             "task_inspector_process_page_capacity",
@@ -747,15 +892,15 @@ fn inspector_scan_limits_match_their_published_page_capacities() {
             8,
         ),
     ] {
-        let syscall = schema::SYSCALLS
+        let invocation = schema::INVOCATIONS
             .iter()
-            .find(|syscall| syscall.name == syscall_name);
+            .find(|invocation| invocation.name == invocation_name);
         let constant = schema::CONSTANTS
             .iter()
             .find(|constant| constant.name == constant_name);
         assert!(matches!(constant, Some(value) if value.value == expected));
         assert!(matches!(
-            syscall.and_then(|value| value
+            invocation.and_then(|value| value
                 .arguments
                 .iter()
                 .find(|argument| argument.name == "records"))
@@ -818,6 +963,9 @@ fn object_transfer_classes_match_the_audited_contract() {
         ("process_retirement", TransferClass::RendezvousOnly),
         ("crash_view", TransferClass::General),
         ("backend_memory_lease", TransferClass::Forbidden),
+        ("execution_context", TransferClass::Forbidden),
+        ("object_factory", TransferClass::Forbidden),
+        ("system_info", TransferClass::General),
     ];
     assert_eq!(schema::OBJECT_KINDS.len(), expected.len());
     for (kind, expected) in schema::OBJECT_KINDS.iter().zip(expected) {
@@ -827,15 +975,13 @@ fn object_transfer_classes_match_the_audited_contract() {
 
 #[test]
 fn rejects_rights_not_declared_by_the_abi() {
-    let mut calls = schema::SYSCALLS.to_vec();
-    let mut arguments = calls[2].arguments.to_vec();
-    if let Some(handle) = arguments[0].handle.as_mut() {
+    let mut calls = schema::INVOCATIONS.to_vec();
+    if let Some(handle) = calls[2].receiver.handle.as_mut() {
         handle.required_rights = 1u64 << 63;
     }
-    calls[2].arguments = Box::leak(arguments.into_boxed_slice());
     let calls = Box::leak(calls.into_boxed_slice());
     let candidate = AbiSchema {
-        syscalls: calls,
+        invocations: calls,
         ..schema::NATIVE_ABI
     };
     assert!(
@@ -934,7 +1080,7 @@ fn rejects_duplicate_public_constants() {
 fn rejects_cross_category_generated_constant_collisions() {
     let constants = Box::leak(
         vec![schema::AbiConstant {
-            name: "sys_abi_query",
+            name: "op_abi_query",
             value: 99,
         }]
         .into_boxed_slice(),
@@ -944,7 +1090,7 @@ fn rejects_cross_category_generated_constant_collisions() {
         ..schema::NATIVE_ABI
     };
     assert!(
-        matches!(validate(&candidate), Err(Error::InvalidSchema(message)) if message.contains("HYPER_NATIVE_SYS_ABI_QUERY"))
+        matches!(validate(&candidate), Err(Error::InvalidSchema(message)) if message.contains("HYPER_NATIVE_OP_ABI_QUERY"))
     );
 }
 
@@ -974,12 +1120,12 @@ fn reserves_zero_for_success_and_rejects_positive_statuses() {
 
 #[test]
 fn directory_stream_derivation_requires_read_only_and_separates_cursor_authority() {
-    let begin = schema::SYSCALLS
+    let begin = schema::INVOCATIONS
         .iter()
         .find(|call| call.name == "directory_begin_read");
     assert!(matches!(
         begin
-            .and_then(|call| call.arguments.first())
+            .map(|call| &call.receiver)
             .and_then(|argument| argument.handle),
         Some(schema::HandleArgument {
             object: schema::ObjectConstraint::Kind("directory"),
@@ -996,11 +1142,11 @@ fn directory_stream_derivation_requires_read_only_and_separates_cursor_authority
             }
         }) if allowed_rights == schema::DIRECTORY_STREAM_RIGHTS)
     );
-    let read = schema::SYSCALLS
+    let read = schema::INVOCATIONS
         .iter()
         .find(|call| call.name == "directory_read");
     assert!(matches!(
-        read.and_then(|call| call.arguments.first())
+        read.map(|call| &call.receiver)
             .and_then(|argument| argument.handle),
         Some(schema::HandleArgument {
             object: schema::ObjectConstraint::Kind("directory_stream"),
@@ -1020,7 +1166,7 @@ fn residency_authority_is_inherited_without_becoming_a_default_grant() {
         ),
         ("vmar_allocate", "vmar", schema::RIGHT_LOCK_MEMORY),
     ] {
-        let call = schema::SYSCALLS.iter().find(|call| call.name == name);
+        let call = schema::INVOCATIONS.iter().find(|call| call.name == name);
         assert!(
             matches!(call.and_then(|call| call.results.first()).and_then(|result| result.handle),
             Some(schema::ProducedHandle { rights: ProducedRights::FixedAndInherited {
@@ -1037,7 +1183,7 @@ fn mixed_produced_rights_reject_undeclared_source_and_overlapping_masks() {
         ("missing", schema::RIGHT_LOCK_MEMORY),
         ("factory", schema::RIGHT_WRITE),
     ] {
-        let mut calls = schema::SYSCALLS.to_vec();
+        let mut calls = schema::INVOCATIONS.to_vec();
         let Some(call) = calls
             .iter_mut()
             .find(|call| call.name == "process_builder_create")
@@ -1055,9 +1201,25 @@ fn mixed_produced_rights_reject_undeclared_source_and_overlapping_masks() {
         };
         call.results = Box::leak(results.into_boxed_slice());
         let candidate = AbiSchema {
-            syscalls: Box::leak(calls.into_boxed_slice()),
+            invocations: Box::leak(calls.into_boxed_slice()),
             ..schema::NATIVE_ABI
         };
         assert!(validate(&candidate).is_err());
+    }
+}
+
+#[test]
+fn execution_context_waits_require_execution_control_not_waitable_object_rights() {
+    for name in ["object_wait_many", "atomic_wait", "thread_sleep"] {
+        let invocation = schema::INVOCATIONS.iter().find(|call| call.name == name);
+        assert!(invocation.is_some(), "missing {name}");
+        let Some(invocation) = invocation else {
+            continue;
+        };
+        let receiver = invocation.receiver.handle;
+        assert!(
+            matches!(receiver, Some(handle) if handle.object == ObjectConstraint::Kind("execution_context") && handle.required_rights == schema::RIGHT_WRITE),
+            "{name}"
+        );
     }
 }

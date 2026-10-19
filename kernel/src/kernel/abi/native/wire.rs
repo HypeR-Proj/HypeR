@@ -74,7 +74,6 @@ pub(super) const PROCESS_INFO_SIZE: usize = core::mem::size_of::<HyperNativeProc
 
 pub(super) type ProcessBuilderHandleRequest = (
     HandleValue,
-    HandleValue,
     u32,
     crate::kernel::object::ObjectKind,
     Option<Rights>,
@@ -89,22 +88,6 @@ pub(super) fn parse_handle(raw: u64) -> Result<HandleValue, HyperNativeStatus> {
     HandleValue::try_from_raw(raw).map_err(status_from_handle_error)
 }
 
-pub(super) fn parse_single_handle(arguments: &Arguments) -> Result<HandleValue, HyperNativeStatus> {
-    if arguments[1..].iter().any(|value| *value != 0) {
-        return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
-    }
-    parse_handle(arguments[0])
-}
-
-pub(super) fn parse_two_handles(
-    arguments: &Arguments,
-) -> Result<[HandleValue; 2], HyperNativeStatus> {
-    if arguments[2..].iter().any(|value| *value != 0) {
-        return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
-    }
-    Ok([parse_handle(arguments[0])?, parse_handle(arguments[1])?])
-}
-
 pub(super) fn decode_resource_limits(
     services: &impl UserMemoryServices,
     arguments: &Arguments,
@@ -113,9 +96,11 @@ pub(super) fn decode_resource_limits(
 
     type Record = HyperNativeResourceLimits;
     const SIZE: usize = core::mem::size_of::<Record>();
+    require_zero(&arguments[2..])?;
     let record = copy_extensible_input_record::<SIZE>(
         services,
-        arguments,
+        arguments[0],
+        arguments[1],
         HYPER_NATIVE_RESOURCE_LIMITS_MIN_SIZE,
     )?;
     if read_record_u64(&record, core::mem::offset_of!(Record, reserved)) != 0 {
@@ -206,9 +191,11 @@ pub(super) fn decode_virtual_machine_configuration(
 ) -> Result<crate::kernel::vm::objects::VirtualMachineConfiguration, HyperNativeStatus> {
     type Record = HyperNativeVirtualMachineConfiguration;
     const SIZE: usize = core::mem::size_of::<Record>();
+    require_zero(&arguments[2..])?;
     let record = copy_extensible_input_record::<SIZE>(
         services,
-        arguments,
+        arguments[0],
+        arguments[1],
         HYPER_NATIVE_VIRTUAL_MACHINE_CONFIGURATION_MIN_SIZE,
     )?;
     let flags = read_record_u32(&record, core::mem::offset_of!(Record, flags));
@@ -233,9 +220,11 @@ pub(super) fn decode_virtual_cpu_bootstrap(
 ) -> Result<crate::kernel::vm::objects::VirtualCpuBootstrap, HyperNativeStatus> {
     type Record = HyperNativeVirtualCpuBootstrap;
     const SIZE: usize = core::mem::size_of::<Record>();
+    require_zero(&arguments[2..])?;
     let record = copy_extensible_input_record::<SIZE>(
         services,
-        arguments,
+        arguments[0],
+        arguments[1],
         HYPER_NATIVE_VIRTUAL_CPU_BOOTSTRAP_MIN_SIZE,
     )?;
     let vcpu_id = read_record_u32(&record, core::mem::offset_of!(Record, vcpu_id));
@@ -268,15 +257,6 @@ pub(super) fn read_record_u64(record: &[u8], offset: usize) -> u64 {
     u64::from_ne_bytes(bytes)
 }
 
-pub(super) fn parse_handle_and_rights(
-    raw_handle: u64,
-    raw_rights: u64,
-) -> Result<(HandleValue, Rights), HyperNativeStatus> {
-    let value = parse_handle(raw_handle)?;
-    let rights = Rights::from_bits(raw_rights).ok_or(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
-    Ok((value, rights))
-}
-
 pub(super) fn parse_wait_many(
     arguments: &Arguments,
 ) -> Result<(UserSlice, usize, u64), HyperNativeStatus> {
@@ -295,46 +275,42 @@ pub(super) fn parse_wait_many(
 
 pub(super) fn parse_byte_channel_io(
     arguments: &Arguments,
-) -> Result<(HandleValue, Option<UserSlice>), HyperNativeStatus> {
-    if arguments[1] != 0 || arguments[3] > HYPER_NATIVE_BYTE_CHANNEL_MAX_MESSAGE_BYTES {
+) -> Result<Option<UserSlice>, HyperNativeStatus> {
+    if arguments[0] != 0 || arguments[2] > HYPER_NATIVE_BYTE_CHANNEL_MAX_MESSAGE_BYTES {
         return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
     }
-    let endpoint = parse_handle(arguments[0])?;
-    let bytes = optional_user_slice(arguments[2], arguments[3])?;
-    Ok((endpoint, bytes))
+    optional_user_slice(arguments[1], arguments[2])
 }
 
 pub(super) fn parse_capability_channel_send(
     arguments: &Arguments,
-) -> Result<(HandleValue, Option<UserSlice>, Option<UserSlice>), HyperNativeStatus> {
-    if arguments[1] != 0
-        || arguments[3] > HYPER_NATIVE_CAPABILITY_CHANNEL_MAX_MESSAGE_BYTES
-        || arguments[5] > HYPER_NATIVE_CAPABILITY_CHANNEL_MAX_HANDLES
+) -> Result<(Option<UserSlice>, Option<UserSlice>), HyperNativeStatus> {
+    if arguments[0] != 0
+        || arguments[2] > HYPER_NATIVE_CAPABILITY_CHANNEL_MAX_MESSAGE_BYTES
+        || arguments[4] > HYPER_NATIVE_CAPABILITY_CHANNEL_MAX_HANDLES
     {
         return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
     }
-    let disposition_bytes = capability_disposition_bytes(arguments[5])?;
+    let disposition_bytes = capability_disposition_bytes(arguments[4])?;
     Ok((
-        parse_handle(arguments[0])?,
-        optional_user_slice(arguments[2], arguments[3])?,
-        optional_user_slice(arguments[4], disposition_bytes)?,
+        optional_user_slice(arguments[1], arguments[2])?,
+        optional_user_slice(arguments[3], disposition_bytes)?,
     ))
 }
 
 pub(super) fn parse_capability_channel_receive(
     arguments: &Arguments,
-) -> Result<(HandleValue, u64, Option<UserSlice>, Option<UserSlice>), HyperNativeStatus> {
-    if arguments[3] > HYPER_NATIVE_CAPABILITY_CHANNEL_MAX_MESSAGE_BYTES
-        || arguments[5] > HYPER_NATIVE_CAPABILITY_CHANNEL_MAX_HANDLES
+) -> Result<(u64, Option<UserSlice>, Option<UserSlice>), HyperNativeStatus> {
+    if arguments[2] > HYPER_NATIVE_CAPABILITY_CHANNEL_MAX_MESSAGE_BYTES
+        || arguments[4] > HYPER_NATIVE_CAPABILITY_CHANNEL_MAX_HANDLES
     {
         return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
     }
-    let slot_bytes = capability_receive_slot_bytes(arguments[5])?;
+    let slot_bytes = capability_receive_slot_bytes(arguments[4])?;
     Ok((
-        parse_handle(arguments[0])?,
-        arguments[1],
-        optional_user_slice(arguments[2], arguments[3])?,
-        optional_user_slice(arguments[4], slot_bytes)?,
+        arguments[0],
+        optional_user_slice(arguments[1], arguments[2])?,
+        optional_user_slice(arguments[3], slot_bytes)?,
     ))
 }
 
@@ -354,27 +330,23 @@ pub(super) fn capability_record_bytes<Record>(record_count: u64) -> Result<u64, 
 
 pub(super) fn parse_builder_create(
     arguments: &Arguments,
-) -> Result<[HandleValue; 5], HyperNativeStatus> {
-    Ok([
+) -> Result<(HandleValue, HandleValue, HandleValue, HandleValue), HyperNativeStatus> {
+    Ok((
         parse_handle(arguments[0])?,
         parse_handle(arguments[1])?,
         parse_handle(arguments[2])?,
         parse_handle(arguments[3])?,
-        parse_handle(arguments[4])?,
-    ])
+    ))
 }
 
 pub(super) fn parse_builder_text(
     arguments: &Arguments,
     maximum_bytes: u64,
-) -> Result<(HandleValue, Option<UserSlice>), HyperNativeStatus> {
-    if arguments[2] > maximum_bytes {
+) -> Result<Option<UserSlice>, HyperNativeStatus> {
+    if arguments[1] > maximum_bytes {
         return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
     }
-    Ok((
-        parse_handle(arguments[0])?,
-        optional_user_slice(arguments[1], arguments[2])?,
-    ))
+    optional_user_slice(arguments[0], arguments[1])
 }
 
 pub(super) fn parse_affinity_words(
@@ -393,26 +365,25 @@ pub(super) fn parse_affinity_words(
 
 pub(super) fn parse_affinity_request(
     arguments: &Arguments,
-) -> Result<(HandleValue, Option<UserSlice>, usize), HyperNativeStatus> {
-    if arguments[3..].iter().any(|value| *value != 0) {
+) -> Result<(Option<UserSlice>, usize), HyperNativeStatus> {
+    if arguments[2..].iter().any(|value| *value != 0) {
         return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
     }
-    let (words, count) = parse_affinity_words(arguments[1], arguments[2])?;
-    Ok((parse_handle(arguments[0])?, words, count))
+    parse_affinity_words(arguments[0], arguments[1])
 }
 
 pub(super) fn parse_builder_handle(
     arguments: &Arguments,
 ) -> Result<ProcessBuilderHandleRequest, HyperNativeStatus> {
-    let purpose = u32::try_from(arguments[2]).map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
-    let raw_kind = u32::try_from(arguments[3]).map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
+    let purpose = u32::try_from(arguments[1]).map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
+    let raw_kind = u32::try_from(arguments[2]).map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
     let expected_kind = parse_object_kind(raw_kind)?;
-    let requested_rights = if arguments[4] == HYPER_NATIVE_CAPABILITY_DISPOSITION_SAME_RIGHTS {
+    let requested_rights = if arguments[3] == HYPER_NATIVE_CAPABILITY_DISPOSITION_SAME_RIGHTS {
         None
     } else {
-        Some(Rights::from_bits(arguments[4]).ok_or(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?)
+        Some(Rights::from_bits(arguments[3]).ok_or(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?)
     };
-    let operation = match arguments[5] {
+    let operation = match arguments[4] {
         HYPER_NATIVE_CAPABILITY_DISPOSITION_MOVE => {
             crate::kernel::capability::HandleTransferOperation::Move
         }
@@ -423,7 +394,6 @@ pub(super) fn parse_builder_handle(
     };
     Ok((
         parse_handle(arguments[0])?,
-        parse_handle(arguments[1])?,
         purpose,
         expected_kind,
         requested_rights,
@@ -483,32 +453,33 @@ pub(super) fn parse_object_kind(
         hyper::abi::native::HYPER_NATIVE_OBJECT_NATIVE_BLOCK => Ok(ObjectKind::NATIVE_BLOCK),
         HYPER_NATIVE_OBJECT_VIRTUAL_CPU => Ok(ObjectKind::VIRTUAL_CPU),
         HYPER_NATIVE_OBJECT_VIRTUAL_SERIAL => Ok(ObjectKind::VIRTUAL_SERIAL),
+        hyper::abi::native::HYPER_NATIVE_OBJECT_EXECUTION_CONTEXT => {
+            Ok(ObjectKind::EXECUTION_CONTEXT)
+        }
+        hyper::abi::native::HYPER_NATIVE_OBJECT_OBJECT_FACTORY => Ok(ObjectKind::OBJECT_FACTORY),
+        hyper::abi::native::HYPER_NATIVE_OBJECT_SYSTEM_INFO => Ok(ObjectKind::SYSTEM_INFO),
         _ => Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT),
     }
 }
 
 pub(super) fn parse_console_io(
     arguments: &Arguments,
-) -> Result<(HandleValue, Option<UserSlice>), HyperNativeStatus> {
-    if arguments[1] != 0 || arguments[3] > HYPER_NATIVE_CONSOLE_MAX_TRANSFER_BYTES {
+) -> Result<Option<UserSlice>, HyperNativeStatus> {
+    if arguments[0] != 0 || arguments[2] > HYPER_NATIVE_CONSOLE_MAX_TRANSFER_BYTES {
         return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
     }
-    let console = parse_handle(arguments[0])?;
-    let bytes = optional_user_slice(arguments[2], arguments[3])?;
-    Ok((console, bytes))
+    optional_user_slice(arguments[1], arguments[2])
 }
 
 pub(super) fn parse_virtual_serial_io(
     arguments: &Arguments,
-) -> Result<(HandleValue, Option<UserSlice>), HyperNativeStatus> {
-    if arguments[2] > HYPER_NATIVE_VIRTUAL_SERIAL_MAX_TRANSFER_BYTES
-        || arguments[3..].iter().any(|argument| *argument != 0)
+) -> Result<Option<UserSlice>, HyperNativeStatus> {
+    if arguments[1] > HYPER_NATIVE_VIRTUAL_SERIAL_MAX_TRANSFER_BYTES
+        || arguments[2..].iter().any(|argument| *argument != 0)
     {
         return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
     }
-    let serial = parse_handle(arguments[0])?;
-    let bytes = optional_user_slice(arguments[1], arguments[2])?;
-    Ok((serial, bytes))
+    optional_user_slice(arguments[0], arguments[1])
 }
 
 pub(super) fn optional_user_slice(
@@ -531,9 +502,8 @@ pub(super) fn require_zero(arguments: &[u64]) -> Result<(), HyperNativeStatus> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy)]
 pub(super) struct InfoRequest {
-    pub(super) value: HandleValue,
     pub(super) destination: UserSlice,
     pub(super) supported_size: usize,
 }
@@ -543,9 +513,9 @@ pub(super) fn prepare_info_request(
     minimum_size: usize,
     supported_size: usize,
 ) -> Result<InfoRequest, HyperNativeStatus> {
-    require_zero(&arguments[3..])?;
+    require_zero(&arguments[2..])?;
     let capacity =
-        usize::try_from(arguments[2]).map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
+        usize::try_from(arguments[1]).map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
     let maximum = HYPER_NATIVE_EXTENSIBLE_RECORD_MAX_BYTES as usize;
     if minimum_size == 0
         || minimum_size > supported_size
@@ -554,13 +524,11 @@ pub(super) fn prepare_info_request(
     {
         return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
     }
-    let value = parse_handle(arguments[0])?;
     let write_size = capacity.min(supported_size);
     let write_size = u64::try_from(write_size).map_err(|_| HYPER_NATIVE_STATUS_INTERNAL)?;
-    let destination = UserSlice::new(UserAddress::new(arguments[1]), write_size)
+    let destination = UserSlice::new(UserAddress::new(arguments[0]), write_size)
         .map_err(status_from_address_error)?;
     Ok(InfoRequest {
-        value,
         destination,
         supported_size,
     })
@@ -584,19 +552,19 @@ pub(super) fn copy_info_record(
 
 pub(super) fn copy_extensible_input_record<const SIZE: usize>(
     services: &impl UserMemoryServices,
-    arguments: &Arguments,
+    address: u64,
+    requested_size: u64,
     minimum_size: usize,
 ) -> Result<[u8; SIZE], HyperNativeStatus> {
     const EXTENSION_CHUNK_BYTES: usize = 64;
 
-    require_zero(&arguments[3..])?;
     let requested =
-        usize::try_from(arguments[2]).map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
+        usize::try_from(requested_size).map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
     let maximum = HYPER_NATIVE_EXTENSIBLE_RECORD_MAX_BYTES as usize;
     if minimum_size == 0 || minimum_size > SIZE || requested < minimum_size || requested > maximum {
         return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
     }
-    let base = UserAddress::new(arguments[1]);
+    let base = UserAddress::new(address);
     let prefix_size = requested.min(SIZE);
     let prefix = UserSlice::new(
         base,
@@ -636,9 +604,9 @@ pub(super) fn parse_inspector_scan(
     arguments: &Arguments,
     capacity: usize,
     record_size: usize,
-) -> Result<(HandleValue, u64, UserSlice), HyperNativeStatus> {
+) -> Result<(u64, UserSlice), HyperNativeStatus> {
     let requested =
-        usize::try_from(arguments[3]).map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
+        usize::try_from(arguments[2]).map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
     if requested != capacity {
         return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
     }
@@ -647,16 +615,16 @@ pub(super) fn parse_inspector_scan(
         .and_then(|bytes| u64::try_from(bytes).ok())
         .ok_or(HYPER_NATIVE_STATUS_INTERNAL)?;
     let destination =
-        UserSlice::new(UserAddress::new(arguments[2]), bytes).map_err(status_from_address_error)?;
-    Ok((parse_handle(arguments[0])?, arguments[1], destination))
+        UserSlice::new(UserAddress::new(arguments[1]), bytes).map_err(status_from_address_error)?;
+    Ok((arguments[0], destination))
 }
 
 pub(super) fn parse_handle_inspector_scan(
     arguments: &Arguments,
-) -> Result<(HandleValue, u64, u64, UserSlice), HyperNativeStatus> {
+) -> Result<(u64, u64, UserSlice), HyperNativeStatus> {
     let requested =
-        usize::try_from(arguments[4]).map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
-    if requested != HANDLE_PAGE_CAPACITY || arguments[1] == 0 {
+        usize::try_from(arguments[3]).map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
+    if requested != HANDLE_PAGE_CAPACITY || arguments[0] == 0 {
         return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
     }
     let bytes = HANDLE_PAGE_CAPACITY
@@ -664,19 +632,8 @@ pub(super) fn parse_handle_inspector_scan(
         .and_then(|bytes| u64::try_from(bytes).ok())
         .ok_or(HYPER_NATIVE_STATUS_INTERNAL)?;
     let destination =
-        UserSlice::new(UserAddress::new(arguments[3]), bytes).map_err(status_from_address_error)?;
-    Ok((
-        parse_handle(arguments[0])?,
-        arguments[1],
-        arguments[2],
-        destination,
-    ))
-}
-
-pub(super) fn parse_inspector_derivation(
-    arguments: &Arguments,
-) -> Result<(HandleValue, HandleValue), HyperNativeStatus> {
-    Ok((parse_handle(arguments[0])?, parse_handle(arguments[1])?))
+        UserSlice::new(UserAddress::new(arguments[2]), bytes).map_err(status_from_address_error)?;
+    Ok((arguments[0], arguments[1], destination))
 }
 
 pub(super) fn copy_encoded_page<T: Copy, const N: usize, const R: usize>(

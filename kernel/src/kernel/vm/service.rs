@@ -4,7 +4,9 @@
 //! Process capability coordinators for userspace-managed virtual machines.
 
 use crate::kernel::accounting::ResourceDomainObject;
-use crate::kernel::capability::{HandleFlags, HandleValue, PreparedHandle, Rights};
+use crate::kernel::capability::{
+    HandleFlags, HandleValue, InvocationReceiver, PreparedHandle, Rights,
+};
 use crate::kernel::mm::user_space::VmoObject;
 use crate::kernel::object::{KernelObject, ObjectPublication};
 use crate::kernel::process::{Process, ProcessError};
@@ -348,13 +350,14 @@ pub(crate) struct VirtualMachinePlatformInfo {
 }
 
 pub(crate) fn platform_info(
-    process: &Process,
-    lease: HandleValue,
+    lease: &InvocationReceiver,
     platform_profile: u32,
 ) -> Result<VirtualMachinePlatformInfo, Error> {
     // Resolution only borrows the lease: failed inspection cannot consume the
     // caller's one-shot creation authority or charge a VM reservation.
-    let _lease = process.resolve_handle::<VirtualMachineCreationLease>(lease, Rights::INSPECT)?;
+    let _lease = lease
+        .resolve::<VirtualMachineCreationLease>(Rights::INSPECT)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     selected_platform_info(platform_profile)
 }
 
@@ -407,13 +410,14 @@ fn selected_platform_info(platform_profile: u32) -> Result<VirtualMachinePlatfor
 
 pub(crate) fn derive_creation_lease(
     process: &Process,
-    authority: HandleValue,
+    authority: &InvocationReceiver,
     domain: HandleValue,
 ) -> Result<HandleValue, Error> {
-    let authority = process.resolve_handle::<VirtualMachineCreationAuthority>(
-        authority,
-        Rights::DERIVE.union(Rights::CREATE_VIRTUAL_MACHINE),
-    )?;
+    let authority = authority
+        .resolve::<VirtualMachineCreationAuthority>(
+            Rights::DERIVE.union(Rights::CREATE_VIRTUAL_MACHINE),
+        )
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let domain =
         process.resolve_handle::<ResourceDomainObject>(domain, Rights::RESOURCE_DOMAIN_SPONSOR)?;
     let lease = authority.object().derive(domain.object().domain())?;
@@ -430,15 +434,16 @@ pub(crate) fn derive_creation_lease(
 /// commits both handle ownership and accounting together.
 pub(crate) fn create_pending(
     process: &Process,
-    lease: HandleValue,
+    lease: &InvocationReceiver,
     configuration: VirtualMachineConfiguration,
 ) -> Result<HandleValue, Error> {
-    let lease_object = process
-        .resolve_handle::<VirtualMachineCreationLease>(lease, Rights::CREATE_VIRTUAL_MACHINE)?;
+    let lease_object = lease
+        .resolve::<VirtualMachineCreationLease>(Rights::CREATE_VIRTUAL_MACHINE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let domain = lease_object.object().domain().clone();
     let output = process.reserve_handles::<1>()?;
     let consumption = match process.prepare_handle_consumption(
-        lease,
+        lease.handle(),
         Rights::CREATE_VIRTUAL_MACHINE,
         VirtualMachineCreationLease::KIND,
         lease_object.koid(),
@@ -473,10 +478,12 @@ pub(crate) fn create_pending(
 
 pub(crate) fn set_memory(
     process: &Process,
-    pending: HandleValue,
+    pending: &InvocationReceiver,
     vmo: HandleValue,
 ) -> Result<(), Error> {
-    let pending = process.resolve_handle::<PendingVirtualMachine>(pending, Rights::WRITE)?;
+    let pending = pending
+        .resolve::<PendingVirtualMachine>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let vmo = process
         .resolve_handle::<VmoObject>(vmo, Rights::READ.union(Rights::WRITE).union(Rights::MAP))?;
     pending.object().set_memory(vmo.object())?;
@@ -484,21 +491,24 @@ pub(crate) fn set_memory(
 }
 
 pub(crate) fn set_bootstrap(
-    process: &Process,
-    pending: HandleValue,
+    pending: &InvocationReceiver,
     bootstrap: VirtualCpuBootstrap,
 ) -> Result<(), Error> {
-    let pending = process.resolve_handle::<PendingVirtualMachine>(pending, Rights::WRITE)?;
+    let pending = pending
+        .resolve::<PendingVirtualMachine>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     pending.object().set_bootstrap(bootstrap)?;
     Ok(())
 }
 
 pub(crate) fn set_virtual_serial(
     process: &Process,
-    pending: HandleValue,
+    pending: &InvocationReceiver,
     serial: HandleValue,
 ) -> Result<(), Error> {
-    let pending = process.resolve_handle::<PendingVirtualMachine>(pending, Rights::WRITE)?;
+    let pending = pending
+        .resolve::<PendingVirtualMachine>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let required = Rights::ASSIGN_DEVICE.union(Rights::TRANSFER);
     let serial_object =
         process.resolve_handle::<super::virtual_serial::VirtualSerial>(serial, required)?;
@@ -532,11 +542,12 @@ pub(crate) fn create_virtual_serial(process: &Process) -> Result<HandleValue, Er
 
 pub(crate) fn register_virtual_serial_output(
     process: &Process,
-    value: HandleValue,
+    value: &InvocationReceiver,
     buffer: HandleValue,
 ) -> Result<(), Error> {
-    let serial =
-        process.resolve_handle::<super::virtual_serial::VirtualSerial>(value, Rights::WRITE)?;
+    let serial = value
+        .resolve::<super::virtual_serial::VirtualSerial>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let buffer = process.resolve_handle::<VmoObject>(
         buffer,
         Rights::READ.union(Rights::WRITE).union(Rights::MAP),
@@ -549,12 +560,12 @@ pub(crate) fn register_virtual_serial_output(
 }
 
 pub(crate) fn acknowledge_virtual_serial_output(
-    process: &Process,
-    value: HandleValue,
+    value: &InvocationReceiver,
     consumed: u64,
 ) -> Result<(), Error> {
-    let serial =
-        process.resolve_handle::<super::virtual_serial::VirtualSerial>(value, Rights::READ)?;
+    let serial = value
+        .resolve::<super::virtual_serial::VirtualSerial>(Rights::READ)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     serial
         .object()
         .acknowledge_output(consumed)
@@ -562,8 +573,10 @@ pub(crate) fn acknowledge_virtual_serial_output(
         .map_err(Into::into)
 }
 
-pub(crate) fn seal(process: &Process, pending: HandleValue) -> Result<(), Error> {
-    let pending = process.resolve_handle::<PendingVirtualMachine>(pending, Rights::WRITE)?;
+pub(crate) fn seal(pending: &InvocationReceiver) -> Result<(), Error> {
+    let pending = pending
+        .resolve::<PendingVirtualMachine>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     pending.object().seal()?;
     Ok(())
 }
@@ -576,12 +589,14 @@ pub(crate) fn seal(process: &Process, pending: HandleValue) -> Result<(), Error>
 /// The boot vCPU remains dormant until a separate start request.
 pub(crate) fn install(
     process: &Process,
-    pending_value: HandleValue,
+    pending_value: &InvocationReceiver,
 ) -> Result<[HandleValue; 2], Error> {
-    let pending = process.resolve_handle::<PendingVirtualMachine>(pending_value, Rights::START)?;
+    let pending = pending_value
+        .resolve::<PendingVirtualMachine>(Rights::START)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let output = process.reserve_handles::<2>()?;
     let consumption = match process.prepare_handle_consumption(
-        pending_value,
+        pending_value.handle(),
         Rights::START,
         PendingVirtualMachine::KIND,
         pending.koid(),
@@ -660,11 +675,12 @@ pub(crate) fn install(
     Ok(consumption.commit_replacement(output, [vm_handle, vcpu_handle]))
 }
 
-pub(crate) fn abort(process: &Process, pending: HandleValue) -> Result<(), Error> {
-    let resolved =
-        process.resolve_handle::<PendingVirtualMachine>(pending, Rights::REQUEST_STOP)?;
+pub(crate) fn abort(process: &Process, pending: &InvocationReceiver) -> Result<(), Error> {
+    let resolved = pending
+        .resolve::<PendingVirtualMachine>(Rights::REQUEST_STOP)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let consumption = process.prepare_handle_consumption(
-        pending,
+        pending.handle(),
         Rights::REQUEST_STOP,
         PendingVirtualMachine::KIND,
         resolved.koid(),
@@ -673,40 +689,48 @@ pub(crate) fn abort(process: &Process, pending: HandleValue) -> Result<(), Error
     Ok(())
 }
 
-pub(crate) fn request_stop(process: &Process, machine: HandleValue) -> Result<(), Error> {
-    let machine = process.resolve_handle::<VirtualMachineObject>(machine, Rights::REQUEST_STOP)?;
+pub(crate) fn request_stop(machine: &InvocationReceiver) -> Result<(), Error> {
+    let machine = machine
+        .resolve::<VirtualMachineObject>(Rights::REQUEST_STOP)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     machine.object().request_stop();
     Ok(())
 }
 
 pub(crate) fn machine_info(
-    process: &Process,
-    machine: HandleValue,
+    machine: &InvocationReceiver,
 ) -> Result<(VirtualMachineConfiguration, VirtualMachineSnapshot), Error> {
-    let machine = process.resolve_handle::<VirtualMachineObject>(machine, Rights::INSPECT)?;
+    let machine = machine
+        .resolve::<VirtualMachineObject>(Rights::INSPECT)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     Ok((
         machine.object().configuration(),
         machine.object().snapshot(),
     ))
 }
 
-pub(crate) fn vcpu_info(process: &Process, vcpu: HandleValue) -> Result<VirtualCpuSnapshot, Error> {
-    let vcpu = process.resolve_handle::<VirtualCpuObject>(vcpu, Rights::INSPECT)?;
+pub(crate) fn vcpu_info(vcpu: &InvocationReceiver) -> Result<VirtualCpuSnapshot, Error> {
+    let vcpu = vcpu
+        .resolve::<VirtualCpuObject>(Rights::INSPECT)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     Ok(vcpu.object().snapshot())
 }
 
-pub(crate) fn start_vcpu(process: &Process, vcpu: HandleValue) -> Result<(), Error> {
-    let vcpu = process.resolve_handle::<VirtualCpuObject>(vcpu, Rights::START)?;
+pub(crate) fn start_vcpu(vcpu: &InvocationReceiver) -> Result<(), Error> {
+    let vcpu = vcpu
+        .resolve::<VirtualCpuObject>(Rights::START)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     vcpu.object().start()?;
     Ok(())
 }
 
 pub(crate) fn set_vcpu_affinity(
-    process: &Process,
-    vcpu: HandleValue,
+    vcpu: &InvocationReceiver,
     affinity: crate::kernel::task::policy::CpuMask,
 ) -> Result<(), Error> {
-    let vcpu = process.resolve_handle::<VirtualCpuObject>(vcpu, Rights::WRITE)?;
+    let vcpu = vcpu
+        .resolve::<VirtualCpuObject>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     vcpu.object().set_affinity(affinity)?;
     Ok(())
 }
@@ -725,10 +749,12 @@ fn prepare_handle<T: crate::kernel::object::UserExportableObject>(
 /// does not allocate or start another scheduler Thread.
 pub(crate) fn open_vcpu(
     process: &Process,
-    machine: HandleValue,
+    machine: &InvocationReceiver,
     id: u32,
 ) -> Result<HandleValue, Error> {
-    let machine = process.resolve_handle::<VirtualMachineObject>(machine, Rights::WRITE)?;
+    let machine = machine
+        .resolve::<VirtualMachineObject>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let object =
         VirtualCpuObject::try_new(machine.object().owner(), id, &process.resource_domain())?;
     let prepared = prepare_handle(object, VirtualCpuObject::SUPPORTED_RIGHTS)?;
@@ -740,20 +766,22 @@ pub(crate) fn open_vcpu(
 }
 
 pub(crate) fn pending_power_request(
-    process: &Process,
-    machine: HandleValue,
+    machine: &InvocationReceiver,
 ) -> Result<Option<hyper::vm::arm::psci::Request>, Error> {
-    let machine = process.resolve_handle::<VirtualMachineObject>(machine, Rights::WRITE)?;
+    let machine = machine
+        .resolve::<VirtualMachineObject>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     Ok(machine.object().owner().pending_power_request())
 }
 
 pub(crate) fn complete_power_request(
-    process: &Process,
-    machine: HandleValue,
+    machine: &InvocationReceiver,
     id: u64,
     accept: bool,
 ) -> Result<(), Error> {
-    let machine = process.resolve_handle::<VirtualMachineObject>(machine, Rights::WRITE)?;
+    let machine = machine
+        .resolve::<VirtualMachineObject>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     machine
         .object()
         .owner()
@@ -763,13 +791,14 @@ pub(crate) fn complete_power_request(
 
 /// Registers an immutable device aperture before the VM starts.
 pub(crate) fn register_mmio(
-    process: &Process,
-    machine: HandleValue,
+    machine: &InvocationReceiver,
     base: u64,
     length: u64,
     device: u64,
 ) -> Result<(), Error> {
-    let machine = process.resolve_handle::<VirtualMachineObject>(machine, Rights::WRITE)?;
+    let machine = machine
+        .resolve::<VirtualMachineObject>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     machine
         .object()
         .owner()
@@ -778,30 +807,33 @@ pub(crate) fn register_mmio(
 }
 
 pub(crate) fn pending_mmio(
-    process: &Process,
-    vcpu: HandleValue,
+    vcpu: &InvocationReceiver,
 ) -> Result<Option<hyper::vm::device::mmio::Request>, Error> {
-    let vcpu = process.resolve_handle::<VirtualCpuObject>(vcpu, Rights::WRITE)?;
+    let vcpu = vcpu
+        .resolve::<VirtualCpuObject>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     vcpu.object().pending_mmio().map_err(Into::into)
 }
 
 pub(crate) fn complete_mmio(
-    process: &Process,
-    vcpu: HandleValue,
+    vcpu: &InvocationReceiver,
     id: u64,
     action: hyper::vm::exit::MmioAction,
 ) -> Result<(), Error> {
-    let vcpu = process.resolve_handle::<VirtualCpuObject>(vcpu, Rights::WRITE)?;
+    let vcpu = vcpu
+        .resolve::<VirtualCpuObject>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     vcpu.object().complete_mmio(id, action).map_err(Into::into)
 }
 
 pub(crate) fn create_guest_memory(
     process: &Process,
-    vmo: HandleValue,
+    vmo: &InvocationReceiver,
 ) -> Result<HandleValue, Error> {
     use super::objects::GuestMemoryObject;
-    let vmo = process
-        .resolve_handle::<VmoObject>(vmo, Rights::READ.union(Rights::WRITE).union(Rights::MAP))?;
+    let vmo = vmo
+        .resolve::<VmoObject>(Rights::READ.union(Rights::WRITE).union(Rights::MAP))
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let object = GuestMemoryObject::try_new(vmo.object(), &process.resource_domain())?;
     let prepared = prepare_handle(object, GuestMemoryObject::SUPPORTED_RIGHTS)?;
     let reservation = process.reserve_handles::<1>()?;
@@ -813,13 +845,15 @@ pub(crate) fn create_guest_memory(
 
 pub(crate) fn map_guest_memory(
     process: &Process,
-    pending: HandleValue,
+    pending: &InvocationReceiver,
     memory: HandleValue,
     guest_offset: u64,
     source_offset: u64,
     length: u64,
 ) -> Result<(), Error> {
-    let pending = process.resolve_handle::<PendingVirtualMachine>(pending, Rights::WRITE)?;
+    let pending = pending
+        .resolve::<PendingVirtualMachine>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let memory =
         process.resolve_handle::<super::objects::GuestMemoryObject>(memory, Rights::MAP)?;
     let region = super::memory::backing::Region::new(

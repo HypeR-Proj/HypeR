@@ -32,13 +32,13 @@ pub(in super::super) fn render_c(schema: &AbiSchema) -> String {
     );
     let _ = writeln!(
         output,
-        "#define HYPER_NATIVE_SYSCALL_ARGUMENT_REGISTERS UINT32_C({})",
-        schema::SYSCALL_ARGUMENT_REGISTERS
+        "#define HYPER_NATIVE_INVOCATION_ARGUMENT_REGISTERS UINT32_C({})",
+        schema::INVOCATION_ARGUMENT_REGISTERS
     );
     let _ = writeln!(
         output,
-        "#define HYPER_NATIVE_SYSCALL_RESULT_REGISTERS UINT32_C({})",
-        schema::SYSCALL_RESULT_REGISTERS
+        "#define HYPER_NATIVE_INVOCATION_RESULT_REGISTERS UINT32_C({})",
+        schema::INVOCATION_RESULT_REGISTERS
     );
     output.push_str(
         "\ntypedef uint64_t hyper_native_handle_t;\n\
@@ -101,11 +101,11 @@ pub(in super::super) fn render_c(schema: &AbiSchema) -> String {
     );
     render_c_constants(
         &mut output,
-        "HYPER_NATIVE_SYS",
+        "HYPER_NATIVE_OP",
         schema
-            .syscalls
+            .invocations
             .iter()
-            .map(|value| (value.name, u64::from(value.number))),
+            .map(|value| (value.name, u64::from(value.operation))),
     );
     render_c_failure_result_mask(&mut output, schema);
     for record in schema.records {
@@ -192,13 +192,13 @@ fn render_c_transfer_classes(output: &mut String, schema: &AbiSchema) {
 
 fn render_c_failure_result_mask(output: &mut String, schema: &AbiSchema) {
     output.push_str(
-        "static inline uint64_t hyper_native_failure_result_mask(\n    uint64_t syscall_number, hyper_native_status_t status)\n{\n",
+        "static inline uint64_t hyper_native_failure_result_mask(\n    uint32_t object_kind, uint64_t operation, hyper_native_status_t status)\n{\n",
     );
-    for syscall in schema.syscalls {
-        for failure in syscall.failure_results {
+    for invocation in schema.invocations {
+        for failure in invocation.failure_results {
             let mut mask = 0u64;
             for result_name in failure.results {
-                if let Some(index) = syscall
+                if let Some(index) = invocation
                     .results
                     .iter()
                     .position(|result| result.name == *result_name)
@@ -206,12 +206,41 @@ fn render_c_failure_result_mask(output: &mut String, schema: &AbiSchema) {
                     mask |= 1u64 << index;
                 }
             }
-            let _ = writeln!(
-                output,
-                "    if (syscall_number == HYPER_NATIVE_SYS_{} &&\n        status == HYPER_NATIVE_STATUS_{}) {{\n        return UINT64_C({mask});\n    }}",
-                upper_snake(syscall.name),
-                upper_snake(failure.status)
-            );
+            if let Some(schema::ObjectConstraint::Kind(kind)) =
+                invocation.receiver.handle.map(|handle| handle.object)
+            {
+                let _ = writeln!(
+                    output,
+                    "    if (object_kind == HYPER_NATIVE_OBJECT_{} &&\n        operation == HYPER_NATIVE_OP_{} &&\n        status == HYPER_NATIVE_STATUS_{}) {{\n        return UINT64_C({mask});\n    }}",
+                    upper_snake(kind),
+                    upper_snake(invocation.name),
+                    upper_snake(failure.status)
+                );
+            } else {
+                // Common methods accept every declared object kind except NONE,
+                // matching NativeOperation::from_raw in the Rust output.
+                let _ = writeln!(
+                    output,
+                    "    if (operation == HYPER_NATIVE_OP_{} &&\n        status == HYPER_NATIVE_STATUS_{}) {{\n        switch (object_kind) {{",
+                    upper_snake(invocation.name),
+                    upper_snake(failure.status)
+                );
+                for object in schema
+                    .object_kinds
+                    .iter()
+                    .filter(|object| object.value != 0)
+                {
+                    let _ = writeln!(
+                        output,
+                        "        case HYPER_NATIVE_OBJECT_{}:",
+                        upper_snake(object.name)
+                    );
+                }
+                let _ = writeln!(
+                    output,
+                    "            return UINT64_C({mask});\n        default:\n            return UINT64_C(0);\n        }}\n    }}"
+                );
+            }
         }
     }
     output.push_str("    return UINT64_C(0);\n}\n\n");

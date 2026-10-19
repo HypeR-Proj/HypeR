@@ -88,17 +88,6 @@ impl HandleValue {
         self.0.get()
     }
 
-    /// Returns the first value published by a fresh table.
-    #[cfg(not(test))]
-    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
-    #[allow(
-        dead_code,
-        reason = "only the AArch64 Native-entry self-test needs the first handle value"
-    )]
-    pub(crate) fn first_for_test() -> Self {
-        Self::encode(storage::SLOTS_PER_PAGE - 1, 1)
-    }
-
     fn encode(slot: usize, generation: u64) -> Self {
         let raw = (generation << SLOT_BITS) | (slot as u64 + 1);
         // Slot indices and generations are private validated table state. Their
@@ -219,9 +208,9 @@ pub(crate) enum HandleTransferRoute {
     /// The transport may retain capability owners after the sender returns.
     #[cfg_attr(
         not(test),
-        expect(
+        allow(
             dead_code,
-            reason = "Keeps the rejection rule for transports that retain capability owners; exercised by host tests"
+            reason = "Retaining transports are rejected by production policy and exercised by host and kernel tests"
         )
     )]
     Buffered,
@@ -787,6 +776,27 @@ impl HandleTable {
         }
         let next = (slot < self.slots.len()).then_some(HandleScanCursor { next_slot: slot });
         Ok(HandleSnapshotPage { entries, len, next })
+    }
+
+    /// Captures a receiver, its rights, and its generation under one table lock.
+    /// The pin permits an admitted operation to finish after a concurrent close;
+    /// it cannot duplicate receiver authority or replace handle-table transactions.
+    pub(crate) fn resolve_invocation(
+        &self,
+        value: HandleValue,
+    ) -> Result<InvocationReceiver, HandleError> {
+        self.ensure_active()?;
+        let handle = self.lookup(value)?;
+        Ok(InvocationReceiver {
+            handle: value,
+            info: HandleInfo {
+                koid: handle.object().koid(),
+                kind: handle.object().kind(),
+                rights: handle.rights.union(),
+                flags: handle.flags,
+            },
+            object: handle.object().pin_erased(),
+        })
     }
 
     /// Resolves authority and clones only an internal object-lifetime reference.
@@ -2163,6 +2173,58 @@ impl<const N: usize> Drop for HandleReservation<N> {
         if !self.completed {
             super::invariant_violation();
         }
+    }
+}
+
+/// One invocation's receiver authority. Only handle-table resolution constructs it.
+/// Dynamic rights checks and downcasts use this captured authority; normal object
+/// operations never look up the receiver handle again. Namespace mutations still
+/// validate the original generation and, for consuming transactions, the KOID.
+pub(crate) struct InvocationReceiver {
+    handle: HandleValue,
+    info: HandleInfo,
+    object: ErasedKernelRef<OperationPin>,
+}
+
+impl InvocationReceiver {
+    pub(crate) const fn handle(&self) -> HandleValue {
+        self.handle
+    }
+    pub(crate) const fn info(&self) -> HandleInfo {
+        self.info
+    }
+    pub(crate) const fn kind(&self) -> ObjectKind {
+        self.info.kind
+    }
+
+    pub(crate) fn require(&self, rights: Rights) -> Result<(), HandleError> {
+        if self.info.rights.contains(rights) {
+            Ok(())
+        } else {
+            Err(HandleError::AccessDenied)
+        }
+    }
+
+    pub(crate) fn resolve<T: KernelObject>(
+        &self,
+        rights: Rights,
+    ) -> Result<ResolvedObject<T>, HandleError> {
+        self.require(rights)?;
+        let object = self.object.pin::<T>().ok_or(HandleError::WrongObjectType)?;
+        Ok(ResolvedObject {
+            object,
+            rights: self.info.rights,
+        })
+    }
+
+    pub(crate) fn resolve_waitable(&self, rights: Rights) -> Result<ResolvedWaitable, HandleError> {
+        self.require(rights)?;
+        self.object
+            .signal_source()
+            .ok_or(HandleError::WrongObjectType)?;
+        Ok(ResolvedWaitable {
+            object: self.object.clone(),
+        })
     }
 }
 

@@ -3,8 +3,6 @@
 
 //! Immutable execution identity and kernel-prepared bootstrap mappings.
 
-use core::num::NonZeroU64;
-
 use crate::kernel::mm::user_space::UserAddress;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -16,42 +14,9 @@ pub(crate) enum MachineAbi {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum AbiFamily {
-    Native,
-    #[expect(
-        dead_code,
-        reason = "Reserved image-routing vocabulary; foreign loaders are not implemented"
-    )]
-    Linux,
-    #[expect(
-        dead_code,
-        reason = "Reserved image-routing vocabulary; foreign loaders are not implemented"
-    )]
-    FreeBsd,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ExecutionRoute {
-    NativeKernel,
-    /// The session is a stable diagnostic key, not authority.
-    #[expect(
-        dead_code,
-        reason = "Reserved image-routing vocabulary; foreign loaders are not implemented"
-    )]
-    Supervised {
-        session: SupervisionSessionId,
-    },
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct SupervisionSessionId(NonZeroU64);
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ImageError {
     InvalidEntry,
     InvalidStack,
-    InvalidRoute,
-    UnsupportedRevision,
 }
 
 /// Initial register values for one native user Thread.
@@ -114,12 +79,9 @@ impl UserThreadStart {
 /// environment. Final application ELF metadata and auxv stay in userspace.
 ///
 /// Mutable registers and mappings belong to `UserThread` and `NativeAddressSpace`,
-/// respectively. Keeping route selection immutable prevents syscall semantics
-/// from changing beneath a running thread.
+/// respectively. Only Native process images can be constructed.
 pub(crate) struct ProcessImage {
     machine: MachineAbi,
-    family: AbiFamily,
-    route: ExecutionRoute,
     entry: UserAddress,
     stack: UserAddress,
     tls: UserAddress,
@@ -134,50 +96,14 @@ impl ProcessImage {
         stack: UserAddress,
         tls: UserAddress,
     ) -> Result<Self, ImageError> {
-        Self::try_new(
-            machine,
-            AbiFamily::Native,
-            hyper::abi::native::HYPER_NATIVE_ABI_REVISION,
-            ExecutionRoute::NativeKernel,
-            entry,
-            stack,
-            tls,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn try_new(
-        machine: MachineAbi,
-        family: AbiFamily,
-        revision: u64,
-        route: ExecutionRoute,
-        entry: UserAddress,
-        stack: UserAddress,
-        tls: UserAddress,
-    ) -> Result<Self, ImageError> {
         if entry.get() == 0 {
             return Err(ImageError::InvalidEntry);
         }
         if stack.get() == 0 || stack.get() & 0xf != 0 {
             return Err(ImageError::InvalidStack);
         }
-        if family == AbiFamily::Native && revision != 0 {
-            return Err(ImageError::UnsupportedRevision);
-        }
-        if !matches!(
-            (family, route),
-            (AbiFamily::Native, ExecutionRoute::NativeKernel)
-                | (
-                    AbiFamily::Linux | AbiFamily::FreeBsd,
-                    ExecutionRoute::Supervised { .. }
-                )
-        ) {
-            return Err(ImageError::InvalidRoute);
-        }
         Ok(Self {
             machine,
-            family,
-            route,
             entry,
             stack,
             tls,
@@ -204,14 +130,6 @@ impl ProcessImage {
 
     pub(crate) const fn machine(&self) -> MachineAbi {
         self.machine
-    }
-
-    pub(crate) const fn family(&self) -> AbiFamily {
-        self.family
-    }
-
-    pub(crate) const fn route(&self) -> ExecutionRoute {
-        self.route
     }
 
     pub(crate) const fn bootstrap(&self) -> super::loader::BootstrapLayout {

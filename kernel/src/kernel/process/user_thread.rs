@@ -13,6 +13,7 @@ use super::lifecycle::{LifecycleError, TerminalReason, UserThreadLifecycle, User
 use super::owner::{Process, ProcessThreadMembership};
 use crate::kernel::accounting::CommittedCharge;
 use crate::kernel::authority::Rights;
+use crate::kernel::capability::{HandleError, InvocationReceiver};
 use crate::kernel::mm::user_space::NativeAddressSpace;
 use crate::kernel::object::{
     KernelObject, KernelRef, KernelService, ObjectCreationError, ObjectKind, ObjectPublication,
@@ -200,10 +201,15 @@ impl UserThread {
         }
     }
 
-    pub(super) fn from_operation_pin(object: KernelRef<UserThreadObject, OperationPin>) -> Self {
-        Self {
-            object: UserThreadOwner::Operation(object),
-        }
+    /// Uses captured invocation authority without repeating handle-table lookup.
+    pub(crate) fn resolve_receiver(
+        receiver: &InvocationReceiver,
+        rights: Rights,
+    ) -> Result<Self, HandleError> {
+        let resolved = receiver.resolve::<UserThreadObject>(rights)?;
+        Ok(Self {
+            object: UserThreadOwner::Operation(resolved.into_operation_pin()),
+        })
     }
 
     pub(crate) fn into_scheduler_owner(self) -> Self {

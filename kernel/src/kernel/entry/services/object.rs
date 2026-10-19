@@ -3,6 +3,8 @@
 
 //! Native object service calls under borrowed Process authority.
 
+use crate::kernel::capability::InvocationReceiver;
+
 use super::ProcessServices;
 use crate::kernel::abi::native::{ObjectServiceError, ObjectServices};
 use crate::kernel::accounting::{ResourceAmount, ResourceKind};
@@ -35,13 +37,13 @@ impl ObjectServices for ProcessServices<'_> {
     }
     fn wait_set_add(
         &self,
-        set: HandleValue,
+        set: &InvocationReceiver,
         source: HandleValue,
         signals: u64,
     ) -> Result<u64, ObjectServiceError> {
-        let set = self
-            .process
-            .resolve_handle::<object::WaitSet>(set, Rights::BIND_WAIT)?;
+        let set = set
+            .resolve::<object::WaitSet>(Rights::BIND_WAIT)
+            .map_err(crate::kernel::process::ProcessError::from)?;
         let source = self.process.resolve_waitable(source, Rights::WAIT)?;
         Ok(set
             .object()
@@ -49,33 +51,33 @@ impl ObjectServices for ProcessServices<'_> {
     }
     fn wait_set_rearm(
         &self,
-        set: HandleValue,
+        set: &InvocationReceiver,
         registration: u64,
     ) -> Result<(), ObjectServiceError> {
-        let set = self
-            .process
-            .resolve_handle::<object::WaitSet>(set, Rights::BIND_WAIT)?;
+        let set = set
+            .resolve::<object::WaitSet>(Rights::BIND_WAIT)
+            .map_err(crate::kernel::process::ProcessError::from)?;
         Ok(set.object().rearm(registration)?)
     }
     fn wait_set_remove(
         &self,
-        set: HandleValue,
+        set: &InvocationReceiver,
         registration: u64,
     ) -> Result<(), ObjectServiceError> {
-        let set = self
-            .process
-            .resolve_handle::<object::WaitSet>(set, Rights::BIND_WAIT)?;
+        let set = set
+            .resolve::<object::WaitSet>(Rights::BIND_WAIT)
+            .map_err(crate::kernel::process::ProcessError::from)?;
         Ok(set.object().remove(registration)?)
     }
     fn wait_set_wait(
         &self,
-        set: HandleValue,
+        set: &InvocationReceiver,
         deadline: u64,
         output: UserSlice,
     ) -> Result<(), ObjectServiceError> {
-        let set = self
-            .process
-            .resolve_handle::<object::WaitSet>(set, Rights::WAIT)?;
+        let set = set
+            .resolve::<object::WaitSet>(Rights::WAIT)
+            .map_err(crate::kernel::process::ProcessError::from)?;
         let delivery = set
             .object()
             .wait(deadline, &self.process.resource_domain(), || {
@@ -95,24 +97,26 @@ impl ObjectServices for ProcessServices<'_> {
 
     fn signal_event(
         &self,
-        value: HandleValue,
+        value: &InvocationReceiver,
         clear: u64,
         set: u64,
     ) -> Result<(), ObjectServiceError> {
-        let event = self
-            .process
-            .resolve_handle::<Event>(value, Rights::SIGNAL)?;
+        let event = value
+            .resolve::<Event>(Rights::SIGNAL)
+            .map_err(crate::kernel::process::ProcessError::from)?;
         event.object().signal(clear, set)?;
         Ok(())
     }
 
     fn wait_one(
         &self,
-        value: HandleValue,
+        value: &InvocationReceiver,
         requested: u64,
         deadline: u64,
     ) -> Result<SignalWaitOutcome, ObjectServiceError> {
-        let resolved = self.process.resolve_waitable(value, Rights::WAIT)?;
+        let resolved = value
+            .resolve_waitable(Rights::WAIT)
+            .map_err(crate::kernel::process::ProcessError::from)?;
         let domain = self.process.resource_domain();
         Ok(object::wait_one(
             resolved.source(),

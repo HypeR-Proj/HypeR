@@ -12,7 +12,7 @@ use schema::{
 use std::collections::BTreeSet;
 
 pub(super) fn validate_indirect_handles(
-    syscall: &schema::Syscall,
+    invocation: &schema::Invocation,
     argument: &schema::Argument,
     memory: schema::UserMemory,
     handles: IndirectHandles,
@@ -21,8 +21,8 @@ pub(super) fn validate_indirect_handles(
 ) -> Result<(), Error> {
     if !matches!(memory.length, MemoryLength::Elements { .. }) {
         return invalid(format!(
-            "syscall {} memory argument {} describes handles without element length",
-            syscall.name, argument.name
+            "invocation {} memory argument {} describes handles without element length",
+            invocation.name, argument.name
         ));
     }
     match handles {
@@ -32,23 +32,23 @@ pub(super) fn validate_indirect_handles(
         } => {
             if memory.direction != MemoryDirection::Read {
                 return invalid(format!(
-                    "syscall {} borrowed-handle argument {} is not input memory",
-                    syscall.name, argument.name
+                    "invocation {} borrowed-handle argument {} is not input memory",
+                    invocation.name, argument.name
                 ));
             }
             if required_rights & !supported_rights != 0 {
                 return invalid(format!(
-                    "syscall {} argument {} indirectly requires undeclared rights",
-                    syscall.name, argument.name
+                    "invocation {} argument {} indirectly requires undeclared rights",
+                    invocation.name, argument.name
                 ));
             }
             let Some(record) = record else {
                 return invalid(format!(
-                    "syscall {} borrowed-handle argument {} has no record",
-                    syscall.name, argument.name
+                    "invocation {} borrowed-handle argument {} has no record",
+                    invocation.name, argument.name
                 ));
             };
-            require_record_field(record, handle_field, FieldKind::U64, syscall, argument)?;
+            require_record_field(record, handle_field, FieldKind::U64, invocation, argument)?;
         }
         IndirectHandles::ConsumeRecords {
             handle_field,
@@ -61,34 +61,40 @@ pub(super) fn validate_indirect_handles(
         } => {
             if memory.direction != MemoryDirection::Read {
                 return invalid(format!(
-                    "syscall {} consumed-handle argument {} is not input memory",
-                    syscall.name, argument.name
+                    "invocation {} consumed-handle argument {} is not input memory",
+                    invocation.name, argument.name
                 ));
             }
             if common_rights & !supported_rights != 0 {
                 return invalid(format!(
-                    "syscall {} argument {} indirectly requires undeclared rights",
-                    syscall.name, argument.name
+                    "invocation {} argument {} indirectly requires undeclared rights",
+                    invocation.name, argument.name
                 ));
             }
             let Some(record) = record else {
                 return invalid(format!(
-                    "syscall {} consumed-handle argument {} has no record",
-                    syscall.name, argument.name
+                    "invocation {} consumed-handle argument {} has no record",
+                    invocation.name, argument.name
                 ));
             };
-            require_record_field(record, handle_field, FieldKind::U64, syscall, argument)?;
-            require_record_field(record, rights_field, FieldKind::U64, syscall, argument)?;
+            require_record_field(record, handle_field, FieldKind::U64, invocation, argument)?;
+            require_record_field(record, rights_field, FieldKind::U64, invocation, argument)?;
             require_record_field(
                 record,
                 expected_kind_field,
                 FieldKind::U32,
-                syscall,
+                invocation,
                 argument,
             )?;
-            require_record_field(record, operation_field, FieldKind::U32, syscall, argument)?;
+            require_record_field(
+                record,
+                operation_field,
+                FieldKind::U32,
+                invocation,
+                argument,
+            )?;
             validate_distinct_fields(
-                syscall,
+                invocation,
                 argument,
                 &[
                     handle_field,
@@ -97,8 +103,13 @@ pub(super) fn validate_indirect_handles(
                     operation_field,
                 ],
             )?;
-            validate_handle_operations(syscall.name, argument.name, operations, supported_rights)?;
-            validate_transfer_operations(syscall, argument, common_rights, operations)?;
+            validate_handle_operations(
+                invocation.name,
+                argument.name,
+                operations,
+                supported_rights,
+            )?;
+            validate_transfer_operations(invocation, argument, common_rights, operations)?;
         }
         IndirectHandles::ProduceTransferred {
             handle_field,
@@ -109,28 +120,28 @@ pub(super) fn validate_indirect_handles(
         } => {
             if memory.direction != MemoryDirection::ReadWrite {
                 return invalid(format!(
-                    "syscall {} transferred-handle output {} must be in/out memory",
-                    syscall.name, argument.name
+                    "invocation {} transferred-handle output {} must be in/out memory",
+                    invocation.name, argument.name
                 ));
             }
             let Some(record) = record else {
                 return invalid(format!(
-                    "syscall {} transferred-handle output {} has no record",
-                    syscall.name, argument.name
+                    "invocation {} transferred-handle output {} has no record",
+                    invocation.name, argument.name
                 ));
             };
-            require_record_field(record, handle_field, FieldKind::U64, syscall, argument)?;
-            require_record_field(record, rights_field, FieldKind::U64, syscall, argument)?;
+            require_record_field(record, handle_field, FieldKind::U64, invocation, argument)?;
+            require_record_field(record, rights_field, FieldKind::U64, invocation, argument)?;
             require_record_field(
                 record,
                 expected_kind_field,
                 FieldKind::U32,
-                syscall,
+                invocation,
                 argument,
             )?;
-            require_record_field(record, flags_field, FieldKind::U32, syscall, argument)?;
+            require_record_field(record, flags_field, FieldKind::U32, invocation, argument)?;
             validate_distinct_fields(
-                syscall,
+                invocation,
                 argument,
                 &[handle_field, rights_field, expected_kind_field, flags_field],
             )?;
@@ -140,7 +151,7 @@ pub(super) fn validate_indirect_handles(
 }
 
 fn validate_distinct_fields(
-    syscall: &schema::Syscall,
+    invocation: &schema::Invocation,
     argument: &schema::Argument,
     fields: &[&str],
 ) -> Result<(), Error> {
@@ -149,14 +160,14 @@ fn validate_distinct_fields(
         Ok(())
     } else {
         invalid(format!(
-            "syscall {} memory argument {} repeats transactional record fields",
-            syscall.name, argument.name
+            "invocation {} memory argument {} repeats transactional record fields",
+            invocation.name, argument.name
         ))
     }
 }
 
 pub(super) fn validate_transfer_operations(
-    syscall: &schema::Syscall,
+    invocation: &schema::Invocation,
     argument: &schema::Argument,
     common_rights: u64,
     operations: &[HandleOperation],
@@ -175,8 +186,8 @@ pub(super) fn validate_transfer_operations(
     ) || common_rights & schema::RIGHT_TRANSFER == 0
     {
         return invalid(format!(
-            "syscall {} argument {} has an invalid move operation",
-            syscall.name, argument.name
+            "invocation {} argument {} has an invalid move operation",
+            invocation.name, argument.name
         ));
     }
     if !matches!(
@@ -190,22 +201,22 @@ pub(super) fn validate_transfer_operations(
     ) || common_rights & schema::RIGHT_TRANSFER == 0
     {
         return invalid(format!(
-            "syscall {} argument {} has an invalid duplicate operation",
-            syscall.name, argument.name
+            "invocation {} argument {} has an invalid duplicate operation",
+            invocation.name, argument.name
         ));
     }
     Ok(())
 }
 
 pub(super) fn validate_handle_operations(
-    syscall: &str,
+    invocation: &str,
     argument: &str,
     operations: &[HandleOperation],
     supported_rights: u64,
 ) -> Result<(), Error> {
     if operations.is_empty() {
         return invalid(format!(
-            "syscall {syscall} handle {argument} has no operations"
+            "invocation {invocation} handle {argument} has no operations"
         ));
     }
     let mut names = BTreeSet::new();
@@ -214,12 +225,12 @@ pub(super) fn validate_handle_operations(
         validate_identifier("handle operation", operation.name)?;
         if !names.insert(operation.name) || !values.insert(operation.value) {
             return invalid(format!(
-                "syscall {syscall} handle {argument} repeats a handle operation"
+                "invocation {invocation} handle {argument} repeats a handle operation"
             ));
         }
         if operation.additional_rights & !supported_rights != 0 {
             return invalid(format!(
-                "syscall {syscall} handle {argument} operation {} requires undeclared rights",
+                "invocation {invocation} handle {argument} operation {} requires undeclared rights",
                 operation.name
             ));
         }
@@ -229,14 +240,14 @@ pub(super) fn validate_handle_operations(
 
 pub(super) fn require_object_kind(
     schema: &AbiSchema,
-    syscall: &str,
+    invocation: &str,
     kind: &str,
 ) -> Result<(), Error> {
     if schema.object_kinds.iter().any(|object| object.name == kind) {
         Ok(())
     } else {
         invalid(format!(
-            "syscall {syscall} names unknown object kind {kind}"
+            "invocation {invocation} names unknown object kind {kind}"
         ))
     }
 }

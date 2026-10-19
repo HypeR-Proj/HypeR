@@ -74,6 +74,7 @@ pub(crate) struct PreparedChildProcessStart {
     builder_consumption: Option<PreparedHandleConsumption>,
     root_vmar_object: Option<PreparedHandle>,
     stack_vmar_object: Option<PreparedHandle>,
+    invocation_handles: Option<[PreparedHandle; 3]>,
     root_vmar_address_space: FallibleArc<NativeAddressSpace>,
     root_vmar_claimed: bool,
     process_object: Option<PublishableRef<ProcessObject, KernelService>>,
@@ -158,6 +159,9 @@ fn prepare_bootstrap(
     let stack_vmar = next();
     let executable = next();
     let channel = next();
+    let execution_context = next();
+    let object_factory = next();
+    let system_info = next();
     let layout = build.child().process().image().bootstrap();
     let header = HyperNativeLoaderStartup {
         size: core::mem::size_of::<HyperNativeLoaderStartup>() as u32,
@@ -171,6 +175,9 @@ fn prepare_bootstrap(
         stack_size: layout.stack_size,
         loader_base: layout.loader_base,
         loader_size: layout.loader_size,
+        execution_context,
+        object_factory,
+        system_info,
     };
     let records = build
         .startup_capabilities()
@@ -212,7 +219,11 @@ impl PreparedChildProcessStart {
         build: SealedProcessBuild,
     ) -> Result<Self, StartPreparationFailure<ChildProcessStartError>> {
         let child = build.child().process().clone();
-        let startup_count = match build.startup_capabilities().len().checked_add(4) {
+        let invocation_handles = match child.prepare_invocation_handles() {
+            Ok(handles) => handles,
+            Err(error) => return Err(start_failure(ChildProcessStartError::Process(error), build)),
+        };
+        let startup_count = match build.startup_capabilities().len().checked_add(7) {
             Some(count) => count,
             None => {
                 return Err(start_failure(
@@ -409,6 +420,7 @@ impl PreparedChildProcessStart {
             builder_consumption: Some(builder_consumption),
             root_vmar_object: Some(root_vmar_object),
             stack_vmar_object: Some(stack_vmar_object),
+            invocation_handles: Some(invocation_handles),
             root_vmar_address_space,
             root_vmar_claimed: true,
             process_object: Some(process_object),
@@ -457,6 +469,11 @@ impl PreparedChildProcessStart {
         };
         self.prepared_startup_handles.push(bootstrap.executable);
         self.prepared_startup_handles.push(bootstrap.child_channel);
+        let invocation_handles = match self.invocation_handles.take() {
+            Some(handles) => handles,
+            None => process_invariant_violation(),
+        };
+        self.prepared_startup_handles.extend(invocation_handles);
         self.prepared_startup_handles.reverse();
         publish_unpublished_startup_handles(&mut self);
 
@@ -502,6 +519,7 @@ impl PreparedChildProcessStart {
         drop(self.initial_thread.take());
         drop(self.root_vmar_object.take());
         drop(self.stack_vmar_object.take());
+        drop(self.invocation_handles.take());
         if self.root_vmar_claimed {
             VmarObject::abort_root_publication(&self.root_vmar_address_space);
             self.root_vmar_claimed = false;
@@ -526,6 +544,7 @@ impl Drop for PreparedChildProcessStart {
             || self.builder_consumption.is_some()
             || self.root_vmar_object.is_some()
             || self.stack_vmar_object.is_some()
+            || self.invocation_handles.is_some()
             || self.root_vmar_claimed
             || self.process_object.is_some()
             || self.supervisor_object.is_some()

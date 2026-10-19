@@ -3,6 +3,8 @@
 
 //! Capability-checked Native VMO and VMAR operations.
 
+use crate::kernel::capability::InvocationReceiver;
+
 use alloc::vec::Vec;
 
 use hyper::mm::PAGE_SIZE;
@@ -87,9 +89,11 @@ pub(crate) fn create_vmo(process: &Process, size: u64) -> Result<HandleValue, Se
 
 pub(crate) fn create_vmo_snapshot(
     process: &Process,
-    vmo: HandleValue,
+    vmo: &InvocationReceiver,
 ) -> Result<(HandleValue, u64), ServiceError> {
-    let source = process.resolve_handle::<VmoObject>(vmo, Rights::READ)?;
+    let source = vmo
+        .resolve::<VmoObject>(Rights::READ)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let object = source.object().try_snapshot(&process.resource_domain())?;
     let size = object.size();
     Ok((process.create_object(object, snapshot_vmo_rights())?, size))
@@ -118,7 +122,7 @@ pub(crate) struct PrivateMappingRequest {
 
 pub(crate) fn map_private(
     process: &Process,
-    vmar: HandleValue,
+    vmar: &InvocationReceiver,
     snapshot: HandleValue,
     request: PrivateMappingRequest,
 ) -> Result<(), ServiceError> {
@@ -135,7 +139,9 @@ pub(crate) fn map_private(
         _ => return Err(ServiceError::InvalidInput),
     };
     let range = aligned_range(request.address, request.size)?;
-    let vmar = process.resolve_handle::<VmarObject>(vmar, Rights::MAP)?;
+    let vmar = vmar
+        .resolve::<VmarObject>(Rights::MAP)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let executable = permission.contains(Access::Execute);
     let source_rights = Rights::READ.union(Rights::MAP).union(if executable {
         Rights::EXECUTE
@@ -210,7 +216,7 @@ pub(crate) fn map_private(
 /// pages to the destination process, never the shared filesystem sponsor.
 pub(crate) fn map_file(
     process: &Process,
-    vmar: HandleValue,
+    vmar: &InvocationReceiver,
     file: HandleValue,
     protection: HandleValue,
     request: PrivateMappingRequest,
@@ -238,7 +244,9 @@ pub(crate) fn map_file(
     let token = process
         .resolve_handle::<crate::kernel::vfs::FileProtectionObject>(protection, Rights::MAP)?;
     let guard = token.object().protection_for(file.object())?;
-    let vmar = process.resolve_handle::<VmarObject>(vmar, Rights::MAP)?;
+    let vmar = vmar
+        .resolve::<VmarObject>(Rights::MAP)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let space = vmar.object().address_space();
     let current = process.address_space_owner()?;
     if !core::ptr::eq(space, &*current) {
@@ -289,7 +297,7 @@ pub(crate) fn map_file(
 
 pub(crate) fn read_vmo(
     process: &Process,
-    value: HandleValue,
+    value: &InvocationReceiver,
     offset: u64,
     destination: Option<UserSlice>,
 ) -> Result<(), ServiceError> {
@@ -297,7 +305,9 @@ pub(crate) fn read_vmo(
         return Ok(());
     };
     let length = transfer_length(destination)?;
-    let vmo = process.resolve_handle::<VmoObject>(value, Rights::READ)?;
+    let vmo = value
+        .resolve::<VmoObject>(Rights::READ)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let mut bytes = Vec::new();
     crate::kernel::mm::reclaim::reserve_exact(&mut bytes, length)
         .map_err(|_| ProcessError::Allocation)?;
@@ -309,7 +319,7 @@ pub(crate) fn read_vmo(
 
 pub(crate) fn write_vmo(
     process: &Process,
-    value: HandleValue,
+    value: &InvocationReceiver,
     offset: u64,
     source: Option<UserSlice>,
 ) -> Result<(), ServiceError> {
@@ -317,7 +327,9 @@ pub(crate) fn write_vmo(
         return Ok(());
     };
     let length = transfer_length(source)?;
-    let vmo = process.resolve_handle::<VmoObject>(value, Rights::WRITE)?;
+    let vmo = value
+        .resolve::<VmoObject>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let mut bytes = Vec::new();
     crate::kernel::mm::reclaim::reserve_exact(&mut bytes, length)
         .map_err(|_| ProcessError::Allocation)?;
@@ -329,13 +341,15 @@ pub(crate) fn write_vmo(
 
 pub(crate) fn allocate_vmar(
     process: &Process,
-    parent: HandleValue,
+    parent: &InvocationReceiver,
     address: u64,
     size: u64,
     exact: bool,
 ) -> Result<(HandleValue, u64), ServiceError> {
     let _ = aligned_range(address, size)?;
-    let parent = process.resolve_handle::<VmarObject>(parent, Rights::MAP)?;
+    let parent = parent
+        .resolve::<VmarObject>(Rights::MAP)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let reservation = process.reserve_handles::<1>()?;
     let child = match retry_mapping_transaction(process, || {
         VmarObject::try_child(
@@ -392,7 +406,7 @@ pub(crate) fn allocate_vmar(
 
 pub(crate) fn map_vmo(
     process: &Process,
-    vmar: HandleValue,
+    vmar: &InvocationReceiver,
     vmo: HandleValue,
     object_offset: u64,
     address: u64,
@@ -406,7 +420,9 @@ pub(crate) fn map_vmo(
     if !permissions.is_valid() {
         return Err(ServiceError::InvalidInput);
     }
-    let vmar = process.resolve_handle::<VmarObject>(vmar, Rights::MAP)?;
+    let vmar = vmar
+        .resolve::<VmarObject>(Rights::MAP)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let mut required = Rights::MAP;
     if permissions.contains(Access::Read) {
         required = required.union(Rights::READ);
@@ -479,7 +495,7 @@ pub(crate) fn map_vmo(
 
 pub(crate) fn protect(
     process: &Process,
-    vmar: HandleValue,
+    vmar: &InvocationReceiver,
     address: u64,
     size: u64,
     permissions: Permissions,
@@ -488,7 +504,9 @@ pub(crate) fn protect(
         return Err(ServiceError::InvalidInput);
     }
     let range = aligned_range(address, size)?;
-    let vmar = process.resolve_handle::<VmarObject>(vmar, Rights::MAP)?;
+    let vmar = vmar
+        .resolve::<VmarObject>(Rights::MAP)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     retry_mapping_transaction(process, || {
         let prepared = vmar
             .object()
@@ -506,12 +524,14 @@ pub(crate) fn protect(
 
 pub(crate) fn unmap(
     process: &Process,
-    vmar: HandleValue,
+    vmar: &InvocationReceiver,
     address: u64,
     size: u64,
 ) -> Result<(), ServiceError> {
     let range = aligned_range(address, size)?;
-    let vmar = process.resolve_handle::<VmarObject>(vmar, Rights::MAP)?;
+    let vmar = vmar
+        .resolve::<VmarObject>(Rights::MAP)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     retry_mapping_transaction(process, || {
         let prepared = vmar
             .object()
@@ -527,14 +547,16 @@ pub(crate) fn unmap(
     })
 }
 
-pub(crate) fn destroy(process: &Process, value: HandleValue) -> Result<(), ServiceError> {
-    let vmar = process.resolve_handle::<VmarObject>(value, Rights::MAP)?;
+pub(crate) fn destroy(process: &Process, value: &InvocationReceiver) -> Result<(), ServiceError> {
+    let vmar = value
+        .resolve::<VmarObject>(Rights::MAP)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     if vmar.object().token() == vmar.object().address_space().logical().root_vmar() {
         return Err(ServiceError::InvalidInput);
     }
     retry_mapping_transaction(process, || {
         let consumption = process.prepare_handle_consumption(
-            value,
+            value.handle(),
             Rights::MAP,
             ObjectKind::VMAR,
             vmar.koid(),
@@ -621,13 +643,15 @@ const fn vmar_rights() -> Rights {
 /// own address space. Allocation and file I/O precede the atomic mapping commit.
 pub(crate) fn set_memory_residency(
     process: &Process,
-    handle: HandleValue,
+    handle: &InvocationReceiver,
     address: u64,
     size: u64,
     current: bool,
     lock: bool,
 ) -> Result<(), ServiceError> {
-    let vmar = process.resolve_handle::<VmarObject>(handle, Rights::LOCK_MEMORY)?;
+    let vmar = handle
+        .resolve::<VmarObject>(Rights::LOCK_MEMORY)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let space = vmar.object().address_space();
     let owner = process.address_space_owner()?;
     if !core::ptr::eq(space, &*owner) {

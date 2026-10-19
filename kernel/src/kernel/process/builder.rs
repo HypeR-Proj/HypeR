@@ -8,6 +8,8 @@
 //! The syscall layer can therefore publish supervisor Process and startup-channel
 //! handles at the same commit that makes the initial Thread runnable.
 
+use crate::kernel::capability::InvocationReceiver;
+
 use alloc::{string::String, vec::Vec};
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -40,8 +42,8 @@ pub(super) const EXECUTABLE_RIGHTS: Rights =
     Rights::READ.union(Rights::EXECUTE).union(Rights::PROTECT);
 
 const _: () = assert!(hyper::cpu::MAX_CPUS <= ABI_AFFINITY_WORDS * u64::BITS as usize);
-const _: () = assert!(MAX_STARTUP_HANDLES > 1);
-const MAX_USER_STARTUP_HANDLES: usize = MAX_STARTUP_HANDLES - 2;
+const _: () = assert!(MAX_STARTUP_HANDLES > 5);
+const MAX_USER_STARTUP_HANDLES: usize = MAX_STARTUP_HANDLES - 5;
 
 /// Failure before the atomic child-publication commit.
 #[derive(Debug)]
@@ -779,14 +781,15 @@ fn copy_executable_for_child(
 /// Creates and publishes one builder from independently checked authorities.
 pub(crate) fn create_process_builder(
     caller: &Process,
-    factory: HandleValue,
+    factory: &InvocationReceiver,
     group: HandleValue,
     domain: HandleValue,
     executable: HandleValue,
     loader: HandleValue,
 ) -> Result<HandleValue, ProcessBuilderError<()>> {
-    let factory = caller
-        .resolve_handle::<TaskFactory>(factory, crate::kernel::authority::Rights::CREATE_PROCESS)
+    let factory = factory
+        .resolve::<TaskFactory>(crate::kernel::authority::Rights::CREATE_PROCESS)
+        .map_err(crate::kernel::process::ProcessError::from)
         .map_err(ProcessBuilderError::Process)?;
     let group = caller
         .resolve_handle::<TaskGroupObject>(
@@ -850,16 +853,17 @@ pub(crate) fn create_process_builder(
 /// keeps transaction internals out of syscall dispatch.
 pub(crate) fn start_process_builder(
     caller: &Process,
-    value: HandleValue,
+    value: &InvocationReceiver,
 ) -> Result<
     super::owner::StartedChildProcess,
     ProcessBuilderError<super::owner::ChildProcessStartError>,
 > {
-    let resolved = caller
-        .resolve_handle::<ProcessBuilder>(value, crate::kernel::authority::Rights::START)
+    let resolved = value
+        .resolve::<ProcessBuilder>(crate::kernel::authority::Rights::START)
+        .map_err(crate::kernel::process::ProcessError::from)
         .map_err(ProcessBuilderError::Process)?;
     let mut coordinator =
-        super::owner::ProcessStartCoordinator::new(caller.clone(), value, resolved.koid());
+        super::owner::ProcessStartCoordinator::new(caller.clone(), value.handle(), resolved.koid());
     resolved.object().start_with(&mut coordinator)
 }
 
@@ -870,14 +874,15 @@ pub(crate) fn start_process_builder(
 /// handle-consumption commit and deferred authority release.
 pub(crate) fn abort_process_builder(
     caller: &Process,
-    value: HandleValue,
+    value: &InvocationReceiver,
 ) -> Result<(), ProcessBuilderError<()>> {
-    let resolved = caller
-        .resolve_handle::<ProcessBuilder>(value, crate::kernel::authority::Rights::REQUEST_STOP)
+    let resolved = value
+        .resolve::<ProcessBuilder>(crate::kernel::authority::Rights::REQUEST_STOP)
+        .map_err(crate::kernel::process::ProcessError::from)
         .map_err(ProcessBuilderError::Process)?;
     let consumption = caller
         .prepare_handle_consumption(
-            value,
+            value.handle(),
             crate::kernel::authority::Rights::REQUEST_STOP,
             ObjectKind::PROCESS_BUILDER,
             resolved.koid(),
@@ -972,10 +977,16 @@ fn validate_startup_capability(
         || capability.purpose == child_root_vmar_purpose()
         || u64::from(capability.purpose)
             == hyper::abi::native::HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_INITIAL_STACK_VMAR
+        || u64::from(capability.purpose)
+            == hyper::abi::native::HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_EXECUTION_CONTEXT
+        || u64::from(capability.purpose)
+            == hyper::abi::native::HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_OBJECT_FACTORY
+        || u64::from(capability.purpose)
+            == hyper::abi::native::HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_SYSTEM_INFO
     {
         return Err(ProcessBuilderError::InvalidStartupPurpose);
     }
-    // The coordinator mints the child ROOT_VMAR and INITIAL_STACK_VMAR slots.
+    // The coordinator mints both VMARs and the three local invocation capabilities.
     if plan.startup.len() >= MAX_USER_STARTUP_HANDLES {
         return Err(ProcessBuilderError::StartupHandleLimit);
     }

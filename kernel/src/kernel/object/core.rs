@@ -115,6 +115,11 @@ type FinalReapQueueLock<T> = InterruptSpinLock<T, TestReapQueueMask>;
 pub(crate) struct ObjectKind(u32);
 
 impl ObjectKind {
+    pub(crate) const EXECUTION_CONTEXT: Self =
+        Self(hyper::abi::native::HYPER_NATIVE_OBJECT_EXECUTION_CONTEXT);
+    pub(crate) const OBJECT_FACTORY: Self =
+        Self(hyper::abi::native::HYPER_NATIVE_OBJECT_OBJECT_FACTORY);
+    pub(crate) const SYSTEM_INFO: Self = Self(hyper::abi::native::HYPER_NATIVE_OBJECT_SYSTEM_INFO);
     pub(crate) const ROOT_TRANSITION: Self = Self(ROOT_TRANSITION_OBJECT_KIND);
     pub(crate) const FILE_PROTECTION: Self = Self(FILE_PROTECTION_OBJECT_KIND);
     pub(crate) const BACKEND_MEMORY_LEASE: Self =
@@ -404,8 +409,8 @@ pub(crate) trait KernelObject: private::Sealed + Any + Send + Sync {
 
     /// Completes the zero-active transition after releasing the handle-table lock.
     ///
-    /// Native handle-close can invoke this from interrupt-masked exception
-    /// entry. Implementations must not allocate, block, fault on user memory,
+    /// The final authority release is not restricted to syscall context.
+    /// Implementations must not allocate, block, fault on user memory,
     /// or perform hardware retirement. Publish durable stop/close state and
     /// wake existing waiters; transfer final destruction to `ObjectRetirement`
     /// or the subsystem reaper. Resolved operation owners can still exist.
@@ -1151,6 +1156,14 @@ impl ActiveHandleOwner {
         ))
     }
 
+    /// Pins one already-authorized invocation without extending active authority.
+    pub(crate) fn pin_erased(&self) -> ErasedKernelRef<OperationPin> {
+        ErasedKernelRef {
+            owner: self.object().owner.clone_as(ReferenceKind::OperationPin),
+            marker: PhantomData,
+        }
+    }
+
     pub(crate) fn pin_waitable(&self) -> Option<ErasedKernelRef<OperationPin>> {
         self.object().owner.signal_source()?;
         Some(ErasedKernelRef {
@@ -1199,6 +1212,12 @@ impl Drop for ActiveHandleOwner {
 }
 
 impl ErasedKernelRef<OperationPin> {
+    /// Retains a typed operation owner after checking the sealed payload kind.
+    pub(crate) fn pin<T: KernelObject>(&self) -> Option<KernelRef<T, OperationPin>> {
+        self.owner.downcast_ref::<T>()?;
+        Some(KernelRef::from_validated_owner(self.owner.clone()))
+    }
+
     pub(crate) fn signal_source(&self) -> Option<SignalSource<'_>> {
         self.owner.signal_source()
     }

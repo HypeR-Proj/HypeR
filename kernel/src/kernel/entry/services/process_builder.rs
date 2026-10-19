@@ -3,6 +3,8 @@
 
 //! Native process builder service calls under borrowed Process authority.
 
+use crate::kernel::capability::InvocationReceiver;
+
 use super::ProcessServices;
 use super::affinity::AffinityInputError;
 use crate::kernel::abi::native::{
@@ -67,7 +69,7 @@ impl ProcessServices<'_> {
 impl ProcessBuilderServices for ProcessServices<'_> {
     fn create_process_builder(
         &self,
-        factory: HandleValue,
+        factory: &InvocationReceiver,
         group: HandleValue,
         domain: HandleValue,
         executable: HandleValue,
@@ -86,12 +88,12 @@ impl ProcessBuilderServices for ProcessServices<'_> {
 
     fn set_process_builder_name(
         &self,
-        builder: HandleValue,
+        builder: &InvocationReceiver,
         name: Option<UserSlice>,
     ) -> Result<(), ProcessBuilderServiceError> {
-        let builder = self
-            .process
-            .resolve_handle::<ProcessBuilder>(builder, Rights::WRITE)?;
+        let builder = builder
+            .resolve::<ProcessBuilder>(Rights::WRITE)
+            .map_err(crate::kernel::process::ProcessError::from)?;
         let bytes = self.copy_builder_input(name)?;
         let name = core::str::from_utf8(bytes.as_bytes())
             .map_err(|_| ProcessBuilderServiceError::InvalidInput)?;
@@ -101,12 +103,12 @@ impl ProcessBuilderServices for ProcessServices<'_> {
 
     fn set_process_builder_data(
         &self,
-        builder: HandleValue,
+        builder: &InvocationReceiver,
         data: Option<UserSlice>,
     ) -> Result<(), ProcessBuilderServiceError> {
-        let builder = self
-            .process
-            .resolve_handle::<ProcessBuilder>(builder, Rights::WRITE)?;
+        let builder = builder
+            .resolve::<ProcessBuilder>(Rights::WRITE)
+            .map_err(crate::kernel::process::ProcessError::from)?;
         let bytes = self.copy_builder_input(data)?;
         builder.object().set_data(bytes.as_bytes())?;
         Ok(())
@@ -114,13 +116,13 @@ impl ProcessBuilderServices for ProcessServices<'_> {
 
     fn set_process_builder_affinity(
         &self,
-        builder: HandleValue,
+        builder: &InvocationReceiver,
         words: Option<UserSlice>,
         word_count: usize,
     ) -> Result<(), ProcessBuilderServiceError> {
-        let builder = self
-            .process
-            .resolve_handle::<ProcessBuilder>(builder, Rights::WRITE)?;
+        let builder = builder
+            .resolve::<ProcessBuilder>(Rights::WRITE)
+            .map_err(crate::kernel::process::ProcessError::from)?;
         let affinity = self
             .copy_affinity(words, word_count)
             .map_err(|error| match error {
@@ -133,28 +135,28 @@ impl ProcessBuilderServices for ProcessServices<'_> {
 
     fn set_process_builder_memory_lock(
         &self,
-        builder: HandleValue,
+        builder: &InvocationReceiver,
         enabled: bool,
     ) -> Result<(), ProcessBuilderServiceError> {
-        let builder = self
-            .process
-            .resolve_handle::<ProcessBuilder>(builder, Rights::WRITE.union(Rights::LOCK_MEMORY))?;
+        let builder = builder
+            .resolve::<ProcessBuilder>(Rights::WRITE.union(Rights::LOCK_MEMORY))
+            .map_err(crate::kernel::process::ProcessError::from)?;
         builder.object().set_memory_lock(enabled)?;
         Ok(())
     }
 
     fn add_process_builder_handle(
         &self,
-        builder: HandleValue,
+        builder: &InvocationReceiver,
         source: HandleValue,
         purpose: u32,
         expected_kind: ObjectKind,
         requested_rights: Option<Rights>,
         operation: crate::kernel::capability::HandleTransferOperation,
     ) -> Result<(), ProcessBuilderServiceError> {
-        let builder = self
-            .process
-            .resolve_handle::<ProcessBuilder>(builder, Rights::WRITE)?;
+        let builder = builder
+            .resolve::<ProcessBuilder>(Rights::WRITE)
+            .map_err(crate::kernel::process::ProcessError::from)?;
         builder.object().add_startup_capability(
             self.process,
             StartupCapability::new(
@@ -168,17 +170,20 @@ impl ProcessBuilderServices for ProcessServices<'_> {
         Ok(())
     }
 
-    fn seal_process_builder(&self, builder: HandleValue) -> Result<(), ProcessBuilderServiceError> {
-        let builder = self
-            .process
-            .resolve_handle::<ProcessBuilder>(builder, Rights::WRITE)?;
+    fn seal_process_builder(
+        &self,
+        builder: &InvocationReceiver,
+    ) -> Result<(), ProcessBuilderServiceError> {
+        let builder = builder
+            .resolve::<ProcessBuilder>(Rights::WRITE)
+            .map_err(crate::kernel::process::ProcessError::from)?;
         builder.object().seal()?;
         Ok(())
     }
 
     fn start_process_builder(
         &self,
-        builder: HandleValue,
+        builder: &InvocationReceiver,
     ) -> Result<[HandleValue; 2], ProcessBuilderServiceError> {
         let started = crate::kernel::process::start_process_builder(self.process, builder)
             .map_err(ProcessBuilderServiceError::Start)?;
@@ -187,7 +192,7 @@ impl ProcessBuilderServices for ProcessServices<'_> {
 
     fn abort_process_builder(
         &self,
-        builder: HandleValue,
+        builder: &InvocationReceiver,
     ) -> Result<(), ProcessBuilderServiceError> {
         crate::kernel::process::abort_process_builder(self.process, builder)?;
         Ok(())
@@ -197,7 +202,7 @@ impl ProcessBuilderServices for ProcessServices<'_> {
 impl HierarchyServices for ProcessServices<'_> {
     fn create_resource_domain(
         &self,
-        parent: HandleValue,
+        parent: &InvocationReceiver,
         limits: crate::kernel::accounting::ResourceLimits,
     ) -> Result<HandleValue, crate::kernel::process::hierarchy::Error> {
         crate::kernel::process::hierarchy::create_resource_domain(self.process, parent, limits)
@@ -205,7 +210,7 @@ impl HierarchyServices for ProcessServices<'_> {
 
     fn create_task_group(
         &self,
-        factory: HandleValue,
+        factory: &InvocationReceiver,
         domain: HandleValue,
     ) -> Result<HandleValue, crate::kernel::process::hierarchy::Error> {
         crate::kernel::process::hierarchy::create_task_group(self.process, factory, domain)

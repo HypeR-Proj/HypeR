@@ -4,14 +4,70 @@
 use hyper_abi as generated;
 
 #[test]
+fn object_local_operations_decode_and_mask_failures_by_receiver_kind() {
+    use generated::NativeOperation;
+    assert_eq!(
+        generated::HYPER_NATIVE_OP_BYTE_CHANNEL_READ,
+        generated::HYPER_NATIVE_OP_CAPABILITY_CHANNEL_RECEIVE
+    );
+    let cases = [
+        (
+            generated::HYPER_NATIVE_OBJECT_BYTE_CHANNEL,
+            NativeOperation::ByteChannelRead,
+            1,
+        ),
+        (
+            generated::HYPER_NATIVE_OBJECT_CAPABILITY_CHANNEL,
+            NativeOperation::CapabilityChannelReceive,
+            3,
+        ),
+    ];
+    for (kind, expected, mask) in cases {
+        let operation = generated::HYPER_NATIVE_OP_BYTE_CHANNEL_READ;
+        assert_eq!(NativeOperation::from_raw(kind, operation), Some(expected));
+        assert_eq!(expected.receiver_kind(), Some(kind));
+        assert_eq!(expected.operation(), operation);
+        assert_eq!(
+            expected.receiver_rights(),
+            generated::HYPER_NATIVE_RIGHT_READ
+        );
+        assert_eq!(
+            generated::hyper_native_failure_result_mask(
+                kind,
+                operation,
+                generated::HYPER_NATIVE_STATUS_BUFFER_TOO_SMALL,
+            ),
+            mask
+        );
+    }
+    assert_eq!(NativeOperation::ThreadCreate.argument_count(), 6);
+    assert_eq!(NativeOperation::FileReadAt.argument_count(), 4);
+    assert_eq!(
+        NativeOperation::from_raw(u32::MAX, generated::HYPER_NATIVE_OP_HANDLE_CLOSE),
+        None
+    );
+    assert_eq!(
+        NativeOperation::from_raw(generated::HYPER_NATIVE_OBJECT_FILE, u64::MAX),
+        None
+    );
+    assert_eq!(
+        NativeOperation::from_raw(
+            generated::HYPER_NATIVE_OBJECT_FILE,
+            generated::HYPER_NATIVE_OP_HANDLE_CLOSE,
+        ),
+        Some(NativeOperation::HandleClose)
+    );
+}
+
+#[test]
 fn generated_rust_layouts_are_compiler_checked() {
     assert_eq!(core::mem::size_of::<generated::HyperNativeHandleInfo>(), 16);
     assert_eq!(
         core::mem::align_of::<generated::HyperNativeObjectBasicInfo>(),
         8
     );
-    assert_eq!(generated::HYPER_NATIVE_SYS_HANDLE_CLOSE, 1);
-    assert_eq!(generated::HYPER_NATIVE_RIGHTS_MASK, 0x7f_ffff_ffff);
+    assert_eq!(generated::HYPER_NATIVE_OP_HANDLE_CLOSE, 0);
+    assert_eq!(generated::HYPER_NATIVE_RIGHTS_MASK, 0xff_ffff_ffff);
     assert_eq!(generated::HYPER_NATIVE_SIGNAL_EVENT_SIGNALED, 1);
     assert_eq!(generated::HYPER_NATIVE_DEADLINE_INFINITE, u64::MAX);
     assert_eq!(generated::HYPER_NATIVE_HANDLE_INFO_MIN_SIZE, 16);
@@ -70,9 +126,9 @@ fn generated_rust_layouts_are_compiler_checked() {
         generated::hyper_native_object_transfer_class(u32::MAX),
         generated::HYPER_NATIVE_TRANSFER_CLASS_FORBIDDEN
     );
-    assert_eq!(generated::HYPER_NATIVE_SYS_BYTE_CHANNEL_CREATE, 12);
-    assert_eq!(generated::HYPER_NATIVE_SYS_BYTE_CHANNEL_WRITE, 13);
-    assert_eq!(generated::HYPER_NATIVE_SYS_BYTE_CHANNEL_READ, 14);
+    assert_eq!(generated::HYPER_NATIVE_OP_BYTE_CHANNEL_CREATE, 257);
+    assert_eq!(generated::HYPER_NATIVE_OP_BYTE_CHANNEL_WRITE, 256);
+    assert_eq!(generated::HYPER_NATIVE_OP_BYTE_CHANNEL_READ, 257);
     assert_eq!(generated::HYPER_NATIVE_SIGNAL_BYTE_CHANNEL_READABLE, 1);
     assert_eq!(generated::HYPER_NATIVE_SIGNAL_BYTE_CHANNEL_WRITABLE, 2);
     assert_eq!(generated::HYPER_NATIVE_SIGNAL_BYTE_CHANNEL_PEER_CLOSED, 4);
@@ -92,7 +148,7 @@ fn generated_rust_layouts_are_compiler_checked() {
     assert_eq!(generated::HYPER_NATIVE_ELF_ABI_VERSION, 0);
     assert_eq!(
         core::mem::size_of::<generated::HyperNativeLoaderStartup>(),
-        72
+        96
     );
     assert_eq!(
         generated::HYPER_NATIVE_PROCESS_STARTUP_DATA_MAX_BYTES,
@@ -139,30 +195,30 @@ fn generated_rust_layouts_are_compiler_checked() {
     assert_eq!(generated::HYPER_NATIVE_VMO_MAX_TRANSFER_BYTES, 64 * 1024);
     assert_eq!(generated::HYPER_NATIVE_CAPABILITY_CHANNEL_MAX_HANDLES, 64);
     assert_eq!(generated::HYPER_NATIVE_CONSOLE_MAX_TRANSFER_BYTES, 4 * 1024);
-    assert_eq!(generated::HYPER_NATIVE_SYS_CONSOLE_READ, 15);
-    assert_eq!(generated::HYPER_NATIVE_SYS_CONSOLE_WRITE, 16);
-    assert_eq!(generated::HYPER_NATIVE_SYS_DIRECTORY_OPEN_FILE, 17);
-    assert_eq!(generated::HYPER_NATIVE_SYS_FILE_READ_AT, 18);
-    assert_eq!(generated::HYPER_NATIVE_SYS_CAPABILITY_CHANNEL_CREATE, 19);
-    assert_eq!(generated::HYPER_NATIVE_SYS_CAPABILITY_CHANNEL_TRY_SEND, 20);
-    assert_eq!(generated::HYPER_NATIVE_SYS_CAPABILITY_CHANNEL_RECEIVE, 21);
+    assert_eq!(generated::HYPER_NATIVE_OP_CONSOLE_READ, 256);
+    assert_eq!(generated::HYPER_NATIVE_OP_CONSOLE_WRITE, 257);
+    assert_eq!(generated::HYPER_NATIVE_OP_DIRECTORY_OPEN_FILE, 256);
+    assert_eq!(generated::HYPER_NATIVE_OP_FILE_READ_AT, 256);
+    assert_eq!(generated::HYPER_NATIVE_OP_CAPABILITY_CHANNEL_CREATE, 258);
+    assert_eq!(generated::HYPER_NATIVE_OP_CAPABILITY_CHANNEL_TRY_SEND, 256);
+    assert_eq!(generated::HYPER_NATIVE_OP_CAPABILITY_CHANNEL_RECEIVE, 257);
     assert_eq!(
         core::mem::offset_of!(generated::HyperNativeLoaderStartup, loader_size),
         64
     );
-    assert_eq!(generated::HYPER_NATIVE_SYS_PROCESS_BUILDER_CREATE, 22);
-    assert_eq!(generated::HYPER_NATIVE_SYS_PROCESS_BUILDER_SET_NAME, 23);
-    assert_eq!(generated::HYPER_NATIVE_SYS_PROCESS_BUILDER_SET_DATA, 24);
-    assert_eq!(generated::HYPER_NATIVE_SYS_PROCESS_BUILDER_SET_AFFINITY, 26);
-    assert_eq!(generated::HYPER_NATIVE_SYS_PROCESS_BUILDER_ADD_HANDLE, 27);
-    assert_eq!(generated::HYPER_NATIVE_SYS_PROCESS_BUILDER_SEAL, 28);
-    assert_eq!(generated::HYPER_NATIVE_SYS_PROCESS_BUILDER_START, 29);
-    assert_eq!(generated::HYPER_NATIVE_SYS_PROCESS_BUILDER_ABORT, 30);
+    assert_eq!(generated::HYPER_NATIVE_OP_PROCESS_BUILDER_CREATE, 256);
+    assert_eq!(generated::HYPER_NATIVE_OP_PROCESS_BUILDER_SET_NAME, 256);
+    assert_eq!(generated::HYPER_NATIVE_OP_PROCESS_BUILDER_SET_DATA, 257);
+    assert_eq!(generated::HYPER_NATIVE_OP_PROCESS_BUILDER_SET_AFFINITY, 258);
+    assert_eq!(generated::HYPER_NATIVE_OP_PROCESS_BUILDER_ADD_HANDLE, 259);
+    assert_eq!(generated::HYPER_NATIVE_OP_PROCESS_BUILDER_SEAL, 260);
+    assert_eq!(generated::HYPER_NATIVE_OP_PROCESS_BUILDER_START, 261);
+    assert_eq!(generated::HYPER_NATIVE_OP_PROCESS_BUILDER_ABORT, 262);
     assert_eq!(
-        generated::HYPER_NATIVE_SYS_PENDING_VIRTUAL_MACHINE_SET_VIRTUAL_SERIAL,
-        72
+        generated::HYPER_NATIVE_OP_PENDING_VIRTUAL_MACHINE_SET_VIRTUAL_SERIAL,
+        261
     );
-    assert_eq!(generated::HYPER_NATIVE_SYS_CLOCK_GET_MONOTONIC, 73);
+    assert_eq!(generated::HYPER_NATIVE_OP_CLOCK_GET_MONOTONIC, 257);
     assert_eq!(
         core::mem::offset_of!(generated::HyperNativeVirtualMachineInfo, architecture),
         24
@@ -176,35 +232,40 @@ fn generated_rust_layouts_are_compiler_checked() {
     assert_eq!(generated::HYPER_NATIVE_STATUS_PEER_CLOSED, -15);
     assert_eq!(
         generated::hyper_native_failure_result_mask(
-            generated::HYPER_NATIVE_SYS_BYTE_CHANNEL_READ,
+            generated::HYPER_NATIVE_OBJECT_BYTE_CHANNEL,
+            generated::HYPER_NATIVE_OP_BYTE_CHANNEL_READ,
             generated::HYPER_NATIVE_STATUS_BUFFER_TOO_SMALL,
         ),
         0b1
     );
     assert_eq!(
         generated::hyper_native_failure_result_mask(
-            generated::HYPER_NATIVE_SYS_BYTE_CHANNEL_READ,
+            generated::HYPER_NATIVE_OBJECT_BYTE_CHANNEL,
+            generated::HYPER_NATIVE_OP_BYTE_CHANNEL_READ,
             generated::HYPER_NATIVE_STATUS_FAULT,
         ),
         0
     );
     assert_eq!(
         generated::hyper_native_failure_result_mask(
-            generated::HYPER_NATIVE_SYS_CAPABILITY_CHANNEL_RECEIVE,
+            generated::HYPER_NATIVE_OBJECT_CAPABILITY_CHANNEL,
+            generated::HYPER_NATIVE_OP_CAPABILITY_CHANNEL_RECEIVE,
             generated::HYPER_NATIVE_STATUS_BUFFER_TOO_SMALL,
         ),
         0b11
     );
     assert_eq!(
         generated::hyper_native_failure_result_mask(
-            generated::HYPER_NATIVE_SYS_CONSOLE_READ,
+            generated::HYPER_NATIVE_OBJECT_CONSOLE,
+            generated::HYPER_NATIVE_OP_CONSOLE_READ,
             generated::HYPER_NATIVE_STATUS_WOULD_BLOCK,
         ),
         0b1
     );
     assert_eq!(
         generated::hyper_native_failure_result_mask(
-            generated::HYPER_NATIVE_SYS_CONSOLE_WRITE,
+            generated::HYPER_NATIVE_OBJECT_CONSOLE,
+            generated::HYPER_NATIVE_OP_CONSOLE_WRITE,
             generated::HYPER_NATIVE_STATUS_WOULD_BLOCK,
         ),
         0b1

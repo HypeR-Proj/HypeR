@@ -4,13 +4,13 @@
 //! Native guest I/O service calls under borrowed Process authority.
 
 use super::ProcessServices;
-use crate::kernel::capability::HandleValue;
+use crate::kernel::capability::{HandleValue, InvocationReceiver};
 use crate::kernel::mm::user_space::UserSlice;
 
 impl crate::kernel::abi::native::GuestIoServices for ProcessServices<'_> {
     fn transfer_guest_memory(
         &self,
-        memory: HandleValue,
+        memory: &InvocationReceiver,
         write: bool,
         offset: u64,
         buffer: UserSlice,
@@ -25,39 +25,32 @@ impl crate::kernel::abi::native::GuestIoServices for ProcessServices<'_> {
     }
     fn scalar_guest_memory(
         &self,
-        memory: HandleValue,
+        memory: &InvocationReceiver,
         write: bool,
         offset: u64,
         width: u32,
         value: u64,
     ) -> Result<u64, crate::kernel::vm::service::Error> {
-        crate::kernel::vm::objects::guest_memory_access::scalar(
-            self.process,
-            memory,
-            write,
-            offset,
-            width,
-            value,
-        )
+        crate::kernel::vm::objects::guest_memory_access::scalar(memory, write, offset, width, value)
     }
     fn create_guest_interrupt(
         &self,
-        machine: HandleValue,
+        machine: &InvocationReceiver,
         irq: u32,
     ) -> Result<HandleValue, crate::kernel::vm::service::Error> {
         crate::kernel::vm::io::service::create_interrupt(self.process, machine, irq)
     }
     fn set_guest_interrupt_level(
         &self,
-        interrupt: HandleValue,
+        interrupt: &InvocationReceiver,
         asserted: bool,
     ) -> Result<(), crate::kernel::vm::service::Error> {
-        crate::kernel::vm::io::service::set_interrupt_level(self.process, interrupt, asserted)
+        crate::kernel::vm::io::service::set_interrupt_level(interrupt, asserted)
     }
 
     fn create_guest_mapping(
         &self,
-        backend: HandleValue,
+        backend: &InvocationReceiver,
         memory: HandleValue,
         frontend: u64,
     ) -> Result<(HandleValue, u64), crate::kernel::vm::service::Error> {
@@ -65,13 +58,13 @@ impl crate::kernel::abi::native::GuestIoServices for ProcessServices<'_> {
     }
     fn release_guest_mapping(
         &self,
-        mapping: HandleValue,
+        mapping: &InvocationReceiver,
     ) -> Result<(), crate::kernel::vm::service::Error> {
-        crate::kernel::vm::release_guest_mapping(self.process, mapping)
+        crate::kernel::vm::release_guest_mapping(mapping)
     }
     fn create_native_block(
         &self,
-        memory: HandleValue,
+        memory: &InvocationReceiver,
         backend: HandleValue,
         guest_base: u64,
         notification_base: u64,
@@ -88,14 +81,14 @@ impl crate::kernel::abi::native::GuestIoServices for ProcessServices<'_> {
     }
     fn activate_native_block(
         &self,
-        block: HandleValue,
+        block: &InvocationReceiver,
         readonly: bool,
     ) -> Result<(u64, bool), crate::kernel::block::service::ActivationError> {
-        crate::kernel::block::service::activate(self.process, block, readonly)
+        crate::kernel::block::service::activate(block, readonly)
     }
     fn transfer_native_block(
         &self,
-        block: HandleValue,
+        block: &InvocationReceiver,
         operation: u32,
         first: u64,
         buffer: Option<UserSlice>,
@@ -106,7 +99,7 @@ impl crate::kernel::abi::native::GuestIoServices for ProcessServices<'_> {
         &self,
         channel: HandleValue,
         buffer: HandleValue,
-        directory: HandleValue,
+        directory: &InvocationReceiver,
         path: UserSlice,
         read_only: bool,
     ) -> Result<(), crate::kernel::vfs::VfsServiceError> {
@@ -121,7 +114,7 @@ impl crate::kernel::abi::native::GuestIoServices for ProcessServices<'_> {
     }
     fn unmount_filesystem(
         &self,
-        directory: HandleValue,
+        directory: &InvocationReceiver,
         path: UserSlice,
     ) -> Result<(), crate::kernel::vfs::VfsServiceError> {
         crate::kernel::vfs::service::unmount(self.process, directory, path)
@@ -129,7 +122,7 @@ impl crate::kernel::abi::native::GuestIoServices for ProcessServices<'_> {
 
     fn create_guest_mailbox(
         &self,
-        machine: HandleValue,
+        machine: &InvocationReceiver,
         base: u64,
         irq: u32,
     ) -> Result<HandleValue, crate::kernel::vm::service::Error> {
@@ -137,21 +130,21 @@ impl crate::kernel::abi::native::GuestIoServices for ProcessServices<'_> {
     }
     fn send_guest_mailbox(
         &self,
-        mailbox: HandleValue,
+        mailbox: &InvocationReceiver,
         bytes: &[u8],
     ) -> Result<(), crate::kernel::vm::service::Error> {
-        crate::kernel::vm::io::service::send_mailbox(self.process, mailbox, bytes)
+        crate::kernel::vm::io::service::send_mailbox(mailbox, bytes)
     }
     fn receive_guest_mailbox(
         &self,
-        mailbox: HandleValue,
+        mailbox: &InvocationReceiver,
         copy: &mut dyn FnMut(&[u8]) -> Result<(), crate::kernel::vm::service::Error>,
     ) -> Result<usize, crate::kernel::vm::service::Error> {
-        crate::kernel::vm::io::service::receive_mailbox(self.process, mailbox, copy)
+        crate::kernel::vm::io::service::receive_mailbox(mailbox, copy)
     }
     fn create_guest_notification(
         &self,
-        frontend: HandleValue,
+        frontend: &InvocationReceiver,
         backend: HandleValue,
         frontend_base: u64,
         backend_base: u64,
@@ -170,39 +163,27 @@ impl crate::kernel::abi::native::GuestIoServices for ProcessServices<'_> {
     }
     fn access_guest_notification(
         &self,
-        machine: HandleValue,
+        machine: &InvocationReceiver,
         original: u64,
         operation: u32,
         value: u32,
     ) -> Result<u32, crate::kernel::vm::service::Error> {
-        crate::kernel::vm::io::service::access_notification(
-            self.process,
-            machine,
-            original,
-            operation,
-            value,
-        )
+        crate::kernel::vm::io::service::access_notification(machine, original, operation, value)
     }
     fn configure_guest_notification(
         &self,
-        machine: HandleValue,
+        machine: &InvocationReceiver,
         original: u64,
         base: u64,
         flags: u32,
     ) -> Result<(), crate::kernel::vm::service::Error> {
-        crate::kernel::vm::io::service::configure_notification(
-            self.process,
-            machine,
-            original,
-            base,
-            flags,
-        )
+        crate::kernel::vm::io::service::configure_notification(machine, original, base, flags)
     }
     fn control_guest_notification(
         &self,
-        notification: HandleValue,
+        notification: &InvocationReceiver,
         operation: u32,
     ) -> Result<u32, crate::kernel::vm::service::Error> {
-        crate::kernel::vm::io::service::control_notification(self.process, notification, operation)
+        crate::kernel::vm::io::service::control_notification(notification, operation)
     }
 }

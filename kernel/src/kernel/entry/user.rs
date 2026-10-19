@@ -25,8 +25,7 @@ use super::services::ProcessServices;
 use crate::kernel::abi::native;
 use crate::kernel::mm::user_space::{ActiveNativeAddressSpace, UserAddress};
 use crate::kernel::process::{
-    AbiFamily, ExecutionRoute, Process, RunAdmissionError, TerminalReason, UserExecution,
-    UserThread,
+    Process, RunAdmissionError, TerminalReason, UserExecution, UserThread,
 };
 use crate::kernel::task::scheduler;
 
@@ -53,13 +52,6 @@ impl UserSession {
         if process.id() != thread.process_id() {
             crate::kernel::crash::fatal(format_args!(
                 "HypeR: native-user Process ownership is inconsistent"
-            ));
-        }
-        if process.image().family() != AbiFamily::Native
-            || process.image().route() != ExecutionRoute::NativeKernel
-        {
-            crate::kernel::crash::fatal(format_args!(
-                "HypeR: native-user Thread has an invalid execution route"
             ));
         }
         (Self { thread, process }, execution)
@@ -233,7 +225,7 @@ unsafe impl NativeCallHandler for NativeMachineSession<'_> {
             CONFIG_ARCH_AARCH64,
             all(feature = "kernel-test", feature = "kernel-self-test")
         ))]
-        self_test::hold_syscall(&self.session.thread, invocation);
+        self_test::hold_syscall(&self.session.process, &self.session.thread, invocation);
         if self.session.stop_requested() {
             crate::hal::irq::mask_local();
             return NativeCallAction::Stop;

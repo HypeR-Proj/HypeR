@@ -3,28 +3,33 @@
 
 //! Native console service calls under borrowed Process authority.
 
+use crate::kernel::capability::InvocationReceiver;
+
 use super::ProcessServices;
 use crate::kernel::abi::native::{ConsoleServiceError, ConsoleServices};
-use crate::kernel::capability::{HandleValue, Rights};
+use crate::kernel::capability::Rights;
 use crate::kernel::mm::user_space::UserSlice;
 use crate::kernel::process::ProcessError;
 
 impl ConsoleServices for ProcessServices<'_> {
-    fn discard_console_input(&self, value: HandleValue) -> Result<usize, ConsoleServiceError> {
-        let console = self
-            .process
-            .resolve_handle::<crate::kernel::device::console::SystemConsole>(value, Rights::READ)?;
+    fn discard_console_input(
+        &self,
+        value: &InvocationReceiver,
+    ) -> Result<usize, ConsoleServiceError> {
+        let console = value
+            .resolve::<crate::kernel::device::console::SystemConsole>(Rights::READ)
+            .map_err(crate::kernel::process::ProcessError::from)?;
         Ok(console.object().discard_input()?)
     }
 
     fn read_console(
         &self,
-        value: HandleValue,
+        value: &InvocationReceiver,
         destination: Option<UserSlice>,
     ) -> Result<usize, ConsoleServiceError> {
-        let console = self
-            .process
-            .resolve_handle::<crate::kernel::device::console::SystemConsole>(value, Rights::READ)?;
+        let console = value
+            .resolve::<crate::kernel::device::console::SystemConsole>(Rights::READ)
+            .map_err(crate::kernel::process::ProcessError::from)?;
         let Some(destination) = destination else {
             return Ok(0);
         };
@@ -46,15 +51,12 @@ impl ConsoleServices for ProcessServices<'_> {
 
     fn write_console(
         &self,
-        value: HandleValue,
+        value: &InvocationReceiver,
         source: Option<UserSlice>,
     ) -> Result<usize, ConsoleServiceError> {
-        let console = self
-            .process
-            .resolve_handle::<crate::kernel::device::console::SystemConsole>(
-                value,
-                Rights::WRITE,
-            )?;
+        let console = value
+            .resolve::<crate::kernel::device::console::SystemConsole>(Rights::WRITE)
+            .map_err(crate::kernel::process::ProcessError::from)?;
         let Some(source) = source else {
             return Ok(0);
         };

@@ -4,15 +4,15 @@
 //! Ordered schema admission and scalar namespace validation.
 
 mod handles;
+mod invocations;
 mod records;
-mod syscalls;
 
 use super::names::upper_snake;
 use super::{Error, schema};
+use invocations::validate_invocations;
 use records::validate_records;
 use schema::{AbiSchema, TransferClass};
 use std::collections::BTreeSet;
-use syscalls::validate_syscalls;
 
 pub fn validate(schema: &AbiSchema) -> Result<(), Error> {
     if schema.revision != 0 {
@@ -25,7 +25,7 @@ pub fn validate(schema: &AbiSchema) -> Result<(), Error> {
     validate_signals(schema)?;
     validate_constants(schema)?;
     validate_records(schema)?;
-    validate_syscalls(schema, supported_rights)?;
+    validate_invocations(schema, supported_rights)?;
     validate_semantic_rules(schema)?;
     validate_generated_constant_names(schema)
 }
@@ -217,7 +217,7 @@ fn validate_constants(schema: &AbiSchema) -> Result<(), Error> {
 ///
 /// Category-local names are insufficient here because free-form constants use
 /// the root `HYPER_NATIVE_` namespace and can otherwise collide with generated
-/// feature, status, object, right, signal, or syscall definitions.
+/// feature, status, object, right, signal, or invocation definitions.
 fn validate_generated_constant_names(schema: &AbiSchema) -> Result<(), Error> {
     let mut names = BTreeSet::new();
     for reserved in [
@@ -271,8 +271,8 @@ fn validate_generated_constant_names(schema: &AbiSchema) -> Result<(), Error> {
             upper_snake(record.name)
         ))?;
     }
-    for syscall in schema.syscalls {
-        insert(format!("HYPER_NATIVE_SYS_{}", upper_snake(syscall.name)))?;
+    for invocation in schema.invocations {
+        insert(format!("HYPER_NATIVE_OP_{}", upper_snake(invocation.name)))?;
     }
     Ok(())
 }

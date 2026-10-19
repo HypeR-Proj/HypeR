@@ -19,9 +19,9 @@ pub(crate) use handle::{
     HandleError, HandleFlags, HandleInfo, HandleReservation, HandleScanCursor, HandleSidecar,
     HandleSidecarPlan, HandleSnapshot, HandleSnapshotPage, HandleTable, HandleTableStoragePlan,
     HandleTableStorageSnapshot, HandleTransferClaim, HandleTransferOperation,
-    HandleTransferRequest, HandleTransferRoute, HandleTransferStorage, HandleValue, PreparedHandle,
-    ResolvedObject, ResolvedWaitable, RetiredDirectHandleTransfer,
-    RetiredHandleBatchReservationStorage,
+    HandleTransferRequest, HandleTransferRoute, HandleTransferStorage, HandleValue,
+    InvocationReceiver, PreparedHandle, ResolvedObject, ResolvedWaitable,
+    RetiredDirectHandleTransfer, RetiredHandleBatchReservationStorage,
 };
 #[cfg(test)]
 pub(crate) use handle::{HandleTableLockOrder, InTransitHandleBatch};

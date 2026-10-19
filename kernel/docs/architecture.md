@@ -554,8 +554,8 @@ rechecks stop, pending scheduling, ASID and current mappings before activating
 on the current CPU. Lower-user faults and preemption still capture owned state
 and unwind the machine run. RISC-V uses private Sv39 roots, a dedicated U-mode
 trap vector and full integer/FP state capture. x86-64 currently rejects
-native-user entry as unsupported. Process lifetime, handles, rights, syscall
-numbers, bootstrap ELF admission, residency, and resource accounting remain in
+native-user entry as unsupported. Process lifetime, handles, rights, object-local
+operation policy, bootstrap ELF admission, residency and resource accounting remain in
 the kernel. Application ELF parsing, stack encoding and relocation belong to
 `bootstrap/stage1/userspace-loader`, `lib/dynamic-loader/elf`, `lib/dynamic-loader` and
 the SDK runtime. Descendant process builders explicitly select a loader File;

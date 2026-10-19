@@ -4,7 +4,9 @@
 //! Capability checks for physical assignment; no arbitrary host address input.
 
 use super::{Assignment, DeviceAssignmentAuthority, PhysicalDevice};
-use crate::kernel::capability::{HandleFlags, HandleValue, PreparedHandle, Rights};
+use crate::kernel::capability::{
+    HandleFlags, HandleValue, InvocationReceiver, PreparedHandle, Rights,
+};
 use crate::kernel::mm::user_space::VmoObject;
 use crate::kernel::object::{KernelObject, ObjectPublication};
 use crate::kernel::process::Process;
@@ -32,7 +34,7 @@ impl From<super::model::SelectionError> for MatchError {
 
 pub(crate) fn claim_matching(
     process: &Process,
-    authority: HandleValue,
+    authority: &InvocationReceiver,
     profile: u32,
     identity_kind: u32,
     identity: &str,
@@ -52,8 +54,9 @@ pub(crate) fn claim_matching(
     {
         return Err(Error::InvalidArgument.into());
     }
-    process
-        .resolve_handle::<DeviceAssignmentAuthority>(authority, Rights::ASSIGN_DEVICE)
+    authority
+        .resolve::<DeviceAssignmentAuthority>(Rights::ASSIGN_DEVICE)
+        .map_err(crate::kernel::process::ProcessError::from)
         .map_err(Error::from)?;
     if !super::model::transport_profile(profile) {
         return Err(Error::NotSupported.into());
@@ -105,11 +108,12 @@ pub(crate) struct DmaExtent {
 
 pub(crate) fn claim(
     process: &Process,
-    authority: HandleValue,
+    authority: &InvocationReceiver,
     index: u32,
 ) -> Result<HandleValue, Error> {
-    let _authority =
-        process.resolve_handle::<DeviceAssignmentAuthority>(authority, Rights::ASSIGN_DEVICE)?;
+    let _authority = authority
+        .resolve::<DeviceAssignmentAuthority>(Rights::ASSIGN_DEVICE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let reservation = process.reserve_handles::<1>()?;
     let (reservation, prepared) = super::transaction::prepare(
         reservation,
@@ -137,40 +141,43 @@ pub(crate) fn claim(
         .map(|handles| handles[0])
         .map_err(|failure| failure.error.into())
 }
-pub(crate) fn dma_fault_info(process: &Process, device: HandleValue) -> Result<[u8; 40], Error> {
-    let device = process
-        .resolve_handle::<PhysicalDevice>(device, Rights::INSPECT.union(Rights::ASSIGN_DEVICE))?;
+pub(crate) fn dma_fault_info(device: &InvocationReceiver) -> Result<[u8; 40], Error> {
+    let device = device
+        .resolve::<PhysicalDevice>(Rights::INSPECT.union(Rights::ASSIGN_DEVICE))
+        .map_err(crate::kernel::process::ProcessError::from)?;
     Ok(device.object().events.snapshot())
 }
 
-pub(crate) fn profile_info(process: &Process, device: HandleValue) -> Result<[u8; 32], Error> {
-    let device = process.resolve_handle::<PhysicalDevice>(device, Rights::INSPECT)?;
+pub(crate) fn profile_info(device: &InvocationReceiver) -> Result<[u8; 32], Error> {
+    let device = device
+        .resolve::<PhysicalDevice>(Rights::INSPECT)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     Ok(device.object().profile_info())
 }
-pub(crate) fn resource_info(
-    process: &Process,
-    device: HandleValue,
-    index: u32,
-) -> Result<[u8; 32], Error> {
-    let device = process.resolve_handle::<PhysicalDevice>(device, Rights::INSPECT)?;
+pub(crate) fn resource_info(device: &InvocationReceiver, index: u32) -> Result<[u8; 32], Error> {
+    let device = device
+        .resolve::<PhysicalDevice>(Rights::INSPECT)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     device.object().resource_info(index).map_err(classify)
 }
 
-pub(crate) fn info(process: &Process, device: HandleValue) -> Result<Info, Error> {
-    Ok(process
-        .resolve_handle::<PhysicalDevice>(device, Rights::INSPECT)?
+pub(crate) fn info(device: &InvocationReceiver) -> Result<Info, Error> {
+    Ok(device
+        .resolve::<PhysicalDevice>(Rights::INSPECT)
+        .map_err(crate::kernel::process::ProcessError::from)?
         .object()
         .info())
 }
 pub(crate) fn dma_extent(
     process: &Process,
-    authority: HandleValue,
+    authority: &InvocationReceiver,
     vmo: HandleValue,
     offset: u64,
     length: u64,
 ) -> Result<DmaExtent, Error> {
-    let _authority =
-        process.resolve_handle::<DeviceAssignmentAuthority>(authority, Rights::MAP_DMA)?;
+    let _authority = authority
+        .resolve::<DeviceAssignmentAuthority>(Rights::MAP_DMA)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let vmo = process.resolve_handle::<VmoObject>(vmo, Rights::READ.union(Rights::MAP))?;
     let storage = vmo.object().writable().ok_or(Error::InvalidArgument)?;
     let first = super::model::contiguous_extent(
@@ -199,15 +206,14 @@ pub(crate) fn dma_extent(
 }
 pub(crate) fn assign(
     process: &Process,
-    pending: HandleValue,
+    pending: &InvocationReceiver,
     device: HandleValue,
     base: u64,
     irq: u32,
 ) -> Result<(), Error> {
-    let pending = process.resolve_handle::<crate::kernel::vm::objects::PendingVirtualMachine>(
-        pending,
-        Rights::WRITE,
-    )?;
+    let pending = pending
+        .resolve::<crate::kernel::vm::objects::PendingVirtualMachine>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let device = process.resolve_handle::<PhysicalDevice>(device, Rights::ASSIGN_DEVICE)?;
     let assignment = Assignment::new(
         device.into_operation_pin().into_vm_device_binding(),
@@ -233,14 +239,14 @@ pub(crate) const fn classify(error: super::Error) -> Error {
 }
 
 pub(crate) fn firmware_read(
-    process: &Process,
-    authority: HandleValue,
+    authority: &InvocationReceiver,
     node: u32,
     field: u32,
     name: &str,
 ) -> Result<alloc::vec::Vec<u8>, MatchError> {
-    process
-        .resolve_handle::<DeviceAssignmentAuthority>(authority, Rights::INSPECT)
+    authority
+        .resolve::<DeviceAssignmentAuthority>(Rights::INSPECT)
+        .map_err(crate::kernel::process::ProcessError::from)
         .map_err(Error::from)?;
     super::super::platform_bus::catalogue()
         .map_err(classify)?
@@ -249,11 +255,13 @@ pub(crate) fn firmware_read(
 
 pub(crate) fn claim_bundle(
     process: &Process,
-    authority: HandleValue,
+    authority: &InvocationReceiver,
     entries: &[(u32, u32, u64)],
     irq_node: u32,
 ) -> Result<HandleValue, Error> {
-    process.resolve_handle::<DeviceAssignmentAuthority>(authority, Rights::ASSIGN_DEVICE)?;
+    authority
+        .resolve::<DeviceAssignmentAuthority>(Rights::ASSIGN_DEVICE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let reservation = process.reserve_handles::<1>()?;
     let (reservation, prepared) = super::transaction::prepare(
         reservation,
@@ -278,34 +286,35 @@ pub(crate) fn claim_bundle(
         .map_err(|failure| failure.error.into())
 }
 pub(crate) fn mmio(
-    process: &Process,
-    device: HandleValue,
+    device: &InvocationReceiver,
     offset: u64,
     width: u32,
     write: bool,
     value: u64,
 ) -> Result<u64, Error> {
-    process
-        .resolve_handle::<PhysicalDevice>(device, if write { Rights::WRITE } else { Rights::READ })?
+    device
+        .resolve::<PhysicalDevice>(if write { Rights::WRITE } else { Rights::READ })
+        .map_err(crate::kernel::process::ProcessError::from)?
         .object()
         .mmio(offset, width, write, value)
         .map_err(classify)
 }
-pub(crate) fn irq_pending(process: &Process, device: HandleValue) -> Result<u64, Error> {
-    process
-        .resolve_handle::<PhysicalDevice>(device, Rights::WAIT)?
+pub(crate) fn irq_pending(device: &InvocationReceiver) -> Result<u64, Error> {
+    device
+        .resolve::<PhysicalDevice>(Rights::WAIT)
+        .map_err(crate::kernel::process::ProcessError::from)?
         .object()
         .irq_pending()
         .map_err(classify)
 }
 pub(crate) fn irq_complete(
-    process: &Process,
-    device: HandleValue,
+    device: &InvocationReceiver,
     sequence: u64,
     asserted: bool,
 ) -> Result<(), Error> {
-    process
-        .resolve_handle::<PhysicalDevice>(device, Rights::ACK_INTERRUPT)?
+    device
+        .resolve::<PhysicalDevice>(Rights::ACK_INTERRUPT)
+        .map_err(crate::kernel::process::ProcessError::from)?
         .object()
         .irq_complete(sequence, asserted)
         .map_err(classify)

@@ -95,7 +95,7 @@ pub(super) fn require_record_field(
     record: &schema::Record,
     field: &str,
     kind: FieldKind,
-    syscall: &schema::Syscall,
+    invocation: &schema::Invocation,
     argument: &schema::Argument,
 ) -> Result<(), Error> {
     if record
@@ -106,8 +106,8 @@ pub(super) fn require_record_field(
         Ok(())
     } else {
         invalid(format!(
-            "syscall {} memory argument {} names invalid {} field {}",
-            syscall.name, argument.name, record.name, field
+            "invocation {} memory argument {} names invalid {} field {}",
+            invocation.name, argument.name, record.name, field
         ))
     }
 }

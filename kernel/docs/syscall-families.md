@@ -3,71 +3,46 @@ SPDX-FileCopyrightText: 2026 roolrz
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# Native syscall families
+# Native object interfaces
 
-The compiler-checked [schema](../../sdk/abi/schema/native.rs) owns syscall
-numbers, arguments, completion and blocking classes. Numbers identify operations;
-they are not an object taxonomy. Related operations need not occupy adjacent
-numbers. Renumbering alone does not simplify the kernel or SDK.
+The compiler-checked [schema](../../sdk/abi/schema/native.rs) owns receiver kinds,
+object-local selectors, arguments, required rights and completion classes.
+Every trap names one receiver handle. Common handle and object operations share
+selectors across kinds; other operations are decoded using the receiver kind.
+The [machine contract](syscall-abi.md#native-machine-abi) defines the registers.
 
-## Group by contract, not by count
+## Group by authority and ownership
 
-The current interface separates these responsibilities:
-
-| Family | Boundary that must remain explicit |
+| Interface | Boundary that remains explicit |
 | --- | --- |
 | Handles and object observation | Process-local authority versus object identity and waitable state |
+| ExecutionContext | Current execution and waits, bound to the calling Process |
+| ObjectFactory | Local object construction charged to the calling Process |
+| SystemInfo | Read-only ABI, configuration and clock queries |
 | Process builders and task accounting | Reversible construction versus publication, execution and stop |
-| Threads, atomic waits and WaitSets | Creation versus runnable admission; distinct wait ownership and completion |
+| Threads and WaitSets | Creation versus runnable admission; distinct wait ownership and completion |
 | Directories and files | Namespace authority versus an opened file; positional data versus metadata |
 | VMO and VMAR | Backing ownership and provenance versus address-space placement |
 | Pending VM, VM and vCPU | Construction versus installed lifecycle; per-vCPU execution and exit completion |
 | Physical devices and DMA | Claim authority, mapped resources and lifetime-bound physical access |
-| Guest transport and block service | Memory grants, notifications and service publication are separate capabilities |
-| Inspectors and clocks | Authority-scoped observation versus time reads |
+| Guest transport and block service | Memory grants, notifications and service publication remain separate capabilities |
 
-A shared noun is insufficient reason for an `object_control(op, bytes)` syscall.
-Such a dispatcher still needs all the operation-specific permission, size,
-blocking and cancellation checks, but hides them behind another discriminator.
-In particular, immediate-call admission must remain conservative for every
-operation: a family-level allowlist must not make a later blocking operation
-legal inside masked exception entry.
+The target selector removes repeated receiver arguments, but does not erase typed
+contracts. Each operation retains explicit argument shapes, rights, buffer bounds,
+reserved-zero validation, blocking and cancellation behavior. The kernel captures
+receiver authority once, then dispatches on its kind and operation. All calls run
+on the Thread's kernel stack with ordinary IRQ delivery, including blocking calls.
 
-## Consolidation candidates reviewed
+Directory open options remain a path-resolution policy; they do not define a new
+object kind. `directory_remove_if` additionally checks expected node identity and
+must preserve that lookup/remove race protection. File, directory and VM queries
+return distinct typed records. Sharing record copying is useful; replacing these
+records with an untyped byte-control API is not required by object invocation.
+Task and object inspectors likewise retain separately typed visibility grants.
 
-Directory open variants are the clearest overlap. `directory_open_file` and
-`directory_open_file_with_options` share the object and path model; the latter
-adds atomic create/truncate/exclusive behavior. The SDK can offer one options
-builder while retaining typed wire entry points. A future wire consolidation
-must preserve the old operation's rejection of nonzero reserved arguments and
-validate options before namespace mutation. Similarly, no-follow directory
-opening is a path-resolution policy, not a new object type.
-
-`directory_remove_if` additionally checks the expected node identity. It is not
-interchangeable with unconditional removal: erasing that check recreates a
-lookup/remove race. Consolidation would have to represent the condition
-explicitly, including whether an identity of zero means no condition.
-
-Task and object inspector derivations look similar but produce different
-visibility capabilities. Their target Process, TaskGroup and ResourceDomain
-handles are separately typed and validated. A shared internal parser already
-handles their wire arguments; replacing the public calls with an untyped
-selector would not remove the authority checks.
-
-File, directory and VM information calls produce different typed records.
-They must not be collapsed into a generic query solely because they all copy
-records to userspace. Shared record validation and copying are the appropriate
-internal reuse boundary. Likewise, file locking/unlocking and atomic wait/wake
-have different blocking and completion behavior despite sharing a resource.
-
-The review retains existing numbers and typed operations. The directory-open
-family is a valid future consolidation candidate, but no application behavior
-currently requires a wire migration. Prefer one coherent SDK API where useful;
-do not accumulate another parallel family just to rename the existing one.
-Any later consolidation must update schema, generated C/Rust bindings, kernel
-routing, installed-SDK consumers and contract tests together. Pre-release ABI
-revision remains zero; that does not make partial producer/consumer migrations
-safe.
+Schema, generated C/Rust bindings, kernel routing, installed SDK consumers and
+contract tests must change together. Pre-release ABI revision remains zero; it
+does not permit partial producer/consumer migrations.
 
 ## Reserved executable conversion
 

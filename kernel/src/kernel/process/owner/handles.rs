@@ -7,7 +7,7 @@
 //! Prepared storage and detached owners are released only after both locks exit.
 
 use super::super::lifecycle::{LifecycleError, ProcessPhase};
-use super::super::user_thread::{UserThread, UserThreadObject};
+use super::super::user_thread::UserThread;
 use super::handle_transactions::{
     HandlePublishFailure, PreparedHandleConsumption, PreparedProcessHandleTransfer,
     ProcessHandleBatchReservation, ProcessHandleReservation,
@@ -22,7 +22,7 @@ use crate::kernel::capability::{
     HandleInfo, HandleReservation, HandleScanCursor, HandleSidecar, HandleSidecarPlan,
     HandleSnapshotPage, HandleTable, HandleTableStoragePlan, HandleTableStorageSnapshot,
     HandleTransferClaim, HandleTransferRequest, HandleTransferRoute, HandleTransferStorage,
-    HandleValue, PreparedHandle, ResolvedObject, ResolvedWaitable, Rights,
+    HandleValue, InvocationReceiver, PreparedHandle, ResolvedObject, ResolvedWaitable, Rights,
 };
 use crate::kernel::object::{KernelObject, Koid, ObjectPublication, UserExportableObject};
 use hyper::mm::FallibleArc;
@@ -474,6 +474,19 @@ impl Process {
         self.reclaim_handle_pages();
     }
 
+    pub(crate) fn resolve_invocation(
+        &self,
+        value: HandleValue,
+    ) -> Result<InvocationReceiver, ProcessError> {
+        self.inner.state.with(|state| {
+            require_handle_phase(state.lifecycle.phase())?;
+            Ok(self
+                .inner
+                .handles
+                .with(|table| table.resolve_invocation(value))?)
+        })
+    }
+
     pub(crate) fn resolve_handle<T: KernelObject>(
         &self,
         value: HandleValue,
@@ -742,18 +755,6 @@ impl Process {
             Ok(values) => Ok(values[0]),
             Err(failure) => Err(failure.error),
         }
-    }
-
-    /// Resolves a thread handle into the same canonical kernel object owner.
-    pub(crate) fn resolve_user_thread_handle(
-        &self,
-        value: HandleValue,
-        rights: Rights,
-    ) -> Result<UserThread, ProcessError> {
-        let resolved = self.resolve_handle::<UserThreadObject>(value, rights)?;
-        Ok(UserThread::from_operation_pin(
-            resolved.into_operation_pin(),
-        ))
     }
 
     /// Publishes a same-kind object pair in one handle-table transaction.

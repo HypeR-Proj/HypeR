@@ -51,11 +51,6 @@ pub(in crate::kernel::abi::native) fn sys_clock_get_monotonic(
 }
 
 #[inline(never)]
-pub(in crate::kernel::abi::native) fn sys_not_supported() -> NativeResult {
-    failure(HYPER_NATIVE_STATUS_NOT_SUPPORTED)
-}
-
-#[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_clock_get_realtime(
     arguments: &Arguments,
 ) -> NativeAction {

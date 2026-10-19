@@ -4,27 +4,21 @@
 //! Native device service calls under borrowed Process authority.
 
 use super::ProcessServices;
-use crate::kernel::capability::HandleValue;
+use crate::kernel::capability::{HandleValue, InvocationReceiver};
 
 impl crate::kernel::abi::native::DeviceServices for ProcessServices<'_> {
     fn device_firmware_read(
         &self,
-        authority: HandleValue,
+        authority: &InvocationReceiver,
         node: u32,
         field: u32,
         name: &str,
     ) -> Result<alloc::vec::Vec<u8>, crate::kernel::device::assigned::service::MatchError> {
-        crate::kernel::device::assigned::service::firmware_read(
-            self.process,
-            authority,
-            node,
-            field,
-            name,
-        )
+        crate::kernel::device::assigned::service::firmware_read(authority, node, field, name)
     }
     fn device_claim_bundle(
         &self,
-        authority: HandleValue,
+        authority: &InvocationReceiver,
         entries: &[(u32, u32, u64)],
         irq_node: u32,
     ) -> Result<HandleValue, crate::kernel::vm::service::Error> {
@@ -37,64 +31,52 @@ impl crate::kernel::abi::native::DeviceServices for ProcessServices<'_> {
     }
     fn device_mmio(
         &self,
-        device: HandleValue,
+        device: &InvocationReceiver,
         offset: u64,
         width: u32,
         write: bool,
         value: u64,
     ) -> Result<u64, crate::kernel::vm::service::Error> {
-        crate::kernel::device::assigned::service::mmio(
-            self.process,
-            device,
-            offset,
-            width,
-            write,
-            value,
-        )
+        crate::kernel::device::assigned::service::mmio(device, offset, width, write, value)
     }
     fn device_irq_pending(
         &self,
-        device: HandleValue,
+        device: &InvocationReceiver,
     ) -> Result<u64, crate::kernel::vm::service::Error> {
-        crate::kernel::device::assigned::service::irq_pending(self.process, device)
+        crate::kernel::device::assigned::service::irq_pending(device)
     }
     fn device_irq_complete(
         &self,
-        device: HandleValue,
+        device: &InvocationReceiver,
         sequence: u64,
         asserted: bool,
     ) -> Result<(), crate::kernel::vm::service::Error> {
-        crate::kernel::device::assigned::service::irq_complete(
-            self.process,
-            device,
-            sequence,
-            asserted,
-        )
+        crate::kernel::device::assigned::service::irq_complete(device, sequence, asserted)
     }
 
     fn device_dma_fault_info(
         &self,
-        device: HandleValue,
+        device: &InvocationReceiver,
     ) -> Result<[u8; 40], crate::kernel::vm::service::Error> {
-        crate::kernel::device::assigned::service::dma_fault_info(self.process, device)
+        crate::kernel::device::assigned::service::dma_fault_info(device)
     }
 
     fn device_profile_info(
         &self,
-        device: HandleValue,
+        device: &InvocationReceiver,
     ) -> Result<[u8; 32], crate::kernel::vm::service::Error> {
-        crate::kernel::device::assigned::service::profile_info(self.process, device)
+        crate::kernel::device::assigned::service::profile_info(device)
     }
     fn device_resource_info(
         &self,
-        device: HandleValue,
+        device: &InvocationReceiver,
         index: u32,
     ) -> Result<[u8; 32], crate::kernel::vm::service::Error> {
-        crate::kernel::device::assigned::service::resource_info(self.process, device, index)
+        crate::kernel::device::assigned::service::resource_info(device, index)
     }
     fn claim_device_matching(
         &self,
-        authority: HandleValue,
+        authority: &InvocationReceiver,
         profile: u32,
         identity_kind: u32,
         identity: &str,
@@ -109,20 +91,20 @@ impl crate::kernel::abi::native::DeviceServices for ProcessServices<'_> {
     }
     fn claim_device(
         &self,
-        authority: HandleValue,
+        authority: &InvocationReceiver,
         index: u32,
     ) -> Result<HandleValue, crate::kernel::vm::service::Error> {
         crate::kernel::device::assigned::service::claim(self.process, authority, index)
     }
     fn physical_device_info(
         &self,
-        device: HandleValue,
+        device: &InvocationReceiver,
     ) -> Result<crate::kernel::device::assigned::Info, crate::kernel::vm::service::Error> {
-        crate::kernel::device::assigned::service::info(self.process, device)
+        crate::kernel::device::assigned::service::info(device)
     }
     fn vmo_dma_extent(
         &self,
-        authority: HandleValue,
+        authority: &InvocationReceiver,
         vmo: HandleValue,
         offset: u64,
         length: u64,
@@ -137,7 +119,7 @@ impl crate::kernel::abi::native::DeviceServices for ProcessServices<'_> {
     }
     fn assign_physical_device(
         &self,
-        pending: HandleValue,
+        pending: &InvocationReceiver,
         device: HandleValue,
         base: u64,
         irq: u32,

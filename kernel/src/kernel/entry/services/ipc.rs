@@ -3,6 +3,8 @@
 
 //! Native ipc service calls under borrowed Process authority.
 
+use crate::kernel::capability::InvocationReceiver;
+
 use super::ProcessServices;
 use crate::kernel::abi::native::IpcServices;
 use crate::kernel::capability::HandleValue;
@@ -24,7 +26,7 @@ impl IpcServices for ProcessServices<'_> {
 
     fn write_byte_channel(
         &self,
-        endpoint: HandleValue,
+        endpoint: &InvocationReceiver,
         bytes: Option<UserSlice>,
     ) -> Result<(), ByteChannelServiceError> {
         crate::kernel::ipc::byte_channel_write(self.process, endpoint, bytes)
@@ -32,7 +34,7 @@ impl IpcServices for ProcessServices<'_> {
 
     fn read_byte_channel(
         &self,
-        endpoint: HandleValue,
+        endpoint: &InvocationReceiver,
         bytes: Option<UserSlice>,
     ) -> Result<ByteChannelReadOutcome, ByteChannelServiceError> {
         crate::kernel::ipc::byte_channel_read(self.process, endpoint, bytes)
@@ -40,7 +42,7 @@ impl IpcServices for ProcessServices<'_> {
 
     fn try_send_capability_channel(
         &self,
-        endpoint: HandleValue,
+        endpoint: &InvocationReceiver,
         bytes: Option<UserSlice>,
         dispositions: Option<UserSlice>,
     ) -> Result<(), CapabilityChannelServiceError> {
@@ -49,7 +51,7 @@ impl IpcServices for ProcessServices<'_> {
 
     fn receive_capability_channel(
         &self,
-        endpoint: HandleValue,
+        endpoint: &InvocationReceiver,
         deadline: u64,
         bytes: Option<UserSlice>,
         slots: Option<UserSlice>,

@@ -65,22 +65,22 @@ pub(in super::super) fn render_reference(schema: &AbiSchema) -> String {
     }
     output.push('\n');
     output.push_str(
-        "## Syscalls\n\n\
+        "## Invocations\n\n\
          Auxiliary result registers are defined only for `ok` unless a result is annotated with\n\
          `also-on=<status>`. Element-count memory ranges are checked as count times the declared\n\
          element size before any user-memory access.\n\n\
-         | Number | Name | Arguments | Results | Capability effects | User memory | Execution | Audit |\n\
-         | ---: | --- | --- | --- | --- | --- | --- | --- |\n",
+         | Receiver | Operation | Name | Arguments | Results | Capability effects | User memory | Execution | Audit |\n\
+         | --- | ---: | --- | --- | --- | --- | --- | --- | --- |\n",
     );
-    for syscall in schema.syscalls {
+    for invocation in schema.invocations {
         let arguments = joined_values(
-            syscall
+            invocation
                 .arguments
                 .iter()
                 .map(|value| format!("`{}: {}`", value.name, value_kind_name(value.kind))),
         );
-        let results = joined_values(syscall.results.iter().map(|value| {
-            let failures = joined_failure_statuses(syscall, value.name);
+        let results = joined_values(invocation.results.iter().map(|value| {
+            let failures = joined_failure_statuses(invocation, value.name);
             format!(
                 "`{}: {}{}`",
                 value.name,
@@ -89,44 +89,48 @@ pub(in super::super) fn render_reference(schema: &AbiSchema) -> String {
             )
         }));
         let capability_effects = joined_values(
-            syscall
-                .arguments
-                .iter()
+            invocation
+                .inputs()
                 .filter_map(|argument| {
                     argument
                         .handle
                         .map(|handle| describe_handle_argument(argument.name, handle))
                 })
-                .chain(syscall.results.iter().filter_map(|result| {
+                .chain(invocation.results.iter().filter_map(|result| {
                     result
                         .handle
                         .map(|handle| describe_produced_handle(result.name, handle))
                 })),
         );
-        let user_memory = joined_values(syscall.arguments.iter().filter_map(|argument| {
+        let user_memory = joined_values(invocation.arguments.iter().filter_map(|argument| {
             argument
                 .memory
                 .map(|memory| describe_user_memory(argument.name, memory))
         }));
         let execution = format!(
             "`blocking={:?}, cancellation={:?}, restart={:?}, completion={:?}, flags={:?}`",
-            syscall.blocking,
-            syscall.cancellation,
-            syscall.restart,
-            syscall.completion,
-            syscall.flags
+            invocation.blocking,
+            invocation.cancellation,
+            invocation.restart,
+            invocation.completion,
+            invocation.flags
         );
         let _ = writeln!(
             output,
-            "| {} | `{}` | {} | {} | {} | {} | {} | `{:?}` |",
-            syscall.number,
-            syscall.name,
+            "| {} | {} | `{}` | {} | {} | {} | {} | {} | `{:?}` |",
+            invocation
+                .receiver
+                .handle
+                .map(|handle| describe_handle_argument(invocation.receiver.name, handle))
+                .unwrap_or_default(),
+            invocation.operation,
+            invocation.name,
             arguments,
             results,
             capability_effects,
             user_memory,
             execution,
-            syscall.audit
+            invocation.audit
         );
     }
     output.push_str("\n## Public records\n\n| Name | Minimum prefix | Size | Alignment | Fields |\n| --- | ---: | ---: | ---: | --- |\n");
@@ -285,8 +289,8 @@ fn describe_operations(operations: &[HandleOperation], common_rights: u64) -> St
         .join("+")
 }
 
-fn joined_failure_statuses(syscall: &schema::Syscall, result_name: &str) -> String {
-    let statuses: Vec<_> = syscall
+fn joined_failure_statuses(invocation: &schema::Invocation, result_name: &str) -> String {
+    let statuses: Vec<_> = invocation
         .failure_results
         .iter()
         .filter(|failure| failure.results.contains(&result_name))

@@ -3,6 +3,8 @@
 
 //! Capability-checked construction of process-accounting hierarchy objects.
 
+use crate::kernel::capability::InvocationReceiver;
+
 use crate::kernel::accounting::{ResourceDomainObject, ResourceDomainObjectError, ResourceLimits};
 use crate::kernel::authority::Rights;
 use crate::kernel::capability::{HandleFlags, HandleValue, PreparedHandle};
@@ -42,11 +44,12 @@ impl From<TaskObjectError> for Error {
 
 pub(crate) fn create_resource_domain(
     process: &Process,
-    parent: HandleValue,
+    parent: &InvocationReceiver,
     limits: ResourceLimits,
 ) -> Result<HandleValue, Error> {
-    let parent =
-        process.resolve_handle::<ResourceDomainObject>(parent, Rights::CREATE_RESOURCE_DOMAIN)?;
+    let parent = parent
+        .resolve::<ResourceDomainObject>(Rights::CREATE_RESOURCE_DOMAIN)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let reservation = process.reserve_handles::<1>()?;
     let publication = match parent.object().try_new_child(limits) {
         Ok(publication) => publication,
@@ -74,10 +77,12 @@ pub(crate) fn create_resource_domain(
 
 pub(crate) fn create_task_group(
     process: &Process,
-    factory: HandleValue,
+    factory: &InvocationReceiver,
     domain: HandleValue,
 ) -> Result<HandleValue, Error> {
-    let factory = process.resolve_handle::<TaskFactory>(factory, Rights::CREATE_TASK_GROUP)?;
+    let factory = factory
+        .resolve::<TaskFactory>(Rights::CREATE_TASK_GROUP)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let domain =
         process.resolve_handle::<ResourceDomainObject>(domain, Rights::RESOURCE_DOMAIN_SPONSOR)?;
     let reservation = process.reserve_handles::<1>()?;

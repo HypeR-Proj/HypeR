@@ -76,8 +76,7 @@ pub(super) use process_builder::{
     sys_process_builder_set_memory_lock, sys_process_builder_set_name, sys_process_builder_start,
 };
 pub(super) use system::{
-    sys_abi_query, sys_clock_get_monotonic, sys_clock_get_realtime, sys_not_supported,
-    sys_system_config,
+    sys_abi_query, sys_clock_get_monotonic, sys_clock_get_realtime, sys_system_config,
 };
 pub(super) use task::{
     sys_atomic_wait, sys_atomic_wake, sys_process_derive_observer, sys_process_exit,

@@ -80,7 +80,7 @@ Private startup purposes are:
 | `0x80080001` | CapabilityChannel | `READ \| WAIT \| TRANSFER` |
 | `0x80080002` | Immutable description VMO | `READ \| INSPECT \| TRANSFER` |
 
-These are userspace protocol roles, not syscall numbers or sender handle IDs.
+These are userspace protocol roles, not operation selectors or sender handle IDs.
 The description contains a little-endian `u64` byte length followed by at most
 32 KiB of UTF-8 JSON. Version 3 has these fields:
 
