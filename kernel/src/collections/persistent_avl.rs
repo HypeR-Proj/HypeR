@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Persistent ordered AVL index with subtree maximum augmentation.
+//! Persistent ordered AVL index with subtree maximum and rank augmentation.
 //!
 //! Updates allocate only the search/rotation paths. Each node retains its own
 //! metadata charge; shared subtrees remain alive for snapshot readers. All
@@ -44,6 +44,7 @@ struct Node<T: Entry, A: NodeAccount> {
     left: Link<T, A>,
     right: Link<T, A>,
     height: u32,
+    count: usize,
     maximum: T::Weight,
     _charge: A::Charge,
 }
@@ -68,6 +69,10 @@ fn maximum<T: Entry, A: NodeAccount>(root: &Link<T, A>) -> T::Weight {
         .map_or(T::Weight::default(), |node| node.maximum)
 }
 
+fn count<T: Entry, A: NodeAccount>(root: &Link<T, A>) -> usize {
+    root.as_ref().map_or(0, |node| node.count)
+}
+
 impl<T: Entry, A: NodeAccount> Node<T, A> {
     fn make(
         value: T,
@@ -80,6 +85,7 @@ impl<T: Entry, A: NodeAccount> Node<T, A> {
             .map_err(Error::Account)?;
         FallibleArc::try_new(Self {
             height: 1 + height(&left).max(height(&right)),
+            count: 1 + count(&left) + count(&right),
             maximum: value.weight().max(maximum(&left)).max(maximum(&right)),
             value,
             left,
@@ -245,6 +251,36 @@ impl<T: Entry, A: NodeAccount> PersistentAvl<T, A> {
     pub const fn new() -> Self {
         Self { root: None }
     }
+    pub fn len(&self) -> usize {
+        count(&self.root)
+    }
+    pub fn is_empty(&self) -> bool {
+        self.root.is_none()
+    }
+    /// Select an in-order rank without scanning preceding entries.
+    pub fn select(&self, mut index: usize) -> Option<&T> {
+        let mut root = self.root.as_deref();
+        while let Some(node) = root {
+            let left = count(&node.left);
+            match index.cmp(&left) {
+                core::cmp::Ordering::Less => root = node.left.as_deref(),
+                core::cmp::Ordering::Equal => return Some(&node.value),
+                core::cmp::Ordering::Greater => {
+                    index -= left + 1;
+                    root = node.right.as_deref();
+                }
+            }
+        }
+        None
+    }
+    pub fn iter(&self) -> Iter<'_, T, A> {
+        Iter::new(self.root.as_deref(), None)
+    }
+    /// Seek in O(log n), then visit successive keys in amortized O(1).
+    /// Iteration borrows the immutable root and never allocates.
+    pub fn iter_from(&self, lower: T::Key) -> Iter<'_, T, A> {
+        Iter::new(self.root.as_deref(), Some(lower))
+    }
     pub fn get(&self, key: T::Key) -> Option<&T> {
         let mut root = self.root.as_ref();
         while let Some(node) = root {
@@ -275,6 +311,59 @@ impl<T: Entry, A: NodeAccount> PersistentAvl<T, A> {
         Ok(Self {
             root: Node::remove(&self.root, key, account)?,
         })
+    }
+}
+
+// AVL minimum population grows faster than 2^(height/2). A tree whose nodes
+// fit in a usize-addressed allocation space cannot reach this path length.
+const MAX_HEIGHT: usize = 2 * usize::BITS as usize;
+
+/// An allocation-free cursor borrowing one immutable tree version. Its path
+/// has a fixed bound derived from the address space, independent of node count.
+pub struct Iter<'a, T: Entry, A: NodeAccount> {
+    path: [Option<&'a Node<T, A>>; MAX_HEIGHT],
+    depth: usize,
+}
+
+impl<'a, T: Entry, A: NodeAccount> Iter<'a, T, A> {
+    fn new(mut root: Option<&'a Node<T, A>>, lower: Option<T::Key>) -> Self {
+        let mut iter = Self {
+            path: [None; MAX_HEIGHT],
+            depth: 0,
+        };
+        while let Some(node) = root {
+            if lower.is_some_and(|key| node.value.key() < key) {
+                root = node.right.as_deref();
+            } else {
+                iter.push(node);
+                root = node.left.as_deref();
+            }
+        }
+        iter
+    }
+
+    fn push(&mut self, node: &'a Node<T, A>) {
+        let Some(slot) = self.path.get_mut(self.depth) else {
+            tree_invariant_failure();
+        };
+        *slot = Some(node);
+        self.depth += 1;
+    }
+}
+
+impl<'a, T: Entry, A: NodeAccount> Iterator for Iter<'a, T, A> {
+    type Item = &'a T;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.depth = self.depth.checked_sub(1)?;
+        let Some(node) = self.path[self.depth].take() else {
+            tree_invariant_failure();
+        };
+        let mut right = node.right.as_deref();
+        while let Some(child) = right {
+            self.push(child);
+            right = child.left.as_deref();
+        }
+        Some(&node.value)
     }
 }
 
@@ -357,6 +446,7 @@ mod tests {
         assert!(lh.abs_diff(rh) <= 1);
         assert_eq!(node.height, 1 + lh.max(rh));
         assert_eq!(node.maximum, node.value.size.max(lm).max(rm));
+        assert_eq!(node.count, lc + rc + 1);
         (node.height, node.maximum, lc + rc + 1)
     }
 
@@ -401,6 +491,18 @@ mod tests {
             }
             assert_eq!(old.get(key).map(|v| v.size), before);
             assert_eq!(verify(&tree.root, None, None).2, expected.len());
+            assert_eq!(tree.len(), expected.len());
+            assert_eq!(tree.is_empty(), expected.is_empty());
+            assert!(
+                tree.iter()
+                    .map(|v| (v.key, v.size))
+                    .eq(expected.iter().map(|(&k, &v)| (k, v)))
+            );
+            let rank = (seed >> 20) as usize % (expected.len() + 1);
+            assert_eq!(
+                tree.select(rank).map(|v| (v.key, v.size)),
+                expected.iter().nth(rank).map(|(&k, &v)| (k, v))
+            );
             let bound = (seed >> 8) % 130;
             let minimum = (seed >> 24) % 35;
             let first = expected
@@ -414,6 +516,11 @@ mod tests {
                 .map(|(&k, _)| k);
             assert_eq!(tree.first(bound, minimum).map(|v| v.key), first);
             assert_eq!(tree.last(bound, minimum).map(|v| v.key), last);
+            assert!(
+                tree.iter_from(bound)
+                    .map(|v| v.key)
+                    .eq(expected.range(bound..).map(|(&k, _)| k))
+            );
         }
         // Remove every entry, exercising both successor replacement and
         // rotations while shrinking. Each displaced snapshot is still valid.
@@ -443,6 +550,13 @@ mod tests {
             tree.last(bound, 16);
             assert!(account.0.probes.load(Ordering::Relaxed) <= 8 * depth);
         }
+        // Seeking near the end must not visit the prefix; walking the suffix
+        // requires neither another root search nor an allocation per entry.
+        let calls = account.0.calls.load(Ordering::Relaxed);
+        account.0.probes.store(0, Ordering::Relaxed);
+        assert!(tree.iter_from(4000).map(|v| v.key).eq(4000..4096));
+        assert!(account.0.probes.load(Ordering::Relaxed) <= depth);
+        assert_eq!(account.0.calls.load(Ordering::Relaxed), calls);
         for key in 0..4096 {
             let before = account.0.calls.load(Ordering::Relaxed);
             let depth = height(&tree.root) as usize;

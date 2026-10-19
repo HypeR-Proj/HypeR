@@ -5,6 +5,7 @@
 
 mod file;
 mod observation;
+mod records;
 mod residency;
 pub(crate) use observation::{CrashMapping, CrashMappingKind, CrashMemory, CrashReadError};
 
@@ -21,6 +22,7 @@ use super::contract::{
 };
 use super::free_ranges::FreeRanges;
 use super::index::{self, Entry, Index};
+use records::MappingIndex;
 
 use super::vmo::{
     ExecutableVmo, MappingObject, PrivateMappingMode, PrivateView, SnapshotVmo, VmoError,
@@ -124,6 +126,7 @@ impl ApplicationVmar {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct MappingToken {
     address_space: AddressSpaceId,
+    base: UserAddress,
     id: u64,
     generation: u64,
 }
@@ -256,8 +259,8 @@ impl<Account: MemoryAccount> Entry for VmarRecord<Account> {
 type VmarSet<Account> = Index<VmarRecord<Account>, Account>;
 
 struct MappingSet<Backend: PageBackend, Account: MemoryAccount> {
-    records: Vec<Mapping<Backend, Account>>,
-    // Retains metadata quota until the complete mapping set is dropped.
+    records: MappingIndex<Backend, Account>,
+    // Tree nodes carry their own charges across shared snapshot versions.
     _storage_charge: Option<Account::Charge>,
 }
 
@@ -338,7 +341,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
             })
             .map_err(AddressSpaceError::Account)?;
         let mappings = FallibleArc::try_new(MappingSet {
-            records: Vec::new(),
+            records: MappingIndex::new(),
             _storage_charge: Some(mapping_set_charge),
         })
         .map_err(|_| AddressSpaceError::Allocation)?;
@@ -417,8 +420,14 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
             return Err(VmarDetailError::InvalidCursor);
         }
         let end = start.saturating_add(32).min(mappings.records.len());
-        for index in start..end {
-            let mapping = &mappings.records[index];
+        let first = mappings.records.select(start).map(|mapping| mapping.key());
+        for (offset, mapping) in first
+            .into_iter()
+            .flat_map(|key| mappings.records.iter_from(key))
+            .take(end - start)
+            .enumerate()
+        {
+            let index = start + offset;
             if !vmar.range.contains(mapping.snapshot.range) {
                 continue;
             }
@@ -637,12 +646,14 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
 
     pub(crate) fn is_private_write(&self, address: UserAddress) -> bool {
         let snapshot = self.snapshot();
-        snapshot.mappings.records.iter().any(|mapping| {
-            mapping.snapshot.range.base() <= address
-                && address < mapping.snapshot.range.end()
-                && mapping.snapshot.permissions.contains(Access::Write)
-                && mapping.object.private().is_some()
-        })
+        snapshot
+            .mappings
+            .records
+            .containing(address)
+            .is_some_and(|mapping| {
+                mapping.snapshot.permissions.contains(Access::Write)
+                    && mapping.object.private().is_some()
+            })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -750,7 +761,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
             return Err(AddressSpaceError::Stopped);
         }
         let mut needed = false;
-        for mapping in &snapshot.mappings.records {
+        for mapping in snapshot.mappings.records.overlapping(range) {
             let Some(overlap) = intersection(mapping.snapshot.range, range) else {
                 continue;
             };
@@ -776,19 +787,16 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
         if !needed {
             return Ok(None);
         }
-        let capacity = snapshot.mappings.records.len();
-        let storage_charge = self.try_mapping_set_charge(capacity)?;
-        let mut replacement = Vec::new();
-        replacement
-            .try_reserve_exact(capacity)
-            .map_err(|_| AddressSpaceError::Allocation)?;
-        replacement.extend(snapshot.mappings.records.iter().cloned());
+        let storage_charge = self.try_mapping_set_charge()?;
+        let mut replacement = snapshot.mappings.records.clone();
         // A view may occur in several protect/unmap fragments. Each prepared
         // version replaces every occurrence so one logical alias cannot retain
         // different bytes. Mapping tokens deliberately survive COW; futex
         // identities are virtual mappings, not physical page identities.
-        for index in 0..replacement.len() {
-            let mapping = &replacement[index];
+        for original in snapshot.mappings.records.overlapping(range) {
+            let mapping = replacement
+                .get(original.key())
+                .ok_or(AddressSpaceError::StaleMapping)?;
             let Some(overlap) = intersection(mapping.snapshot.range, range) else {
                 continue;
             };
@@ -810,15 +818,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
             }
             let old = view.clone();
             let changed = view.materialize(first, count)?;
-            for fragment in &mut replacement {
-                if fragment
-                    .object
-                    .private()
-                    .is_some_and(|view| core::ptr::eq(&**view, &*old))
-                {
-                    fragment.object = MappingObject::Private(changed.clone());
-                }
-            }
+            replacement.replace_private_view(&old, &changed, &self.account)?;
         }
         let replacement = FallibleArc::try_new(MappingSet {
             records: replacement,
@@ -928,15 +928,10 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
         })?;
         let token = MappingToken {
             address_space: self.id,
+            base: range.base(),
             id,
             generation: next_authority_epoch,
         };
-        let capacity = snapshot
-            .mappings
-            .records
-            .len()
-            .checked_add(1)
-            .ok_or(AddressSpaceError::SizeOverflow)?;
 
         if !object.fully_resident(object_offset, range.length())? {
             return Err(AddressSpaceError::BackingNotResident);
@@ -947,28 +942,25 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
         } else {
             None
         };
-        let storage_charge = self.try_mapping_set_charge(capacity)?;
-        let mut replacement = Vec::new();
-        replacement
-            .try_reserve_exact(capacity)
-            .map_err(|_| AddressSpaceError::Allocation)?;
-        replacement.extend(snapshot.mappings.records.iter().cloned());
-        replacement.push(Mapping {
-            owner_vmar: vmar.id,
-            snapshot: MappingSnapshot {
-                token,
-                range,
-                object_offset,
-                permissions,
-                executable_backing: object.executable(),
+        let storage_charge = self.try_mapping_set_charge()?;
+        let replacement = snapshot.mappings.records.insert(
+            Mapping {
+                owner_vmar: vmar.id,
+                snapshot: MappingSnapshot {
+                    token,
+                    range,
+                    object_offset,
+                    permissions,
+                    executable_backing: object.executable(),
+                },
+                maximum_permissions,
+                object,
+                ownership,
+                write_lease,
+                locks: None,
             },
-            maximum_permissions,
-            object,
-            ownership,
-            write_lease,
-            locks: None,
-        });
-        sort_mappings(&mut replacement);
+            &self.account,
+        )?;
         let replacement = FallibleArc::try_new(MappingSet {
             records: replacement,
             _storage_charge: storage_charge,
@@ -1055,17 +1047,9 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
             .mapping_epoch
             .checked_add(1)
             .ok_or(AddressSpaceError::IdentityExhausted)?;
-        let (capacity, extra_owners, rewritten) = {
-            let mut capacity = 0usize;
-            let mut extra = 0usize;
+        let rewritten = {
             let mut rewritten = 0usize;
-            for mapping in &snapshot.mappings.records {
-                if mapping.owner_vmar != vmar.id || !ranges_overlap(mapping.snapshot.range, range) {
-                    capacity = capacity
-                        .checked_add(1)
-                        .ok_or(AddressSpaceError::SizeOverflow)?;
-                    continue;
-                }
+            for mapping in snapshot.mappings.records.overlapping(range) {
                 if let Some(new_permissions) = permissions {
                     validate_mapping_permissions(&mapping.object, new_permissions)?;
                     if !new_permissions.is_subset_of(mapping.maximum_permissions) {
@@ -1074,17 +1058,11 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
                 }
                 let fragments =
                     fragment_total(mapping.snapshot.range, range, permissions.is_some());
-                capacity = capacity
-                    .checked_add(fragments)
-                    .ok_or(AddressSpaceError::SizeOverflow)?;
                 rewritten = rewritten
                     .checked_add(fragments)
                     .ok_or(AddressSpaceError::SizeOverflow)?;
-                extra = extra
-                    .checked_add(fragments.saturating_sub(1))
-                    .ok_or(AddressSpaceError::SizeOverflow)?;
             }
-            (capacity, extra, rewritten)
+            rewritten
         };
         let first_token = self.state.with(|state| {
             if state.authority_epoch != snapshot.authority_epoch {
@@ -1093,46 +1071,29 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
             reserve_mapping_ids(state, rewritten)
         })?;
 
-        let storage_charge = self.try_mapping_set_charge(capacity)?;
-        let mut replacement = Vec::new();
-        replacement
-            .try_reserve_exact(capacity)
-            .map_err(|_| AddressSpaceError::Allocation)?;
-        let ownership_storage_charge =
-            self.try_storage_charge::<MappingOwner<Account>>(extra_owners)?;
-        let mut ownerships = Vec::new();
-        ownerships
-            .try_reserve_exact(extra_owners)
-            .map_err(|_| AddressSpaceError::Allocation)?;
-        for _ in 0..extra_owners {
-            ownerships.push(self.try_mapping_ownership()?);
-        }
+        let storage_charge = self.try_mapping_set_charge()?;
+        let mut replacement = snapshot.mappings.records.clone();
 
         let mut next_token = first_token;
-        let mut next_ownership = ownerships.drain(..);
-        for mapping in &snapshot.mappings.records {
-            if mapping.owner_vmar != vmar.id || !ranges_overlap(mapping.snapshot.range, range) {
-                replacement.push(mapping.clone());
-                continue;
-            }
+        for mapping in snapshot.mappings.records.overlapping(range) {
+            replacement = replacement.remove(mapping.key(), &self.account)?;
             append_fragments(
-                self.id,
+                self,
                 &mut replacement,
                 mapping,
                 range,
                 permissions,
                 generation,
                 &mut next_token,
-                &mut next_ownership,
             )?;
         }
         if permissions.is_none() {
-            prune_private_views(&mut replacement)?;
+            prune_private_views(
+                &mut replacement,
+                snapshot.mappings.records.overlapping(range),
+                &self.account,
+            )?;
         }
-        sort_mappings(&mut replacement);
-        drop(next_ownership);
-        drop(ownerships);
-        drop(ownership_storage_charge);
         let replacement = FallibleArc::try_new(MappingSet {
             records: replacement,
             _storage_charge: storage_charge,
@@ -1168,8 +1129,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
         snapshot
             .mappings
             .records
-            .iter()
-            .find(|mapping| mapping.snapshot.token == token)
+            .by_token(token)
             .map(|mapping| mapping.snapshot)
             .ok_or(AddressSpaceError::StaleMapping)
     }
@@ -1405,8 +1365,8 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
         let mapping = snapshot
             .mappings
             .records
-            .iter()
-            .find(|mapping| mapping.snapshot.range.contains(range))
+            .containing(address)
+            .filter(|mapping| mapping.snapshot.range.contains(range))
             .ok_or(AddressSpaceError::NotMapped)?;
         if !mapping.snapshot.permissions.contains(Access::Write) {
             return Err(AddressSpaceError::WriteDenied);
@@ -1460,19 +1420,14 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
         if !self.root.range.contains(range) {
             return Err(AddressSpaceError::InvalidRange);
         }
-        let count = snapshot
-            .mappings
-            .records
-            .iter()
-            .filter(|mapping| ranges_overlap(mapping.snapshot.range, range))
-            .count();
+        let count = snapshot.mappings.records.overlapping(range).count();
         let temporary_charge = self.try_storage_charge::<CopySegment<Backend, Account>>(count)?;
         let mut segments = Vec::new();
         segments
             .try_reserve_exact(count)
             .map_err(|_| AddressSpaceError::Allocation)?;
         let mut cursor = range.base();
-        for mapping in &snapshot.mappings.records {
+        for mapping in snapshot.mappings.records.overlapping(range) {
             let Some(overlap) = intersection(mapping.snapshot.range, range) else {
                 continue;
             };
@@ -1573,29 +1528,10 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
             .map_err(AddressSpaceError::Account)
     }
 
-    fn try_mapping_set_charge(
-        &self,
-        capacity: usize,
-    ) -> SpaceResult<Backend, Account, Option<Account::Charge>> {
-        self.try_owner_storage_charge::<Mapping<Backend, Account>>(
-            capacity,
-            FallibleArc::<MappingSet<Backend, Account>>::allocation_size(),
-        )
-    }
-
-    fn try_owner_storage_charge<Item>(
-        &self,
-        capacity: usize,
-        owner_bytes: usize,
-    ) -> SpaceResult<Backend, Account, Option<Account::Charge>> {
-        let bytes = capacity
-            .checked_mul(size_of::<Item>())
-            .and_then(|bytes| bytes.checked_add(owner_bytes))
-            .and_then(|bytes| u64::try_from(bytes).ok())
-            .ok_or(AddressSpaceError::SizeOverflow)?;
+    fn try_mapping_set_charge(&self) -> SpaceResult<Backend, Account, Option<Account::Charge>> {
         self.account
             .try_charge(MemoryCharge {
-                kernel_bytes: bytes,
+                kernel_bytes: FallibleArc::<MappingSet<Backend, Account>>::allocation_size() as u64,
                 ..MemoryCharge::default()
             })
             .map(Some)
@@ -1681,7 +1617,7 @@ impl<'a, Backend: PageBackend, Account: MemoryAccount> PreparedMappingChange<'a,
         &self,
         context: &Backend::InstructionPublicationContext,
     ) -> SpaceResult<Backend, Account, ()> {
-        for mapping in &self.replacement.records {
+        for mapping in self.replacement.records.iter() {
             if let Some(view) = mapping.object.private() {
                 view.publish_file_pages(context)?;
             }
@@ -1711,12 +1647,10 @@ impl<'a, Backend: PageBackend, Account: MemoryAccount> PreparedMappingChange<'a,
         PreparedPageSnapshot<Backend, Account>,
         AddressSpaceError<Backend::Error, Account::Error>,
     > {
-        let (mapping_index, mapping) = self
+        let mapping = self
             .replacement
             .records
-            .iter()
-            .enumerate()
-            .find(|(_, mapping)| mapping.snapshot.token == token)
+            .by_token(token)
             .ok_or(AddressSpaceError::StaleMapping)?;
         let count = usize::try_from(mapping.snapshot.range.length() / PAGE_SIZE)
             .map_err(|_| AddressSpaceError::SizeOverflow)?;
@@ -1731,7 +1665,7 @@ impl<'a, Backend: PageBackend, Account: MemoryAccount> PreparedMappingChange<'a,
         Ok(PreparedPageSnapshot {
             pages,
             _charge: charge,
-            mapping_index,
+            mapping: mapping.clone(),
             _pins: self.replacement.clone(),
         })
     }
@@ -1803,15 +1737,13 @@ impl<'a, Backend: PageBackend, Account: MemoryAccount> PreparedMappingChange<'a,
 pub(crate) struct PreparedPageSnapshot<Backend: PageBackend, Account: MemoryAccount> {
     pages: Vec<Option<PhysicalAddress>>,
     _charge: Option<Account::Charge>,
-    mapping_index: usize,
+    mapping: Mapping<Backend, Account>,
     _pins: FallibleArc<MappingSet<Backend, Account>>,
 }
 
 impl<Backend: PageBackend, Account: MemoryAccount> PreparedPageSnapshot<Backend, Account> {
     pub(crate) fn page_is_writable(&self, index: usize) -> bool {
-        let Some(mapping) = self._pins.records.get(self.mapping_index) else {
-            return false;
-        };
+        let mapping = &self.mapping;
         let Some(offset) = (index as u64)
             .checked_mul(PAGE_SIZE)
             .and_then(|delta| mapping.snapshot.object_offset.checked_add(delta))
@@ -2154,7 +2086,7 @@ fn validate_owned_mapped_range<Backend: PageBackend, Account: MemoryAccount>(
         return Err(AddressSpaceError::NotMapped);
     }
     let mut cursor = range.base();
-    for mapping in &state.mappings.records {
+    for mapping in state.mappings.records.overlapping(range) {
         if mapping.owner_vmar != vmar.id {
             continue;
         }
@@ -2206,15 +2138,14 @@ fn validate_mapping_permissions<Backend: PageBackend, Account: MemoryAccount>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn append_fragments<'a, Backend: PageBackend, Account: MemoryAccount>(
-    address_space: AddressSpaceId,
-    output: &mut Vec<Mapping<Backend, Account>>,
+fn append_fragments<Backend: PageBackend, Account: MemoryAccount>(
+    space: &UserAddressSpace<Backend, Account>,
+    output: &mut MappingIndex<Backend, Account>,
     original: &Mapping<Backend, Account>,
     cut: UserSlice,
     permissions: Option<Permissions>,
     generation: u64,
     next_token: &mut u64,
-    extra_ownerships: &mut alloc::vec::Drain<'a, FallibleArc<MappingOwnership<Account::Charge>>>,
 ) -> Result<(), AddressSpaceError<Backend::Error, Account::Error>> {
     let overlap =
         intersection(original.snapshot.range, cut).ok_or(AddressSpaceError::InvalidRange)?;
@@ -2232,9 +2163,7 @@ fn append_fragments<'a, Backend: PageBackend, Account: MemoryAccount>(
             first = false;
             original.ownership.clone()
         } else {
-            extra_ownerships
-                .next()
-                .ok_or(AddressSpaceError::Allocation)?
+            space.try_mapping_ownership()?
         };
         let length = end.get() - base.get();
         let range = UserSlice::new(base, length).map_err(|_| AddressSpaceError::SizeOverflow)?;
@@ -2247,43 +2176,47 @@ fn append_fragments<'a, Backend: PageBackend, Account: MemoryAccount>(
             Some(permissions) => permissions,
             None => original.snapshot.permissions,
         };
-        output.push(Mapping {
-            owner_vmar: original.owner_vmar,
-            snapshot: MappingSnapshot {
-                token: MappingToken {
-                    address_space,
-                    id,
-                    generation,
+        *output = output.insert(
+            Mapping {
+                owner_vmar: original.owner_vmar,
+                snapshot: MappingSnapshot {
+                    token: MappingToken {
+                        address_space: space.id,
+                        base,
+                        id,
+                        generation,
+                    },
+                    range,
+                    object_offset: original
+                        .snapshot
+                        .object_offset
+                        .checked_add(delta)
+                        .ok_or(AddressSpaceError::SizeOverflow)?,
+                    permissions: fragment_permissions,
+                    executable_backing: original.snapshot.executable_backing,
                 },
-                range,
-                object_offset: original
-                    .snapshot
-                    .object_offset
-                    .checked_add(delta)
-                    .ok_or(AddressSpaceError::SizeOverflow)?,
-                permissions: fragment_permissions,
-                executable_backing: original.snapshot.executable_backing,
+                maximum_permissions: original.maximum_permissions,
+                object: original.object.clone(),
+                locks: original
+                    .locks
+                    .as_ref()
+                    .map(|locks| locks.retain::<Backend>(range))
+                    .transpose()?
+                    .flatten(),
+                ownership,
+                write_lease: if fragment_permissions.contains(Access::Write)
+                    && original.object.private().is_none()
+                {
+                    match &original.write_lease {
+                        Some(lease) => Some(lease.clone()),
+                        None => Some(original.object.try_write_lease()?),
+                    }
+                } else {
+                    None
+                },
             },
-            maximum_permissions: original.maximum_permissions,
-            object: original.object.clone(),
-            locks: original
-                .locks
-                .as_ref()
-                .map(|locks| locks.retain::<Backend>(range))
-                .transpose()?
-                .flatten(),
-            ownership,
-            write_lease: if fragment_permissions.contains(Access::Write)
-                && original.object.private().is_none()
-            {
-                match &original.write_lease {
-                    Some(lease) => Some(lease.clone()),
-                    None => Some(original.object.try_write_lease()?),
-                }
-            } else {
-                None
-            },
-        });
+            &space.account,
+        )?;
     }
     Ok(())
 }
@@ -2332,13 +2265,25 @@ fn fragment_total(mapping: UserSlice, cut: UserSlice, retain_middle: bool) -> us
 /// Unmapping removes ownership of private pages which no remaining fragment
 /// covers. The prepared version is unpublished; the old version still owns
 /// every removed page until acknowledged hardware retirement.
-fn prune_private_views<B: PageBackend, A: MemoryAccount>(
-    mappings: &mut [Mapping<B, A>],
+fn prune_private_views<'a, B: PageBackend + 'a, A: MemoryAccount + 'a>(
+    mappings: &mut MappingIndex<B, A>,
+    affected: impl Iterator<Item = &'a Mapping<B, A>>,
+    account: &A,
 ) -> SpaceResult<B, A, ()> {
-    for index in 0..mappings.len() {
-        let Some(old) = mappings[index].object.private().cloned() else {
+    for mapping in affected {
+        let Some(old) = mapping.object.private().cloned() else {
             continue;
         };
+        // A prior affected fragment may already have replaced this view, or
+        // the unmap may have removed every alias. Neither needs another copy.
+        if !mappings.iter().any(|mapping| {
+            mapping
+                .object
+                .private()
+                .is_some_and(|view| core::ptr::eq(&**view, &*old))
+        }) {
+            continue;
+        }
         let changed = old.retain_pages(|page| {
             let offset = page as u64 * PAGE_SIZE;
             mappings.iter().any(|mapping| {
@@ -2351,23 +2296,9 @@ fn prune_private_views<B: PageBackend, A: MemoryAccount>(
             })
         })?;
         let Some(changed) = changed else { continue };
-        for mapping in mappings.iter_mut() {
-            if mapping
-                .object
-                .private()
-                .is_some_and(|view| core::ptr::eq(&**view, &*old))
-            {
-                mapping.object = MappingObject::Private(changed.clone());
-            }
-        }
+        mappings.replace_private_view(&old, &changed, account)?;
     }
     Ok(())
-}
-
-fn sort_mappings<Backend: PageBackend, Account: MemoryAccount>(
-    mappings: &mut [Mapping<Backend, Account>],
-) {
-    mappings.sort_unstable_by_key(|mapping| mapping.snapshot.range.base());
 }
 
 /// Retains the writable lease and backing independently of mapping replacement.

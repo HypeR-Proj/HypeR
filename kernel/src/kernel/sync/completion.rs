@@ -68,6 +68,27 @@ impl Completion {
         super::expect_notification(outcome)
     }
 
+    /// Joins kernel-owned work which must finish before the caller can retire.
+    /// Cancellation wakes the caller but cannot release its lifetime obligation;
+    /// rearm a fresh wait instead. Ordinary cancellable waits must use `wait`.
+    pub(crate) fn wait_uninterruptible(&self) -> Result<(), Error> {
+        loop {
+            match self.wait() {
+                Err(Error::WaitInterrupted(crate::kernel::task::WaitOutcome::Cancelled)) => {}
+                result => return result,
+            }
+        }
+    }
+
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
+    pub(crate) fn cancel_waiter_for_test(
+        &self,
+        thread: crate::kernel::task::thread::ThreadId,
+    ) -> Result<bool, Error> {
+        self.state
+            .with(|state| state.waiters.cancel(thread).map_err(Into::into))
+    }
+
     /// Consumes one retained completion without blocking.
     pub fn try_wait(&self) -> bool {
         self.state.with(consume_one)

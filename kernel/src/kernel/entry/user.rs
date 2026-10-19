@@ -58,7 +58,16 @@ impl UserSession {
     }
 
     fn stop_requested(&self) -> bool {
-        self.thread.stop_requested()
+        if self.thread.stop_requested() {
+            return true;
+        }
+        if let Some(reason) = self.process.requested_stop_reason() {
+            // Preserve the Process reason even if this continuation observes
+            // closed admission before the scheduler's per-Thread stop fan-out.
+            self.thread.request_stop(reason);
+            return true;
+        }
+        false
     }
 }
 

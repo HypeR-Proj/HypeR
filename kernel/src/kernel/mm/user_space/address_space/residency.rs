@@ -168,7 +168,7 @@ impl<B: PageBackend, A: MemoryAccount> UserAddressSpace<B, A> {
                 return Err(AddressSpaceError::InvalidRange);
             }
             let mut cursor = range.base();
-            for mapping in &snapshot.mappings.records {
+            for mapping in snapshot.mappings.records.overlapping(range) {
                 if let Some(overlap) = intersection(mapping.snapshot.range, range) {
                     if overlap.base() != cursor {
                         return Err(AddressSpaceError::NotMapped);
@@ -180,43 +180,33 @@ impl<B: PageBackend, A: MemoryAccount> UserAddressSpace<B, A> {
                 return Err(AddressSpaceError::NotMapped);
             }
         }
-        let storage_charge = self.try_mapping_set_charge(snapshot.mappings.records.len())?;
-        let mut records = Vec::new();
-        records
-            .try_reserve_exact(snapshot.mappings.records.len())
-            .map_err(|_| AddressSpaceError::Allocation)?;
-        records.extend(snapshot.mappings.records.iter().cloned());
-        for index in 0..records.len() {
-            let Some(overlap) = intersection(records[index].snapshot.range, affected) else {
+        let storage_charge = self.try_mapping_set_charge()?;
+        let mut records = snapshot.mappings.records.clone();
+        for original in snapshot.mappings.records.overlapping(affected) {
+            let mapping = records
+                .get(original.key())
+                .ok_or(AddressSpaceError::StaleMapping)?;
+            let Some(overlap) = intersection(mapping.snapshot.range, affected) else {
                 continue;
             };
-            if lock
-                && let Some(view) = records[index]
-                    .object
-                    .private()
-                    .filter(|view| view.is_file())
-            {
+            if lock && let Some(view) = mapping.object.private().filter(|view| view.is_file()) {
                 let old = view.clone();
-                let offset = records[index].snapshot.object_offset + overlap.base().get()
-                    - records[index].snapshot.range.base().get();
+                let offset = mapping.snapshot.object_offset + overlap.base().get()
+                    - mapping.snapshot.range.base().get();
                 let first = (offset / PAGE_SIZE) as usize;
                 let count = (overlap.length() / PAGE_SIZE) as usize;
                 if (first..first + count).any(|page| !old.has_page(page)) {
                     let next = old.populate_pages(first, count)?;
-                    for alias in &mut records {
-                        if alias
-                            .object
-                            .private()
-                            .is_some_and(|view| core::ptr::eq(&**view, &*old))
-                        {
-                            alias.object = MappingObject::Private(next.clone());
-                        }
-                    }
+                    records.replace_private_view(&old, &next, &self.account)?;
                 }
             }
-            let mapping = &mut records[index];
+            let mut mapping = records
+                .get(original.key())
+                .ok_or(AddressSpaceError::StaleMapping)?
+                .clone();
             mapping.locks =
                 LockedPages::update::<B>(&self.account, mapping.locks.as_deref(), overlap, lock)?;
+            records = records.insert(mapping, &self.account)?;
         }
         let replacement = FallibleArc::try_new(MappingSet {
             records,

@@ -269,6 +269,7 @@ pub(super) struct ProcessInner {
     state: ProcessLock<ProcessState>,
     object: PublishedOnce<PublishableRef<ProcessObject, KernelService>>,
     stopped: Completion,
+    stop_requested: AtomicBool,
     retirement_queued: AtomicBool,
     retention: PublishedOnce<FallibleArc<super::retention::Retention>>,
     retention_budget: ProcessLock<Option<FallibleArc<super::retention::SupervisorBudget>>>,
@@ -496,6 +497,7 @@ impl PreparedProcess {
             }),
             object: PublishedOnce::new(),
             stopped: Completion::new(),
+            stop_requested: AtomicBool::new(false),
             retirement_queued: AtomicBool::new(false),
             retention: PublishedOnce::new(),
             retention_budget: ProcessLock::new(None),
@@ -1066,6 +1068,16 @@ impl Process {
         self.request_stop_inner(reason, None)
     }
 
+    /// Observes process-wide stop before the asynchronous per-Thread fan-out.
+    /// The common running path takes no Process lock. A published stop retains
+    /// its first terminal reason through retirement; Processes never restart.
+    pub(crate) fn requested_stop_reason(&self) -> Option<TerminalReason> {
+        if !self.inner.stop_requested.load(Ordering::Acquire) {
+            return None;
+        }
+        self.inner.state.with(|state| state.lifecycle.terminal())
+    }
+
     fn request_stop_inner(
         &self,
         reason: TerminalReason,
@@ -1079,6 +1091,10 @@ impl Process {
                     Some(reason) => reason,
                     None => process_invariant_violation(),
                 };
+                // Publish before unlocking closed handle admission. A syscall
+                // rejected during the fan-out must not return an error to EL0
+                // merely because this Thread has not received its stop yet.
+                self.inner.stop_requested.store(true, Ordering::Release);
                 if newly_requested && let Some(retention) = self.inner.retention.get() {
                     // Publish the winning fault and stop deadline before a
                     // concurrent final detach can expose Stopped to the reaper.

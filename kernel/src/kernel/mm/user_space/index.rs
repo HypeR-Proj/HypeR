@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! VMAR accounting adapter for the shared persistent index.
+//! Address-space metadata accounting for the shared persistent index.
 use super::contract::{MemoryAccount, MemoryCharge};
 pub(super) use hyper::collections::persistent_avl::{Entry, Error};
 use hyper::collections::persistent_avl::{NodeAccount, PersistentAvl};
@@ -29,6 +29,21 @@ impl<T: Entry<Key = u64, Weight = u64>, A: MemoryAccount> Clone for Index<T, A> 
 impl<T: Entry<Key = u64, Weight = u64>, A: MemoryAccount> Index<T, A> {
     pub(super) const fn new() -> Self {
         Self(PersistentAvl::new())
+    }
+    pub(super) fn len(&self) -> usize {
+        self.0.len()
+    }
+    pub(super) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    pub(super) fn select(&self, index: usize) -> Option<&T> {
+        self.0.select(index)
+    }
+    pub(super) fn iter(&self) -> impl Iterator<Item = &T> {
+        self.0.iter()
+    }
+    pub(super) fn iter_from(&self, lower: u64) -> impl Iterator<Item = &T> {
+        self.0.iter_from(lower)
     }
     pub(super) fn get(&self, key: u64) -> Option<&T> {
         self.0.get(key)
