@@ -7,6 +7,8 @@ use super::{DmaBuffer, DmaMemory, Environment, Error, memory};
 use alloc::vec::Vec;
 
 const ADDRESS_MASK: u64 = 0x0000_ffff_ffff_f000;
+const NO_TABLE: u32 = u32::MAX;
+const TABLE_ENTRIES: usize = 512;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DomainId {
@@ -40,10 +42,36 @@ pub(super) struct Mapping<M> {
 }
 struct Table<M> {
     memory: M,
-    // Parents precede children in the owner vector. Use physical identity so
-    // removing acknowledged owners never invalidates the remaining links.
-    parent: Option<(u64, usize)>,
+    // Root/L2 tables mirror their hardware slots with dense owner indices.
+    // Leaf tables need no child array. Parents always precede their children.
+    children: Vec<u32>,
+    parent: Option<(usize, usize)>,
     entries: u16,
+    // Scratch for allocation-free index repair after acknowledged retirement.
+    relocation: u32,
+}
+
+impl<M: DmaMemory> Table<M> {
+    fn new<E: Environment<Memory = M>>(
+        parent: Option<(usize, usize)>,
+        branch: bool,
+        bits: u8,
+    ) -> Result<Self, Error> {
+        let mut children = Vec::new();
+        if branch {
+            children
+                .try_reserve_exact(TABLE_ENTRIES)
+                .map_err(|_| Error::Allocation)?;
+            children.resize(TABLE_ENTRIES, NO_TABLE);
+        }
+        Ok(Self {
+            memory: memory::allocate::<E>(0, bits)?,
+            children,
+            parent,
+            entries: 0,
+            relocation: NO_TABLE,
+        })
+    }
 }
 pub(super) struct Domain<M, B> {
     pub id: DomainId,
@@ -55,11 +83,7 @@ impl<M: DmaMemory, B: DmaBuffer> Domain<M, B> {
     pub(super) fn new<E: Environment<Memory = M>>(id: DomainId, bits: u8) -> Result<Self, Error> {
         let mut tables = Vec::new();
         tables.try_reserve_exact(1).map_err(|_| Error::Allocation)?;
-        tables.push(Table {
-            memory: memory::allocate::<E>(0, bits)?,
-            parent: None,
-            entries: 0,
-        });
+        tables.push(Table::new::<E>(None, true, bits)?);
         Ok(Self {
             id,
             tables,
@@ -75,7 +99,10 @@ impl<M: DmaMemory, B: DmaBuffer> Domain<M, B> {
         let page = &mut self.tables[table];
         let previous = memory::read(&page.memory, index);
         page.entries = match (previous == 0, value == 0) {
-            (true, false) => page.entries.checked_add(1).filter(|count| *count <= 512),
+            (true, false) => page
+                .entries
+                .checked_add(1)
+                .filter(|count| usize::from(*count) <= TABLE_ENTRIES),
             (false, true) => page.entries.checked_sub(1),
             _ => Some(page.entries),
         }
@@ -100,28 +127,35 @@ impl<M: DmaMemory, B: DmaBuffer> Domain<M, B> {
         for shift in [30, 21] {
             let index = ((iova >> shift) & 511) as usize;
             let entry = memory::read(&self.tables[table].memory, index);
+            let child = self.tables[table].children[index];
             let next = if entry == 0 {
+                if child != NO_TABLE {
+                    return Err(Error::Corrupt);
+                }
                 if !create {
                     return Err(Error::NotMapped);
                 }
+                let next = u32::try_from(self.tables.len())
+                    .ok()
+                    .filter(|index| *index != NO_TABLE)
+                    .ok_or(Error::Exhausted)?;
                 self.tables.try_reserve(1).map_err(|_| Error::Allocation)?;
-                let page = memory::allocate::<E>(0, bits)?;
-                let physical = page.physical();
-                let next = self.tables.len();
-                let parent = self.tables[table].memory.physical();
-                self.tables.push(Table {
-                    memory: page,
-                    parent: Some((parent, index)),
-                    entries: 0,
-                });
+                let page = Table::new::<E>(Some((table, index)), shift == 30, bits)?;
+                let physical = page.memory.physical();
+                self.tables.push(page);
                 E::synchronize();
                 self.write_entry(table, index, physical | 3)?;
-                next
+                self.tables[table].children[index] = next;
+                next as usize
             } else {
-                self.tables
-                    .iter()
-                    .position(|page| page.memory.physical() == entry & ADDRESS_MASK)
-                    .ok_or(Error::Corrupt)?
+                let owner = self.tables.get(child as usize).ok_or(Error::Corrupt)?;
+                if owner.parent != Some((table, index))
+                    || owner.memory.physical() != entry & ADDRESS_MASK
+                    || entry & 3 != 3
+                {
+                    return Err(Error::Corrupt);
+                }
+                child as usize
             };
             table = next;
         }
@@ -220,19 +254,18 @@ impl<M: DmaMemory, B: DmaBuffer> Domain<M, B> {
             if self.tables[child].entries != 0 {
                 continue;
             }
-            let Some((physical, slot)) = self.tables[child].parent else {
+            let Some((parent, slot)) = self.tables[child].parent else {
                 continue;
             };
-            let parent = self.tables[..child]
-                .iter()
-                .position(|page| page.memory.physical() == physical)
-                .ok_or(Error::Corrupt)?;
-            if memory::read(&self.tables[parent].memory, slot)
-                != (self.tables[child].memory.physical() | 3)
+            if parent >= child
+                || self.tables[parent].children[slot] as usize != child
+                || memory::read(&self.tables[parent].memory, slot)
+                    != (self.tables[child].memory.physical() | 3)
             {
                 return Err(Error::Corrupt);
             }
             self.write_entry(parent, slot, 0)?;
+            self.tables[parent].children[slot] = NO_TABLE;
             self.tables[child].parent = None;
         }
         Ok(())
@@ -241,13 +274,41 @@ impl<M: DmaMemory, B: DmaBuffer> Domain<M, B> {
     /// Called only after domain-wide invalidation and `CMD_SYNC` acknowledged
     /// every detached walk. The root remains owned while the domain is alive.
     pub(super) fn finish_unmap(&mut self, mapping: usize) -> B {
-        let root = self.root_address();
-        self.tables
-            .retain(|page| page.parent.is_some() || page.memory.physical() == root);
+        self.retire_tables();
         let buffer = self.mappings.remove(mapping).memory;
-        compact(&mut self.tables);
         compact(&mut self.mappings);
         buffer
+    }
+
+    fn retire_tables(&mut self) {
+        // Compute the stable compaction map in the existing owners. Repair
+        // links while every old index is still valid, then release dead owners.
+        // Each child repairs its own parent slot, so this visits only owners,
+        // not all 512 slots of each branch, and needs no allocation.
+        let mut destination = 0;
+        for (index, page) in self.tables.iter_mut().enumerate() {
+            page.relocation = if index == 0 || page.parent.is_some() {
+                let next = destination;
+                destination += 1;
+                next
+            } else {
+                NO_TABLE
+            };
+        }
+        if destination as usize == self.tables.len() {
+            return;
+        }
+        for index in 0..self.tables.len() {
+            if self.tables[index].relocation == NO_TABLE {
+                continue;
+            }
+            if let Some((parent, slot)) = self.tables[index].parent {
+                self.tables[parent].children[slot] = self.tables[index].relocation;
+                self.tables[index].parent = Some((self.tables[parent].relocation as usize, slot));
+            }
+        }
+        self.tables.retain(|page| page.relocation != NO_TABLE);
+        compact(&mut self.tables);
     }
 
     #[cfg(all(feature = "kernel-test", feature = "io-dma-revoke-test"))]
