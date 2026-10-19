@@ -4,7 +4,7 @@
 //! Process-facing VFS operations and user-memory validation.
 
 use crate::kernel::authority::Rights;
-use crate::kernel::capability::{HandleFlags, HandleValue, PreparedHandle};
+use crate::kernel::capability::{HandleFlags, HandleValue, InvocationReceiver, PreparedHandle};
 use crate::kernel::mm::user_space::{UserSlice, UserWriteReservation};
 use crate::kernel::object::ObjectPublication;
 use crate::kernel::process::{Process, ProcessError};
@@ -41,7 +41,7 @@ impl From<ProcessError> for ServiceError {
 
 pub(crate) fn open_file(
     process: &Process,
-    directory: HandleValue,
+    directory: &InvocationReceiver,
     path: UserSlice,
     rights: Rights,
 ) -> Result<HandleValue, ServiceError> {
@@ -50,7 +50,9 @@ pub(crate) fn open_file(
     let required = super::rights_contract::directory_rights_for_file(rights.bits())
         .and_then(Rights::from_bits)
         .ok_or(ServiceError::InvalidInput)?;
-    let directory = process.resolve_handle::<DirectoryObject>(directory, required)?;
+    let directory = directory
+        .resolve::<DirectoryObject>(required)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let file = directory
         .object()
         .open_file(&path, &process.resource_domain())?;
@@ -59,7 +61,7 @@ pub(crate) fn open_file(
 
 pub(crate) fn open_directory(
     process: &Process,
-    directory: HandleValue,
+    directory: &InvocationReceiver,
     path: UserSlice,
     rights: Rights,
 ) -> Result<HandleValue, ServiceError> {
@@ -67,7 +69,9 @@ pub(crate) fn open_directory(
     let required = super::rights_contract::directory_rights_for_directory(rights.bits())
         .and_then(Rights::from_bits)
         .ok_or(ServiceError::InvalidInput)?;
-    let directory = process.resolve_handle::<DirectoryObject>(directory, required)?;
+    let directory = directory
+        .resolve::<DirectoryObject>(required)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let child = directory
         .object()
         .open_directory(&path, &process.resource_domain())?;
@@ -77,9 +81,11 @@ pub(crate) fn open_directory(
 /// Create independent iteration authority using only the source Directory's READ right.
 pub(crate) fn begin_directory_read(
     process: &Process,
-    directory: HandleValue,
+    directory: &InvocationReceiver,
 ) -> Result<HandleValue, ServiceError> {
-    let directory = process.resolve_handle::<DirectoryObject>(directory, Rights::READ)?;
+    let directory = directory
+        .resolve::<DirectoryObject>(Rights::READ)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let rights = Rights::from_bits(super::rights_contract::directory_stream_rights(
         directory.rights().bits(),
     ))
@@ -89,12 +95,13 @@ pub(crate) fn begin_directory_read(
 }
 
 pub(crate) fn read_directory(
-    process: &Process,
-    directory: HandleValue,
+    directory: &InvocationReceiver,
     cookie: u64,
     page: &mut DirectoryPage,
 ) -> Result<(), ServiceError> {
-    let directory = process.resolve_handle::<super::DirectoryStream>(directory, Rights::READ)?;
+    let directory = directory
+        .resolve::<super::DirectoryStream>(Rights::READ)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     directory
         .object()
         .read_page(cookie, page)
@@ -102,18 +109,18 @@ pub(crate) fn read_directory(
 }
 
 pub(crate) fn directory_info(
-    process: &Process,
-    directory: HandleValue,
+    directory: &InvocationReceiver,
 ) -> Result<super::DirectoryInfo, ServiceError> {
-    let directory = process.resolve_handle::<DirectoryObject>(directory, Rights::INSPECT)?;
+    let directory = directory
+        .resolve::<DirectoryObject>(Rights::INSPECT)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     directory.object().info().map_err(Into::into)
 }
 
-pub(crate) fn file_info(
-    process: &Process,
-    file: HandleValue,
-) -> Result<super::FileInfo, ServiceError> {
-    let file = process.resolve_handle::<FileObject>(file, Rights::INSPECT)?;
+pub(crate) fn file_info(file: &InvocationReceiver) -> Result<super::FileInfo, ServiceError> {
+    let file = file
+        .resolve::<FileObject>(Rights::INSPECT)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     file.object().info().map_err(Into::into)
 }
 
@@ -121,9 +128,11 @@ pub(crate) fn file_info(
 /// the process still admits handles; a concurrent exit rolls preparation back.
 pub(crate) fn protect_file(
     process: &Process,
-    file: HandleValue,
+    file: &InvocationReceiver,
 ) -> Result<(HandleValue, u64), ServiceError> {
-    let file = process.resolve_handle::<FileObject>(file, Rights::PROTECT)?;
+    let file = file
+        .resolve::<FileObject>(Rights::PROTECT)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let domain = process.resource_domain();
     let protection = file.object().protect(&domain)?;
     let size = protection.size();
@@ -148,11 +157,13 @@ pub(crate) fn copy_path(process: &Process, path: UserSlice) -> Result<ScratchStr
 
 pub(crate) fn read_file_at(
     process: &Process,
-    file: HandleValue,
+    file: &InvocationReceiver,
     offset: u64,
     output: Option<UserSlice>,
 ) -> Result<(u64, u64), ServiceError> {
-    let file = process.resolve_handle::<FileObject>(file, Rights::READ)?;
+    let file = file
+        .resolve::<FileObject>(Rights::READ)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let file_size = file.object().len()?;
     let Some(output) = output else {
         return Ok((0, file_size));
@@ -222,7 +233,7 @@ impl From<super::instance::Error> for ServiceError {
 
 pub(crate) fn create_file(
     process: &Process,
-    directory: HandleValue,
+    directory: &InvocationReceiver,
     path: UserSlice,
     rights: Rights,
     mode: u32,
@@ -235,7 +246,9 @@ pub(crate) fn create_file(
         .and_then(Rights::from_bits)
         .ok_or(ServiceError::InvalidInput)?
         .union(Rights::WRITE);
-    let directory = process.resolve_handle::<DirectoryObject>(directory, required)?;
+    let directory = directory
+        .resolve::<DirectoryObject>(required)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     prepare_file_handle(process, rights, |prepare| {
         directory
             .object()
@@ -245,7 +258,7 @@ pub(crate) fn create_file(
 
 pub(crate) fn create_directory(
     process: &Process,
-    directory: HandleValue,
+    directory: &InvocationReceiver,
     path: UserSlice,
     mode: u32,
 ) -> Result<(), ServiceError> {
@@ -253,8 +266,9 @@ pub(crate) fn create_directory(
     if mode & !0o777 != 0 {
         return Err(ServiceError::InvalidInput);
     }
-    let directory =
-        process.resolve_handle::<DirectoryObject>(directory, Rights::READ.union(Rights::WRITE))?;
+    let directory = directory
+        .resolve::<DirectoryObject>(Rights::READ.union(Rights::WRITE))
+        .map_err(crate::kernel::process::ProcessError::from)?;
     directory
         .object()
         .create(
@@ -268,13 +282,14 @@ pub(crate) fn create_directory(
 
 pub(crate) fn remove_entry(
     process: &Process,
-    directory: HandleValue,
+    directory: &InvocationReceiver,
     path: UserSlice,
     is_directory: bool,
 ) -> Result<(), ServiceError> {
     let path = copy_path(process, path)?;
-    let directory =
-        process.resolve_handle::<DirectoryObject>(directory, Rights::READ.union(Rights::WRITE))?;
+    let directory = directory
+        .resolve::<DirectoryObject>(Rights::READ.union(Rights::WRITE))
+        .map_err(crate::kernel::process::ProcessError::from)?;
     directory
         .object()
         .remove(
@@ -289,22 +304,22 @@ pub(crate) fn remove_entry(
         .map_err(Into::into)
 }
 
-pub(crate) fn resize_file(
-    process: &Process,
-    file: HandleValue,
-    length: u64,
-) -> Result<(), ServiceError> {
-    let file = process.resolve_handle::<FileObject>(file, Rights::WRITE)?;
+pub(crate) fn resize_file(file: &InvocationReceiver, length: u64) -> Result<(), ServiceError> {
+    let file = file
+        .resolve::<FileObject>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     file.object().resize(length).map_err(Into::into)
 }
 
 pub(crate) fn write_file_at(
     process: &Process,
-    file: HandleValue,
+    file: &InvocationReceiver,
     offset: Option<u64>,
     input: Option<UserSlice>,
 ) -> Result<(u64, u64), ServiceError> {
-    let file = process.resolve_handle::<FileObject>(file, Rights::WRITE)?;
+    let file = file
+        .resolve::<FileObject>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let Some(input) = input else {
         return Ok((0, offset.unwrap_or(file.object().len()?)));
     };
@@ -332,7 +347,7 @@ pub(crate) fn write_file_at(
 
 pub(crate) fn directory_scope_create(
     process: &Process,
-    root: HandleValue,
+    root: &InvocationReceiver,
     start: HandleValue,
     rights: Rights,
 ) -> Result<HandleValue, ServiceError> {
@@ -342,7 +357,9 @@ pub(crate) fn directory_scope_create(
     .and_then(Rights::from_bits)
     .ok_or(ServiceError::InvalidInput)?
     .union(rights.intersection(Rights::MANAGE_NAMESPACE));
-    let root = process.resolve_handle::<DirectoryObject>(root, required)?;
+    let root = root
+        .resolve::<DirectoryObject>(required)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let start = process.resolve_handle::<DirectoryObject>(start, required)?;
     let scope = DirectoryObject::scope(root.object(), start.object(), &process.resource_domain())?;
     Ok(process.create_object(scope, rights)?)
@@ -350,13 +367,14 @@ pub(crate) fn directory_scope_create(
 
 pub(crate) fn directory_get_metadata(
     process: &Process,
-    directory: HandleValue,
+    directory: &InvocationReceiver,
     path: UserSlice,
     follow: bool,
 ) -> Result<super::Metadata, ServiceError> {
     let path = copy_path(process, path)?;
-    let directory = process
-        .resolve_handle::<DirectoryObject>(directory, Rights::READ.union(Rights::INSPECT))?;
+    let directory = directory
+        .resolve::<DirectoryObject>(Rights::READ.union(Rights::INSPECT))
+        .map_err(crate::kernel::process::ProcessError::from)?;
     Ok(directory.object().metadata(
         &path,
         follow,
@@ -365,31 +383,34 @@ pub(crate) fn directory_get_metadata(
 }
 
 pub(crate) fn file_get_metadata(
-    process: &Process,
-    file: HandleValue,
+    file: &InvocationReceiver,
 ) -> Result<super::Metadata, ServiceError> {
-    let file = process.resolve_handle::<FileObject>(file, Rights::INSPECT)?;
+    let file = file
+        .resolve::<FileObject>(Rights::INSPECT)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     Ok(file.object().metadata()?)
 }
 
 pub(crate) fn directory_get_self_metadata(
-    process: &Process,
-    directory: HandleValue,
+    directory: &InvocationReceiver,
 ) -> Result<super::Metadata, ServiceError> {
-    let directory = process.resolve_handle::<DirectoryObject>(directory, Rights::INSPECT)?;
+    let directory = directory
+        .resolve::<DirectoryObject>(Rights::INSPECT)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     Ok(directory.object().self_metadata()?)
 }
 
 pub(crate) fn directory_set_metadata(
     process: &Process,
-    directory: HandleValue,
+    directory: &InvocationReceiver,
     path: UserSlice,
     follow: bool,
     update: super::MetadataUpdate,
 ) -> Result<(), ServiceError> {
     let path = copy_path(process, path)?;
-    let directory = process
-        .resolve_handle::<DirectoryObject>(directory, Rights::READ.union(Rights::SET_ATTRIBUTES))?;
+    let directory = directory
+        .resolve::<DirectoryObject>(Rights::READ.union(Rights::SET_ATTRIBUTES))
+        .map_err(crate::kernel::process::ProcessError::from)?;
     Ok(directory.object().set_metadata(
         &path,
         follow,
@@ -399,17 +420,18 @@ pub(crate) fn directory_set_metadata(
 }
 
 pub(crate) fn file_set_metadata(
-    process: &Process,
-    file: HandleValue,
+    file: &InvocationReceiver,
     update: super::MetadataUpdate,
 ) -> Result<(), ServiceError> {
-    let file = process.resolve_handle::<FileObject>(file, Rights::SET_ATTRIBUTES)?;
+    let file = file
+        .resolve::<FileObject>(Rights::SET_ATTRIBUTES)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     Ok(file.object().set_metadata(update)?)
 }
 
 pub(crate) fn directory_rename(
     process: &Process,
-    source: HandleValue,
+    source: &InvocationReceiver,
     path: UserSlice,
     destination: HandleValue,
     new_path: UserSlice,
@@ -417,7 +439,9 @@ pub(crate) fn directory_rename(
     let path = copy_path(process, path)?;
     let new_path = copy_path(process, new_path)?;
     let rights = Rights::READ.union(Rights::WRITE);
-    let source = process.resolve_handle::<DirectoryObject>(source, rights)?;
+    let source = source
+        .resolve::<DirectoryObject>(rights)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let destination = process.resolve_handle::<DirectoryObject>(destination, rights)?;
     Ok(source.object().rename(
         &path,
@@ -429,7 +453,7 @@ pub(crate) fn directory_rename(
 
 pub(crate) fn directory_link(
     process: &Process,
-    source: HandleValue,
+    source: &InvocationReceiver,
     path: UserSlice,
     destination: HandleValue,
     new_path: UserSlice,
@@ -437,7 +461,9 @@ pub(crate) fn directory_link(
     let path = copy_path(process, path)?;
     let new_path = copy_path(process, new_path)?;
     let rights = Rights::READ.union(Rights::WRITE);
-    let source = process.resolve_handle::<DirectoryObject>(source, rights)?;
+    let source = source
+        .resolve::<DirectoryObject>(rights)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let destination = process.resolve_handle::<DirectoryObject>(destination, rights)?;
     Ok(source.object().link(
         &path,
@@ -449,14 +475,15 @@ pub(crate) fn directory_link(
 
 pub(crate) fn directory_symlink(
     process: &Process,
-    directory: HandleValue,
+    directory: &InvocationReceiver,
     path: UserSlice,
     target: UserSlice,
 ) -> Result<(), ServiceError> {
     let path = copy_path(process, path)?;
     let target = copy_path(process, target)?;
-    let directory =
-        process.resolve_handle::<DirectoryObject>(directory, Rights::READ.union(Rights::WRITE))?;
+    let directory = directory
+        .resolve::<DirectoryObject>(Rights::READ.union(Rights::WRITE))
+        .map_err(crate::kernel::process::ProcessError::from)?;
     Ok(directory.object().symlink(
         &path,
         &target,
@@ -466,11 +493,13 @@ pub(crate) fn directory_symlink(
 
 pub(crate) fn directory_read_link(
     process: &Process,
-    directory: HandleValue,
+    directory: &InvocationReceiver,
     path: UserSlice,
 ) -> Result<ScratchVec<u8>, ServiceError> {
     let path = copy_path(process, path)?;
-    let directory = process.resolve_handle::<DirectoryObject>(directory, Rights::READ)?;
+    let directory = directory
+        .resolve::<DirectoryObject>(Rights::READ)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     Ok(directory
         .object()
         .read_link(&path, &ScratchBudget::new(&process.resource_domain()))?)
@@ -478,11 +507,13 @@ pub(crate) fn directory_read_link(
 
 pub(crate) fn directory_canonicalize(
     process: &Process,
-    directory: HandleValue,
+    directory: &InvocationReceiver,
     path: UserSlice,
 ) -> Result<ScratchString, ServiceError> {
     let path = copy_path(process, path)?;
-    let directory = process.resolve_handle::<DirectoryObject>(directory, Rights::READ)?;
+    let directory = directory
+        .resolve::<DirectoryObject>(Rights::READ)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     Ok(directory
         .object()
         .canonicalize(&path, &ScratchBudget::new(&process.resource_domain()))?)
@@ -490,7 +521,7 @@ pub(crate) fn directory_canonicalize(
 
 pub(crate) fn directory_remove_if(
     process: &Process,
-    directory: HandleValue,
+    directory: &InvocationReceiver,
     path: UserSlice,
     is_directory: bool,
     expected: u64,
@@ -499,8 +530,9 @@ pub(crate) fn directory_remove_if(
         return Err(ServiceError::InvalidInput);
     }
     let path = copy_path(process, path)?;
-    let directory =
-        process.resolve_handle::<DirectoryObject>(directory, Rights::READ.union(Rights::WRITE))?;
+    let directory = directory
+        .resolve::<DirectoryObject>(Rights::READ.union(Rights::WRITE))
+        .map_err(crate::kernel::process::ProcessError::from)?;
     Ok(directory.object().remove_if(
         &path,
         is_directory,
@@ -511,7 +543,7 @@ pub(crate) fn directory_remove_if(
 
 pub(crate) fn directory_open_directory_nofollow(
     process: &Process,
-    directory: HandleValue,
+    directory: &InvocationReceiver,
     path: UserSlice,
     rights: Rights,
 ) -> Result<HandleValue, ServiceError> {
@@ -519,46 +551,50 @@ pub(crate) fn directory_open_directory_nofollow(
     let required = super::rights_contract::directory_rights_for_directory(rights.bits())
         .and_then(Rights::from_bits)
         .ok_or(ServiceError::InvalidInput)?;
-    let directory = process.resolve_handle::<DirectoryObject>(directory, required)?;
+    let directory = directory
+        .resolve::<DirectoryObject>(required)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let child = directory
         .object()
         .open_directory_nofollow(&path, &process.resource_domain())?;
     Ok(process.create_object(child, rights)?)
 }
 
-pub(crate) fn file_sync(
-    process: &Process,
-    file: HandleValue,
-    scope: u64,
-) -> Result<(), ServiceError> {
+pub(crate) fn file_sync(file: &InvocationReceiver, scope: u64) -> Result<(), ServiceError> {
     if scope > 1 {
         return Err(ServiceError::InvalidInput);
     }
-    let file = process.resolve_handle::<FileObject>(file, Rights::WRITE)?;
+    let file = file
+        .resolve::<FileObject>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     Ok(file.object().sync(scope)?)
 }
 
 pub(crate) fn file_lock(
     process: &Process,
-    file: HandleValue,
+    file: &InvocationReceiver,
     mode: super::locks::LockMode,
     deadline: u64,
     cancelled: impl Fn() -> bool,
 ) -> Result<(), ServiceError> {
-    let file = process.resolve_handle::<FileObject>(file, Rights::LOCK_FILE)?;
+    let file = file
+        .resolve::<FileObject>(Rights::LOCK_FILE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     file.object()
         .lock(mode, deadline, &process.resource_domain(), cancelled)
         .map_err(ServiceError::FileLock)
 }
 
-pub(crate) fn file_unlock(process: &Process, file: HandleValue) -> Result<(), ServiceError> {
-    let file = process.resolve_handle::<FileObject>(file, Rights::LOCK_FILE)?;
+pub(crate) fn file_unlock(file: &InvocationReceiver) -> Result<(), ServiceError> {
+    let file = file
+        .resolve::<FileObject>(Rights::LOCK_FILE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     file.object().unlock().map_err(ServiceError::FileLock)
 }
 
 pub(crate) fn directory_open_file_with_options(
     process: &Process,
-    directory: HandleValue,
+    directory: &InvocationReceiver,
     path: UserSlice,
     rights: Rights,
     options: u64,
@@ -578,7 +614,9 @@ pub(crate) fn directory_open_file_with_options(
     if options & 3 != 0 {
         required = required.union(Rights::WRITE);
     }
-    let directory = process.resolve_handle::<DirectoryObject>(directory, required)?;
+    let directory = directory
+        .resolve::<DirectoryObject>(required)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let options = super::FileOpenOptions::new(rights, options, mode)?;
     prepare_file_handle(process, rights, |prepare| {
         directory.object().open_file_with_options(
@@ -623,13 +661,14 @@ pub(crate) fn mount_remote(
     process: &Process,
     channel: HandleValue,
     buffer: HandleValue,
-    directory: HandleValue,
+    directory: &InvocationReceiver,
     path: UserSlice,
     read_only: bool,
 ) -> Result<(), ServiceError> {
     let path = copy_path(process, path)?;
-    let directory = process
-        .resolve_handle::<DirectoryObject>(directory, Rights::WRITE.union(Rights::EXECUTE))?;
+    let directory = directory
+        .resolve::<DirectoryObject>(Rights::WRITE.union(Rights::EXECUTE))
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let device = super::remote::Transport::prepare(process, channel, buffer, read_only)
         .map_err(|error| ServiceError::FileSystem(VfsError::Backend(error)))?;
     directory
@@ -640,12 +679,13 @@ pub(crate) fn mount_remote(
 
 pub(crate) fn unmount(
     process: &Process,
-    directory: HandleValue,
+    directory: &InvocationReceiver,
     path: UserSlice,
 ) -> Result<(), ServiceError> {
     let path = copy_path(process, path)?;
-    let directory = process
-        .resolve_handle::<DirectoryObject>(directory, Rights::WRITE.union(Rights::EXECUTE))?;
+    let directory = directory
+        .resolve::<DirectoryObject>(Rights::WRITE.union(Rights::EXECUTE))
+        .map_err(crate::kernel::process::ProcessError::from)?;
     directory
         .object()
         .unmount(&path, &process.resource_domain())?;

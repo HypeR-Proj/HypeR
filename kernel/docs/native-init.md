@@ -79,8 +79,9 @@ and a loader File with `READ|EXECUTE`. The child receives only
 `READ|EXECUTE|PROTECT` on the target; builder creation preserves file identity,
 not a frozen content version. The kernel validates and maps the loader's restricted ELF,
 then enters it on an empty guarded stack. Its first argument register carries
-a ByteChannel handle. The queued 72-byte `loader_startup` header describes the
-executable/VMAR capabilities and mapping bounds, followed by tagged capabilities
+a ByteChannel handle. The queued 96-byte `loader_startup` header describes the
+executable/VMAR capabilities and mapping bounds, plus the child's ExecutionContext,
+ObjectFactory and SystemInfo capabilities, followed by tagged capabilities
 and opaque SDK data. No runtime or library directory is opened implicitly by
 the kernel. Application ELF, argv/auxv and application relocation are userspace
 responsibilities. Kernel-image relocation during boot is unchanged.

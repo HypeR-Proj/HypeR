@@ -54,6 +54,7 @@ impl Rights {
     pub(crate) const SIGNAL: Self = Self(native::HYPER_NATIVE_RIGHT_SIGNAL);
     pub(crate) const CREATE_PROCESS: Self = Self(native::HYPER_NATIVE_RIGHT_CREATE_PROCESS);
     pub(crate) const CREATE_THREAD: Self = Self(native::HYPER_NATIVE_RIGHT_CREATE_THREAD);
+    pub(crate) const CREATE_OBJECT: Self = Self(native::HYPER_NATIVE_RIGHT_CREATE_OBJECT);
     pub(crate) const CREATE_TASK_GROUP: Self = Self(native::HYPER_NATIVE_RIGHT_CREATE_TASK_GROUP);
     pub(crate) const CREATE_RESOURCE_DOMAIN: Self =
         Self(native::HYPER_NATIVE_RIGHT_CREATE_RESOURCE_DOMAIN);

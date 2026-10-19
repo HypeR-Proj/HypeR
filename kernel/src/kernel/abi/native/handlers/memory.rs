@@ -9,7 +9,7 @@ use crate::kernel::abi::native::status::{
     failure, handle_result, status_from_memory_service_error, status_only, success,
 };
 use crate::kernel::abi::native::wire::{optional_user_slice, parse_handle, require_zero};
-use crate::kernel::capability::HandleValue;
+use crate::kernel::capability::InvocationReceiver;
 use crate::kernel::mm::user_space::UserSlice;
 use hyper::abi::native::{
     HYPER_NATIVE_STATUS_INVALID_ARGUMENT, HYPER_NATIVE_VMO_MAX_TRANSFER_BYTES, HyperNativeStatus,
@@ -33,11 +33,12 @@ pub(in crate::kernel::abi::native) fn sys_vmo_create(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_vmo_read(
     services: &impl MemoryServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_vmo_transfer(arguments).and_then(|(vmo, offset, bytes)| {
+    let result = parse_vmo_transfer(arguments).and_then(|(offset, bytes)| {
         services
-            .read_vmo(vmo, offset, bytes)
+            .read_vmo(receiver, offset, bytes)
             .map_err(status_from_memory_service_error)
     });
     NativeAction::Return(status_only(result))
@@ -46,11 +47,12 @@ pub(in crate::kernel::abi::native) fn sys_vmo_read(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_vmo_write(
     services: &impl MemoryServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_vmo_transfer(arguments).and_then(|(vmo, offset, bytes)| {
+    let result = parse_vmo_transfer(arguments).and_then(|(offset, bytes)| {
         services
-            .write_vmo(vmo, offset, bytes)
+            .write_vmo(receiver, offset, bytes)
             .map_err(status_from_memory_service_error)
     });
     NativeAction::Return(status_only(result))
@@ -58,33 +60,31 @@ pub(in crate::kernel::abi::native) fn sys_vmo_write(
 
 fn parse_vmo_transfer(
     arguments: &Arguments,
-) -> Result<(HandleValue, u64, Option<UserSlice>), HyperNativeStatus> {
-    if arguments[4] != 0 || arguments[5] != 0 || arguments[3] > HYPER_NATIVE_VMO_MAX_TRANSFER_BYTES
+) -> Result<(u64, Option<UserSlice>), HyperNativeStatus> {
+    if arguments[3] != 0 || arguments[4] != 0 || arguments[2] > HYPER_NATIVE_VMO_MAX_TRANSFER_BYTES
     {
         return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
     }
     Ok((
-        parse_handle(arguments[0])?,
-        arguments[1],
-        optional_user_slice(arguments[2], arguments[3])?,
+        arguments[0],
+        optional_user_slice(arguments[1], arguments[2])?,
     ))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_vmar_allocate(
     services: &impl MemoryServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = if arguments[4..].iter().any(|value| *value != 0)
-        || arguments[3] & !hyper::abi::native::HYPER_NATIVE_VMAR_ALLOCATE_EXACT != 0
+    let result = if arguments[3..].iter().any(|value| *value != 0)
+        || arguments[2] & !hyper::abi::native::HYPER_NATIVE_VMAR_ALLOCATE_EXACT != 0
     {
         Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)
     } else {
-        parse_handle(arguments[0]).and_then(|parent| {
-            services
-                .allocate_vmar(parent, arguments[1], arguments[2], arguments[3] != 0)
-                .map_err(status_from_memory_service_error)
-        })
+        services
+            .allocate_vmar(receiver, arguments[0], arguments[1], arguments[2] != 0)
+            .map_err(status_from_memory_service_error)
     };
     NativeAction::Return(match result {
         Ok((handle, address)) => success([handle.get(), address]),
@@ -95,41 +95,45 @@ pub(in crate::kernel::abi::native) fn sys_vmar_allocate(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_vmar_map(
     services: &impl MemoryServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_handle(arguments[0]).and_then(|vmar| {
-        let vmo = parse_handle(arguments[1])?;
-        let permissions = crate::kernel::mm::user_space::abi_permissions(arguments[5])
+    let result = (|| {
+        let vmar = receiver;
+        let vmo = parse_handle(arguments[0])?;
+        let permissions = crate::kernel::mm::user_space::abi_permissions(arguments[4])
             .ok_or(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
         services
             .map_vmo(
                 vmar,
                 vmo,
+                arguments[1],
                 arguments[2],
                 arguments[3],
-                arguments[4],
                 permissions,
             )
             .map_err(status_from_memory_service_error)
-    });
+    })();
     NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_vmar_protect(
     services: &impl MemoryServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = if arguments[4] != 0 || arguments[5] != 0 {
+    let result = if arguments[3] != 0 || arguments[4] != 0 {
         Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)
     } else {
-        parse_handle(arguments[0]).and_then(|vmar| {
-            let permissions = crate::kernel::mm::user_space::abi_permissions(arguments[3])
+        (|| {
+            let vmar = receiver;
+            let permissions = crate::kernel::mm::user_space::abi_permissions(arguments[2])
                 .ok_or(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
             services
-                .protect_vmar(vmar, arguments[1], arguments[2], permissions)
+                .protect_vmar(vmar, arguments[0], arguments[1], permissions)
                 .map_err(status_from_memory_service_error)
-        })
+        })()
     };
     NativeAction::Return(status_only(result))
 }
@@ -137,16 +141,15 @@ pub(in crate::kernel::abi::native) fn sys_vmar_protect(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_vmar_unmap(
     services: &impl MemoryServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = if arguments[3..].iter().any(|value| *value != 0) {
+    let result = if arguments[2..].iter().any(|value| *value != 0) {
         Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)
     } else {
-        parse_handle(arguments[0]).and_then(|vmar| {
-            services
-                .unmap_vmar(vmar, arguments[1], arguments[2])
-                .map_err(status_from_memory_service_error)
-        })
+        services
+            .unmap_vmar(receiver, arguments[0], arguments[1])
+            .map_err(status_from_memory_service_error)
     };
     NativeAction::Return(status_only(result))
 }
@@ -154,16 +157,15 @@ pub(in crate::kernel::abi::native) fn sys_vmar_unmap(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_vmar_destroy(
     services: &impl MemoryServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = if arguments[1..].iter().any(|value| *value != 0) {
+    let result = if arguments[0..].iter().any(|value| *value != 0) {
         Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)
     } else {
-        parse_handle(arguments[0]).and_then(|vmar| {
-            services
-                .destroy_vmar(vmar)
-                .map_err(status_from_memory_service_error)
-        })
+        services
+            .destroy_vmar(receiver)
+            .map_err(status_from_memory_service_error)
     };
     NativeAction::Return(status_only(result))
 }
@@ -171,11 +173,12 @@ pub(in crate::kernel::abi::native) fn sys_vmar_destroy(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_vmo_create_snapshot(
     services: &impl MemoryServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[1..])?;
-        let value = parse_handle(arguments[0])?;
+        require_zero(&arguments[0..])?;
+        let value = receiver;
         services
             .create_vmo_snapshot(value)
             .map_err(status_from_memory_service_error)
@@ -189,15 +192,17 @@ pub(in crate::kernel::abi::native) fn sys_vmo_create_snapshot(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_vmar_map_private(
     services: &(impl MemoryServices + crate::kernel::abi::native::services::UserMemoryServices),
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[4..])?;
-        let vmar = parse_handle(arguments[0])?;
-        let snapshot = parse_handle(arguments[1])?;
+        require_zero(&arguments[3..])?;
+        let vmar = receiver;
+        let snapshot = parse_handle(arguments[0])?;
         let record = crate::kernel::abi::native::wire::copy_extensible_input_record::<48>(
             services,
-            &[0, arguments[2], arguments[3], 0, 0, 0],
+            arguments[1],
+            arguments[2],
             48,
         )?;
         use crate::kernel::abi::native::wire::{read_record_u32, read_record_u64};
@@ -220,16 +225,18 @@ pub(in crate::kernel::abi::native) fn sys_vmar_map_private(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_vmar_map_file(
     services: &(impl MemoryServices + crate::kernel::abi::native::services::UserMemoryServices),
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[5..])?;
-        let vmar = parse_handle(arguments[0])?;
-        let file = parse_handle(arguments[1])?;
-        let protection = parse_handle(arguments[2])?;
+        require_zero(&arguments[4..])?;
+        let vmar = receiver;
+        let file = parse_handle(arguments[0])?;
+        let protection = parse_handle(arguments[1])?;
         let record = crate::kernel::abi::native::wire::copy_extensible_input_record::<48>(
             services,
-            &[0, arguments[3], arguments[4], 0, 0, 0],
+            arguments[2],
+            arguments[3],
             48,
         )?;
         use crate::kernel::abi::native::wire::{read_record_u32, read_record_u64};
@@ -267,43 +274,40 @@ pub(in crate::kernel::abi::native) fn sys_vmo_create_contiguous(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_vmar_lock_memory(
     services: &impl MemoryServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    memory_residency(services, arguments, true)
+    memory_residency(services, receiver, arguments, true)
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_vmar_unlock_memory(
     services: &impl MemoryServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    memory_residency(services, arguments, false)
+    memory_residency(services, receiver, arguments, false)
 }
 
 fn memory_residency(
     services: &impl MemoryServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
     lock: bool,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[4..])?;
-        let current = match arguments[3] {
+        require_zero(&arguments[3..])?;
+        let current = match arguments[2] {
             0 => false,
             hyper::abi::native::HYPER_NATIVE_VMAR_MEMORY_CURRENT
-                if arguments[1] == 0 && arguments[2] == 0 =>
+                if arguments[0] == 0 && arguments[1] == 0 =>
             {
                 true
             }
             _ => return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT),
         };
         services
-            .set_memory_residency(
-                parse_handle(arguments[0])?,
-                arguments[1],
-                arguments[2],
-                current,
-                lock,
-            )
+            .set_memory_residency(receiver, arguments[0], arguments[1], current, lock)
             .map_err(status_from_memory_service_error)
     })();
     NativeAction::Return(status_only(result))

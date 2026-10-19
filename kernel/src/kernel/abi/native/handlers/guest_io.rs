@@ -3,6 +3,8 @@
 
 //! Native guest I/O syscall validation.
 
+use crate::kernel::capability::InvocationReceiver;
+
 use crate::kernel::abi::native::services::NativeAction;
 use crate::kernel::abi::native::status::{
     failure, handle_result, status_from_process_error, status_from_vm_service_error, status_only,
@@ -21,16 +23,13 @@ use hyper::abi::native::{
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_mailbox_create(
     services: &impl GuestIoServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[3..])?;
+        require_zero(&arguments[2..])?;
         services
-            .create_guest_mailbox(
-                parse_handle(arguments[0])?,
-                arguments[1],
-                parse_u32(arguments[2])?,
-            )
+            .create_guest_mailbox(receiver, arguments[0], parse_u32(arguments[1])?)
             .map_err(status_from_vm_service_error)
     })();
     NativeAction::Return(handle_result(result))
@@ -39,18 +38,19 @@ pub(in crate::kernel::abi::native) fn sys_guest_mailbox_create(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_mailbox_send(
     services: &impl GuestIoServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[3..])?;
+        require_zero(&arguments[2..])?;
         let length =
-            usize::try_from(arguments[2]).map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
+            usize::try_from(arguments[1]).map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
         if length == 0 || length > 256 {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
         }
-        let source = optional_user_slice(arguments[1], arguments[2])?
+        let source = optional_user_slice(arguments[0], arguments[1])?
             .ok_or(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
-        let mailbox = parse_handle(arguments[0])?;
+        let mailbox = receiver;
         let mut bytes = [0u8; 256];
         services
             .copy_from_user(source, &mut bytes[..length])
@@ -65,22 +65,23 @@ pub(in crate::kernel::abi::native) fn sys_guest_mailbox_send(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_mailbox_receive(
     services: &impl GuestIoServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[3..])?;
-        if arguments[2] == 0 || arguments[2] > 256 {
+        require_zero(&arguments[2..])?;
+        if arguments[1] == 0 || arguments[1] > 256 {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
         }
-        let _validated = optional_user_slice(arguments[1], arguments[2])?;
-        let mailbox = parse_handle(arguments[0])?;
+        let _validated = optional_user_slice(arguments[0], arguments[1])?;
+        let mailbox = receiver;
         services
             .receive_guest_mailbox(mailbox, &mut |bytes| {
-                if bytes.len() as u64 > arguments[2] {
+                if bytes.len() as u64 > arguments[1] {
                     return Err(Error::InvalidArgument);
                 }
                 let destination =
-                    UserSlice::new(UserAddress::new(arguments[1]), bytes.len() as u64)
+                    UserSlice::new(UserAddress::new(arguments[0]), bytes.len() as u64)
                         .map_err(|_| Error::Fault)?;
                 services
                     .copy_to_user(destination, bytes)
@@ -97,17 +98,18 @@ pub(in crate::kernel::abi::native) fn sys_guest_mailbox_receive(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_notification_create(
     services: &impl GuestIoServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
         services
             .create_guest_notification(
+                receiver,
                 parse_handle(arguments[0])?,
-                parse_handle(arguments[1])?,
+                arguments[1],
                 arguments[2],
-                arguments[3],
+                parse_u32(arguments[3])?,
                 parse_u32(arguments[4])?,
-                parse_u32(arguments[5])?,
             )
             .map_err(status_from_vm_service_error)
     })();
@@ -117,12 +119,13 @@ pub(in crate::kernel::abi::native) fn sys_guest_notification_create(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_notification_control(
     services: &impl GuestIoServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[2..])?;
+        require_zero(&arguments[1..])?;
         services
-            .control_guest_notification(parse_handle(arguments[0])?, parse_u32(arguments[1])?)
+            .control_guest_notification(receiver, parse_u32(arguments[0])?)
             .map_err(status_from_vm_service_error)
     })();
     NativeAction::Return(match result {
@@ -134,17 +137,18 @@ pub(in crate::kernel::abi::native) fn sys_guest_notification_control(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_native_block_create(
     services: &impl GuestIoServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[5..])?;
+        require_zero(&arguments[4..])?;
         services
             .create_native_block(
+                receiver,
                 parse_handle(arguments[0])?,
-                parse_handle(arguments[1])?,
+                arguments[1],
                 arguments[2],
-                arguments[3],
-                parse_u32(arguments[4])?,
+                parse_u32(arguments[3])?,
             )
             .map_err(status_from_vm_service_error)
     })();
@@ -154,15 +158,16 @@ pub(in crate::kernel::abi::native) fn sys_native_block_create(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_native_block_activate(
     services: &impl GuestIoServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[2..])?;
-        if arguments[1] > 1 {
+        require_zero(&arguments[1..])?;
+        if arguments[0] > 1 {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
         }
         services
-            .activate_native_block(parse_handle(arguments[0])?, arguments[1] != 0)
+            .activate_native_block(receiver, arguments[0] != 0)
             .map_err(|error| {
                 use crate::kernel::block::service::ActivationError;
                 use hyper::abi::native::{
@@ -193,25 +198,26 @@ pub(in crate::kernel::abi::native) fn sys_native_block_activate(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_filesystem_mount(
     services: &impl GuestIoServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[6..])?;
-        if arguments[5] > 1 {
+        require_zero(&arguments[5..])?;
+        if arguments[4] > 1 {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
         }
-        if arguments[4] == 0 || arguments[4] > 4096 {
+        if arguments[3] == 0 || arguments[3] > 4096 {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
         }
-        let path = UserSlice::new(UserAddress::new(arguments[3]), arguments[4])
+        let path = UserSlice::new(UserAddress::new(arguments[2]), arguments[3])
             .map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
         services
             .mount_filesystem(
                 parse_handle(arguments[0])?,
                 parse_handle(arguments[1])?,
-                parse_handle(arguments[2])?,
+                receiver,
                 path,
-                arguments[5] != 0,
+                arguments[4] != 0,
             )
             .map_err(crate::kernel::abi::native::status::status_from_vfs_service_error)
     })();
@@ -221,17 +227,18 @@ pub(in crate::kernel::abi::native) fn sys_filesystem_mount(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_filesystem_unmount(
     services: &impl GuestIoServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[3..])?;
-        if arguments[2] == 0 || arguments[2] > 4096 {
+        require_zero(&arguments[2..])?;
+        if arguments[1] == 0 || arguments[1] > 4096 {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
         }
-        let path = UserSlice::new(UserAddress::new(arguments[1]), arguments[2])
+        let path = UserSlice::new(UserAddress::new(arguments[0]), arguments[1])
             .map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
         services
-            .unmount_filesystem(parse_handle(arguments[0])?, path)
+            .unmount_filesystem(receiver, path)
             .map_err(crate::kernel::abi::native::status::status_from_vfs_service_error)
     })();
     NativeAction::Return(status_only(result))
@@ -240,20 +247,21 @@ pub(in crate::kernel::abi::native) fn sys_filesystem_unmount(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_native_block_transfer(
     services: &impl GuestIoServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[5..])?;
-        let operation = parse_u32(arguments[1])?;
+        require_zero(&arguments[4..])?;
+        let operation = parse_u32(arguments[0])?;
         if operation > 3
-            || arguments[4] > HYPER_NATIVE_NATIVE_BLOCK_TRANSFER_FRAME_BYTES
-            || (operation == 2 && (arguments[2] != 0 || arguments[3] != 0 || arguments[4] != 0))
+            || arguments[3] > HYPER_NATIVE_NATIVE_BLOCK_TRANSFER_FRAME_BYTES
+            || (operation == 2 && (arguments[1] != 0 || arguments[2] != 0 || arguments[3] != 0))
         {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
         }
-        let buffer = optional_user_slice(arguments[3], arguments[4])?;
+        let buffer = optional_user_slice(arguments[2], arguments[3])?;
         services
-            .transfer_native_block(parse_handle(arguments[0])?, operation, arguments[2], buffer)
+            .transfer_native_block(receiver, operation, arguments[1], buffer)
             .map_err(|error| {
                 use crate::kernel::block::service::TransferError;
                 use hyper::{abi::native::*, fs::block::Error};
@@ -276,16 +284,13 @@ pub(in crate::kernel::abi::native) fn sys_native_block_transfer(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_mapping_create(
     services: &impl GuestIoServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[3..])?;
+        require_zero(&arguments[2..])?;
         services
-            .create_guest_mapping(
-                parse_handle(arguments[0])?,
-                parse_handle(arguments[1])?,
-                arguments[2],
-            )
+            .create_guest_mapping(receiver, parse_handle(arguments[0])?, arguments[1])
             .map_err(status_from_vm_service_error)
     })();
     NativeAction::Return(match result {
@@ -297,12 +302,13 @@ pub(in crate::kernel::abi::native) fn sys_guest_mapping_create(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_mapping_release(
     services: &impl GuestIoServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[1..])?;
+        require_zero(&arguments[0..])?;
         services
-            .release_guest_mapping(parse_handle(arguments[0])?)
+            .release_guest_mapping(receiver)
             .map_err(status_from_vm_service_error)
     })();
     NativeAction::Return(status_only(result))
@@ -311,16 +317,17 @@ pub(in crate::kernel::abi::native) fn sys_guest_mapping_release(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_notification_configure(
     services: &impl GuestIoServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[4..])?;
+        require_zero(&arguments[3..])?;
         services
             .configure_guest_notification(
-                parse_handle(arguments[0])?,
+                receiver,
+                arguments[0],
                 arguments[1],
-                arguments[2],
-                parse_u32(arguments[3])?,
+                parse_u32(arguments[2])?,
             )
             .map_err(status_from_vm_service_error)
     })();
@@ -333,16 +340,17 @@ pub(in crate::kernel::abi::native) fn sys_guest_notification_configure(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_notification_access(
     services: &impl GuestIoServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[4..])?;
+        require_zero(&arguments[3..])?;
         services
             .access_guest_notification(
-                parse_handle(arguments[0])?,
-                arguments[1],
+                receiver,
+                arguments[0],
+                parse_u32(arguments[1])?,
                 parse_u32(arguments[2])?,
-                parse_u32(arguments[3])?,
             )
             .map_err(status_from_vm_service_error)
     })();
@@ -355,18 +363,19 @@ pub(in crate::kernel::abi::native) fn sys_guest_notification_access(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_memory_transfer(
     services: &impl GuestIoServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[5..])?;
-        if arguments[1] > 1 || arguments[4] == 0 || arguments[4] > 4096 {
+        require_zero(&arguments[4..])?;
+        if arguments[0] > 1 || arguments[3] == 0 || arguments[3] > 4096 {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
         }
-        let memory = parse_handle(arguments[0])?;
-        let buffer = optional_user_slice(arguments[3], arguments[4])?
+        let memory = receiver;
+        let buffer = optional_user_slice(arguments[2], arguments[3])?
             .ok_or(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
         services
-            .transfer_guest_memory(memory, arguments[1] != 0, arguments[2], buffer)
+            .transfer_guest_memory(memory, arguments[0] != 0, arguments[1], buffer)
             .map_err(status_from_vm_service_error)
     })();
     NativeAction::Return(status_only(result))
@@ -375,20 +384,21 @@ pub(in crate::kernel::abi::native) fn sys_guest_memory_transfer(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_memory_scalar(
     services: &impl GuestIoServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[5..])?;
-        if arguments[1] > 1 {
+        require_zero(&arguments[4..])?;
+        if arguments[0] > 1 {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
         }
         services
             .scalar_guest_memory(
-                parse_handle(arguments[0])?,
-                arguments[1] != 0,
-                arguments[2],
-                parse_u32(arguments[3])?,
-                arguments[4],
+                receiver,
+                arguments[0] != 0,
+                arguments[1],
+                parse_u32(arguments[2])?,
+                arguments[3],
             )
             .map_err(status_from_vm_service_error)
     })();
@@ -401,12 +411,13 @@ pub(in crate::kernel::abi::native) fn sys_guest_memory_scalar(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_interrupt_create(
     services: &impl GuestIoServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[2..])?;
+        require_zero(&arguments[1..])?;
         services
-            .create_guest_interrupt(parse_handle(arguments[0])?, parse_u32(arguments[1])?)
+            .create_guest_interrupt(receiver, parse_u32(arguments[0])?)
             .map_err(status_from_vm_service_error)
     })();
     NativeAction::Return(handle_result(result))
@@ -415,15 +426,16 @@ pub(in crate::kernel::abi::native) fn sys_guest_interrupt_create(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_guest_interrupt_set_level(
     services: &impl GuestIoServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[2..])?;
-        if arguments[1] > 1 {
+        require_zero(&arguments[1..])?;
+        if arguments[0] > 1 {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
         }
         services
-            .set_guest_interrupt_level(parse_handle(arguments[0])?, arguments[1] != 0)
+            .set_guest_interrupt_level(receiver, arguments[0] != 0)
             .map_err(status_from_vm_service_error)
     })();
     NativeAction::Return(status_only(result))

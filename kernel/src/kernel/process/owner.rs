@@ -21,7 +21,7 @@ pub(crate) use start::{ChildProcessStartError, ProcessStartCoordinator, StartedC
 
 use super::builder::{ProcessStartTransaction, SealedProcessBuild, StartPreparationFailure};
 use super::directory::PreparedRegistration;
-use super::image::{AbiFamily, ExecutionRoute, MachineAbi, ProcessImage, UserThreadStart};
+use super::image::{MachineAbi, ProcessImage, UserThreadStart};
 use super::lifecycle::{
     LifecycleError, ProcessLifecycle, ProcessPhase, StopDispatchProgress, TerminalReason,
 };
@@ -828,10 +828,7 @@ impl Process {
         start: UserThreadStart,
         affinity: CpuMask,
     ) -> Result<UserThread, ProcessError> {
-        if !machine_matches_host(self.image().machine())
-            || self.image().family() != AbiFamily::Native
-            || self.image().route() != ExecutionRoute::NativeKernel
-        {
+        if !machine_matches_host(self.image().machine()) {
             return Err(ProcessError::UserEntry(
                 crate::hal::user::UserEntryError::Unsupported,
             ));
@@ -892,10 +889,7 @@ impl Process {
         affinity: CpuMask,
         argument: u64,
     ) -> Result<PreparedInitialUserThread, ProcessError> {
-        if !machine_matches_host(self.image().machine())
-            || self.image().family() != AbiFamily::Native
-            || self.image().route() != ExecutionRoute::NativeKernel
-        {
+        if !machine_matches_host(self.image().machine()) {
             return Err(ProcessError::UserEntry(
                 crate::hal::user::UserEntryError::Unsupported,
             ));

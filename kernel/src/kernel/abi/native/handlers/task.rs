@@ -13,8 +13,9 @@ use crate::kernel::abi::native::status::{
 };
 use crate::kernel::abi::native::wire::{
     PROCESS_INFO_SIZE, copy_info_record, decode_resource_limits, encode_process_info,
-    parse_affinity_words, parse_handle, parse_single_handle, prepare_info_request, require_zero,
+    parse_affinity_words, parse_handle, prepare_info_request, require_zero,
 };
+use crate::kernel::capability::InvocationReceiver;
 use hyper::abi::native::{
     HYPER_NATIVE_PROCESS_INFO_MIN_SIZE, HYPER_NATIVE_STATUS_CANCELLED,
     HYPER_NATIVE_STATUS_INVALID_ARGUMENT, HYPER_NATIVE_STATUS_TIMED_OUT, HyperNativeStatus,
@@ -53,29 +54,33 @@ pub(in crate::kernel::abi::native) fn sys_thread_set_current_name(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_resource_domain_create(
     services: &impl HierarchyServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_handle(arguments[0]).and_then(|parent| {
+    let result = (|| {
+        let parent = receiver;
         let limits = decode_resource_limits(services, arguments)?;
         services
             .create_resource_domain(parent, limits)
             .map_err(status_from_hierarchy_error)
-    });
+    })();
     NativeAction::Return(handle_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_task_group_create(
     services: &impl HierarchyServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_handle(arguments[0]).and_then(|factory| {
-        let domain = parse_handle(arguments[1])?;
-        require_zero(&arguments[2..])?;
+    let result = (|| {
+        let factory = receiver;
+        let domain = parse_handle(arguments[0])?;
+        require_zero(&arguments[1..])?;
         services
             .create_task_group(factory, domain)
             .map_err(status_from_hierarchy_error)
-    });
+    })();
     NativeAction::Return(handle_result(result))
 }
 
@@ -101,47 +106,45 @@ pub(in crate::kernel::abi::native) fn sys_process_exit(arguments: &Arguments) ->
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_process_derive_observer(
     services: &impl TaskServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    NativeAction::Return(handle_result(parse_single_handle(arguments).and_then(
-        |process| {
-            services
-                .derive_process_observer(process)
-                .map_err(status_from_process_error)
-        },
-    )))
+    NativeAction::Return(handle_result(require_zero(arguments).and_then(|()| {
+        services
+            .derive_process_observer(receiver)
+            .map_err(status_from_process_error)
+    })))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_task_group_request_stop(
     services: &impl TaskServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    NativeAction::Return(status_only(parse_single_handle(arguments).and_then(
-        |group| {
-            services
-                .request_task_group_stop(group)
-                .map_err(status_from_process_error)
-        },
-    )))
+    NativeAction::Return(status_only(require_zero(arguments).and_then(|()| {
+        services
+            .request_task_group_stop(receiver)
+            .map_err(status_from_process_error)
+    })))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_process_request_stop(
     services: &impl TaskServices,
-    arguments: &Arguments,
+    receiver: &InvocationReceiver,
+    _arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_handle(arguments[0]).and_then(|process| {
-        services
-            .request_process_stop(process)
-            .map_err(status_from_process_error)
-    });
+    let result = services
+        .request_process_stop(receiver)
+        .map_err(status_from_process_error);
     NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_process_get_info(
     services: &impl TaskServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = prepare_info_request(
@@ -150,7 +153,7 @@ pub(in crate::kernel::abi::native) fn sys_process_get_info(
         PROCESS_INFO_SIZE,
     )
     .and_then(|request| {
-        let process = request.value;
+        let process = receiver;
         let snapshot = services
             .process_info(process)
             .map_err(status_from_process_error)?;
@@ -187,11 +190,12 @@ pub(in crate::kernel::abi::native) fn sys_thread_create(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_thread_start(
     services: &impl TaskServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeResult {
-    status_only(parse_single_handle(arguments).and_then(|handle| {
+    status_only(require_zero(arguments).and_then(|()| {
         services
-            .start_thread(handle)
+            .start_thread(receiver)
             .map_err(status_from_process_error)
     }))
 }
@@ -199,11 +203,12 @@ pub(in crate::kernel::abi::native) fn sys_thread_start(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_thread_request_stop(
     services: &impl TaskServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeResult {
-    status_only(parse_single_handle(arguments).and_then(|handle| {
+    status_only(require_zero(arguments).and_then(|()| {
         services
-            .stop_thread(handle)
+            .stop_thread(receiver)
             .map_err(status_from_process_error)
     }))
 }

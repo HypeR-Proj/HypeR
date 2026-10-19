@@ -12,13 +12,13 @@ use crate::kernel::abi::native::status::{
 use crate::kernel::abi::native::wire::{
     parse_byte_channel_io, parse_capability_channel_receive, parse_capability_channel_send,
 };
+use crate::kernel::capability::InvocationReceiver;
 use crate::kernel::ipc::{
     ByteChannelReadOutcome, CapabilityChannelError, CapabilityReceiveOutcome,
 };
 use hyper::abi::native::{
     HYPER_NATIVE_STATUS_BUFFER_TOO_SMALL, HYPER_NATIVE_STATUS_INTERNAL,
-    HYPER_NATIVE_STATUS_INVALID_ARGUMENT, HYPER_NATIVE_SYS_BYTE_CHANNEL_READ,
-    HYPER_NATIVE_SYS_CAPABILITY_CHANNEL_RECEIVE, HyperNativeStatus, NativeResult,
+    HYPER_NATIVE_STATUS_INVALID_ARGUMENT, HyperNativeStatus, NativeOperation, NativeResult,
 };
 
 #[inline(never)]
@@ -58,11 +58,12 @@ pub(in crate::kernel::abi::native) fn sys_capability_channel_create(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_byte_channel_write(
     services: &impl IpcServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_byte_channel_io(arguments).and_then(|(endpoint, bytes)| {
+    let result = parse_byte_channel_io(arguments).and_then(|bytes| {
         services
-            .write_byte_channel(endpoint, bytes)
+            .write_byte_channel(receiver, bytes)
             .map_err(status_from_byte_channel_service_error)
     });
     NativeAction::Return(status_only(result))
@@ -71,17 +72,18 @@ pub(in crate::kernel::abi::native) fn sys_byte_channel_write(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_byte_channel_read(
     services: &impl IpcServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_byte_channel_io(arguments).and_then(|(endpoint, bytes)| {
+    let result = parse_byte_channel_io(arguments).and_then(|bytes| {
         services
-            .read_byte_channel(endpoint, bytes)
+            .read_byte_channel(receiver, bytes)
             .map_err(status_from_byte_channel_service_error)
     });
     let result = match result {
         Ok(ByteChannelReadOutcome::Received { bytes }) => success([bytes, 0]),
-        Ok(ByteChannelReadOutcome::BufferTooSmall { bytes }) => NativeResult::for_syscall(
-            HYPER_NATIVE_SYS_BYTE_CHANNEL_READ,
+        Ok(ByteChannelReadOutcome::BufferTooSmall { bytes }) => NativeResult::for_operation(
+            NativeOperation::ByteChannelRead,
             HYPER_NATIVE_STATUS_BUFFER_TOO_SMALL,
             [bytes, 0],
         ),
@@ -93,29 +95,29 @@ pub(in crate::kernel::abi::native) fn sys_byte_channel_read(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_capability_channel_try_send(
     services: &impl IpcServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result =
-        parse_capability_channel_send(arguments).and_then(|(endpoint, bytes, dispositions)| {
-            services
-                .try_send_capability_channel(endpoint, bytes, dispositions)
-                .map_err(status_from_capability_channel_service_error)
-        });
+    let result = parse_capability_channel_send(arguments).and_then(|(bytes, dispositions)| {
+        services
+            .try_send_capability_channel(receiver, bytes, dispositions)
+            .map_err(status_from_capability_channel_service_error)
+    });
     NativeAction::Return(status_only(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_capability_channel_receive(
     services: &impl IpcServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_capability_channel_receive(arguments).and_then(
-        |(endpoint, deadline, bytes, slots)| {
+    let result =
+        parse_capability_channel_receive(arguments).and_then(|(deadline, bytes, slots)| {
             services
-                .receive_capability_channel(endpoint, deadline, bytes, slots)
+                .receive_capability_channel(receiver, deadline, bytes, slots)
                 .map_err(status_from_capability_channel_service_error)
-        },
-    );
+        });
     NativeAction::Return(capability_receive_result(result))
 }
 
@@ -136,8 +138,8 @@ pub(in crate::kernel::abi::native) fn capability_receive_result(
             u64::try_from(required_bytes),
             u64::try_from(required_handles),
         ) {
-            (Ok(bytes), Ok(handles)) => NativeResult::for_syscall(
-                HYPER_NATIVE_SYS_CAPABILITY_CHANNEL_RECEIVE,
+            (Ok(bytes), Ok(handles)) => NativeResult::for_operation(
+                NativeOperation::CapabilityChannelReceive,
                 HYPER_NATIVE_STATUS_BUFFER_TOO_SMALL,
                 [bytes, handles],
             ),

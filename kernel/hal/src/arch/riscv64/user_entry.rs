@@ -442,6 +442,7 @@ fn active_run() -> Result<ActiveRun, Error> {
 fn invocation(frame: &NativeFrame) -> Result<NativeInvocation, Error> {
     Ok(NativeInvocation::new(
         frame.general[17],
+        frame.general[16],
         [
             frame.general[10],
             frame.general[11],
@@ -626,38 +627,3 @@ const _: () = {
     assert!(size_of::<NativeFrame>() == registers::USER_FRAME_SIZE as usize);
     assert!(offset_of!(MachineContext, frame) == 0);
 };
-
-/// Raw LP64D register-isolation payload, copied into test-owned user memory.
-#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
-pub(crate) fn native_register_test_program_for_test() -> &'static [u8] {
-    unsafe extern "C" {
-        static riscv64_native_register_test_start: u8;
-        static riscv64_native_register_test_end: u8;
-    }
-    let start = core::ptr::addr_of!(riscv64_native_register_test_start);
-    let end = core::ptr::addr_of!(riscv64_native_register_test_end);
-    let length = end.addr() - start.addr();
-    // SAFETY: Assembly bounds one immutable, retained position-independent
-    // payload. Its bytes remain mapped and unchanged for the machine lifetime.
-    unsafe { core::slice::from_raw_parts(start, length) }
-}
-
-/// Containment probes: supervisor-only load through a0, then privileged SATP.
-/// A forbidden instruction which incorrectly completes exits with -99, so an
-/// unrelated later instruction fault cannot masquerade as successful isolation.
-#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
-pub(crate) fn native_fault_test_programs_for_test() -> [&'static [u8]; 2] {
-    const SUPERVISOR_LOAD: [u8; 16] = [
-        0x83, 0x32, 0x05, 0x00, // ld t0, 0(a0).
-        0x13, 0x05, 0xd0, 0xf9, // li a0, -99.
-        0x93, 0x08, 0x70, 0x00, // li a7, 7; thread_exit.
-        0x73, 0x00, 0x00, 0x00, // ecall.
-    ];
-    const PRIVILEGED_CSR: [u8; 16] = [
-        0xf3, 0x22, 0x00, 0x18, // csrr t0, satp.
-        0x13, 0x05, 0xd0, 0xf9, // li a0, -99.
-        0x93, 0x08, 0x70, 0x00, // li a7, 7; thread_exit.
-        0x73, 0x00, 0x00, 0x00, // ecall.
-    ];
-    [&SUPERVISOR_LOAD, &PRIVILEGED_CSR]
-}

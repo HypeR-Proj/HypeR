@@ -16,548 +16,574 @@ pub(in crate::kernel) fn dispatch(
     services: &impl NativeServices,
     invocation: NativeInvocation,
 ) -> NativeAction {
-    match invocation.number() {
-        abi::HYPER_NATIVE_SYS_ABI_QUERY => {
-            NativeAction::Return(handlers::sys_abi_query(invocation.arguments()))
+    let (receiver, operation) = match admit_invocation(services, &invocation) {
+        Ok(authorized) => authorized,
+        Err(status) => return NativeAction::Return(super::status::failure(status)),
+    };
+    dispatch_operation(services, &receiver, operation, invocation.arguments())
+}
+
+/// Resolves the receiver and validates method authority before reading payloads.
+pub(super) fn admit_invocation(
+    services: &impl super::services::HandleServices,
+    invocation: &NativeInvocation,
+) -> Result<
+    (
+        crate::kernel::capability::InvocationReceiver,
+        abi::NativeOperation,
+    ),
+    abi::HyperNativeStatus,
+> {
+    let handle = super::wire::parse_handle(invocation.target())?;
+    let receiver = services
+        .resolve_invocation(handle)
+        .map_err(super::status::status_from_process_error)?;
+    let operation = abi::NativeOperation::from_raw(receiver.kind().get(), invocation.operation())
+        .ok_or(abi::HYPER_NATIVE_STATUS_NOT_SUPPORTED)?;
+    let rights = crate::kernel::capability::Rights::from_bits(operation.receiver_rights())
+        .ok_or(abi::HYPER_NATIVE_STATUS_INTERNAL)?;
+    receiver
+        .require(rights)
+        .map_err(super::status::status_from_handle_error)?;
+    services
+        .validate_invocation_context(&receiver)
+        .map_err(super::status::status_from_process_error)?;
+    Ok((receiver, operation))
+}
+
+/// Routes an authorized operation without repeating handle lookup or encoding
+/// the receiver back into the business argument registers.
+pub(super) fn dispatch_operation(
+    services: &impl NativeServices,
+    receiver: &crate::kernel::capability::InvocationReceiver,
+    operation: abi::NativeOperation,
+    arguments: &super::Arguments,
+) -> NativeAction {
+    if arguments[operation.argument_count()..]
+        .iter()
+        .any(|value| *value != 0)
+    {
+        return NativeAction::Return(super::status::failure(
+            abi::HYPER_NATIVE_STATUS_INVALID_ARGUMENT,
+        ));
+    }
+    match operation {
+        abi::NativeOperation::AbiQuery => NativeAction::Return(handlers::sys_abi_query(arguments)),
+        abi::NativeOperation::SystemConfig => {
+            NativeAction::Return(handlers::sys_system_config(arguments))
         }
-        abi::HYPER_NATIVE_SYS_SYSTEM_CONFIG => {
-            NativeAction::Return(handlers::sys_system_config(invocation.arguments()))
+        abi::NativeOperation::ClockGetMonotonic => {
+            NativeAction::Return(handlers::sys_clock_get_monotonic(arguments))
         }
-        abi::HYPER_NATIVE_SYS_CLOCK_GET_MONOTONIC => {
-            NativeAction::Return(handlers::sys_clock_get_monotonic(invocation.arguments()))
+        abi::NativeOperation::HandleClose => {
+            NativeAction::Return(handlers::sys_handle_close(services, receiver, arguments))
         }
-        abi::HYPER_NATIVE_SYS_HANDLE_CLOSE => {
-            NativeAction::Return(handlers::sys_handle_close(services, invocation.arguments()))
+        abi::NativeOperation::ProcessDeriveObserver => {
+            handlers::sys_process_derive_observer(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PROCESS_DERIVE_OBSERVER => {
-            handlers::sys_process_derive_observer(services, invocation.arguments())
+        abi::NativeOperation::TaskGroupRequestStop => {
+            handlers::sys_task_group_request_stop(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_TASK_GROUP_REQUEST_STOP => {
-            handlers::sys_task_group_request_stop(services, invocation.arguments())
+        abi::NativeOperation::ConsoleDiscardInput => {
+            handlers::sys_console_discard_input(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_CONSOLE_DISCARD_INPUT => {
-            handlers::sys_console_discard_input(services, invocation.arguments())
+        abi::NativeOperation::HandleGetInfo => {
+            NativeAction::Return(handlers::sys_handle_get_info(services, receiver, arguments))
         }
-        abi::HYPER_NATIVE_SYS_HANDLE_GET_INFO => NativeAction::Return(
-            handlers::sys_handle_get_info(services, invocation.arguments()),
+        abi::NativeOperation::ObjectGetBasicInfo => NativeAction::Return(
+            handlers::sys_object_get_basic_info(services, receiver, arguments),
         ),
-        abi::HYPER_NATIVE_SYS_OBJECT_GET_BASIC_INFO => NativeAction::Return(
-            handlers::sys_object_get_basic_info(services, invocation.arguments()),
+        abi::NativeOperation::VmoCreateSnapshot => {
+            handlers::sys_vmo_create_snapshot(services, receiver, arguments)
+        }
+        abi::NativeOperation::FileProtect => {
+            handlers::sys_file_protect(services, receiver, arguments)
+        }
+        abi::NativeOperation::VmarLockMemory => {
+            handlers::sys_vmar_lock_memory(services, receiver, arguments)
+        }
+        abi::NativeOperation::VmarUnlockMemory => {
+            handlers::sys_vmar_unlock_memory(services, receiver, arguments)
+        }
+        abi::NativeOperation::VmarMapFile => {
+            handlers::sys_vmar_map_file(services, receiver, arguments)
+        }
+        abi::NativeOperation::VmarMapPrivate => {
+            handlers::sys_vmar_map_private(services, receiver, arguments)
+        }
+        abi::NativeOperation::HandleDuplicate => NativeAction::Return(
+            handlers::sys_handle_duplicate(services, receiver, arguments),
         ),
-        abi::HYPER_NATIVE_SYS_VMO_CREATE_SNAPSHOT => {
-            handlers::sys_vmo_create_snapshot(services, invocation.arguments())
+        abi::NativeOperation::HandleReplace => {
+            NativeAction::Return(handlers::sys_handle_replace(services, receiver, arguments))
         }
-        abi::HYPER_NATIVE_SYS_FILE_PROTECT => {
-            handlers::sys_file_protect(services, invocation.arguments())
+        abi::NativeOperation::EventCreate => {
+            NativeAction::Return(handlers::sys_event_create(services, arguments))
         }
-        abi::HYPER_NATIVE_SYS_VMAR_LOCK_MEMORY => {
-            handlers::sys_vmar_lock_memory(services, invocation.arguments())
+        abi::NativeOperation::ByteChannelCreate => {
+            NativeAction::Return(handlers::sys_byte_channel_create(services, arguments))
         }
-        abi::HYPER_NATIVE_SYS_VMAR_UNLOCK_MEMORY => {
-            handlers::sys_vmar_unlock_memory(services, invocation.arguments())
+        abi::NativeOperation::CapabilityChannelCreate => {
+            NativeAction::Return(handlers::sys_capability_channel_create(services, arguments))
         }
-        abi::HYPER_NATIVE_SYS_VMAR_MAP_FILE => {
-            handlers::sys_vmar_map_file(services, invocation.arguments())
+        abi::NativeOperation::ThreadSetCurrentName => {
+            NativeAction::Return(handlers::sys_thread_set_current_name(services, arguments))
         }
-        abi::HYPER_NATIVE_SYS_VMAR_MAP_PRIVATE => {
-            handlers::sys_vmar_map_private(services, invocation.arguments())
+        abi::NativeOperation::ThreadCreate => {
+            NativeAction::Return(handlers::sys_thread_create(services, arguments))
         }
-        abi::HYPER_NATIVE_SYS_HANDLE_DUPLICATE => NativeAction::Return(
-            handlers::sys_handle_duplicate(services, invocation.arguments()),
+        abi::NativeOperation::ThreadStart => {
+            NativeAction::Return(handlers::sys_thread_start(services, receiver, arguments))
+        }
+        abi::NativeOperation::ThreadRequestStop => NativeAction::Return(
+            handlers::sys_thread_request_stop(services, receiver, arguments),
         ),
-        abi::HYPER_NATIVE_SYS_HANDLE_REPLACE => NativeAction::Return(handlers::sys_handle_replace(
-            services,
-            invocation.arguments(),
-        )),
-        abi::HYPER_NATIVE_SYS_EVENT_CREATE => {
-            NativeAction::Return(handlers::sys_event_create(services, invocation.arguments()))
+        abi::NativeOperation::AtomicWait => {
+            NativeAction::Return(handlers::sys_atomic_wait(services, arguments))
         }
-        abi::HYPER_NATIVE_SYS_BYTE_CHANNEL_CREATE => NativeAction::Return(
-            handlers::sys_byte_channel_create(services, invocation.arguments()),
-        ),
-        abi::HYPER_NATIVE_SYS_CAPABILITY_CHANNEL_CREATE => NativeAction::Return(
-            handlers::sys_capability_channel_create(services, invocation.arguments()),
-        ),
-        abi::HYPER_NATIVE_SYS_THREAD_SET_CURRENT_NAME => NativeAction::Return(
-            handlers::sys_thread_set_current_name(services, invocation.arguments()),
-        ),
-        abi::HYPER_NATIVE_SYS_THREAD_CREATE => NativeAction::Return(handlers::sys_thread_create(
-            services,
-            invocation.arguments(),
-        )),
-        abi::HYPER_NATIVE_SYS_THREAD_START => {
-            NativeAction::Return(handlers::sys_thread_start(services, invocation.arguments()))
+        abi::NativeOperation::AtomicWake => {
+            NativeAction::Return(handlers::sys_atomic_wake(services, arguments))
         }
-        abi::HYPER_NATIVE_SYS_THREAD_REQUEST_STOP => NativeAction::Return(
-            handlers::sys_thread_request_stop(services, invocation.arguments()),
-        ),
-        abi::HYPER_NATIVE_SYS_ATOMIC_WAIT => {
-            NativeAction::Return(handlers::sys_atomic_wait(services, invocation.arguments()))
+        abi::NativeOperation::ThreadSleep => {
+            NativeAction::Return(handlers::sys_thread_sleep(services, arguments))
         }
-        abi::HYPER_NATIVE_SYS_ATOMIC_WAKE => {
-            NativeAction::Return(handlers::sys_atomic_wake(services, invocation.arguments()))
+        abi::NativeOperation::ThreadYield => handlers::sys_thread_yield(),
+        abi::NativeOperation::ThreadExit => handlers::sys_thread_exit(arguments),
+        abi::NativeOperation::ProcessExit => handlers::sys_process_exit(arguments),
+        abi::NativeOperation::EventSignal => {
+            handlers::sys_event_signal(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_THREAD_SLEEP => {
-            NativeAction::Return(handlers::sys_thread_sleep(services, invocation.arguments()))
+        abi::NativeOperation::ObjectWaitOne => {
+            handlers::sys_object_wait_one(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_THREAD_YIELD => handlers::sys_thread_yield(),
-        abi::HYPER_NATIVE_SYS_THREAD_EXIT => handlers::sys_thread_exit(invocation.arguments()),
-        abi::HYPER_NATIVE_SYS_PROCESS_EXIT => handlers::sys_process_exit(invocation.arguments()),
-        abi::HYPER_NATIVE_SYS_EVENT_SIGNAL => {
-            handlers::sys_event_signal(services, invocation.arguments())
+        abi::NativeOperation::ObjectWaitMany => handlers::sys_object_wait_many(services, arguments),
+        abi::NativeOperation::ByteChannelWrite => {
+            handlers::sys_byte_channel_write(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_OBJECT_WAIT_ONE => {
-            handlers::sys_object_wait_one(services, invocation.arguments())
+        abi::NativeOperation::ByteChannelRead => {
+            handlers::sys_byte_channel_read(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_OBJECT_WAIT_MANY => {
-            handlers::sys_object_wait_many(services, invocation.arguments())
+        abi::NativeOperation::CapabilityChannelTrySend => {
+            handlers::sys_capability_channel_try_send(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_BYTE_CHANNEL_WRITE => {
-            handlers::sys_byte_channel_write(services, invocation.arguments())
+        abi::NativeOperation::CapabilityChannelReceive => {
+            handlers::sys_capability_channel_receive(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_BYTE_CHANNEL_READ => {
-            handlers::sys_byte_channel_read(services, invocation.arguments())
+        abi::NativeOperation::ConsoleRead => {
+            handlers::sys_console_read(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_CAPABILITY_CHANNEL_TRY_SEND => {
-            handlers::sys_capability_channel_try_send(services, invocation.arguments())
+        abi::NativeOperation::ConsoleWrite => {
+            handlers::sys_console_write(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_CAPABILITY_CHANNEL_RECEIVE => {
-            handlers::sys_capability_channel_receive(services, invocation.arguments())
+        abi::NativeOperation::DirectoryOpenFile => {
+            handlers::sys_directory_open_file(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_CONSOLE_READ => {
-            handlers::sys_console_read(services, invocation.arguments())
+        abi::NativeOperation::DirectoryOpenDirectory => {
+            handlers::sys_directory_open_directory(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_CONSOLE_WRITE => {
-            handlers::sys_console_write(services, invocation.arguments())
+        abi::NativeOperation::DirectoryBeginRead => {
+            handlers::sys_directory_begin_read(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DIRECTORY_OPEN_FILE => {
-            handlers::sys_directory_open_file(services, invocation.arguments())
+        abi::NativeOperation::DirectoryRead => {
+            handlers::sys_directory_read(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DIRECTORY_OPEN_DIRECTORY => {
-            handlers::sys_directory_open_directory(services, invocation.arguments())
+        abi::NativeOperation::FileWriteAt => {
+            handlers::sys_file_write_at(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DIRECTORY_BEGIN_READ => {
-            handlers::sys_directory_begin_read(services, invocation.arguments())
+        abi::NativeOperation::FileResize => {
+            handlers::sys_file_resize(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DIRECTORY_READ => {
-            handlers::sys_directory_read(services, invocation.arguments())
+        abi::NativeOperation::DirectoryCreateFile => {
+            handlers::sys_directory_create_file(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_FILE_WRITE_AT => {
-            handlers::sys_file_write_at(services, invocation.arguments())
+        abi::NativeOperation::DirectoryCreateDirectory => {
+            handlers::sys_directory_create_directory(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_FILE_RESIZE => {
-            handlers::sys_file_resize(services, invocation.arguments())
+        abi::NativeOperation::DirectoryScopeCreate => {
+            handlers::sys_directory_scope_create(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DIRECTORY_CREATE_FILE => {
-            handlers::sys_directory_create_file(services, invocation.arguments())
+        abi::NativeOperation::DirectoryGetMetadata => {
+            handlers::sys_directory_get_metadata(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DIRECTORY_CREATE_DIRECTORY => {
-            handlers::sys_directory_create_directory(services, invocation.arguments())
+        abi::NativeOperation::FileGetMetadata => {
+            handlers::sys_file_get_metadata(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DIRECTORY_SCOPE_CREATE => {
-            handlers::sys_directory_scope_create(services, invocation.arguments())
+        abi::NativeOperation::DirectoryGetSelfMetadata => {
+            handlers::sys_directory_get_self_metadata(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DIRECTORY_GET_METADATA => {
-            handlers::sys_directory_get_metadata(services, invocation.arguments())
+        abi::NativeOperation::DirectorySetMetadata => {
+            handlers::sys_directory_set_metadata(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_FILE_GET_METADATA => {
-            handlers::sys_file_get_metadata(services, invocation.arguments())
+        abi::NativeOperation::FileSetMetadata => {
+            handlers::sys_file_set_metadata(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DIRECTORY_GET_SELF_METADATA => {
-            handlers::sys_directory_get_self_metadata(services, invocation.arguments())
+        abi::NativeOperation::DirectoryRename => {
+            handlers::sys_directory_rename(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DIRECTORY_SET_METADATA => {
-            handlers::sys_directory_set_metadata(services, invocation.arguments())
+        abi::NativeOperation::DirectoryLink => {
+            handlers::sys_directory_link(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_FILE_SET_METADATA => {
-            handlers::sys_file_set_metadata(services, invocation.arguments())
+        abi::NativeOperation::DirectorySymlink => {
+            handlers::sys_directory_symlink(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DIRECTORY_RENAME => {
-            handlers::sys_directory_rename(services, invocation.arguments())
+        abi::NativeOperation::DirectoryReadLink => {
+            handlers::sys_directory_read_link(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DIRECTORY_LINK => {
-            handlers::sys_directory_link(services, invocation.arguments())
+        abi::NativeOperation::DirectoryCanonicalize => {
+            handlers::sys_directory_canonicalize(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DIRECTORY_SYMLINK => {
-            handlers::sys_directory_symlink(services, invocation.arguments())
+        abi::NativeOperation::DirectoryRemoveIf => {
+            handlers::sys_directory_remove_if(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DIRECTORY_READ_LINK => {
-            handlers::sys_directory_read_link(services, invocation.arguments())
+        abi::NativeOperation::DirectoryOpenDirectoryNofollow => {
+            handlers::sys_directory_open_directory_nofollow(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DIRECTORY_CANONICALIZE => {
-            handlers::sys_directory_canonicalize(services, invocation.arguments())
+        abi::NativeOperation::FileSync => handlers::sys_file_sync(services, receiver, arguments),
+        abi::NativeOperation::FileLock => handlers::sys_file_lock(services, receiver, arguments),
+        abi::NativeOperation::FileUnlock => {
+            handlers::sys_file_unlock(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DIRECTORY_REMOVE_IF => {
-            handlers::sys_directory_remove_if(services, invocation.arguments())
+        abi::NativeOperation::DirectoryOpenFileWithOptions => {
+            handlers::sys_directory_open_file_with_options(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DIRECTORY_OPEN_DIRECTORY_NOFOLLOW => {
-            handlers::sys_directory_open_directory_nofollow(services, invocation.arguments())
+        abi::NativeOperation::ClockGetRealtime => handlers::sys_clock_get_realtime(arguments),
+        abi::NativeOperation::DirectoryRemove => {
+            handlers::sys_directory_remove(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_FILE_SYNC => {
-            handlers::sys_file_sync(services, invocation.arguments())
+        abi::NativeOperation::WaitSetCreate => handlers::sys_wait_set_create(services, arguments),
+        abi::NativeOperation::WaitSetAdd => {
+            handlers::sys_wait_set_add(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_FILE_LOCK => {
-            handlers::sys_file_lock(services, invocation.arguments())
+        abi::NativeOperation::WaitSetRearm => {
+            handlers::sys_wait_set_rearm(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_FILE_UNLOCK => {
-            handlers::sys_file_unlock(services, invocation.arguments())
+        abi::NativeOperation::WaitSetRemove => {
+            handlers::sys_wait_set_remove(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DIRECTORY_OPEN_FILE_WITH_OPTIONS => {
-            handlers::sys_directory_open_file_with_options(services, invocation.arguments())
+        abi::NativeOperation::WaitSetWait => {
+            handlers::sys_wait_set_wait(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_CLOCK_GET_REALTIME => {
-            handlers::sys_clock_get_realtime(invocation.arguments())
+        abi::NativeOperation::ProcessGetCurrentId => {
+            handlers::sys_process_get_current_id(services, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DIRECTORY_REMOVE => {
-            handlers::sys_directory_remove(services, invocation.arguments())
+        abi::NativeOperation::FileReadAt => {
+            handlers::sys_file_read_at(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_WAIT_SET_CREATE => {
-            handlers::sys_wait_set_create(services, invocation.arguments())
+        abi::NativeOperation::FileGetInfo => {
+            handlers::sys_file_get_info(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_WAIT_SET_ADD => {
-            handlers::sys_wait_set_add(services, invocation.arguments())
+        abi::NativeOperation::DirectoryGetInfo => {
+            handlers::sys_directory_get_info(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_WAIT_SET_REARM => {
-            handlers::sys_wait_set_rearm(services, invocation.arguments())
+        abi::NativeOperation::VirtualMachineCreationLeaseCreate => {
+            handlers::sys_virtual_machine_creation_lease_create(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_WAIT_SET_REMOVE => {
-            handlers::sys_wait_set_remove(services, invocation.arguments())
+        abi::NativeOperation::VirtualMachineCreate => {
+            handlers::sys_virtual_machine_create(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_WAIT_SET_WAIT => {
-            handlers::sys_wait_set_wait(services, invocation.arguments())
+        abi::NativeOperation::PendingVirtualMachineSetMemory => {
+            handlers::sys_pending_virtual_machine_set_memory(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PROCESS_GET_CURRENT_ID => {
-            handlers::sys_process_get_current_id(services, invocation.arguments())
+        abi::NativeOperation::PendingVirtualMachineSetBootstrap => {
+            handlers::sys_pending_virtual_machine_set_bootstrap(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_FILE_READ_AT => {
-            handlers::sys_file_read_at(services, invocation.arguments())
+        abi::NativeOperation::PendingVirtualMachineSetVirtualSerial => {
+            handlers::sys_pending_virtual_machine_set_virtual_serial(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_FILE_GET_INFO => {
-            handlers::sys_file_get_info(services, invocation.arguments())
+        abi::NativeOperation::VirtualSerialCreate => {
+            handlers::sys_virtual_serial_create(services, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DIRECTORY_GET_INFO => {
-            handlers::sys_directory_get_info(services, invocation.arguments())
+        abi::NativeOperation::VirtualSerialRegisterOutput => {
+            handlers::sys_virtual_serial_register_output(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VIRTUAL_MACHINE_CREATION_LEASE_CREATE => {
-            handlers::sys_virtual_machine_creation_lease_create(services, invocation.arguments())
+        abi::NativeOperation::VirtualSerialAcknowledgeOutput => {
+            handlers::sys_virtual_serial_acknowledge_output(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VIRTUAL_MACHINE_CREATE => {
-            handlers::sys_virtual_machine_create(services, invocation.arguments())
+        abi::NativeOperation::VirtualSerialWrite => {
+            handlers::sys_virtual_serial_write(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PENDING_VIRTUAL_MACHINE_SET_MEMORY => {
-            handlers::sys_pending_virtual_machine_set_memory(services, invocation.arguments())
+        abi::NativeOperation::PendingVirtualMachineSeal => {
+            handlers::sys_pending_virtual_machine_seal(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PENDING_VIRTUAL_MACHINE_SET_BOOTSTRAP => {
-            handlers::sys_pending_virtual_machine_set_bootstrap(services, invocation.arguments())
+        abi::NativeOperation::PendingVirtualMachineInstall => {
+            handlers::sys_pending_virtual_machine_install(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PENDING_VIRTUAL_MACHINE_SET_VIRTUAL_SERIAL => {
-            handlers::sys_pending_virtual_machine_set_virtual_serial(
-                services,
-                invocation.arguments(),
-            )
+        abi::NativeOperation::PendingVirtualMachineAbort => {
+            handlers::sys_pending_virtual_machine_abort(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VIRTUAL_SERIAL_CREATE => {
-            handlers::sys_virtual_serial_create(services, invocation.arguments())
+        abi::NativeOperation::VirtualMachineRequestStop => {
+            handlers::sys_virtual_machine_request_stop(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VIRTUAL_SERIAL_REGISTER_OUTPUT => {
-            handlers::sys_virtual_serial_register_output(services, invocation.arguments())
-        }
-        abi::HYPER_NATIVE_SYS_VIRTUAL_SERIAL_ACKNOWLEDGE_OUTPUT => {
-            handlers::sys_virtual_serial_acknowledge_output(services, invocation.arguments())
-        }
-        abi::HYPER_NATIVE_SYS_VIRTUAL_SERIAL_WRITE => {
-            handlers::sys_virtual_serial_write(services, invocation.arguments())
-        }
-        abi::HYPER_NATIVE_SYS_PENDING_VIRTUAL_MACHINE_SEAL => {
-            handlers::sys_pending_virtual_machine_seal(services, invocation.arguments())
-        }
-        abi::HYPER_NATIVE_SYS_PENDING_VIRTUAL_MACHINE_INSTALL => {
-            handlers::sys_pending_virtual_machine_install(services, invocation.arguments())
-        }
-        abi::HYPER_NATIVE_SYS_PENDING_VIRTUAL_MACHINE_ABORT => {
-            handlers::sys_pending_virtual_machine_abort(services, invocation.arguments())
-        }
-        abi::HYPER_NATIVE_SYS_VIRTUAL_MACHINE_REQUEST_STOP => {
-            handlers::sys_virtual_machine_request_stop(services, invocation.arguments())
-        }
-        abi::HYPER_NATIVE_SYS_VIRTUAL_MACHINE_CREATION_LEASE_GET_PLATFORM_INFO => {
+        abi::NativeOperation::VirtualMachineCreationLeaseGetPlatformInfo => {
             handlers::sys_virtual_machine_creation_lease_get_platform_info(
-                services,
-                invocation.arguments(),
+                services, receiver, arguments,
             )
         }
-        abi::HYPER_NATIVE_SYS_VIRTUAL_MACHINE_GET_POWER_REQUEST => {
-            handlers::sys_virtual_machine_get_power_request(services, invocation.arguments())
+        abi::NativeOperation::VirtualMachineGetPowerRequest => {
+            handlers::sys_virtual_machine_get_power_request(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VIRTUAL_MACHINE_COMPLETE_POWER_REQUEST => {
-            handlers::sys_virtual_machine_complete_power_request(services, invocation.arguments())
+        abi::NativeOperation::VirtualMachineCompletePowerRequest => {
+            handlers::sys_virtual_machine_complete_power_request(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VIRTUAL_MACHINE_OPEN_VCPU => {
-            handlers::sys_virtual_machine_open_vcpu(services, invocation.arguments())
+        abi::NativeOperation::VirtualMachineOpenVcpu => {
+            handlers::sys_virtual_machine_open_vcpu(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VIRTUAL_MACHINE_GET_INFO => {
-            handlers::sys_virtual_machine_get_info(services, invocation.arguments())
+        abi::NativeOperation::VirtualMachineGetInfo => {
+            handlers::sys_virtual_machine_get_info(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VIRTUAL_MACHINE_REGISTER_MMIO => {
-            handlers::sys_virtual_machine_register_mmio(services, invocation.arguments())
+        abi::NativeOperation::VirtualMachineRegisterMmio => {
+            handlers::sys_virtual_machine_register_mmio(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VIRTUAL_CPU_GET_MMIO_REQUEST => {
-            handlers::sys_virtual_cpu_get_mmio_request(services, invocation.arguments())
+        abi::NativeOperation::VirtualCpuGetMmioRequest => {
+            handlers::sys_virtual_cpu_get_mmio_request(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VIRTUAL_CPU_COMPLETE_MMIO => {
-            handlers::sys_virtual_cpu_complete_mmio(services, invocation.arguments())
+        abi::NativeOperation::VirtualCpuCompleteMmio => {
+            handlers::sys_virtual_cpu_complete_mmio(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_GUEST_MEMORY_TRANSFER => {
-            handlers::sys_guest_memory_transfer(services, invocation.arguments())
+        abi::NativeOperation::GuestMemoryTransfer => {
+            handlers::sys_guest_memory_transfer(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_GUEST_MEMORY_SCALAR => {
-            handlers::sys_guest_memory_scalar(services, invocation.arguments())
+        abi::NativeOperation::GuestMemoryScalar => {
+            handlers::sys_guest_memory_scalar(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_GUEST_INTERRUPT_CREATE => {
-            handlers::sys_guest_interrupt_create(services, invocation.arguments())
+        abi::NativeOperation::GuestInterruptCreate => {
+            handlers::sys_guest_interrupt_create(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_GUEST_INTERRUPT_SET_LEVEL => {
-            handlers::sys_guest_interrupt_set_level(services, invocation.arguments())
+        abi::NativeOperation::GuestInterruptSetLevel => {
+            handlers::sys_guest_interrupt_set_level(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_GUEST_MEMORY_CREATE => {
-            handlers::sys_guest_memory_create(services, invocation.arguments())
+        abi::NativeOperation::GuestMemoryCreate => {
+            handlers::sys_guest_memory_create(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PENDING_VIRTUAL_MACHINE_MAP_MEMORY => {
-            handlers::sys_pending_virtual_machine_map_memory(services, invocation.arguments())
+        abi::NativeOperation::PendingVirtualMachineMapMemory => {
+            handlers::sys_pending_virtual_machine_map_memory(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DEVICE_FIRMWARE_READ => {
-            handlers::sys_device_firmware_read(services, invocation.arguments())
+        abi::NativeOperation::DeviceFirmwareRead => {
+            handlers::sys_device_firmware_read(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DEVICE_CLAIM_BUNDLE => {
-            handlers::sys_device_claim_bundle(services, invocation.arguments())
+        abi::NativeOperation::DeviceClaimBundle => {
+            handlers::sys_device_claim_bundle(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DEVICE_MMIO => {
-            handlers::sys_device_mmio(services, invocation.arguments())
+        abi::NativeOperation::DeviceMmio => {
+            handlers::sys_device_mmio(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DEVICE_IRQ_PENDING => {
-            handlers::sys_device_irq_pending(services, invocation.arguments())
+        abi::NativeOperation::DeviceIrqPending => {
+            handlers::sys_device_irq_pending(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DEVICE_IRQ_COMPLETE => {
-            handlers::sys_device_irq_complete(services, invocation.arguments())
+        abi::NativeOperation::DeviceIrqComplete => {
+            handlers::sys_device_irq_complete(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DEVICE_DMA_FAULT_INFO => {
-            handlers::sys_device_dma_fault_info(services, invocation.arguments())
+        abi::NativeOperation::DeviceDmaFaultInfo => {
+            handlers::sys_device_dma_fault_info(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DEVICE_PROFILE_INFO => {
-            handlers::sys_device_profile_info(services, invocation.arguments())
+        abi::NativeOperation::DeviceProfileInfo => {
+            handlers::sys_device_profile_info(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DEVICE_RESOURCE_INFO => {
-            handlers::sys_device_resource_info(services, invocation.arguments())
+        abi::NativeOperation::DeviceResourceInfo => {
+            handlers::sys_device_resource_info(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DEVICE_CLAIM_MATCHING => {
-            handlers::sys_device_claim_matching(services, invocation.arguments())
+        abi::NativeOperation::DeviceClaimMatching => {
+            handlers::sys_device_claim_matching(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_DEVICE_CLAIM => {
-            handlers::sys_device_claim(services, invocation.arguments())
+        abi::NativeOperation::DeviceClaim => {
+            handlers::sys_device_claim(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PHYSICAL_DEVICE_INFO => {
-            handlers::sys_physical_device_info(services, invocation.arguments())
+        abi::NativeOperation::PhysicalDeviceInfo => {
+            handlers::sys_physical_device_info(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VMO_GET_DMA_EXTENT => {
-            handlers::sys_vmo_get_dma_extent(services, invocation.arguments())
+        abi::NativeOperation::VmoGetDmaExtent => {
+            handlers::sys_vmo_get_dma_extent(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PENDING_VIRTUAL_MACHINE_ASSIGN_DEVICE => {
-            handlers::sys_pending_virtual_machine_assign_device(services, invocation.arguments())
+        abi::NativeOperation::PendingVirtualMachineAssignDevice => {
+            handlers::sys_pending_virtual_machine_assign_device(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_GUEST_MAILBOX_CREATE => {
-            handlers::sys_guest_mailbox_create(services, invocation.arguments())
+        abi::NativeOperation::GuestMailboxCreate => {
+            handlers::sys_guest_mailbox_create(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_GUEST_MAILBOX_SEND => {
-            handlers::sys_guest_mailbox_send(services, invocation.arguments())
+        abi::NativeOperation::GuestMailboxSend => {
+            handlers::sys_guest_mailbox_send(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_GUEST_MAILBOX_RECEIVE => {
-            handlers::sys_guest_mailbox_receive(services, invocation.arguments())
+        abi::NativeOperation::GuestMailboxReceive => {
+            handlers::sys_guest_mailbox_receive(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_GUEST_NOTIFICATION_CREATE => {
-            handlers::sys_guest_notification_create(services, invocation.arguments())
+        abi::NativeOperation::GuestNotificationCreate => {
+            handlers::sys_guest_notification_create(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_GUEST_MAPPING_CREATE => {
-            handlers::sys_guest_mapping_create(services, invocation.arguments())
+        abi::NativeOperation::GuestMappingCreate => {
+            handlers::sys_guest_mapping_create(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_GUEST_MAPPING_RELEASE => {
-            handlers::sys_guest_mapping_release(services, invocation.arguments())
+        abi::NativeOperation::GuestMappingRelease => {
+            handlers::sys_guest_mapping_release(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_NATIVE_BLOCK_CREATE => {
-            handlers::sys_native_block_create(services, invocation.arguments())
+        abi::NativeOperation::NativeBlockCreate => {
+            handlers::sys_native_block_create(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_NATIVE_BLOCK_ACTIVATE => {
-            handlers::sys_native_block_activate(services, invocation.arguments())
+        abi::NativeOperation::NativeBlockActivate => {
+            handlers::sys_native_block_activate(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_NATIVE_BLOCK_TRANSFER => {
-            handlers::sys_native_block_transfer(services, invocation.arguments())
+        abi::NativeOperation::NativeBlockTransfer => {
+            handlers::sys_native_block_transfer(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_FILESYSTEM_MOUNT_RAMFS => {
-            handlers::sys_filesystem_mount_ramfs(services, invocation.arguments())
+        abi::NativeOperation::FilesystemMountRamfs => {
+            handlers::sys_filesystem_mount_ramfs(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_FILESYSTEM_SWITCH_ROOT => {
-            handlers::sys_filesystem_switch_root(services, invocation.arguments())
+        abi::NativeOperation::FilesystemSwitchRoot => {
+            handlers::sys_filesystem_switch_root(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_FILESYSTEM_BEGIN_ROOT_SWITCH => {
-            handlers::sys_filesystem_begin_root_switch(services, invocation.arguments())
+        abi::NativeOperation::FilesystemBeginRootSwitch => {
+            handlers::sys_filesystem_begin_root_switch(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_FILESYSTEM_FINISH_ROOT_SWITCH => {
-            handlers::sys_filesystem_finish_root_switch(services, invocation.arguments())
+        abi::NativeOperation::FilesystemFinishRootSwitch => {
+            handlers::sys_filesystem_finish_root_switch(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_FILESYSTEM_UNMOUNT => {
-            handlers::sys_filesystem_unmount(services, invocation.arguments())
+        abi::NativeOperation::FilesystemUnmount => {
+            handlers::sys_filesystem_unmount(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_FILESYSTEM_MOUNT => {
-            handlers::sys_filesystem_mount(services, invocation.arguments())
+        abi::NativeOperation::FilesystemMount => {
+            handlers::sys_filesystem_mount(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_GUEST_NOTIFICATION_ACCESS => {
-            handlers::sys_guest_notification_access(services, invocation.arguments())
+        abi::NativeOperation::GuestNotificationAccess => {
+            handlers::sys_guest_notification_access(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_GUEST_NOTIFICATION_CONFIGURE => {
-            handlers::sys_guest_notification_configure(services, invocation.arguments())
+        abi::NativeOperation::GuestNotificationConfigure => {
+            handlers::sys_guest_notification_configure(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_GUEST_NOTIFICATION_CONTROL => {
-            handlers::sys_guest_notification_control(services, invocation.arguments())
+        abi::NativeOperation::GuestNotificationControl => {
+            handlers::sys_guest_notification_control(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VMO_CREATE_CONTIGUOUS => {
-            handlers::sys_vmo_create_contiguous(services, invocation.arguments())
+        abi::NativeOperation::VmoCreateContiguous => {
+            handlers::sys_vmo_create_contiguous(services, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VIRTUAL_CPU_GET_INFO => {
-            handlers::sys_virtual_cpu_get_info(services, invocation.arguments())
+        abi::NativeOperation::VirtualCpuGetInfo => {
+            handlers::sys_virtual_cpu_get_info(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VIRTUAL_CPU_SET_AFFINITY => {
-            handlers::sys_virtual_cpu_set_affinity(services, invocation.arguments())
+        abi::NativeOperation::VirtualCpuSetAffinity => {
+            handlers::sys_virtual_cpu_set_affinity(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VIRTUAL_CPU_START => {
-            handlers::sys_virtual_cpu_start(services, invocation.arguments())
+        abi::NativeOperation::VirtualCpuStart => {
+            handlers::sys_virtual_cpu_start(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_RESOURCE_DOMAIN_CREATE => {
-            handlers::sys_resource_domain_create(services, invocation.arguments())
+        abi::NativeOperation::ResourceDomainCreate => {
+            handlers::sys_resource_domain_create(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_TASK_GROUP_CREATE => {
-            handlers::sys_task_group_create(services, invocation.arguments())
+        abi::NativeOperation::TaskGroupCreate => {
+            handlers::sys_task_group_create(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VMO_CREATE => {
-            handlers::sys_vmo_create(services, invocation.arguments())
+        abi::NativeOperation::VmoCreate => handlers::sys_vmo_create(services, arguments),
+        abi::NativeOperation::VmoRead => handlers::sys_vmo_read(services, receiver, arguments),
+        abi::NativeOperation::VmoWrite => handlers::sys_vmo_write(services, receiver, arguments),
+        abi::NativeOperation::VmarAllocate => {
+            handlers::sys_vmar_allocate(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VMO_READ => handlers::sys_vmo_read(services, invocation.arguments()),
-        abi::HYPER_NATIVE_SYS_VMO_WRITE => {
-            handlers::sys_vmo_write(services, invocation.arguments())
+        abi::NativeOperation::VmarMap => handlers::sys_vmar_map(services, receiver, arguments),
+        abi::NativeOperation::VmarProtect => {
+            handlers::sys_vmar_protect(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VMAR_ALLOCATE => {
-            handlers::sys_vmar_allocate(services, invocation.arguments())
+        abi::NativeOperation::VmarUnmap => handlers::sys_vmar_unmap(services, receiver, arguments),
+        abi::NativeOperation::VmarDestroy => {
+            handlers::sys_vmar_destroy(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VMAR_MAP => handlers::sys_vmar_map(services, invocation.arguments()),
-        abi::HYPER_NATIVE_SYS_VMAR_PROTECT => {
-            handlers::sys_vmar_protect(services, invocation.arguments())
+        abi::NativeOperation::ProcessBuilderRetain => {
+            handlers::sys_process_builder_retain(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VMAR_UNMAP => {
-            handlers::sys_vmar_unmap(services, invocation.arguments())
+        abi::NativeOperation::ProcessRetirementOpenView => {
+            handlers::sys_process_retirement_open_view(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_VMAR_DESTROY => {
-            handlers::sys_vmar_destroy(services, invocation.arguments())
+        abi::NativeOperation::ProcessRetirementRelease => {
+            handlers::sys_process_retirement_release(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PROCESS_BUILDER_RETAIN => {
-            handlers::sys_process_builder_retain(services, invocation.arguments())
+        abi::NativeOperation::CrashViewRead => {
+            handlers::sys_crash_view_read(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PROCESS_RETIREMENT_OPEN_VIEW => {
-            handlers::sys_process_retirement_open_view(services, invocation.arguments())
+        abi::NativeOperation::CrashViewThread => {
+            handlers::sys_crash_view_thread(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PROCESS_RETIREMENT_RELEASE => {
-            handlers::sys_process_retirement_release(services, invocation.arguments())
+        abi::NativeOperation::CrashViewMapping => {
+            handlers::sys_crash_view_mapping(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_CRASH_VIEW_READ => {
-            handlers::sys_crash_view_read(services, invocation.arguments())
+        abi::NativeOperation::CrashViewHandle => {
+            handlers::sys_crash_view_handle(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_CRASH_VIEW_THREAD => {
-            handlers::sys_crash_view_thread(services, invocation.arguments())
+        abi::NativeOperation::ProcessRetirementGetInfo => {
+            handlers::sys_retention_info(services, receiver, arguments, false)
         }
-        abi::HYPER_NATIVE_SYS_CRASH_VIEW_MAPPING => {
-            handlers::sys_crash_view_mapping(services, invocation.arguments())
+        abi::NativeOperation::CrashViewGetInfo => {
+            handlers::sys_retention_info(services, receiver, arguments, true)
         }
-        abi::HYPER_NATIVE_SYS_CRASH_VIEW_HANDLE => {
-            handlers::sys_crash_view_handle(services, invocation.arguments())
+        abi::NativeOperation::ProcessBuilderCreate => {
+            handlers::sys_process_builder_create(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PROCESS_RETIREMENT_GET_INFO => {
-            handlers::sys_retention_info(services, invocation.arguments(), false)
+        abi::NativeOperation::ProcessBuilderSetName => {
+            handlers::sys_process_builder_set_name(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_CRASH_VIEW_GET_INFO => {
-            handlers::sys_retention_info(services, invocation.arguments(), true)
+        abi::NativeOperation::ProcessBuilderSetData => {
+            handlers::sys_process_builder_set_data(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PROCESS_BUILDER_CREATE => {
-            handlers::sys_process_builder_create(services, invocation.arguments())
+        abi::NativeOperation::ProcessBuilderSetAffinity => {
+            handlers::sys_process_builder_set_affinity(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PROCESS_BUILDER_SET_NAME => {
-            handlers::sys_process_builder_set_name(services, invocation.arguments())
+        abi::NativeOperation::ProcessBuilderSetMemoryLock => {
+            handlers::sys_process_builder_set_memory_lock(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PROCESS_BUILDER_SET_DATA => {
-            handlers::sys_process_builder_set_data(services, invocation.arguments())
+        abi::NativeOperation::ProcessBuilderAddHandle => {
+            handlers::sys_process_builder_add_handle(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PROCESS_BUILDER_SET_AFFINITY => {
-            handlers::sys_process_builder_set_affinity(services, invocation.arguments())
+        abi::NativeOperation::ProcessBuilderSeal => {
+            handlers::sys_process_builder_seal(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PROCESS_BUILDER_SET_MEMORY_LOCK => {
-            handlers::sys_process_builder_set_memory_lock(services, invocation.arguments())
+        abi::NativeOperation::ProcessBuilderStart => {
+            handlers::sys_process_builder_start(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PROCESS_BUILDER_ADD_HANDLE => {
-            handlers::sys_process_builder_add_handle(services, invocation.arguments())
+        abi::NativeOperation::ProcessBuilderAbort => {
+            handlers::sys_process_builder_abort(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PROCESS_BUILDER_SEAL => {
-            handlers::sys_process_builder_seal(services, invocation.arguments())
+        abi::NativeOperation::ProcessRequestStop => {
+            handlers::sys_process_request_stop(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PROCESS_BUILDER_START => {
-            handlers::sys_process_builder_start(services, invocation.arguments())
+        abi::NativeOperation::ProcessGetInfo => {
+            handlers::sys_process_get_info(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PROCESS_BUILDER_ABORT => {
-            handlers::sys_process_builder_abort(services, invocation.arguments())
+        abi::NativeOperation::TaskInspectorScanProcesses => {
+            handlers::sys_task_inspector_scan_processes(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PROCESS_REQUEST_STOP => {
-            handlers::sys_process_request_stop(services, invocation.arguments())
+        abi::NativeOperation::TaskInspectorScanThreads => {
+            handlers::sys_task_inspector_scan_threads(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_PROCESS_GET_INFO => {
-            handlers::sys_process_get_info(services, invocation.arguments())
+        abi::NativeOperation::TaskInspectorDeriveProcess => {
+            handlers::sys_task_inspector_derive_process(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_TASK_INSPECTOR_SCAN_PROCESSES => {
-            handlers::sys_task_inspector_scan_processes(services, invocation.arguments())
+        abi::NativeOperation::ObjectInspectorReadDetails => {
+            handlers::sys_object_inspector_read_details(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_TASK_INSPECTOR_SCAN_THREADS => {
-            handlers::sys_task_inspector_scan_threads(services, invocation.arguments())
+        abi::NativeOperation::ObjectInspectorScanObjects => {
+            handlers::sys_object_inspector_scan_objects(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_TASK_INSPECTOR_DERIVE_PROCESS => {
-            handlers::sys_task_inspector_derive_process(services, invocation.arguments())
+        abi::NativeOperation::ObjectInspectorScanHandles => {
+            handlers::sys_object_inspector_scan_handles(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_OBJECT_INSPECTOR_READ_DETAILS => {
-            handlers::sys_object_inspector_read_details(services, invocation.arguments())
+        abi::NativeOperation::ObjectInspectorDeriveProcess => {
+            handlers::sys_object_inspector_derive_process(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_OBJECT_INSPECTOR_SCAN_OBJECTS => {
-            handlers::sys_object_inspector_scan_objects(services, invocation.arguments())
+        abi::NativeOperation::TaskInspectorDeriveTaskGroup => {
+            handlers::sys_task_inspector_derive_task_group(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_OBJECT_INSPECTOR_SCAN_HANDLES => {
-            handlers::sys_object_inspector_scan_handles(services, invocation.arguments())
+        abi::NativeOperation::ObjectInspectorDeriveTaskGroup => {
+            handlers::sys_object_inspector_derive_task_group(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_OBJECT_INSPECTOR_DERIVE_PROCESS => {
-            handlers::sys_object_inspector_derive_process(services, invocation.arguments())
+        abi::NativeOperation::TaskInspectorDeriveResourceDomain => {
+            handlers::sys_task_inspector_derive_resource_domain(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_TASK_INSPECTOR_DERIVE_TASK_GROUP => {
-            handlers::sys_task_inspector_derive_task_group(services, invocation.arguments())
+        abi::NativeOperation::ObjectInspectorDeriveResourceDomain => {
+            handlers::sys_object_inspector_derive_resource_domain(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_OBJECT_INSPECTOR_DERIVE_TASK_GROUP => {
-            handlers::sys_object_inspector_derive_task_group(services, invocation.arguments())
+        abi::NativeOperation::MemoryInspectorReadStatistics => {
+            handlers::sys_memory_inspector_read_statistics(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_TASK_INSPECTOR_DERIVE_RESOURCE_DOMAIN => {
-            handlers::sys_task_inspector_derive_resource_domain(services, invocation.arguments())
+        abi::NativeOperation::MemoryInspectorRead => {
+            handlers::sys_memory_inspector_read(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_OBJECT_INSPECTOR_DERIVE_RESOURCE_DOMAIN => {
-            handlers::sys_object_inspector_derive_resource_domain(services, invocation.arguments())
+        abi::NativeOperation::CpuInspectorRead => {
+            handlers::sys_cpu_inspector_read(services, receiver, arguments)
         }
-        abi::HYPER_NATIVE_SYS_MEMORY_INSPECTOR_READ_STATISTICS => {
-            handlers::sys_memory_inspector_read_statistics(services, invocation.arguments())
-        }
-        abi::HYPER_NATIVE_SYS_MEMORY_INSPECTOR_READ => {
-            handlers::sys_memory_inspector_read(services, invocation.arguments())
-        }
-        abi::HYPER_NATIVE_SYS_CPU_INSPECTOR_READ => {
-            handlers::sys_cpu_inspector_read(services, invocation.arguments())
-        }
-        _ => NativeAction::Return(handlers::sys_not_supported()),
     }
 }

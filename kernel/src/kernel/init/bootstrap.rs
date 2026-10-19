@@ -146,7 +146,9 @@ fn install_bootstrap<const N: usize>(
     values: &[HandleValue; N],
 ) -> Result<u64, Error> {
     use hyper::abi::native::*;
-    let reservation = boot.process.reserve_handles::<2>()?;
+    let [execution_context, object_factory, system_info] =
+        boot.process.prepare_invocation_handles()?;
+    let reservation = boot.process.reserve_handles::<5>()?;
     let extra = reservation.values();
     let root = purposes
         .iter()
@@ -171,6 +173,9 @@ fn install_bootstrap<const N: usize>(
         stack_size: layout.stack_size,
         loader_base: layout.loader_base,
         loader_size: layout.loader_size,
+        execution_context: extra[2].get(),
+        object_factory: extra[3].get(),
+        system_info: extra[4].get(),
     };
     let records = purposes
         .iter()
@@ -198,7 +203,16 @@ fn install_bootstrap<const N: usize>(
     drop(prepared.parent_channel);
     let published = boot
         .process
-        .publish_handles(reservation, [prepared.executable, prepared.child_channel])
+        .publish_handles(
+            reservation,
+            [
+                prepared.executable,
+                prepared.child_channel,
+                execution_context,
+                object_factory,
+                system_info,
+            ],
+        )
         .map_err(|failure| Error::Process(failure.error))?;
     Ok(published[1].get())
 }

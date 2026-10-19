@@ -42,7 +42,8 @@ retain the bank, while scheduling and deferred exits save and clear it.
 retry for Native threads, per-run eager guest restore, separate HS/VS FS
 controls, and migration invariants.
 The runtime owns `tp`; kernel Rust executes with the restored host `gp`/`tp`.
-Native calls use `ecall`, `a7` for the operation, `a0`–`a5` for arguments,
+Native calls use `ecall`, `a7` for the receiver handle, `a6` for its operation,
+`a0`–`a5` for business arguments,
 and `a0`–`a2` for status and results.
 
 Native roots use the lower Sv39 canonical half for user mappings and share

@@ -671,6 +671,7 @@ fn invocation_from_frame(frame: &ExceptionFrame) -> Result<NativeInvocation, Err
         .ok_or(Error::InvalidMachineState)?;
     Ok(NativeInvocation::new(
         frame.general[8],
+        frame.general[6],
         [
             frame.general[0],
             frame.general[1],

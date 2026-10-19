@@ -3,7 +3,7 @@
 
 //! Bounded user input snapshots for privileged namespace transactions.
 
-use crate::kernel::capability::{HandleValue, Rights};
+use crate::kernel::capability::{HandleValue, InvocationReceiver, Rights};
 use crate::kernel::mm::user_space::{UserAddress, UserSlice};
 use crate::kernel::process::Process;
 use crate::kernel::vfs::service::copy_path;
@@ -19,10 +19,12 @@ const MAX_MOVES: usize = abi::HYPER_NATIVE_FILESYSTEM_SWITCH_ROOT_MAX_MOVES as u
 
 pub(super) fn mount_ramfs(
     process: &Process,
-    root: HandleValue,
+    root: &InvocationReceiver,
     path: UserSlice,
 ) -> Result<(), VfsServiceError> {
-    let directory = process.resolve_handle::<DirectoryObject>(root, NAMESPACE_RIGHTS)?;
+    let directory = root
+        .resolve::<DirectoryObject>(NAMESPACE_RIGHTS)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let path = copy_path(process, path)?;
     directory
         .object()
@@ -32,7 +34,7 @@ pub(super) fn mount_ramfs(
 
 pub(super) fn switch_root(
     process: &Process,
-    root: HandleValue,
+    root: &InvocationReceiver,
     request: UserSlice,
 ) -> Result<(), VfsServiceError> {
     with_root_request(
@@ -49,7 +51,7 @@ pub(super) fn switch_root(
 
 pub(super) fn begin_root_switch(
     process: &Process,
-    root: HandleValue,
+    root: &InvocationReceiver,
     request: UserSlice,
 ) -> Result<HandleValue, VfsServiceError> {
     with_root_request(
@@ -99,22 +101,24 @@ pub(super) fn begin_root_switch(
 }
 
 pub(super) fn finish_root_switch(
-    process: &Process,
-    token: HandleValue,
+    token: &InvocationReceiver,
     commit: bool,
 ) -> Result<(), VfsServiceError> {
-    let token =
-        process.resolve_handle::<crate::kernel::vfs::RootTransitionObject>(token, Rights::WRITE)?;
+    let token = token
+        .resolve::<crate::kernel::vfs::RootTransitionObject>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     token.object().finish(commit).map_err(Into::into)
 }
 
 fn with_root_request<T>(
     process: &Process,
-    root: HandleValue,
+    root: &InvocationReceiver,
     request: UserSlice,
     operation: impl FnOnce(&DirectoryObject, &str, &str, &[(&str, &str)]) -> Result<T, VfsServiceError>,
 ) -> Result<T, VfsServiceError> {
-    let directory = process.resolve_handle::<DirectoryObject>(root, NAMESPACE_RIGHTS)?;
+    let directory = root
+        .resolve::<DirectoryObject>(NAMESPACE_RIGHTS)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let mut header = [0u8; 48];
     process.copy_from_user(request, &mut header)?;
     let words = decode_words::<6>(&header)?;

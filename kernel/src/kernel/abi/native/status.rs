@@ -61,18 +61,12 @@ pub(super) fn info_result(result: Result<u64, HyperNativeStatus>) -> NativeResul
     }
 }
 
-pub(super) fn console_io_result(
-    syscall: u64,
-    result: Result<usize, HyperNativeStatus>,
-) -> NativeResult {
+pub(super) fn console_io_result(result: Result<usize, HyperNativeStatus>) -> NativeResult {
     match result {
         Ok(actual) => match u64::try_from(actual) {
             Ok(actual) => success([actual, 0]),
             Err(_) => failure(HYPER_NATIVE_STATUS_INTERNAL),
         },
-        Err(HYPER_NATIVE_STATUS_WOULD_BLOCK) => {
-            NativeResult::for_syscall(syscall, HYPER_NATIVE_STATUS_WOULD_BLOCK, [0, 0])
-        }
         Err(status) => failure(status),
     }
 }

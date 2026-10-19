@@ -3,6 +3,8 @@
 
 //! Native memory service calls under borrowed Process authority.
 
+use crate::kernel::capability::InvocationReceiver;
+
 use super::ProcessServices;
 use crate::kernel::abi::native::MemoryServices;
 use crate::kernel::capability::HandleValue;
@@ -25,13 +27,13 @@ impl MemoryServices for ProcessServices<'_> {
 
     fn create_vmo_snapshot(
         &self,
-        value: HandleValue,
+        value: &InvocationReceiver,
     ) -> Result<(HandleValue, u64), crate::kernel::mm::user_space::MemoryServiceError> {
         crate::kernel::mm::user_space::create_vmo_snapshot(self.process, value)
     }
     fn map_file(
         &self,
-        vmar: HandleValue,
+        vmar: &InvocationReceiver,
         file: HandleValue,
         protection: HandleValue,
         request: crate::kernel::mm::user_space::PrivateMappingRequest,
@@ -40,7 +42,7 @@ impl MemoryServices for ProcessServices<'_> {
     }
     fn map_private(
         &self,
-        vmar: HandleValue,
+        vmar: &InvocationReceiver,
         snapshot: HandleValue,
         request: crate::kernel::mm::user_space::PrivateMappingRequest,
     ) -> Result<(), crate::kernel::mm::user_space::MemoryServiceError> {
@@ -48,7 +50,7 @@ impl MemoryServices for ProcessServices<'_> {
     }
     fn read_vmo(
         &self,
-        vmo: HandleValue,
+        vmo: &InvocationReceiver,
         offset: u64,
         output: Option<UserSlice>,
     ) -> Result<(), crate::kernel::mm::user_space::MemoryServiceError> {
@@ -57,7 +59,7 @@ impl MemoryServices for ProcessServices<'_> {
 
     fn write_vmo(
         &self,
-        vmo: HandleValue,
+        vmo: &InvocationReceiver,
         offset: u64,
         input: Option<UserSlice>,
     ) -> Result<(), crate::kernel::mm::user_space::MemoryServiceError> {
@@ -66,7 +68,7 @@ impl MemoryServices for ProcessServices<'_> {
 
     fn set_memory_residency(
         &self,
-        vmar: HandleValue,
+        vmar: &InvocationReceiver,
         address: u64,
         size: u64,
         current: bool,
@@ -83,7 +85,7 @@ impl MemoryServices for ProcessServices<'_> {
     }
     fn allocate_vmar(
         &self,
-        parent: HandleValue,
+        parent: &InvocationReceiver,
         address: u64,
         size: u64,
         exact: bool,
@@ -93,7 +95,7 @@ impl MemoryServices for ProcessServices<'_> {
 
     fn map_vmo(
         &self,
-        vmar: HandleValue,
+        vmar: &InvocationReceiver,
         vmo: HandleValue,
         vmo_offset: u64,
         address: u64,
@@ -113,7 +115,7 @@ impl MemoryServices for ProcessServices<'_> {
 
     fn protect_vmar(
         &self,
-        vmar: HandleValue,
+        vmar: &InvocationReceiver,
         address: u64,
         size: u64,
         permissions: crate::kernel::mm::user_space::Permissions,
@@ -123,7 +125,7 @@ impl MemoryServices for ProcessServices<'_> {
 
     fn unmap_vmar(
         &self,
-        vmar: HandleValue,
+        vmar: &InvocationReceiver,
         address: u64,
         size: u64,
     ) -> Result<(), crate::kernel::mm::user_space::MemoryServiceError> {
@@ -132,7 +134,7 @@ impl MemoryServices for ProcessServices<'_> {
 
     fn destroy_vmar(
         &self,
-        vmar: HandleValue,
+        vmar: &InvocationReceiver,
     ) -> Result<(), crate::kernel::mm::user_space::MemoryServiceError> {
         crate::kernel::mm::user_space::destroy_vmar(self.process, vmar)
     }

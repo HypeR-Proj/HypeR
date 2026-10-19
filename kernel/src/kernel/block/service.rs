@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::kernel::accounting::{ResourceAmount, ResourceKind};
-use crate::kernel::capability::{HandleFlags, HandleValue, PreparedHandle};
+use crate::kernel::capability::{HandleFlags, HandleValue, InvocationReceiver, PreparedHandle};
 use crate::kernel::object::{ObjectPublication, object_allocation_size};
 use crate::kernel::process::Process;
 use crate::kernel::vm::objects::{GuestMemoryObject, VirtualMachineObject};
@@ -13,13 +13,15 @@ use crate::kernel::vm::service::Error as ServiceError;
 
 pub(crate) fn create(
     process: &Process,
-    memory: HandleValue,
+    memory: &InvocationReceiver,
     backend: HandleValue,
     guest_base: u64,
     notify_base: u64,
     notify_irq: u32,
 ) -> Result<HandleValue, ServiceError> {
-    let memory = process.resolve_handle::<GuestMemoryObject>(memory, Rights::MAP)?;
+    let memory = memory
+        .resolve::<GuestMemoryObject>(Rights::MAP)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let backend = process.resolve_handle::<VirtualMachineObject>(backend, Rights::WRITE)?;
     let backing = memory.object().backing();
     if backing.size() != wire::MEMORY_BYTES
@@ -112,12 +114,12 @@ pub(crate) enum ActivationError {
 }
 
 pub(crate) fn activate(
-    process: &Process,
-    handle: HandleValue,
+    handle: &InvocationReceiver,
     readonly: bool,
 ) -> Result<(u64, bool), ActivationError> {
-    let block = process
-        .resolve_handle::<NativeBlock>(handle, Rights::WRITE)
+    let block = handle
+        .resolve::<NativeBlock>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)
         .map_err(ActivationError::Capability)?;
     block
         .object()
@@ -131,7 +133,7 @@ pub(crate) fn activate(
 /// the I/O owner transfers its sole active handle to the filesystem service.
 pub(crate) fn transfer(
     process: &Process,
-    handle: HandleValue,
+    handle: &InvocationReceiver,
     operation: u32,
     first: u64,
     buffer: Option<crate::kernel::mm::user_space::UserSlice>,
@@ -145,8 +147,9 @@ pub(crate) fn transfer(
     } else {
         Rights::WRITE
     };
-    let block = process
-        .resolve_handle::<NativeBlock>(handle, rights)
+    let block = handle
+        .resolve::<NativeBlock>(rights)
+        .map_err(crate::kernel::process::ProcessError::from)
         .map_err(TransferError::Capability)?;
     let mut device = BlockAccess {
         device: block.object().device.clone(),

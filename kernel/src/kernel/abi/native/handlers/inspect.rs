@@ -11,9 +11,9 @@ use crate::kernel::abi::native::status::{
 use crate::kernel::abi::native::wire::{
     copy_encoded_page, copy_info_record, encode_cpu_observation, encode_handle_inspection,
     encode_memory_observation, encode_object_inspection, encode_task_process, encode_task_thread,
-    parse_handle_inspector_scan, parse_inspector_derivation, parse_inspector_scan,
-    prepare_info_request,
+    parse_handle, parse_handle_inspector_scan, parse_inspector_scan, prepare_info_request,
 };
+use crate::kernel::capability::InvocationReceiver;
 use crate::kernel::inspect::{OBJECT_PAGE_CAPACITY, Page};
 use hyper::abi::native::{
     HYPER_NATIVE_CPU_OBSERVATION_MIN_SIZE, HYPER_NATIVE_MEMORY_OBSERVATION_MIN_SIZE,
@@ -25,16 +25,17 @@ use hyper::abi::native::{
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_object_inspector_read_details(
     services: &impl InspectServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
         let request = prepare_info_request(
-            &[arguments[0], arguments[4], arguments[5], 0, 0, 0],
+            &[arguments[3], arguments[4], 0, 0, 0, 0],
             HYPER_NATIVE_OBJECT_DETAILS_MIN_SIZE,
             core::mem::size_of::<HyperNativeObjectDetails>(),
         )?;
         let value = services
-            .read_object_details(request.value, arguments[1], arguments[2], arguments[3])
+            .read_object_details(receiver, arguments[0], arguments[1], arguments[2])
             .map_err(status_from_inspection_error)?;
         let record = crate::kernel::abi::native::wire::encode_object_details(&value);
         copy_info_record(services, request, &record)
@@ -45,6 +46,7 @@ pub(in crate::kernel::abi::native) fn sys_object_inspector_read_details(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_task_inspector_scan_processes(
     services: &impl InspectServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = parse_inspector_scan(
@@ -52,10 +54,10 @@ pub(in crate::kernel::abi::native) fn sys_task_inspector_scan_processes(
         crate::kernel::inspect::PROCESS_PAGE_CAPACITY,
         core::mem::size_of::<HyperNativeTaskProcess>(),
     )
-    .and_then(|(inspector, cursor, destination)| {
+    .and_then(|(cursor, destination)| {
         let mut page = Page::empty();
         services
-            .scan_processes(inspector, cursor, &mut page)
+            .scan_processes(receiver, cursor, &mut page)
             .map_err(status_from_inspection_error)?;
         copy_encoded_page(services, destination, &page, encode_task_process)
     });
@@ -65,6 +67,7 @@ pub(in crate::kernel::abi::native) fn sys_task_inspector_scan_processes(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_task_inspector_scan_threads(
     services: &impl InspectServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = parse_inspector_scan(
@@ -72,10 +75,10 @@ pub(in crate::kernel::abi::native) fn sys_task_inspector_scan_threads(
         crate::kernel::inspect::THREAD_PAGE_CAPACITY,
         core::mem::size_of::<HyperNativeTaskThread>(),
     )
-    .and_then(|(inspector, cursor, destination)| {
+    .and_then(|(cursor, destination)| {
         let mut page = Page::empty();
         services
-            .scan_threads(inspector, cursor, &mut page)
+            .scan_threads(receiver, cursor, &mut page)
             .map_err(status_from_inspection_error)?;
         copy_encoded_page(services, destination, &page, encode_task_thread)
     });
@@ -85,6 +88,7 @@ pub(in crate::kernel::abi::native) fn sys_task_inspector_scan_threads(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_object_inspector_scan_objects(
     services: &impl InspectServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = parse_inspector_scan(
@@ -92,10 +96,10 @@ pub(in crate::kernel::abi::native) fn sys_object_inspector_scan_objects(
         OBJECT_PAGE_CAPACITY,
         core::mem::size_of::<HyperNativeObjectInspection>(),
     )
-    .and_then(|(inspector, cursor, destination)| {
+    .and_then(|(cursor, destination)| {
         let mut page = Page::empty();
         services
-            .scan_objects(inspector, cursor, &mut page)
+            .scan_objects(receiver, cursor, &mut page)
             .map_err(status_from_inspection_error)?;
         copy_encoded_page(services, destination, &page, encode_object_inspection)
     });
@@ -105,27 +109,28 @@ pub(in crate::kernel::abi::native) fn sys_object_inspector_scan_objects(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_object_inspector_scan_handles(
     services: &impl InspectServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_handle_inspector_scan(arguments).and_then(
-        |(inspector, process_koid, cursor, destination)| {
+    let result =
+        parse_handle_inspector_scan(arguments).and_then(|(process_koid, cursor, destination)| {
             let page = services
-                .scan_process_handles(inspector, process_koid, cursor)
+                .scan_process_handles(receiver, process_koid, cursor)
                 .map_err(status_from_inspection_error)?;
             copy_encoded_page(services, destination, &page, encode_handle_inspection)
-        },
-    );
+        });
     NativeAction::Return(scan_result(result))
 }
 
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_task_inspector_derive_process(
     services: &impl InspectServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_inspector_derivation(arguments).and_then(|(inspector, process)| {
+    let result = parse_handle(arguments[0]).and_then(|process| {
         services
-            .derive_task_inspector(inspector, process)
+            .derive_task_inspector(receiver, process)
             .map_err(status_from_inspection_error)
     });
     NativeAction::Return(handle_result(result))
@@ -134,11 +139,12 @@ pub(in crate::kernel::abi::native) fn sys_task_inspector_derive_process(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_object_inspector_derive_process(
     services: &impl InspectServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_inspector_derivation(arguments).and_then(|(inspector, process)| {
+    let result = parse_handle(arguments[0]).and_then(|process| {
         services
-            .derive_object_inspector(inspector, process)
+            .derive_object_inspector(receiver, process)
             .map_err(status_from_inspection_error)
     });
     NativeAction::Return(handle_result(result))
@@ -147,11 +153,12 @@ pub(in crate::kernel::abi::native) fn sys_object_inspector_derive_process(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_task_inspector_derive_task_group(
     services: &impl InspectServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_inspector_derivation(arguments).and_then(|(inspector, group)| {
+    let result = parse_handle(arguments[0]).and_then(|group| {
         services
-            .derive_task_inspector_for_task_group(inspector, group)
+            .derive_task_inspector_for_task_group(receiver, group)
             .map_err(status_from_inspection_error)
     });
     NativeAction::Return(handle_result(result))
@@ -160,11 +167,12 @@ pub(in crate::kernel::abi::native) fn sys_task_inspector_derive_task_group(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_object_inspector_derive_task_group(
     services: &impl InspectServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_inspector_derivation(arguments).and_then(|(inspector, group)| {
+    let result = parse_handle(arguments[0]).and_then(|group| {
         services
-            .derive_object_inspector_for_task_group(inspector, group)
+            .derive_object_inspector_for_task_group(receiver, group)
             .map_err(status_from_inspection_error)
     });
     NativeAction::Return(handle_result(result))
@@ -173,11 +181,12 @@ pub(in crate::kernel::abi::native) fn sys_object_inspector_derive_task_group(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_task_inspector_derive_resource_domain(
     services: &impl InspectServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_inspector_derivation(arguments).and_then(|(inspector, domain)| {
+    let result = parse_handle(arguments[0]).and_then(|domain| {
         services
-            .derive_task_inspector_for_resource_domain(inspector, domain)
+            .derive_task_inspector_for_resource_domain(receiver, domain)
             .map_err(status_from_inspection_error)
     });
     NativeAction::Return(handle_result(result))
@@ -186,11 +195,12 @@ pub(in crate::kernel::abi::native) fn sys_task_inspector_derive_resource_domain(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_object_inspector_derive_resource_domain(
     services: &impl InspectServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
-    let result = parse_inspector_derivation(arguments).and_then(|(inspector, domain)| {
+    let result = parse_handle(arguments[0]).and_then(|domain| {
         services
-            .derive_object_inspector_for_resource_domain(inspector, domain)
+            .derive_object_inspector_for_resource_domain(receiver, domain)
             .map_err(status_from_inspection_error)
     });
     NativeAction::Return(handle_result(result))
@@ -199,6 +209,7 @@ pub(in crate::kernel::abi::native) fn sys_object_inspector_derive_resource_domai
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_memory_inspector_read(
     services: &impl SystemInspectServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = prepare_info_request(
@@ -207,7 +218,7 @@ pub(in crate::kernel::abi::native) fn sys_memory_inspector_read(
         core::mem::size_of::<HyperNativeMemoryObservation>(),
     )
     .and_then(|request| {
-        let inspector = request.value;
+        let inspector = receiver;
         let observation = services
             .memory_observation(inspector)
             .map_err(status_from_inspection_error)?;
@@ -219,6 +230,7 @@ pub(in crate::kernel::abi::native) fn sys_memory_inspector_read(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_cpu_inspector_read(
     services: &impl SystemInspectServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = prepare_info_request(
@@ -227,7 +239,7 @@ pub(in crate::kernel::abi::native) fn sys_cpu_inspector_read(
         core::mem::size_of::<HyperNativeCpuObservation>(),
     )
     .and_then(|request| {
-        let inspector = request.value;
+        let inspector = receiver;
         let observation = services
             .cpu_observation(inspector)
             .map_err(status_from_inspection_error)?;

@@ -15,7 +15,6 @@ use hyper::abi::native as abi;
 use hyper::fs::{NodeAttributes, NodeKind};
 
 const BASE: u64 = 0x3000;
-const HANDLE: u64 = (1 << 24) | 1;
 
 struct Memory {
     bytes: RefCell<[u8; 256]>,
@@ -240,14 +239,14 @@ fn check_output(memory: &Memory) -> Result<(), Error> {
         return Err(Error(10));
     }
     for capacity in [0, 111, abi::HYPER_NATIVE_EXTENSIBLE_RECORD_MAX_BYTES + 1] {
-        if metadata_request(HANDLE, BASE, capacity).is_ok() {
+        if metadata_request(BASE, capacity).is_ok() {
             return Err(Error(11));
         }
     }
     for capacity in [112, 256, abi::HYPER_NATIVE_EXTENSIBLE_RECORD_MAX_BYTES] {
         memory.reset();
         memory.bytes.borrow_mut().fill(0xa5);
-        let request = metadata_request(HANDLE, BASE, capacity).map_err(|_| Error(12))?;
+        let request = metadata_request(BASE, capacity).map_err(|_| Error(12))?;
         if copy_info_record(memory, request, &bytes) != Ok(METADATA_SIZE as u64) {
             return Err(Error(13));
         }
@@ -257,7 +256,7 @@ fn check_output(memory: &Memory) -> Result<(), Error> {
         }
     }
     memory.fail.set(true);
-    let request = metadata_request(HANDLE, BASE, 112).map_err(|_| Error(15))?;
+    let request = metadata_request(BASE, 112).map_err(|_| Error(15))?;
     if copy_info_record(memory, request, &bytes) != Err(abi::HYPER_NATIVE_STATUS_NO_MEMORY) {
         return Err(Error(16));
     }

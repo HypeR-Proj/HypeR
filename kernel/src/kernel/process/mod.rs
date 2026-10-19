@@ -11,6 +11,7 @@ mod builder_policy;
 mod directory;
 pub(crate) mod hierarchy;
 mod image;
+mod invocation;
 mod lifecycle;
 pub(crate) mod loader;
 mod objects;
@@ -26,9 +27,7 @@ pub(crate) use builder::{
 pub(crate) use directory::{
     FilePageReclaimCursor, ProcessDiagnosticRef, ProcessScanCursor, reclaim_file_pages, scan,
 };
-pub(crate) use image::{
-    AbiFamily, ExecutionRoute, ImageError, MachineAbi, ProcessImage, UserThreadStart,
-};
+pub(crate) use image::{ImageError, MachineAbi, ProcessImage, UserThreadStart};
 pub(crate) use lifecycle::{ProcessPhase, TerminalReason, UserThreadPhase};
 pub(crate) use loader::{Error as LoaderError, load_native};
 pub(crate) use objects::{ProcessObject, TaskFactory, TaskGroupObject, TaskObjectError};

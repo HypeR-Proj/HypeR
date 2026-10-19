@@ -3,6 +3,8 @@
 
 //! Native device syscall validation.
 
+use crate::kernel::capability::InvocationReceiver;
+
 use crate::kernel::abi::native::services::NativeAction;
 use crate::kernel::abi::native::status::{
     handle_result, info_result, status_from_process_error, status_from_vm_service_error,
@@ -29,17 +31,18 @@ fn status_from_match_error(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_device_firmware_read(
     services: &impl DeviceServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[4..])?;
-        let authority = parse_handle(arguments[0])?;
-        if arguments[3] > 65536 {
+        require_zero(&arguments[3..])?;
+        let authority = receiver;
+        if arguments[2] > 65536 {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
         }
         let mut query = [0u8; 24];
         let source =
-            optional_user_slice(arguments[1], 24)?.ok_or(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
+            optional_user_slice(arguments[0], 24)?.ok_or(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
         services
             .copy_from_user(source, &mut query)
             .map_err(status_from_process_error)?;
@@ -88,13 +91,13 @@ pub(in crate::kernel::abi::native) fn sys_device_firmware_read(
             return Err(hyper::abi::native::HYPER_NATIVE_STATUS_INTERNAL);
         }
         let length = bytes.len() as u64;
-        if arguments[3] == 0 {
+        if arguments[2] == 0 {
             return Ok(length);
         }
-        if arguments[3] < length {
+        if arguments[2] < length {
             return Err(hyper::abi::native::HYPER_NATIVE_STATUS_BUFFER_TOO_SMALL);
         }
-        if let Some(destination) = optional_user_slice(arguments[2], length)? {
+        if let Some(destination) = optional_user_slice(arguments[1], length)? {
             services
                 .copy_to_user(destination, &bytes)
                 .map_err(status_from_process_error)?;
@@ -107,19 +110,20 @@ pub(in crate::kernel::abi::native) fn sys_device_firmware_read(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_device_claim_bundle(
     services: &impl DeviceServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[4..])?;
-        let authority = parse_handle(arguments[0])?;
-        if arguments[2] == 0 || arguments[2] > 8 {
+        require_zero(&arguments[3..])?;
+        let authority = receiver;
+        if arguments[1] == 0 || arguments[1] > 8 {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
         }
-        let irq_node = parse_u32(arguments[3])?;
+        let irq_node = parse_u32(arguments[2])?;
         let count =
-            usize::try_from(arguments[2]).map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
+            usize::try_from(arguments[1]).map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
         let mut bytes = [0u8; 8 * 16];
-        let source = optional_user_slice(arguments[1], arguments[2] * 16)?
+        let source = optional_user_slice(arguments[0], arguments[1] * 16)?
             .ok_or(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
         services
             .copy_from_user(source, &mut bytes[..count * 16])
@@ -157,23 +161,24 @@ pub(in crate::kernel::abi::native) fn sys_device_claim_bundle(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_device_mmio(
     services: &impl DeviceServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[5..])?;
-        if !matches!(arguments[2], 1 | 2 | 4)
-            || arguments[3] > 1
-            || (arguments[3] == 0 && arguments[4] != 0)
+        require_zero(&arguments[4..])?;
+        if !matches!(arguments[1], 1 | 2 | 4)
+            || arguments[2] > 1
+            || (arguments[2] == 0 && arguments[3] != 0)
         {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
         }
         services
             .device_mmio(
-                parse_handle(arguments[0])?,
-                arguments[1],
-                parse_u32(arguments[2])?,
-                arguments[3] != 0,
-                arguments[4],
+                receiver,
+                arguments[0],
+                parse_u32(arguments[1])?,
+                arguments[2] != 0,
+                arguments[3],
             )
             .map_err(status_from_vm_service_error)
     })();
@@ -183,12 +188,13 @@ pub(in crate::kernel::abi::native) fn sys_device_mmio(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_device_irq_pending(
     services: &impl DeviceServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[1..])?;
+        require_zero(&arguments[0..])?;
         services
-            .device_irq_pending(parse_handle(arguments[0])?)
+            .device_irq_pending(receiver)
             .map_err(status_from_vm_service_error)
     })();
     NativeAction::Return(info_result(result))
@@ -197,15 +203,16 @@ pub(in crate::kernel::abi::native) fn sys_device_irq_pending(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_device_irq_complete(
     services: &impl DeviceServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[3..])?;
-        if arguments[2] > 1 {
+        require_zero(&arguments[2..])?;
+        if arguments[1] > 1 {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
         }
         services
-            .device_irq_complete(parse_handle(arguments[0])?, arguments[1], arguments[2] != 0)
+            .device_irq_complete(receiver, arguments[0], arguments[1] != 0)
             .map_err(status_from_vm_service_error)
     })();
     NativeAction::Return(status_only(result))
@@ -214,12 +221,13 @@ pub(in crate::kernel::abi::native) fn sys_device_irq_complete(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_device_dma_fault_info(
     services: &impl DeviceServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
         let output = prepare_info_request(arguments, 40, 40)?;
         let bytes = services
-            .device_dma_fault_info(output.value)
+            .device_dma_fault_info(receiver)
             .map_err(status_from_vm_service_error)?;
         copy_info_record(services, output, &bytes)
     })();
@@ -229,12 +237,13 @@ pub(in crate::kernel::abi::native) fn sys_device_dma_fault_info(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_device_profile_info(
     services: &impl DeviceServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
         let output = prepare_info_request(arguments, 32, 32)?;
         let bytes = services
-            .device_profile_info(output.value)
+            .device_profile_info(receiver)
             .map_err(status_from_vm_service_error)?;
         copy_info_record(services, output, &bytes)
     })();
@@ -244,14 +253,14 @@ pub(in crate::kernel::abi::native) fn sys_device_profile_info(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_device_resource_info(
     services: &impl DeviceServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[4..])?;
-        let output =
-            prepare_info_request(&[arguments[0], arguments[2], arguments[3], 0, 0, 0], 32, 32)?;
+        require_zero(&arguments[3..])?;
+        let output = prepare_info_request(&[arguments[1], arguments[2], 0, 0, 0, 0], 32, 32)?;
         let bytes = services
-            .device_resource_info(output.value, parse_u32(arguments[1])?)
+            .device_resource_info(receiver, parse_u32(arguments[0])?)
             .map_err(status_from_vm_service_error)?;
         copy_info_record(services, output, &bytes)
     })();
@@ -261,16 +270,17 @@ pub(in crate::kernel::abi::native) fn sys_device_resource_info(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_device_claim_matching(
     services: &impl DeviceServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[5..])?;
+        require_zero(&arguments[4..])?;
         let length =
-            usize::try_from(arguments[4]).map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
+            usize::try_from(arguments[3]).map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
         if length == 0 || length > 512 {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
         }
-        let source = optional_user_slice(arguments[3], arguments[4])?
+        let source = optional_user_slice(arguments[2], arguments[3])?
             .ok_or(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
         let mut bytes = [0u8; 512];
         services
@@ -280,9 +290,9 @@ pub(in crate::kernel::abi::native) fn sys_device_claim_matching(
             .map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
         services
             .claim_device_matching(
-                parse_handle(arguments[0])?,
+                receiver,
+                parse_u32(arguments[0])?,
                 parse_u32(arguments[1])?,
-                parse_u32(arguments[2])?,
                 identity,
             )
             .map_err(status_from_match_error)
@@ -293,12 +303,13 @@ pub(in crate::kernel::abi::native) fn sys_device_claim_matching(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_device_claim(
     services: &impl DeviceServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[2..])?;
+        require_zero(&arguments[1..])?;
         services
-            .claim_device(parse_handle(arguments[0])?, parse_u32(arguments[1])?)
+            .claim_device(receiver, parse_u32(arguments[0])?)
             .map_err(status_from_vm_service_error)
     })();
     NativeAction::Return(handle_result(result))
@@ -307,12 +318,13 @@ pub(in crate::kernel::abi::native) fn sys_device_claim(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_physical_device_info(
     services: &impl DeviceServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
         let output = prepare_info_request(arguments, 16, 16)?;
         let info = services
-            .physical_device_info(output.value)
+            .physical_device_info(receiver)
             .map_err(status_from_vm_service_error)?;
         let mut bytes = [0u8; 16];
         bytes[..4].copy_from_slice(&info.device_id.to_le_bytes());
@@ -326,17 +338,17 @@ pub(in crate::kernel::abi::native) fn sys_physical_device_info(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_vmo_get_dma_extent(
     services: &impl DeviceServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        let output =
-            prepare_info_request(&[arguments[0], arguments[4], arguments[5], 0, 0, 0], 16, 16)?;
+        let output = prepare_info_request(&[arguments[3], arguments[4], 0, 0, 0, 0], 16, 16)?;
         let extent = services
             .vmo_dma_extent(
-                output.value,
-                parse_handle(arguments[1])?,
+                receiver,
+                parse_handle(arguments[0])?,
+                arguments[1],
                 arguments[2],
-                arguments[3],
             )
             .map_err(status_from_vm_service_error)?;
         let mut bytes = [0u8; 16];
@@ -350,16 +362,17 @@ pub(in crate::kernel::abi::native) fn sys_vmo_get_dma_extent(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_pending_virtual_machine_assign_device(
     services: &impl DeviceServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[4..])?;
+        require_zero(&arguments[3..])?;
         services
             .assign_physical_device(
+                receiver,
                 parse_handle(arguments[0])?,
-                parse_handle(arguments[1])?,
-                arguments[2],
-                parse_u32(arguments[3])?,
+                arguments[1],
+                parse_u32(arguments[2])?,
             )
             .map_err(status_from_vm_service_error)
     })();

@@ -3,6 +3,8 @@
 
 //! Read-only postmortem access under an explicitly delegated capability.
 
+use crate::kernel::capability::InvocationReceiver;
+
 use super::ProcessServices;
 use crate::kernel::abi::native::{ProcessBuilderServiceError, RetentionServices};
 use crate::kernel::accounting::{ResourceAmount, ResourceKind};
@@ -17,14 +19,13 @@ use crate::kernel::process::{ProcessBuilder, ProcessError};
 impl RetentionServices for ProcessServices<'_> {
     fn retain_process_builder(
         &self,
-        builder: HandleValue,
+        builder: &InvocationReceiver,
         bytes: u64,
         timeout: u64,
     ) -> Result<HandleValue, ProcessBuilderServiceError> {
-        let builder = self.process.resolve_handle::<ProcessBuilder>(
-            builder,
-            Rights::WRITE.union(Rights::RETAIN_PROCESS),
-        )?;
+        let builder = builder
+            .resolve::<ProcessBuilder>(Rights::WRITE.union(Rights::RETAIN_PROCESS))
+            .map_err(crate::kernel::process::ProcessError::from)?;
         // Object allocation and handle capacity are prepared before changing
         // policy. Publishing the prepared handle can now fail only if the
         // caller has stopped; withdrawing its authority revokes retention.
@@ -44,24 +45,25 @@ impl RetentionServices for ProcessServices<'_> {
             .map(|values| values[0])
             .map_err(|failure| failure.error.into())
     }
-    fn retention_info(&self, handle: HandleValue, view: bool) -> Result<Info, Error> {
+    fn retention_info(&self, handle: &InvocationReceiver, view: bool) -> Result<Info, Error> {
         if view {
-            self.process
-                .resolve_handle::<CrashView>(handle, Rights::INSPECT)?
+            handle
+                .resolve::<CrashView>(Rights::INSPECT)
+                .map_err(crate::kernel::process::ProcessError::from)?
                 .object()
                 .info()
         } else {
-            Ok(self
-                .process
-                .resolve_handle::<ProcessRetirement>(handle, Rights::INSPECT)?
+            Ok(handle
+                .resolve::<ProcessRetirement>(Rights::INSPECT)
+                .map_err(crate::kernel::process::ProcessError::from)?
                 .object()
                 .info())
         }
     }
-    fn retention_open_view(&self, handle: HandleValue) -> Result<HandleValue, Error> {
-        let control = self
-            .process
-            .resolve_handle::<ProcessRetirement>(handle, Rights::INSPECT_DETAILS)?;
+    fn retention_open_view(&self, handle: &InvocationReceiver) -> Result<HandleValue, Error> {
+        let control = handle
+            .resolve::<ProcessRetirement>(Rights::INSPECT_DETAILS)
+            .map_err(crate::kernel::process::ProcessError::from)?;
         if control.object().info().process_koid == self.process.koid().get() {
             return Err(Error::Process(ProcessError::Handle(
                 crate::kernel::capability::HandleError::AccessDenied,
@@ -74,46 +76,50 @@ impl RetentionServices for ProcessServices<'_> {
             .create_object(view, CrashView::RIGHTS)
             .map_err(Into::into)
     }
-    fn retention_release(&self, handle: HandleValue) -> Result<(), Error> {
-        self.process
-            .resolve_handle::<ProcessRetirement>(handle, Rights::RETIRE)?
+    fn retention_release(&self, handle: &InvocationReceiver) -> Result<(), Error> {
+        handle
+            .resolve::<ProcessRetirement>(Rights::RETIRE)
+            .map_err(crate::kernel::process::ProcessError::from)?
             .object()
             .release();
         Ok(())
     }
     fn crash_thread(
         &self,
-        handle: HandleValue,
+        handle: &InvocationReceiver,
         index: usize,
     ) -> Result<(ThreadEvidence, usize), Error> {
-        self.process
-            .resolve_handle::<CrashView>(handle, Rights::READ)?
+        handle
+            .resolve::<CrashView>(Rights::READ)
+            .map_err(crate::kernel::process::ProcessError::from)?
             .object()
             .thread(index)
     }
     fn crash_mapping(
         &self,
-        handle: HandleValue,
+        handle: &InvocationReceiver,
         index: usize,
     ) -> Result<(CrashMapping, usize), Error> {
-        self.process
-            .resolve_handle::<CrashView>(handle, Rights::READ)?
+        handle
+            .resolve::<CrashView>(Rights::READ)
+            .map_err(crate::kernel::process::ProcessError::from)?
             .object()
             .mapping(index)
     }
     fn crash_handle(
         &self,
-        handle: HandleValue,
+        handle: &InvocationReceiver,
         index: usize,
     ) -> Result<(HandleSnapshot, usize), Error> {
-        self.process
-            .resolve_handle::<CrashView>(handle, Rights::READ)?
+        handle
+            .resolve::<CrashView>(Rights::READ)
+            .map_err(crate::kernel::process::ProcessError::from)?
             .object()
             .handle(index)
     }
     fn crash_read(
         &self,
-        handle: HandleValue,
+        handle: &InvocationReceiver,
         address: u64,
         output: UserSlice,
     ) -> Result<usize, Error> {
@@ -121,9 +127,9 @@ impl RetentionServices for ProcessServices<'_> {
         if size == 0 || size > 65536 {
             return Err(Error::Invalid);
         }
-        let view = self
-            .process
-            .resolve_handle::<CrashView>(handle, Rights::READ)?;
+        let view = handle
+            .resolve::<CrashView>(Rights::READ)
+            .map_err(crate::kernel::process::ProcessError::from)?;
         let _charge = self
             .process
             .resource_domain()

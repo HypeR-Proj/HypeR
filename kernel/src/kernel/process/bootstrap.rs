@@ -65,6 +65,9 @@ pub(crate) fn prepare(
         header.stack_size,
         header.loader_base,
         header.loader_size,
+        header.execution_context,
+        header.object_factory,
+        header.system_info,
     ]
     .into_iter()
     .enumerate()

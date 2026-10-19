@@ -21,6 +21,8 @@ mod vfs;
 mod vfs_namespace;
 mod vm;
 
+use crate::kernel::capability::InvocationReceiver;
+
 use crate::kernel::abi::native::{HandleServices, UserMemoryServices};
 use crate::kernel::capability::{HandleInfo, HandleValue, Rights};
 use crate::kernel::mm::user_space::UserSlice;
@@ -53,30 +55,44 @@ impl UserMemoryServices for ProcessServices<'_> {
 }
 
 impl HandleServices for ProcessServices<'_> {
-    fn close_handle(&self, value: HandleValue) -> Result<(), ProcessError> {
-        self.process.close_handle(value)
+    fn resolve_invocation(&self, value: HandleValue) -> Result<InvocationReceiver, ProcessError> {
+        self.process.resolve_invocation(value)
+    }
+
+    fn validate_invocation_context(
+        &self,
+        receiver: &InvocationReceiver,
+    ) -> Result<(), ProcessError> {
+        self.process.validate_invocation_context(receiver)
+    }
+
+    fn close_handle(&self, value: &InvocationReceiver) -> Result<(), ProcessError> {
+        self.process.close_handle(value.handle())
     }
 
     fn handle_info(
         &self,
-        value: HandleValue,
+        value: &InvocationReceiver,
         required_rights: Rights,
     ) -> Result<HandleInfo, ProcessError> {
-        self.process.handle_info(value, required_rights)
+        value
+            .require(required_rights)
+            .map(|()| value.info())
+            .map_err(Into::into)
     }
 
     fn duplicate_handle(
         &self,
-        value: HandleValue,
+        value: &InvocationReceiver,
         rights: Rights,
     ) -> Result<HandleValue, ProcessError> {
-        self.process.duplicate_handle(value, rights)
+        self.process.duplicate_handle(value.handle(), rights)
     }
     fn replace_handle(
         &self,
-        value: HandleValue,
+        value: &InvocationReceiver,
         rights: Rights,
     ) -> Result<HandleValue, ProcessError> {
-        self.process.replace_handle(value, rights)
+        self.process.replace_handle(value.handle(), rights)
     }
 }

@@ -5,7 +5,7 @@
 
 use crate::kernel::accounting::CommittedCharge;
 use crate::kernel::authority::Rights;
-use crate::kernel::capability::{HandleFlags, HandleValue, PreparedHandle};
+use crate::kernel::capability::{HandleFlags, HandleValue, InvocationReceiver, PreparedHandle};
 use crate::kernel::object::{KernelObject, ObjectKind, ObjectPublication, TransferClass, private};
 use crate::kernel::process::Process;
 use crate::kernel::vm::{
@@ -35,14 +35,16 @@ fn classify(error: super::Error) -> Error {
 
 pub(crate) fn create(
     process: &Process,
-    backend: HandleValue,
+    backend: &InvocationReceiver,
     memory: HandleValue,
     frontend: u64,
 ) -> Result<(HandleValue, u64), Error> {
     if !crate::hal::vm::supports_io_notifications() {
         return Err(Error::NotSupported);
     }
-    let vm = process.resolve_handle::<VirtualMachineObject>(backend, Rights::WRITE)?;
+    let vm = backend
+        .resolve::<VirtualMachineObject>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let memory = process.resolve_handle::<GuestMemoryObject>(memory, Rights::MAP)?;
     let domain = process.resource_domain();
     let owner = vm.object().owner();
@@ -152,8 +154,10 @@ pub(crate) fn create(
     }
 }
 
-pub(crate) fn release(process: &Process, handle: HandleValue) -> Result<(), Error> {
-    let mapping = process.resolve_handle::<GuestMapping>(handle, Rights::WRITE)?;
+pub(crate) fn release(handle: &InvocationReceiver) -> Result<(), Error> {
+    let mapping = handle
+        .resolve::<GuestMapping>(Rights::WRITE)
+        .map_err(crate::kernel::process::ProcessError::from)?;
     let mapping = mapping.object();
     let binding = registry::acquire_binding(mapping.backend).map_err(|_| Error::BadState)?;
     let mut synchronization =

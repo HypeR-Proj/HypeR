@@ -8,9 +8,9 @@ use crate::kernel::abi::native::Arguments;
 use crate::kernel::abi::native::services::{NativeAction, UserMemoryServices, VfsServices};
 use crate::kernel::abi::native::status::{info_result, status_from_vfs_service_error, status_only};
 use crate::kernel::abi::native::wire::{
-    InfoRequest, copy_extensible_input_record, copy_info_record, parse_handle,
-    prepare_info_request, require_zero,
+    InfoRequest, copy_extensible_input_record, copy_info_record, prepare_info_request, require_zero,
 };
+use crate::kernel::capability::InvocationReceiver;
 use crate::kernel::vfs::{Metadata, MetadataUpdate};
 use hyper::abi::native as abi;
 use hyper::time::Timestamp;
@@ -35,9 +35,9 @@ mod self_test;
 #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(in crate::kernel::abi::native) use self_test::run as run_wire_self_test;
 
-fn metadata_request(handle: u64, address: u64, capacity: u64) -> Result<InfoRequest, Status> {
+fn metadata_request(address: u64, capacity: u64) -> Result<InfoRequest, Status> {
     prepare_info_request(
-        &[handle, address, capacity, 0, 0, 0],
+        &[address, capacity, 0, 0, 0, 0],
         abi::HYPER_NATIVE_FILE_METADATA_MIN_SIZE,
         METADATA_SIZE,
     )
@@ -133,7 +133,8 @@ fn decode_metadata_update(
 ) -> Result<MetadataUpdate, Status> {
     let bytes = copy_extensible_input_record::<UPDATE_SIZE>(
         services,
-        &[0, address, size, 0, 0, 0],
+        address,
+        size,
         abi::HYPER_NATIVE_FILE_METADATA_UPDATE_MIN_SIZE,
     )?;
     let word = |offset: usize| -> Result<u32, Status> {
@@ -183,15 +184,16 @@ fn decode_metadata_update(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_directory_get_metadata(
     services: &impl VfsServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        let request = metadata_request(arguments[0], arguments[4], arguments[5])?;
+        let request = metadata_request(arguments[3], arguments[4])?;
         let value = services
             .directory_get_metadata(
-                request.value,
-                parse_path(arguments[1], arguments[2])?,
-                parse_follow_symlinks(arguments[3])?,
+                receiver,
+                parse_path(arguments[0], arguments[1])?,
+                parse_follow_symlinks(arguments[2])?,
             )
             .map_err(status_from_vfs_service_error)?;
         copy_info_record(services, request, &encode_metadata(value))
@@ -202,15 +204,16 @@ pub(in crate::kernel::abi::native) fn sys_directory_get_metadata(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_directory_set_metadata(
     services: &impl VfsServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        let update = decode_metadata_update(services, arguments[4], arguments[5])?;
+        let update = decode_metadata_update(services, arguments[3], arguments[4])?;
         services
             .directory_set_metadata(
-                parse_handle(arguments[0])?,
-                parse_path(arguments[1], arguments[2])?,
-                parse_follow_symlinks(arguments[3])?,
+                receiver,
+                parse_path(arguments[0], arguments[1])?,
+                parse_follow_symlinks(arguments[2])?,
                 update,
             )
             .map_err(status_from_vfs_service_error)
@@ -221,13 +224,14 @@ pub(in crate::kernel::abi::native) fn sys_directory_set_metadata(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_file_set_metadata(
     services: &impl VfsServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[3..])?;
-        let update = decode_metadata_update(services, arguments[1], arguments[2])?;
+        require_zero(&arguments[2..])?;
+        let update = decode_metadata_update(services, arguments[0], arguments[1])?;
         services
-            .file_set_metadata(parse_handle(arguments[0])?, update)
+            .file_set_metadata(receiver, update)
             .map_err(status_from_vfs_service_error)
     })();
     NativeAction::Return(status_only(result))
@@ -236,13 +240,14 @@ pub(in crate::kernel::abi::native) fn sys_file_set_metadata(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_file_get_metadata(
     services: &impl VfsServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[3..])?;
-        let request = metadata_request(arguments[0], arguments[1], arguments[2])?;
+        require_zero(&arguments[2..])?;
+        let request = metadata_request(arguments[0], arguments[1])?;
         let value = services
-            .file_get_metadata(request.value)
+            .file_get_metadata(receiver)
             .map_err(status_from_vfs_service_error)?;
         copy_info_record(services, request, &encode_metadata(value))
     })();
@@ -252,13 +257,14 @@ pub(in crate::kernel::abi::native) fn sys_file_get_metadata(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_directory_get_self_metadata(
     services: &impl VfsServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&arguments[3..])?;
-        let request = metadata_request(arguments[0], arguments[1], arguments[2])?;
+        require_zero(&arguments[2..])?;
+        let request = metadata_request(arguments[0], arguments[1])?;
         let value = services
-            .directory_get_self_metadata(request.value)
+            .directory_get_self_metadata(receiver)
             .map_err(status_from_vfs_service_error)?;
         copy_info_record(services, request, &encode_metadata(value))
     })();

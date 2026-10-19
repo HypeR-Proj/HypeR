@@ -4,14 +4,14 @@
 //! Bounded postmortem operations. Each output is copied from an owned record;
 //! no target lock is held while touching the observer's userspace memory.
 
+use crate::kernel::capability::InvocationReceiver;
+
 use crate::kernel::abi::native::services::NativeAction;
 use crate::kernel::abi::native::status::{
     failure, handle_result, status_from_process_builder_service_error, status_from_process_error,
     status_from_retention_error, status_only, success,
 };
-use crate::kernel::abi::native::wire::{
-    parse_handle, require_zero, terminal_reason, write_u32, write_u64,
-};
+use crate::kernel::abi::native::wire::{require_zero, terminal_reason, write_u32, write_u64};
 use crate::kernel::abi::native::{Arguments, RetentionServices};
 use crate::kernel::mm::user_space::{Access, CrashMappingKind, UserAddress, UserSlice};
 use crate::kernel::process::TerminalReason;
@@ -20,12 +20,13 @@ use hyper::abi::native as abi;
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_process_builder_retain(
     services: &impl RetentionServices,
+    receiver: &InvocationReceiver,
     args: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&args[3..])?;
+        require_zero(&args[2..])?;
         services
-            .retain_process_builder(parse_handle(args[0])?, args[1], args[2])
+            .retain_process_builder(receiver, args[0], args[1])
             .map_err(status_from_process_builder_service_error)
     })();
     NativeAction::Return(handle_result(result))
@@ -33,12 +34,13 @@ pub(in crate::kernel::abi::native) fn sys_process_builder_retain(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_process_retirement_open_view(
     services: &impl RetentionServices,
+    receiver: &InvocationReceiver,
     args: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&args[1..])?;
+        require_zero(&args[0..])?;
         services
-            .retention_open_view(parse_handle(args[0])?)
+            .retention_open_view(receiver)
             .map_err(status_from_retention_error)
     })();
     NativeAction::Return(handle_result(result))
@@ -46,12 +48,13 @@ pub(in crate::kernel::abi::native) fn sys_process_retirement_open_view(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_process_retirement_release(
     services: &impl RetentionServices,
+    receiver: &InvocationReceiver,
     args: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&args[1..])?;
+        require_zero(&args[0..])?;
         services
-            .retention_release(parse_handle(args[0])?)
+            .retention_release(receiver)
             .map_err(status_from_retention_error)
     })();
     NativeAction::Return(status_only(result))
@@ -59,18 +62,19 @@ pub(in crate::kernel::abi::native) fn sys_process_retirement_release(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_retention_info(
     services: &impl RetentionServices,
+    receiver: &InvocationReceiver,
     args: &Arguments,
     view: bool,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&args[3..])?;
+        require_zero(&args[2..])?;
         let output = output(
+            args[0],
             args[1],
-            args[2],
             abi::HYPER_NATIVE_PROCESS_RETIREMENT_INFO_MIN_SIZE,
         )?;
         let info = services
-            .retention_info(parse_handle(args[0])?, view)
+            .retention_info(receiver, view)
             .map_err(status_from_retention_error)?;
         let mut record = [0; abi::HYPER_NATIVE_PROCESS_RETIREMENT_INFO_MIN_SIZE];
         write_u32(
@@ -113,13 +117,14 @@ pub(in crate::kernel::abi::native) fn sys_retention_info(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_crash_view_thread(
     services: &impl RetentionServices,
+    receiver: &InvocationReceiver,
     args: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&args[4..])?;
-        let output = output(args[2], args[3], abi::HYPER_NATIVE_CRASH_THREAD_MIN_SIZE)?;
+        require_zero(&args[3..])?;
+        let output = output(args[1], args[2], abi::HYPER_NATIVE_CRASH_THREAD_MIN_SIZE)?;
         let (thread, next) = services
-            .crash_thread(parse_handle(args[0])?, index(args[1])?)
+            .crash_thread(receiver, index(args[0])?)
             .map_err(status_from_retention_error)?;
         let mut record = [0; abi::HYPER_NATIVE_CRASH_THREAD_MIN_SIZE];
         write_u32(
@@ -160,13 +165,14 @@ pub(in crate::kernel::abi::native) fn sys_crash_view_thread(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_crash_view_mapping(
     services: &impl RetentionServices,
+    receiver: &InvocationReceiver,
     args: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&args[4..])?;
-        let output = output(args[2], args[3], abi::HYPER_NATIVE_CRASH_MAPPING_MIN_SIZE)?;
+        require_zero(&args[3..])?;
+        let output = output(args[1], args[2], abi::HYPER_NATIVE_CRASH_MAPPING_MIN_SIZE)?;
         let (mapping, next) = services
-            .crash_mapping(parse_handle(args[0])?, index(args[1])?)
+            .crash_mapping(receiver, index(args[0])?)
             .map_err(status_from_retention_error)?;
         let mut record = [0; abi::HYPER_NATIVE_CRASH_MAPPING_MIN_SIZE];
         write_u32(
@@ -201,13 +207,14 @@ pub(in crate::kernel::abi::native) fn sys_crash_view_mapping(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_crash_view_handle(
     services: &impl RetentionServices,
+    receiver: &InvocationReceiver,
     args: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&args[4..])?;
-        let output = output(args[2], args[3], abi::HYPER_NATIVE_CRASH_HANDLE_MIN_SIZE)?;
+        require_zero(&args[3..])?;
+        let output = output(args[1], args[2], abi::HYPER_NATIVE_CRASH_HANDLE_MIN_SIZE)?;
         let (handle, next) = services
-            .crash_handle(parse_handle(args[0])?, index(args[1])?)
+            .crash_handle(receiver, index(args[0])?)
             .map_err(status_from_retention_error)?;
         let mut record = [0; abi::HYPER_NATIVE_CRASH_HANDLE_MIN_SIZE];
         write_u32(
@@ -230,17 +237,18 @@ pub(in crate::kernel::abi::native) fn sys_crash_view_handle(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_crash_view_read(
     services: &impl RetentionServices,
+    receiver: &InvocationReceiver,
     args: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        require_zero(&args[4..])?;
-        if args[3] == 0 || args[3] > abi::HYPER_NATIVE_CRASH_READ_MAX_BYTES {
+        require_zero(&args[3..])?;
+        if args[2] == 0 || args[2] > abi::HYPER_NATIVE_CRASH_READ_MAX_BYTES {
             return Err(abi::HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
         }
-        let output = UserSlice::new(UserAddress::new(args[2]), args[3])
+        let output = UserSlice::new(UserAddress::new(args[1]), args[2])
             .map_err(|_| abi::HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
         services
-            .crash_read(parse_handle(args[0])?, args[1], output)
+            .crash_read(receiver, args[0], output)
             .map(|count| [count as u64, 0])
             .map_err(status_from_retention_error)
     })();

@@ -26,6 +26,23 @@ use crate::kernel::process::{
 use hyper::mm::PAGE_SIZE;
 
 const IMAGE_BASE: u64 = 0x40_0000;
+const EXECUTION_CONTEXT_SLOT: u64 = 16;
+const SYSTEM_INFO_SLOT: u64 = 24;
+const OBJECT_FACTORY_SLOT: u64 = 32;
+#[cfg(CONFIG_ARCH_AARCH64)]
+const EVENT_SLOT: u64 = 40;
+
+/// Views one immutable position-independent assembly fixture.
+///
+/// # Safety
+///
+/// The labels must bound one retained linked section in ascending order.
+unsafe fn program_bytes(start: *const u8, end: *const u8) -> &'static [u8] {
+    let length = end.addr() - start.addr();
+    // SAFETY: The caller supplies linked section boundaries; the bytes remain
+    // allocated and immutable for the entire kernel lifetime.
+    unsafe { core::slice::from_raw_parts(start, length) }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Error {
@@ -89,11 +106,37 @@ fn prepare_process(
         object,
         crate::kernel::process::ProcessNameSnapshot::from_validated("native-test"),
     );
+    let handles = process
+        .publish_invocation_handles()
+        .map_err(|_| Error::Construction)?;
+    for (offset, handle) in [
+        (EXECUTION_CONTEXT_SLOT, handles.execution_context),
+        (SYSTEM_INFO_SLOT, handles.system_info),
+        (OBJECT_FACTORY_SLOT, handles.object_factory),
+    ] {
+        let destination = UserSlice::new(UserAddress::new(stack_range.base().get() + offset), 8)
+            .map_err(|_| Error::AddressSpace)?;
+        process
+            .copy_to_user(destination, &handle.get().to_le_bytes())
+            .map_err(|_| Error::AddressSpace)?;
+    }
     if !process_is_discoverable(&process) {
         return Err(Error::Construction);
     }
     process.start().map_err(|_| Error::Lifecycle)?;
     Ok(process)
+}
+
+#[cfg(CONFIG_ARCH_AARCH64)]
+fn event_handle(process: &Process) -> Result<crate::kernel::capability::HandleValue, Error> {
+    let source = UserSlice::new(UserAddress::new(IMAGE_BASE + PAGE_SIZE * 2 + EVENT_SLOT), 8)
+        .map_err(|_| Error::AddressSpace)?;
+    let mut bytes = [0; 8];
+    process
+        .copy_from_user(source, &mut bytes)
+        .map_err(|_| Error::AddressSpace)?;
+    crate::kernel::capability::HandleValue::try_from_raw(u64::from_le_bytes(bytes))
+        .map_err(|_| Error::Construction)
 }
 
 fn process_is_discoverable(target: &Process) -> bool {
@@ -130,6 +173,16 @@ fn verify_thread_creation_affinity(
     machine: MachineAbi,
 ) -> Result<(), Error> {
     let process = prepare_process(domain, group, program, machine)?;
+    let foreign = prepare_process(domain, group, program, machine)?;
+    let contexts = process.verify_invocation_context_for_test(&foreign);
+    foreign.request_stop(crate::kernel::process::TerminalReason::Requested);
+    retire_process(&foreign)?;
+    if let Err(reason) = contexts {
+        process.request_stop(crate::kernel::process::TerminalReason::Requested);
+        retire_process(&process)?;
+        crate::pr_err!("HypeR test: invocation context failed: {reason}");
+        return Err(Error::Construction);
+    }
     let caller = process
         .create_initial_user_thread(
             "selftest/affinity-parent",

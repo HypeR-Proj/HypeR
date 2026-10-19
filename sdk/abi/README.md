@@ -5,9 +5,9 @@ SPDX-License-Identifier: Apache-2.0
 
 # HypeR Native ABI source
 
-HypeR ABI is the compiler-checked source of truth for the HypeR Native syscall
+HypeR ABI is the compiler-checked source of truth for the HypeR Native capability invocation
 boundary. It provides dependency-free Rust definitions for `no_std` consumers,
-a C/C++ header, syscall metadata, wire-layout assertions, and an auditable
+a C/C++ header, invocation metadata, wire-layout assertions, and an auditable
 reference generated from one schema.
 
 The Native ABI is intentionally independent of kernel implementation details
@@ -25,9 +25,9 @@ stability.
 | `schema/native.rs` | Machine-readable Native ABI schema |
 | `src/generated.rs` | Generated dependency-free Rust values and layouts |
 | `include/hyper/native.h` | Generated C and C++ interface |
-| `docs/native.md` | Generated syscall and object reference |
+| `docs/native.md` | Generated invocation and object reference |
 | `generator/mod.rs` | Generation, drift checks, and repository output |
-| `generator/validation/` | Scalar namespaces, record layouts, and syscall ownership contracts |
+| `generator/validation/` | Scalar namespaces, record layouts, and invocation ownership contracts |
 | `generator/render/` | Deterministic Rust, C, and reference renderers |
 | `generator/names.rs` | Shared spelling of generated public identifiers |
 | `tests/` | Rust, C, and C++ layout conformance |
@@ -58,7 +58,7 @@ and generated Rust, C, and reference outputs.
 ## Ownership boundary
 
 - The kernel implements and validates the machine contract.
-- `stdlib/hyper/` provides the C runtime and architecture syscall veneers.
+- `stdlib/hyper/` provides the C runtime and architecture invocation veneers.
 - `stdlib/rust/` provides raw and safe Native Rust application bindings.
 - `sdk/toolchain/` assembles the compiler, linker, headers, and runtime into a
   consumable SDK.

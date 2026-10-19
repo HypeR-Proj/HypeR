@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Bounded, read-only allocator diagnostics under `MemoryInspector` authority.
+use crate::kernel::capability::InvocationReceiver;
+
 use crate::kernel::abi::native::{
     Arguments,
     services::{NativeAction, SystemInspectServices},
@@ -21,15 +23,16 @@ const _: () =
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_memory_inspector_read_statistics(
     services: &impl SystemInspectServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeAction {
     let result = (|| {
-        if arguments[5] != 0 {
+        if arguments[4] != 0 {
             return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
         }
         let index =
-            usize::try_from(arguments[2]).map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
-        let (query, size) = match (arguments[1], index) {
+            usize::try_from(arguments[1]).map_err(|_| HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
+        let (query, size) = match (arguments[0], index) {
             (HYPER_NATIVE_MEMORY_STATISTICS_HEAP, 0) => (
                 Query::Heap,
                 core::mem::size_of::<HyperNativeMemoryHeapStatistics>(),
@@ -64,13 +67,9 @@ pub(in crate::kernel::abi::native) fn sys_memory_inspector_read_statistics(
             }
             _ => return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT),
         };
-        let request = prepare_info_request(
-            &[arguments[0], arguments[3], arguments[4], 0, 0, 0],
-            size,
-            size,
-        )?;
+        let request = prepare_info_request(&[arguments[2], arguments[3], 0, 0, 0, 0], size, size)?;
         let snapshot = services
-            .memory_statistics(request.value, query)
+            .memory_statistics(receiver, query)
             .map_err(status_from_inspection_error)?;
         let mut record = [0; memory_statistics::MAX_RECORD];
         let encoded = memory_statistics::encode(snapshot, &mut record);

@@ -6,16 +6,15 @@ SPDX-License-Identifier: Apache-2.0
 # Userspace and syscall architecture
 
 This document describes the Native userspace boundary, ownership contracts,
-and syscall execution model. Current signatures and numbers are defined by the
+and syscall execution model. Current object interfaces and signatures are defined by the
 compiler-checked schema in `sdk/abi`; exploratory interfaces below are labelled
 as planned. Linux/FreeBSD application compatibility is outside this contract.
 
 The current integration goal is Native applications plus a trusted Linux I/O VM
-on Pi 5; see the [roadmap](../../docs/roadmap.md). HypeR is pre-release, so syscall
-numbers and binary layouts do not yet carry a release compatibility guarantee.
+on Pi 5; see the [roadmap](../../docs/roadmap.md). HypeR is pre-release, so operation selectors and binary layouts do not yet carry a release compatibility guarantee.
 
 For operation grouping and consolidation boundaries, see
-[Native syscall families](syscall-families.md).
+[Native object interfaces](syscall-families.md).
 
 ## Design goals
 
@@ -86,7 +85,7 @@ destination. SDK bindings handle shorter records from older kernels.
 
 The design assumes that any EL0 caller can:
 
-- issue every syscall number with arbitrary register values;
+- invoke arbitrary target handles and operation selectors with arbitrary register values;
 - race handle operations, mappings, waits, cancellation, and process exit on
   multiple CPUs;
 - mutate or unmap user memory during validation;
@@ -132,7 +131,7 @@ Dependencies flow downward. `kernel::abi` contains fixed-width values and
 dispatch policy but no architecture register offsets. `kernel::capability`
 does not depend on Channel or VM policy. IPC composes capability transactions;
 object-specific behavior remains in its owning subsystem. HAL knows address-
-space activation and user entry mechanisms but never Process, syscall numbers,
+space activation and user entry mechanisms but never Process, object operation selectors,
 rights, or ELF metadata.
 
 The earlier `UserExecution { AddressSpaceId, UserContext }` placeholder was
@@ -141,33 +140,20 @@ user Thread must retain a strong Process and prepared-address-space capability.
 An identity remains useful for diagnostics and TLB tagging, but is not
 authority.
 
-## Process image and execution route
+## Process image
 
-Each installed `ProcessImage` owns immutable machine ABI, ABI family, execution
-route, initial entry/stack/TLS values, and bootstrap mapping bounds. For Native
-processes these describe the userspace loader and temporary stack, not the final
-application entry or its auxv. The address space is owned separately by
-`Process`; mutable registers belong to the Thread.
-The Native ABI revision is validated at construction and remains zero during
-pre-release development, rather than being stored redundantly in the image.
+Each installed `ProcessImage` owns immutable machine ABI, initial entry/stack/TLS
+values, and bootstrap mapping bounds. These describe the userspace loader and
+temporary stack, not the final application entry or its auxv. The address space
+is owned separately by `Process`; mutable registers belong to the Thread.
 
-The implemented loader creates Native images. Before preparing user execution,
-`Process::create_user_thread_with_start` checks that the machine matches the
-host and that the family/route are `Native`/`NativeKernel`. The common entry
-adapter also rejects a non-Native route. Loader metadata and ELF branding are
-untrusted inputs, never sources of authority.
+Only Native images can be constructed. Before creating a user Thread, `Process`
+checks that the image's machine matches the host. Loader metadata and ELF branding
+are untrusted inputs, never sources of authority. The Native ABI revision remains
+zero during pre-release development and is not stored in individual images.
 
-`AbiFamily::Linux`, `AbiFamily::FreeBsd`, `ExecutionRoute::Supervised`, and
-`SupervisionSessionId` remain internal reserved vocabulary. The session ID is a
-diagnostic key, not a capability. These names do not imply a working foreign
-loader, supervisor execution mode, or a public supervision API. Removing or
-implementing them requires a separate code review; Native callers do not need
-to maintain hypothetical compatibility state.
-
-The route stays fixed for the installed image. Process construction and
-publication use the existing builder transaction. In-place image replacement,
-`PreparedExec`, multiple execution views, and vDSO selection are not implemented
-contracts; adding them requires explicit ownership and failure-path review.
+Process construction and publication use the builder transaction. In-place image
+replacement and foreign ABI execution are not implemented.
 
 ### Native process startup
 
@@ -176,8 +162,10 @@ guarded temporary stack. Initial boot alone opens
 `/lib/userspace-loader-hyper-<arch>` to start `/init` from the RAM archive root.
 The first argument register carries a ByteChannel handle whose queued message
 contains `loader_startup`, tagged startup handles, and opaque startup data.
-The 72-byte fixed record supplies an executable File and mapping capabilities plus their
-actual bounds; handle values already belong to the child's table. The
+The 96-byte fixed record supplies an executable File, mapping capabilities and
+their actual bounds, plus ExecutionContext, ObjectFactory and SystemInfo handles.
+All handles already belong to the child's table. The first channel read uses its
+explicit receiver; no implicit context is needed to obtain the startup record. The
 [generated ABI reference](../../sdk/abi/docs/native.md) defines record layouts,
 rights and syscall result slots.
 
@@ -216,8 +204,8 @@ never borrows a raw exception frame and never learns its field offsets.
 For Native calls, the architecture entry adapter:
 
 1. proves that the current Thread owns an active user execution context;
-2. copies the syscall number, six argument words, and call site into an owned
-   `NativeInvocation`;
+2. copies the target handle, object-local operation, six business argument words
+   and call site into an owned `NativeInvocation`;
 3. passes no private-frame reference or architecture offset to policy;
 4. invokes the borrowed `kernel::entry::user` service; and
 5. encodes its `NativeResult` and returns through the vector, or captures a
@@ -225,8 +213,8 @@ For Native calls, the architecture entry adapter:
 
 Every syscall runs on its Thread's kernel stack with normal IRQ delivery and
 preemption enabled. The single dispatcher handles queries, user copies,
-allocation, IPC and blocking operations; unknown numbers return
-`NOT_SUPPORTED` through the same path. A syscall which completes without a
+allocation, IPC and blocking operations. Invalid or stale target handles return
+`BAD_HANDLE`; an unknown operation on a valid receiver returns `NOT_SUPPORTED`. A syscall which completes without a
 context switch retains its active translation and resident user FP bank. The
 kernel itself keeps FP access disabled. User copies may populate file pages or
 resolve COW through the normal mapping transaction and acknowledged replacement
@@ -261,25 +249,63 @@ run remains occupied until the caller resumes or discards that capability.
 Dropping an armed return owner enters a lock-, allocation-, and diagnostic-free
 fail-stop.
 
-Architecture entry does not interpret syscall numbers, handles, or process
-policy. Kernel services return typed internal errors; the Native adapter maps
+Architecture entry does not interpret target handles, operation selectors or
+process policy. Kernel services return typed internal errors; the Native adapter maps
 them to `NativeStatus`.
 
 ## Native machine ABI
 
-Native syscall numbers are architecture-independent and are never reused after
-publication. The initial calling conventions follow each architecture's
-established syscall register convention:
+Every Native trap invokes a process-local capability. The register previously
+used for a syscall number carries the receiver handle; a separate register
+carries an operation local to that receiver's object kind. The six argument
+registers contain business arguments only, without repeating the receiver.
 
-| Architecture | Number | Arguments | Result |
-| --- | --- | --- | --- |
-| AArch64 | `x8` | `x0`-`x5` | status in `x0`, values in `x1` and `x2` |
-| RISC-V 64 | `a7` | `a0`-`a5` | status in `a0`, values in `a1` and `a2` |
-| x86-64 | `rax` | `rdi`, `rsi`, `rdx`, `r10`, `r8`, `r9` | status in `rax`, values in documented caller-clobbered result registers |
+| Architecture | Receiver handle | Operation | Arguments | Result |
+| --- | --- | --- | --- | --- |
+| AArch64 | `x8` | `x6` | `x0`–`x5` | status in `x0`, values in `x1` and `x2` |
+| RISC-V 64 | `a7` | `a6` | `a0`–`a5` | status in `a0`, values in `a1` and `a2` |
+
+x86-64 Native entry remains unimplemented; no x86 register contract is promised.
+Common handle/object operations occupy selectors 0–5. Kind-specific operations
+start at 256 and may reuse the same numeric selector on different kinds. Zero
+is not a valid target handle. Unused argument registers must be zero.
+
+Admission captures the receiver's generation, kind, rights and internal lifetime
+pin under the Process handle-table lock, then releases that lock before dispatch.
+The operation decoder and rights checks use this captured authority. Normal
+operations do not repeat receiver lookup. Operations on the handle namespace
+(close, duplicate, replace, and supervisor-to-observer derivation) still require
+the original live slot generation; consuming transactions also validate object
+identity at commit. An admitted object operation may finish after a concurrent
+close, including publishing its declared result handles. Its internal lifetime
+pin cannot duplicate or revive the closed receiver's handle authority.
+
+Operations without a natural object receiver use real startup capabilities:
+
+- ExecutionContext controls the caller's execution, current Thread operations
+  and process-local waits. Its rights can be reduced independently. Waiting or
+  sleeping requires `WRITE` on this context; it has no signal source and does
+  not grant `WAIT`, which authorizes observing another object's signals.
+- ObjectFactory creates local objects charged to the caller's ResourceDomain.
+- SystemInfo permits read-only ABI, configuration and clock queries.
+
+ExecutionContext and ObjectFactory are bound to the creating Process and cannot
+be transferred. They hold its identity, not an owning Process reference.
+SystemInfo is transferable read authority. Closing or attenuating these handles
+has ordinary capability semantics; there is no selector that recreates ambient
+authority. SDK wrappers retain the startup handles for convenient typed calls.
+Runtime getters return borrowed handles: callers must not close or replace
+them. A raw close or replace invalidates the retained generation; the runtime
+does not rebind or recreate that authority, so subsequent context-dependent SDK
+calls return a handle error (the no-return exit wrappers trap). To invoke with
+reduced rights, duplicate a separate attenuated handle and pass it explicitly to
+`hyper_native_invoke6`.
 
 `NativeResult { status, value0, value1 }` returns up to two new handles without
-a fallible user-memory copy. Auxiliary values are zero on failure. Larger data
-uses explicit output buffers.
+a fallible user-memory copy. Failure values are zero except where the schema
+explicitly permits required-size or partial-transfer information. This policy is
+selected by receiver kind and operation together. Larger data uses explicit
+output buffers.
 
 ABI values use fixed-width integers. Public layouts never contain `usize`, Rust
 references, Rust enum layout, implicit bitfields, or an unqualified `bool`.
@@ -304,9 +330,9 @@ dependency without maintaining a second ABI definition. Released Native SDKs
 are generated from the same repository commit as the kernel that implements
 their contract.
 
-Each syscall declaration records at least:
+Each invocation declaration records at least:
 
-- assigned number, public name, and feature gate;
+- receiver object kind, local operation selector, public name and feature gate;
 - ordered argument and result shapes;
 - handle object kind, required rights, consume/borrow/produce semantics, and
   resulting rights;
@@ -316,7 +342,7 @@ Each syscall declaration records at least:
 - strict or flexible flag behavior.
 
 The current generator produces Rust values, a C constants-and-layout header,
-syscall metadata, layout assertions, an ABI reference, and compatibility tests.
+invocation metadata, layout assertions, an ABI reference, and compatibility tests.
 It is intended to generate kernel dispatch wrappers, architecture stubs, and
 vDSO exports as those layers are introduced. Generated source is checked into
 the SDK-facing locations where appropriate; CI regenerates it and rejects
@@ -1010,18 +1036,18 @@ domains cannot consume.
 
 ## Implemented Native object and syscall surface
 
-The compiler-checked schema owns syscall numbers, signatures and completion
+The compiler-checked schema owns object-local selectors, signatures and completion
 contracts. These are representative implemented families; consult the
 [generated reference](../../sdk/abi/docs/native.md) for the complete surface.
 
 | Family | Objects and representative operations |
 | --- | --- |
-| ABI and observation | `abi_query`, `system_config`, monotonic and UTC clocks, scoped inspectors |
+| ABI and observation | SystemInfo queries and clocks; scoped inspectors |
 | Handles | Close, duplicate, replace/attenuate, handle and object information |
 | Accounting | ResourceDomain and TaskGroup creation, resource sponsorship |
-| Tasks | ProcessBuilder construction/seal/start/abort; Process stop and exit; Thread create/start/exit/yield/sleep/request-stop |
+| Tasks | ExecutionContext for current execution; ProcessBuilder construction/seal/start/abort; Process stop and exit; Thread create/start/exit/yield/sleep/request-stop |
 | Memory | VMO creation/read/write/snapshot; protected file mappings; VMAR allocate/map/private-map/unmap/protect/destroy |
-| IPC | ByteChannel queues, CapabilityChannel rendezvous, Event create/signal |
+| IPC | ObjectFactory creation; ByteChannel queues, CapabilityChannel rendezvous, Event create/signal |
 | Wait | Object wait-one/wait-many; WaitSet create/add/rearm/remove/wait; atomic wait/wake |
 | Filesystem | Capability-relative Directory operations, File data/metadata/sync, content protection and advisory locks; authorized ramfs mount and atomic root switching |
 | Virtualization | Creation leases, PendingVirtualMachine construction/install/abort, VM stop and power completion, vCPU start/affinity/MMIO completion, VirtualSerial |
