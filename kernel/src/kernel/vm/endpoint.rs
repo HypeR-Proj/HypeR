@@ -246,10 +246,23 @@ impl VcpuEndpoint {
         // or transferred immediately into the committed scheduler handoff.
         let (prepared, interrupt_mask) = unsafe {
             self.wait.with_mask_retained(|state| {
-                match state
-                    .publication
-                    .register(ticket.epoch, registration.ticket())
-                {
+                // Stop is durable, unlike an interrupt notification. A runner
+                // can snapshot a fresh epoch after the stop signal and would
+                // otherwise park again. Under this lock either stop already
+                // closed admission, or its subsequent signal resolves the
+                // registration before request_stop returns to the scheduler.
+                let admission = match self.state.ensure_live() {
+                    Ok(()) => state
+                        .publication
+                        .register(ticket.epoch, registration.ticket()),
+                    Err(super::endpoint_state::StateError::Closed(_)) => {
+                        Ok(super::endpoint_wait::Registration::Changed)
+                    }
+                    Err(super::endpoint_state::StateError::Corrupt) => {
+                        hyper::debug::invariant_failure("vCPU wait lifecycle corrupt")
+                    }
+                };
+                match admission {
                     Ok(super::endpoint_wait::Registration::Changed) => {
                         match scheduler::finish_wait(registration)? {
                             None => Ok(LockedWait::Changed),
@@ -493,7 +506,10 @@ mod self_test {
             0,
             CpuMask::single(CpuIndex::BOOT),
         )?;
-        scheduler::thread_ready(worker)?;
+        endpoint()?
+            .bind_thread(worker)
+            .map_err(|_| Error::State(7))?;
+        endpoint()?.start().map_err(|_| Error::State(8))?;
 
         wait_for_phase(1)?;
         endpoint()?.signal_waiter();
@@ -505,9 +521,17 @@ mod self_test {
         // a benign scheduler loser and must let resumed cleanup consume the
         // already-cleared endpoint publication.
         endpoint()?.signal_waiter();
+        wait_for_phase(3)?;
+        endpoint()?
+            .request_stop(
+                worker,
+                crate::kernel::vm::endpoint_state::AdministrativeStopReason::Requested,
+            )
+            .map_err(|_| Error::State(9))?;
         wait_for_done()?;
-        if OUTCOMES.load(Ordering::Acquire) != 0b11 {
-            return Err(Error::State(3));
+        let outcomes = OUTCOMES.load(Ordering::Acquire);
+        if outcomes != 0b1111 {
+            return Err(Error::State(outcomes));
         }
         Ok(())
     }
@@ -539,9 +563,13 @@ mod self_test {
     }
 
     extern "C" fn worker(_argument: usize) {
-        for (round, expected) in [WaitOutcome::Notified, WaitOutcome::Cancelled]
-            .into_iter()
-            .enumerate()
+        for (round, expected) in [
+            WaitOutcome::Notified,
+            WaitOutcome::Cancelled,
+            WaitOutcome::Notified,
+        ]
+        .into_iter()
+        .enumerate()
         {
             let outcome = match wait_once(round + 1) {
                 Ok(outcome) => outcome,
@@ -558,9 +586,44 @@ mod self_test {
             }
             OUTCOMES.fetch_or(1 << round, Ordering::AcqRel);
         }
+        if let Err(code) = verify_stop_before_park() {
+            OUTCOMES.store(0x400 + code, Ordering::Release);
+            let _ = DONE.release();
+            return;
+        }
+        OUTCOMES.fetch_or(1 << 3, Ordering::AcqRel);
         if DONE.release().is_err() {
             OUTCOMES.store(0x300, Ordering::Release);
         }
+    }
+
+    /// A stop is permanent even when its notification precedes a new snapshot.
+    /// Exercise the production scheduler park, and unwind it on regression so
+    /// the test reports a failure instead of leaving a suspended continuation.
+    fn verify_stop_before_park() -> Result<(), usize> {
+        let endpoint = VcpuEndpoint::try_new(0).map_err(|_| 1usize)?;
+        let thread = scheduler::current_thread_id().map_err(|_| 2usize)?;
+        endpoint.bind_thread(thread).map_err(|_| 3usize)?;
+        endpoint.state.publish_started().map_err(|_| 4usize)?;
+        let old_ticket = endpoint.wait_ticket();
+        endpoint
+            .request_stop(
+                thread,
+                crate::kernel::vm::endpoint_state::AdministrativeStopReason::Requested,
+            )
+            .map_err(|_| 5usize)?;
+        for ticket in [old_ticket, endpoint.wait_ticket()] {
+            match endpoint.prepare_wait(ticket).map_err(|_| 6usize)? {
+                PreparedWait::Changed => {}
+                PreparedWait::Completed(_) => return Err(7),
+                PreparedWait::Park(park) => {
+                    endpoint.signal_waiter();
+                    let _ = park.complete();
+                    return Err(8);
+                }
+            }
+        }
+        Ok(())
     }
 
     fn wait_once(phase: usize) -> Result<WaitOutcome, usize> {
