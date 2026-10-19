@@ -415,12 +415,19 @@ RSS. Guest accounting includes loaned transport buffers, not just advertised
 RAM. Sparse uncommitted guest RAM counts as zero. Final lease release removes
 guest use even if Native handles still retain the underlying VMO pages.
 
-`Cache` separates unpinned clean file pages from complete slab pages recoverable
-by draining CPU-local magazines. File-cache ownership also includes loading or
+`Cache` separates unpinned clean file pages and shrinker-managed index/header
+backing from complete kernel slab pages recoverable by draining CPU-local
+magazines. File-cache ownership also includes loading or
 pinned pages, which cannot immediately be reclaimed. A slab page is recoverable
 only if all its outstanding central reservations are cached tokens. The bounded
 census validates magazine epochs and never drains caches to measure them.
 Neither cache detail is an additional physical pool to add to `Owners`.
+The `non-reclaimable` cache detail reports file-cache backing minus reclaimable
+file backing. It represents pinned/loading payloads, and is already part of
+both `buffered/cached` and `used`. Thus the visible
+breakdown reconciles as `used = reserved + kernel + user + guest + cache
+non-reclaimable + other`. Use `--bytes` for exact arithmetic: human-readable
+fields are independently rounded down.
 
 `Ramfs` shows a logical capacity metric within `kernel`. It sums writable ramfs
 payload-capacity reservations, including transient replacement reservations.
@@ -430,8 +437,11 @@ Ramfs data is authoritative and cannot be discarded as cache. Borrowed
 boot-archive storage remains in reserved RAM. File-cache index arrays and page
 descriptors use a separate heap pool; their
 physical backing is included in `buffered/cached`, not `kernel`. Cache totals
-include mapped or pinned data and metadata; `file-reclaimable` remains a
-conservative estimate of immediately discardable payload pages.
+include mapped or pinned data and metadata. `file-reclaimable` includes
+shrinker-managed metadata and is an estimate, not a promise of immediate
+recovery: live pins can retain a minimum index and partially occupied header
+slabs. Growing a disposable cache must not be reported as permanent `used`
+memory merely because its bookkeeping also consumes RAM.
 
 `top` reports total, allocated (including reserved), free and reserved bytes;
 its allocated count includes reclaimable caches. Default units retain small

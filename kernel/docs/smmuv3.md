@@ -71,8 +71,14 @@ before leaf publication. `map_page` is the one-page convenience form. Control
 tables/queues retain a separate exclusive allocation interface; payloads expose
 no CPU pointer to the driver. Descriptor publication is ordered with full-system
 barriers. Mapping replacement requires removal first. `unmap_buffer` clears all
-leaves of the original mapping, invalidates the domain's TLB entries and waits
-for `CMD_SYNC` before returning the buffer owner. This covers the affected transactions' architectural completion
+leaves of the original mapping, detaches empty intermediate tables, invalidates
+the domain's TLB entries and walk caches, and waits for `CMD_SYNC` before freeing
+those tables or returning the buffer owner. Table-entry counts allow bottom-up
+pruning without scanning every leaf or allocating retirement metadata. Command
+failure retains both detached tables and payload owners. Long-lived domains
+also compact spare metadata after successful unmap; an allocation failure leaves
+the existing metadata intact without failing completed retirement.
+This covers the affected transactions' architectural completion
 semantics, not just command consumption. ATS translation caches cannot retain
 old translations because ATS is disabled.
 
