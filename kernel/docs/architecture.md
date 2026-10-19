@@ -58,11 +58,14 @@ locking policy. Modules define their own entry types, implement the public
 traits, and may wrap a container with domain-specific methods.
 
 - `persistent_avl::PersistentAvl` stores generic ordered keys and maintains a
-  subtree maximum weight. `Entry` defines stable keys and weights; `()` disables
-  weighted filtering. `NodeAccount` supplies fallible per-node accounting.
+  subtree maximum weight and entry count. `Entry` defines stable keys and
+  weights; `()` disables weighted filtering. `NodeAccount` supplies fallible
+  per-node accounting.
   Clones share immutable subtrees, and updates return a new root without
-  publishing it. VMAR wraps this with memory accounting and free-range rules;
-  its authority checks and transactional publication stay in `user_space`.
+  publishing it. Rank selection and allocation-free ordered range iteration
+  operate on an immutable root. VMAR identities, free ranges and actual Native
+  mapping records wrap this with memory accounting; their authority checks,
+  backing retirement and transactional publication stay in `user_space`.
 - `indexed_heap` provides allocation-free sift and repair operations over a
   `Storage` adapter. The adapter supplies comparison, storage and swaps that
   update reverse positions. Fixed-capacity deadline queues and vGIC ready queues

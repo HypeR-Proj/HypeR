@@ -1188,11 +1188,17 @@ destroying a VMAR takes O(log V + log F) index work and path-copy allocations,
 where V is the address space's VMAR count and F is the affected free-interval
 count. Unchanged subtrees remain shared with concurrent snapshots. Every node
 allocation is fallible and accounted; failed preparation leaves the published
-index unchanged. Mapping transactions publish their free-space changes together
-with the mapping snapshot. Mapping payload snapshots still use a vector, so
-map/unmap/protect and page-table work do not acquire a logarithmic bound from
-this index change. Tree nodes also have more per-entry overhead than a packed
-vector.
+index unchanged. Actual mapping records also use a persistent AVL tree, keyed
+by virtual base address. Point lookup takes O(log M); a range scan takes
+O(log M + K), where M is the mapping count and K is the number of intersecting
+records. Inserting or replacing one record copies only its tree path. Unmap and
+protect replace the affected fragments, preserving unrelated subtrees.
+Mapping transactions publish their free-space changes together with the mapping
+snapshot; displaced backing remains owned until machine retirement completes.
+Private-view version changes still reconcile all aliases, and machine page-table
+preparation may visit the complete mapping set. These costs are separate from
+the address index, so whole map/unmap/protect operations are not promised to be
+O(log M). Tree nodes have more per-entry overhead than a packed vector.
 
 SDK main and worker stacks use independent automatically placed child VMARs,
 including their guard pages; they do not consume a fixed SDK stack arena. The

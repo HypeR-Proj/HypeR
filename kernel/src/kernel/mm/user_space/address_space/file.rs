@@ -5,9 +5,9 @@
 
 use super::super::vmo::FilePageSource;
 use super::{
-    Access, AddressSpaceError, FallibleArc, Mapping, MappingObject, MappingSet, MemoryAccount,
+    Access, AddressSpaceError, Entry, FallibleArc, MappingIndex, MappingSet, MemoryAccount,
     PAGE_SIZE, PageBackend, PreparedMappingChange, PrivateView, SpaceResult, UserAddress,
-    UserAddressSpace, UserSlice, Vec, intersection,
+    UserAddressSpace, UserSlice, intersection,
 };
 
 type FileReclaimPlan<'a, B, A> = Option<(PreparedMappingChange<'a, B, A>, usize)>;
@@ -44,7 +44,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
     /// observation pins metadata only; source guards are dropped outside MM locks.
     pub(crate) fn retire_file_sources(&self) {
         let snapshot = self.snapshot();
-        for mapping in &snapshot.mappings.records {
+        for mapping in snapshot.mappings.records.iter() {
             if let Some(locks) = &mapping.locks {
                 locks.retire();
             }
@@ -55,12 +55,14 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
     }
 
     pub(crate) fn is_file_access(&self, address: UserAddress, access: Access) -> bool {
-        self.snapshot().mappings.records.iter().any(|mapping| {
-            mapping.snapshot.range.base() <= address
-                && address < mapping.snapshot.range.end()
-                && mapping.snapshot.permissions.contains(access)
-                && mapping.object.private().is_some_and(|view| view.is_file())
-        })
+        self.snapshot()
+            .mappings
+            .records
+            .containing(address)
+            .is_some_and(|mapping| {
+                mapping.snapshot.permissions.contains(access)
+                    && mapping.object.private().is_some_and(|view| view.is_file())
+            })
     }
 
     /// File I/O happens against an immutable observation, without the MM lock.
@@ -74,7 +76,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
         if snapshot.sealed {
             return Err(AddressSpaceError::Stopped);
         }
-        let needs_population = snapshot.mappings.records.iter().any(|mapping| {
+        let needs_population = snapshot.mappings.records.overlapping(range).any(|mapping| {
             let Some(overlap) = intersection(mapping.snapshot.range, range) else {
                 return false;
             };
@@ -90,15 +92,13 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
         if !needs_population {
             return Ok(None);
         }
-        let storage_charge = self.try_mapping_set_charge(snapshot.mappings.records.len())?;
-        let mut replacement = Vec::new();
-        replacement
-            .try_reserve_exact(snapshot.mappings.records.len())
-            .map_err(|_| AddressSpaceError::Allocation)?;
-        replacement.extend(snapshot.mappings.records.iter().cloned());
+        let storage_charge = self.try_mapping_set_charge()?;
+        let mut replacement = snapshot.mappings.records.clone();
         let mut changed_any = false;
-        for index in 0..replacement.len() {
-            let mapping = &replacement[index];
+        for original in snapshot.mappings.records.overlapping(range) {
+            let mapping = replacement
+                .get(original.key())
+                .ok_or(AddressSpaceError::StaleMapping)?;
             let Some(overlap) = intersection(mapping.snapshot.range, range) else {
                 continue;
             };
@@ -114,15 +114,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
             }
             let old = view.clone();
             let next = old.populate_pages(first, end - first)?;
-            for fragment in &mut replacement {
-                if fragment
-                    .object
-                    .private()
-                    .is_some_and(|view| core::ptr::eq(&**view, &*old))
-                {
-                    fragment.object = MappingObject::Private(next.clone());
-                }
-            }
+            replacement.replace_private_view(&old, &next, &self.account)?;
             changed_any = true;
         }
         if !changed_any {
@@ -157,12 +149,8 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
         let mapping = snapshot
             .mappings
             .records
-            .iter()
-            .filter(|mapping| {
-                mapping.snapshot.range.end().get() > after_address
-                    && mapping.object.private().is_some_and(|view| view.is_file())
-            })
-            .min_by_key(|mapping| mapping.snapshot.range.base())?;
+            .iter_from_address(after_address)
+            .find(|mapping| mapping.object.private().is_some_and(|view| view.is_file()))?;
         let range = mapping.snapshot.range;
         let start = range
             .base()
@@ -197,7 +185,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
         let mut replacement = None;
         let mut storage_charge = None;
         let mut reclaimed = 0;
-        for mapping in &snapshot.mappings.records {
+        for mapping in snapshot.mappings.records.overlapping(range) {
             let Some(overlap) = intersection(mapping.snapshot.range, range) else {
                 continue;
             };
@@ -206,10 +194,9 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
             };
             let view = replacement
                 .as_ref()
-                .and_then(|records: &Vec<Mapping<Backend, Account>>| {
+                .and_then(|records: &MappingIndex<Backend, Account>| {
                     records
-                        .iter()
-                        .find(|record| record.snapshot.token == mapping.snapshot.token)
+                        .by_token(mapping.snapshot.token)
                         .and_then(|record| record.object.private())
                 })
                 .unwrap_or(original_view);
@@ -247,23 +234,13 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
             };
             let old = view.clone();
             if replacement.is_none() {
-                storage_charge = self.try_mapping_set_charge(snapshot.mappings.records.len())?;
-                let mut records = Vec::new();
-                records
-                    .try_reserve_exact(snapshot.mappings.records.len())
-                    .map_err(|_| AddressSpaceError::Allocation)?;
-                records.extend(snapshot.mappings.records.iter().cloned());
-                replacement = Some(records);
+                storage_charge = self.try_mapping_set_charge()?;
+                replacement = Some(snapshot.mappings.records.clone());
             }
-            for record in replacement.iter_mut().flatten() {
-                if record
-                    .object
-                    .private()
-                    .is_some_and(|other| core::ptr::eq(&**other, &*old))
-                {
-                    record.object = MappingObject::Private(next.clone());
-                }
-            }
+            let records = replacement
+                .as_mut()
+                .ok_or(AddressSpaceError::StaleMapping)?;
+            records.replace_private_view(&old, &next, &self.account)?;
             reclaimed += count;
         }
         let Some(records) = replacement else {

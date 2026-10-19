@@ -132,8 +132,10 @@ impl<B: PageBackend, A: MemoryAccount> UserAddressSpace<B, A> {
         let mapping_count = snapshot.records.len().min(MAX_MAPPINGS);
         let page_limit = (max_bytes.min(MAX_BYTES) / PAGE_SIZE) as usize;
         let page_capacity =
-            snapshot.records[..mapping_count]
+            snapshot
+                .records
                 .iter()
+                .take(mapping_count)
                 .fold(0usize, |count, mapping| {
                     count
                         .saturating_add((mapping.snapshot.range.length() / PAGE_SIZE) as usize)
