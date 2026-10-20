@@ -4,6 +4,7 @@
 //! Target-specific renderers share only ABI vocabulary.
 
 mod c;
+mod documentation;
 mod reference;
 mod rust;
 
@@ -11,7 +12,15 @@ pub(super) use c::render_c;
 pub(super) use reference::render_reference;
 pub(super) use rust::render_rust;
 
-use super::schema::TransferClass;
+use super::schema::{ConstantGroupKind, TransferClass};
+
+const fn constant_group_kind(kind: ConstantGroupKind) -> &'static str {
+    match kind {
+        ConstantGroupKind::Enumeration => "enum",
+        ConstantGroupKind::Flags => "flags",
+        ConstantGroupKind::Constants => "constants",
+    }
+}
 
 const fn transfer_class_constant(class: TransferClass) -> &'static str {
     match class {
