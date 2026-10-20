@@ -399,7 +399,7 @@ pub enum MemoryLength {
         argument: &'static str,
         maximum_bytes: u32,
     },
-    /// Element count comes from a named argument; element_size is measured in bytes.
+    /// Element count comes from a named argument; `element_size` is measured in bytes.
     Elements {
         argument: &'static str,
         maximum_elements: u32,

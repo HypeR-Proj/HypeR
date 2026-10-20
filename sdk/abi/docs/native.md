@@ -157,7 +157,7 @@ Executable identifiers and kernel-to-loader transport bounds.
 
 | Name | Value | Meaning |
 | --- | ---: | --- |
-| `elf_osabi` | `63` | HypeR's ELF OSABI byte; this is not a Linux or generic System V image. |
+| `elf_osabi` | `63` | `HypeR`'s ELF OSABI byte; this is not a Linux or generic System V image. |
 | `elf_abi_version` | `0` |  |
 | `process_startup_data_max_bytes` | `16384` |  |
 | `startup_max_handles` | `256` |  |
@@ -446,7 +446,7 @@ Console transfer bounds and virtual serial shared-memory layout.
 | `virtual_serial_max_transfer_bytes` | `4096` |  |
 | `virtual_serial_output_capacity` | `65536` | Byte slots in the producer ring; unread bytes are never overwritten. |
 | `virtual_serial_output_header_bytes` | `4096` | Byte offset of ring data after its shared atomic counter header. |
-| `virtual_serial_output_bytes` | `69632` | Exact VMO size required by virtual_serial_register_output. |
+| `virtual_serial_output_bytes` | `69632` | Exact VMO size required by `virtual_serial_register_output`. |
 
 ### `directory_entry_kind` (enum)
 
@@ -676,7 +676,7 @@ Reference platform identifiers.
 
 ### `virtual_platform_aarch64_layout` (constants)
 
-Immutable AArch64 reference platform geometry shared by kernel and userspace.
+Immutable `AArch64` reference platform geometry shared by kernel and userspace.
 
 | Name | Value | Meaning |
 | --- | ---: | --- |

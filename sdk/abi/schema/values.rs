@@ -87,7 +87,7 @@ constant_groups! {
 
     /// Executable identifiers and kernel-to-loader transport bounds.
     constants startup_limits {
-        /// HypeR's ELF OSABI byte; this is not a Linux or generic System V image.
+        /// `HypeR`'s ELF OSABI byte; this is not a Linux or generic System V image.
         elf_osabi = 63,
         elf_abi_version = 0,
         process_startup_data_max_bytes = 16 * 1024,
@@ -312,7 +312,7 @@ constant_groups! {
         virtual_serial_output_capacity = 65536,
         /// Byte offset of ring data after its shared atomic counter header.
         virtual_serial_output_header_bytes = 4096,
-        /// Exact VMO size required by virtual_serial_register_output.
+        /// Exact VMO size required by `virtual_serial_register_output`.
         virtual_serial_output_bytes = 4096 + 65536,
     }
 
@@ -482,7 +482,7 @@ constant_groups! {
         virtual_platform_riscv64_reference = 2,
     }
 
-    /// Immutable AArch64 reference platform geometry shared by kernel and userspace.
+    /// Immutable `AArch64` reference platform geometry shared by kernel and userspace.
     constants virtual_platform_aarch64_layout {
         virtual_platform_aarch64_reference_max_vcpus = 8,
         virtual_platform_aarch64_reference_guest_ram_base = 0x4000_0000,

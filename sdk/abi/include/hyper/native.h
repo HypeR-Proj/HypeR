@@ -926,7 +926,7 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * Executable identifiers and kernel-to-loader transport bounds.
  * Numeric parameter or sentinel, not an enum discriminant.
  *
- * HypeR's ELF OSABI byte; this is not a Linux or generic System V image.
+ * `HypeR`'s ELF OSABI byte; this is not a Linux or generic System V image.
  */
 #define HYPER_NATIVE_ELF_OSABI UINT64_C(63)
 /**
@@ -1945,7 +1945,7 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * Console transfer bounds and virtual serial shared-memory layout.
  * Numeric parameter or sentinel, not an enum discriminant.
  *
- * Exact VMO size required by virtual_serial_register_output.
+ * Exact VMO size required by `virtual_serial_register_output`.
  */
 #define HYPER_NATIVE_VIRTUAL_SERIAL_OUTPUT_BYTES UINT64_C(69632)
 /** @} */
@@ -2680,139 +2680,139 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
 /**
  * @defgroup hyper_native_virtual_platform_aarch64_layout virtual_platform_aarch64_layout (constants)
  * @ingroup hyper_native
- * Immutable AArch64 reference platform geometry shared by kernel and userspace.
+ * Immutable `AArch64` reference platform geometry shared by kernel and userspace.
  * @{
  */
 /**
  * `virtual_platform_aarch64_reference_max_vcpus` in the `virtual_platform_aarch64_layout` constants domain.
  *
- * Immutable AArch64 reference platform geometry shared by kernel and userspace.
+ * Immutable `AArch64` reference platform geometry shared by kernel and userspace.
  * Numeric parameter or sentinel, not an enum discriminant.
  */
 #define HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_MAX_VCPUS UINT64_C(8)
 /**
  * `virtual_platform_aarch64_reference_guest_ram_base` in the `virtual_platform_aarch64_layout` constants domain.
  *
- * Immutable AArch64 reference platform geometry shared by kernel and userspace.
+ * Immutable `AArch64` reference platform geometry shared by kernel and userspace.
  * Numeric parameter or sentinel, not an enum discriminant.
  */
 #define HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_GUEST_RAM_BASE UINT64_C(1073741824)
 /**
  * `virtual_platform_aarch64_reference_dtb_offset` in the `virtual_platform_aarch64_layout` constants domain.
  *
- * Immutable AArch64 reference platform geometry shared by kernel and userspace.
+ * Immutable `AArch64` reference platform geometry shared by kernel and userspace.
  * Numeric parameter or sentinel, not an enum discriminant.
  */
 #define HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_DTB_OFFSET UINT64_C(65536)
 /**
  * `virtual_platform_aarch64_reference_gic_distributor_base` in the `virtual_platform_aarch64_layout` constants domain.
  *
- * Immutable AArch64 reference platform geometry shared by kernel and userspace.
+ * Immutable `AArch64` reference platform geometry shared by kernel and userspace.
  * Numeric parameter or sentinel, not an enum discriminant.
  */
 #define HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_GIC_DISTRIBUTOR_BASE UINT64_C(134217728)
 /**
  * `virtual_platform_aarch64_reference_gic_distributor_size` in the `virtual_platform_aarch64_layout` constants domain.
  *
- * Immutable AArch64 reference platform geometry shared by kernel and userspace.
+ * Immutable `AArch64` reference platform geometry shared by kernel and userspace.
  * Numeric parameter or sentinel, not an enum discriminant.
  */
 #define HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_GIC_DISTRIBUTOR_SIZE UINT64_C(65536)
 /**
  * `virtual_platform_aarch64_reference_gic_redistributor_base` in the `virtual_platform_aarch64_layout` constants domain.
  *
- * Immutable AArch64 reference platform geometry shared by kernel and userspace.
+ * Immutable `AArch64` reference platform geometry shared by kernel and userspace.
  * Numeric parameter or sentinel, not an enum discriminant.
  */
 #define HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_GIC_REDISTRIBUTOR_BASE UINT64_C(134873088)
 /**
  * `virtual_platform_aarch64_reference_gic_redistributor_size` in the `virtual_platform_aarch64_layout` constants domain.
  *
- * Immutable AArch64 reference platform geometry shared by kernel and userspace.
+ * Immutable `AArch64` reference platform geometry shared by kernel and userspace.
  * Numeric parameter or sentinel, not an enum discriminant.
  */
 #define HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_GIC_REDISTRIBUTOR_SIZE UINT64_C(131072)
 /**
  * `virtual_platform_aarch64_reference_gicv2_distributor_size` in the `virtual_platform_aarch64_layout` constants domain.
  *
- * Immutable AArch64 reference platform geometry shared by kernel and userspace.
+ * Immutable `AArch64` reference platform geometry shared by kernel and userspace.
  * Numeric parameter or sentinel, not an enum discriminant.
  */
 #define HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_GICV2_DISTRIBUTOR_SIZE UINT64_C(4096)
 /**
  * `virtual_platform_aarch64_reference_gicv2_cpu_base` in the `virtual_platform_aarch64_layout` constants domain.
  *
- * Immutable AArch64 reference platform geometry shared by kernel and userspace.
+ * Immutable `AArch64` reference platform geometry shared by kernel and userspace.
  * Numeric parameter or sentinel, not an enum discriminant.
  */
 #define HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_GICV2_CPU_BASE UINT64_C(134283264)
 /**
  * `virtual_platform_aarch64_reference_gicv2_cpu_size` in the `virtual_platform_aarch64_layout` constants domain.
  *
- * Immutable AArch64 reference platform geometry shared by kernel and userspace.
+ * Immutable `AArch64` reference platform geometry shared by kernel and userspace.
  * Numeric parameter or sentinel, not an enum discriminant.
  */
 #define HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_GICV2_CPU_SIZE UINT64_C(8192)
 /**
  * `virtual_platform_aarch64_reference_uart_base` in the `virtual_platform_aarch64_layout` constants domain.
  *
- * Immutable AArch64 reference platform geometry shared by kernel and userspace.
+ * Immutable `AArch64` reference platform geometry shared by kernel and userspace.
  * Numeric parameter or sentinel, not an enum discriminant.
  */
 #define HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_UART_BASE UINT64_C(150994944)
 /**
  * `virtual_platform_aarch64_reference_user_mmio_base` in the `virtual_platform_aarch64_layout` constants domain.
  *
- * Immutable AArch64 reference platform geometry shared by kernel and userspace.
+ * Immutable `AArch64` reference platform geometry shared by kernel and userspace.
  * Numeric parameter or sentinel, not an enum discriminant.
  */
 #define HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_USER_MMIO_BASE UINT64_C(167772160)
 /**
  * `virtual_platform_aarch64_reference_user_mmio_size` in the `virtual_platform_aarch64_layout` constants domain.
  *
- * Immutable AArch64 reference platform geometry shared by kernel and userspace.
+ * Immutable `AArch64` reference platform geometry shared by kernel and userspace.
  * Numeric parameter or sentinel, not an enum discriminant.
  */
 #define HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_USER_MMIO_SIZE UINT64_C(16777216)
 /**
  * `virtual_platform_aarch64_reference_uart_size` in the `virtual_platform_aarch64_layout` constants domain.
  *
- * Immutable AArch64 reference platform geometry shared by kernel and userspace.
+ * Immutable `AArch64` reference platform geometry shared by kernel and userspace.
  * Numeric parameter or sentinel, not an enum discriminant.
  */
 #define HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_UART_SIZE UINT64_C(4096)
 /**
  * `virtual_platform_aarch64_reference_uart_baud` in the `virtual_platform_aarch64_layout` constants domain.
  *
- * Immutable AArch64 reference platform geometry shared by kernel and userspace.
+ * Immutable `AArch64` reference platform geometry shared by kernel and userspace.
  * Numeric parameter or sentinel, not an enum discriminant.
  */
 #define HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_UART_BAUD UINT64_C(115200)
 /**
  * `virtual_platform_aarch64_reference_uart_interrupt` in the `virtual_platform_aarch64_layout` constants domain.
  *
- * Immutable AArch64 reference platform geometry shared by kernel and userspace.
+ * Immutable `AArch64` reference platform geometry shared by kernel and userspace.
  * Numeric parameter or sentinel, not an enum discriminant.
  */
 #define HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_UART_INTERRUPT UINT64_C(33)
 /**
  * `virtual_platform_aarch64_reference_timer_interrupt` in the `virtual_platform_aarch64_layout` constants domain.
  *
- * Immutable AArch64 reference platform geometry shared by kernel and userspace.
+ * Immutable `AArch64` reference platform geometry shared by kernel and userspace.
  * Numeric parameter or sentinel, not an enum discriminant.
  */
 #define HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_TIMER_INTERRUPT UINT64_C(27)
 /**
  * `virtual_platform_aarch64_reference_interrupt_count` in the `virtual_platform_aarch64_layout` constants domain.
  *
- * Immutable AArch64 reference platform geometry shared by kernel and userspace.
+ * Immutable `AArch64` reference platform geometry shared by kernel and userspace.
  * Numeric parameter or sentinel, not an enum discriminant.
  */
 #define HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_INTERRUPT_COUNT UINT64_C(256)
 /**
  * `virtual_platform_aarch64_reference_device_interrupt_base` in the `virtual_platform_aarch64_layout` constants domain.
  *
- * Immutable AArch64 reference platform geometry shared by kernel and userspace.
+ * Immutable `AArch64` reference platform geometry shared by kernel and userspace.
  * Numeric parameter or sentinel, not an enum discriminant.
  */
 #define HYPER_NATIVE_VIRTUAL_PLATFORM_AARCH64_REFERENCE_DEVICE_INTERRUPT_BASE UINT64_C(40)

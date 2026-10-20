@@ -68,7 +68,7 @@ const OBJECT_WAIT_ITEM_FIELDS: &[Field] = &[
     },
 ];
 
-/// Process lifecycle observation; terminal_reason selects the meaning of detail0/1.
+/// Process lifecycle observation; `terminal_reason` selects the meaning of `detail0/1`.
 const PROCESS_INFO_FIELDS: &[Field] = &[
     Field {
         name: "phase",
@@ -167,7 +167,7 @@ const STARTUP_HANDLE_FIELDS: &[Field] = &[
     },
 ];
 
-/// Bounded process-list observation; name_length bounds the fixed UTF-8 name array.
+/// Bounded process-list observation; `name_length` bounds the fixed UTF-8 name array.
 const TASK_PROCESS_FIELDS: &[Field] = &[
     Field {
         name: "koid",
@@ -535,7 +535,7 @@ const HANDLE_INSPECTION_FIELDS: &[Field] = &[
     },
 ];
 
-/// One bounded directory entry: name_length UTF-8 bytes followed by zero-filled
+/// One bounded directory entry: `name_length` UTF-8 bytes followed by zero-filled
 /// name capacity. Entry names are single components, not full paths.
 const DIRECTORY_ENTRY_FIELDS: &[Field] = &[
     Field {
@@ -796,7 +796,7 @@ const VIRTUAL_MACHINE_POWER_REQUEST_FIELDS: &[Field] = &[
 ];
 
 /// Resident backing is appended after the original 32-byte prefix. It excludes
-/// stage-2 tables, aliases and Native runtime memory; u64::MAX means unavailable.
+/// stage-2 tables, aliases and Native runtime memory; `u64::MAX` means unavailable.
 const VIRTUAL_MACHINE_INFO_FIELDS: &[Field] = &[
     Field {
         name: "phase",
@@ -835,7 +835,7 @@ const VIRTUAL_MACHINE_INFO_FIELDS: &[Field] = &[
     },
 ];
 
-/// vcpu_id is a guest topology index; scheduler_thread_id and host_cpu describe
+/// `vcpu_id` is a guest topology index; `scheduler_thread_id` and `host_cpu` describe
 /// host scheduling. A started phase does not prove the vCPU is currently running.
 const VIRTUAL_CPU_INFO_FIELDS: &[Field] = &[
     Field {
