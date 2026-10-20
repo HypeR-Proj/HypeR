@@ -127,6 +127,8 @@ pub(super) fn initialize(
             crate::pr_err!("HypeR: firmware catalogue allocation failed");
             Error::DriverRegistration(ProbeError::Resource)
         })?;
+    #[cfg(all(CONFIG_ARCH_AARCH64, feature = "pmu-profiling"))]
+    crate::kernel::profile::initialize(&catalogue.nodes, boot.interrupts().root_domain);
     let services = KernelDriverServices { boot };
     // Activate default-deny translation before publishing any physical device.
     // A discovered but unsupported/failed IOMMU aborts admission, never bypasses.
@@ -185,7 +187,8 @@ pub(super) fn initialize(
     // and does not expose any packet DMA until an assigned VM owns its backing.
     let kernel_owned = |node: &PlatformDevice| {
         node.kernel_claimed()
-            || super::iommu::host_owned(node)
+            || crate::kernel::profile::owns_node(node)
+            || super::iommu::host_owned(&catalogue.nodes, node)
             || manager.binding_driver(node.id()).is_some()
             || reserved_console_base.is_some_and(|base| {
                 node.registers()
@@ -196,11 +199,14 @@ pub(super) fn initialize(
     // Include aliases outside the PCI tree before the transport touches MMIO.
     // Catalogue reservation checks physical pages and interrupt identities.
     catalogue.reserve(kernel_owned);
-    let pci_owned = catalogue.nodes.iter().enumerate().any(|(index, node)| {
-        hyper::drivers::pci::owns_handoff_node(&catalogue.nodes, node) && catalogue.reserved(index)
+    let pci_conflict = catalogue.nodes.iter().enumerate().find(|(index, node)| {
+        hyper::drivers::pci::owns_handoff_node(&catalogue.nodes, node) && catalogue.reserved(*index)
     });
-    if pci_owned {
-        crate::pr_warn!("HypeR: PCI function handoff conflicts with a kernel device");
+    if let Some((_, node)) = pci_conflict {
+        crate::pr_warn!(
+            "HypeR: PCI function handoff conflicts with a kernel device: {}",
+            node.path()
+        );
     } else {
         match hyper::drivers::pci::Transport::discover::<crate::hal::memory::Barrier>(
             &catalogue.nodes,

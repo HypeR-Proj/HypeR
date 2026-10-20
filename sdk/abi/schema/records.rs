@@ -983,6 +983,126 @@ const RESOURCE_LIMITS_FIELDS: &[Field] = &[
 /// Complete public record catalog. Named field arrays above factor reusable
 /// layouts; inline fields obey the same offset/alignment validation.
 pub const RECORDS: &[Record] = &[
+    // Capture identity and buffer geometry; period is a PMU event-count period,
+    // while deadline_ns is absolute monotonic time. Generations detect reuse.
+    Record {
+        name: "cpu_profile_info",
+        fields: &[
+            Field {
+                name: "generation",
+                kind: FieldKind::U64,
+                offset: 0,
+            },
+            Field {
+                name: "period",
+                kind: FieldKind::U64,
+                offset: 8,
+            },
+            Field {
+                name: "deadline_ns",
+                kind: FieldKind::U64,
+                offset: 16,
+            },
+            Field {
+                name: "cpu_count",
+                kind: FieldKind::U64,
+                offset: 24,
+            },
+            Field {
+                name: "running_generation",
+                kind: FieldKind::U64,
+                offset: 32,
+            },
+            Field {
+                name: "armed_mask",
+                kind: FieldKind::U64,
+                offset: 40,
+            },
+            Field {
+                name: "capacity",
+                kind: FieldKind::U64,
+                offset: 48,
+            },
+            Field {
+                name: "depth",
+                kind: FieldKind::U64,
+                offset: 56,
+            },
+            Field {
+                name: "active_cpus",
+                kind: FieldKind::U64,
+                offset: 64,
+            },
+            Field {
+                name: "dropped",
+                kind: FieldKind::U64,
+                offset: 72,
+            },
+            Field {
+                name: "revision",
+                kind: FieldKind::Bytes(64),
+                offset: 80,
+            },
+        ],
+        minimum_size: 144,
+        size: 144,
+        alignment: 8,
+    },
+    // One bounded sample, not a live stack reference. depth bounds the PC array;
+    // dropped reports missing samples rather than implying a complete trace.
+    Record {
+        name: "cpu_profile_sample",
+        fields: &[
+            Field {
+                name: "sequence",
+                kind: FieldKind::U64,
+                offset: 0,
+            },
+            Field {
+                name: "timestamp_ns",
+                kind: FieldKind::U64,
+                offset: 8,
+            },
+            Field {
+                name: "cpu",
+                kind: FieldKind::U64,
+                offset: 16,
+            },
+            Field {
+                name: "world",
+                kind: FieldKind::U64,
+                offset: 24,
+            },
+            Field {
+                name: "depth",
+                kind: FieldKind::U64,
+                offset: 32,
+            },
+            Field {
+                name: "flags",
+                kind: FieldKind::U64,
+                offset: 40,
+            },
+            Field {
+                name: "dropped",
+                kind: FieldKind::U64,
+                offset: 48,
+            },
+            Field {
+                name: "period",
+                kind: FieldKind::U64,
+                offset: 56,
+            },
+            Field {
+                name: "frames",
+                kind: FieldKind::Bytes(128),
+                offset: 64,
+            },
+        ],
+        minimum_size: 192,
+        size: 192,
+        alignment: 8,
+    },
     // Retention lifecycle and release reason are independent of live process state.
     Record {
         name: "process_retirement_info",

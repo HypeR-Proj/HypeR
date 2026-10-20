@@ -55,6 +55,13 @@ pub fn guest_interrupts_supported() -> bool {
     matches!(INTERFACE.get(), Some(Interface::V3)) || super::vgic::v2::guest_physical().is_some()
 }
 
+pub(super) fn v2_target(affinity: u32) -> Option<u8> {
+    V2_AFFINITIES
+        .iter()
+        .position(|slot| slot.load(Ordering::Acquire) == u64::from(affinity))
+        .map(|index| 1 << index)
+}
+
 fn send_targeted(interrupt: InterruptId, affinity: u32) -> bool {
     match INTERFACE.get() {
         Some(Interface::V2(local)) => {

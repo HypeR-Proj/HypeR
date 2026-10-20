@@ -582,6 +582,15 @@ pub(super) fn dispatch_operation(
         abi::NativeOperation::MemoryInspectorRead => {
             handlers::sys_memory_inspector_read(services, receiver, arguments)
         }
+        abi::NativeOperation::CpuInspectorProfileStart => {
+            handlers::sys_cpu_inspector_profile_start(services, receiver, arguments)
+        }
+        abi::NativeOperation::CpuInspectorProfileStop => {
+            handlers::sys_cpu_inspector_profile_stop(services, receiver, arguments)
+        }
+        abi::NativeOperation::CpuInspectorProfileRead => {
+            handlers::sys_cpu_inspector_profile_read(services, receiver, arguments)
+        }
         abi::NativeOperation::CpuInspectorRead => {
             handlers::sys_cpu_inspector_read(services, receiver, arguments)
         }

@@ -14,6 +14,41 @@ use crate::kernel::object::KernelObject;
 use crate::kernel::process::{ProcessObject, ProcessSnapshot, TaskGroupObject};
 
 impl SystemInspectServices for ProcessServices<'_> {
+    fn profile_start(
+        &self,
+        receiver: &InvocationReceiver,
+        period: u64,
+        seconds: u64,
+    ) -> crate::kernel::profile::Result<u64> {
+        receiver
+            .resolve::<CpuInspector>(Rights::SET_ATTRIBUTES)
+            .map_err(|_| hyper::abi::native::HYPER_NATIVE_STATUS_ACCESS_DENIED)?;
+        crate::kernel::profile::start(period, seconds)
+    }
+    fn profile_stop(
+        &self,
+        receiver: &InvocationReceiver,
+        generation: u64,
+    ) -> crate::kernel::profile::Result<()> {
+        receiver
+            .resolve::<CpuInspector>(Rights::SET_ATTRIBUTES)
+            .map_err(|_| hyper::abi::native::HYPER_NATIVE_STATUS_ACCESS_DENIED)?;
+        crate::kernel::profile::stop(generation)
+    }
+    fn profile_read(
+        &self,
+        receiver: &InvocationReceiver,
+        generation: u64,
+        cpu: u64,
+        cursor: u64,
+        output: &mut [u8],
+    ) -> crate::kernel::profile::Result<usize> {
+        receiver
+            .resolve::<CpuInspector>(Rights::INSPECT_DETAILS)
+            .map_err(|_| hyper::abi::native::HYPER_NATIVE_STATUS_ACCESS_DENIED)?;
+        crate::kernel::profile::query(generation, cpu, cursor, output)
+    }
+
     fn memory_statistics(
         &self,
         inspector: &InvocationReceiver,

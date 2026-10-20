@@ -124,9 +124,11 @@ selection in its JSON document:
 | `rtc` | No hardware wall-clock initialization; monotonic time remains available |
 | `runtime-symbols` | No embedded runtime symbol table; crash reports retain raw addresses |
 | `crash-console` | No interactive kernel crash command loop; fatal reporting remains |
+| `pmu-profiling` | No AArch64 PMUv3 IRQ sampler or sample buffers; PMU queries report unsupported |
 | `heap-profiling` | No per-size-class heap occupancy and traffic counters; general memory accounting remains |
 
 The default feature set preserves the existing production behavior.
+`pmu-profiling` is opt-in; see [PMU sampling](profiling.md).
 `heap-profiling` is opt-in; see [memory diagnostics](memory-diagnostics.md).
 Memory ownership, capability checks, device isolation, IPC and the scheduler are
 not optional security switches. The architecture and limit configuration stays

@@ -25,10 +25,12 @@ make -C kernel image ARCH=aarch64 KERNEL_FEATURES=
 | `rtc` | Discover and read firmware-initialized PL031 or Goldfish clocks | No RTC mappings or driver code; realtime remains Unix epoch plus uptime |
 | `runtime-symbols` | Build and embed the compact symbol table; symbolize fatal addresses | Omit table generation, embedding and the runtime decoder; retain registers, raw addresses and bounded frame walking |
 | `crash-console` | Interactive allocation-free fatal monitor, UART polling and mapping inspection | Report the crash and halt; no interactive commands or inspection code |
+| `pmu-profiling` | AArch64 PMUv3 cycle-overflow sampling and bounded per-CPU call chains | No sampling hook or buffers; profiling queries report unsupported |
 | `heap-profiling` | Track allocation traffic and occupancy by heap size class | Basic memory accounting remains; the detailed profiling query reports unsupported |
 
 Make defaults are `rtc runtime-symbols crash-console` on AArch64 and
-`rtc runtime-symbols` on RISC-V and x86-64. `heap-profiling` is off everywhere.
+`rtc runtime-symbols` on RISC-V and x86-64. `heap-profiling` and `pmu-profiling` are off everywhere. See
+[PMU recording and export](../../docs/profiling.md) for limits and authority.
 Direct Cargo builds default to the AArch64 set; use `--no-default-features`
 and an explicit `--features` list to select a different configuration.
 The mechanism crates have no implicit defaults: the kernel forwards each chosen
