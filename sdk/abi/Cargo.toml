@@ -22,6 +22,7 @@ required-features = ["generator"]
 [dependencies]
 
 [lints.clippy]
+doc_markdown = "deny"
 expect_used = "deny"
 panic = "deny"
 todo = "deny"

@@ -895,8 +895,8 @@ fn inspector_scan_limits_match_their_published_page_capacities() {
         let invocation = schema::INVOCATIONS
             .iter()
             .find(|invocation| invocation.name == invocation_name);
-        let constant = schema::CONSTANTS
-            .iter()
+        let constant = schema::NATIVE_ABI
+            .constants()
             .find(|constant| constant.name == constant_name);
         assert!(matches!(constant, Some(value) if value.value == expected));
         assert!(matches!(
@@ -1057,10 +1057,12 @@ fn rejects_duplicate_public_constants() {
     let constants = Box::leak(
         vec![
             schema::AbiConstant {
+                description: "",
                 name: "duplicate",
                 value: 1,
             },
             schema::AbiConstant {
+                description: "",
                 name: "duplicate",
                 value: 2,
             },
@@ -1068,7 +1070,7 @@ fn rejects_duplicate_public_constants() {
         .into_boxed_slice(),
     );
     let candidate = AbiSchema {
-        constants,
+        constant_groups: test_constant_groups(schema::ConstantGroupKind::Constants, constants),
         ..schema::NATIVE_ABI
     };
     assert!(
@@ -1080,13 +1082,14 @@ fn rejects_duplicate_public_constants() {
 fn rejects_cross_category_generated_constant_collisions() {
     let constants = Box::leak(
         vec![schema::AbiConstant {
+            description: "",
             name: "op_abi_query",
             value: 99,
         }]
         .into_boxed_slice(),
     );
     let candidate = AbiSchema {
-        constants,
+        constant_groups: test_constant_groups(schema::ConstantGroupKind::Constants, constants),
         ..schema::NATIVE_ABI
     };
     assert!(
@@ -1222,4 +1225,102 @@ fn execution_context_waits_require_execution_control_not_waitable_object_rights(
             "{name}"
         );
     }
+}
+
+fn test_constant_groups(
+    kind: schema::ConstantGroupKind,
+    values: &'static [schema::AbiConstant],
+) -> &'static [schema::ConstantGroup] {
+    Box::leak(
+        vec![schema::ConstantGroup {
+            name: "test_values",
+            description: "Schema validation fixture.",
+            kind,
+            values,
+        }]
+        .into_boxed_slice(),
+    )
+}
+
+#[test]
+fn scalar_domains_validate_enumerations_and_flags() {
+    use schema::{AbiConstant, ConstantGroupKind};
+    for (kind, values, accepted) in [
+        (ConstantGroupKind::Enumeration, [0, 1], true),
+        (ConstantGroupKind::Enumeration, [1, 1], false),
+        (ConstantGroupKind::Flags, [1, 1 << 63], true),
+        (ConstantGroupKind::Flags, [0, 1], false),
+        (ConstantGroupKind::Flags, [1, 3], false),
+        (ConstantGroupKind::Flags, [2, 2], false),
+        (ConstantGroupKind::Constants, [u64::MAX, u64::MAX], true),
+    ] {
+        let values = Box::leak(
+            vec![
+                AbiConstant {
+                    description: "",
+                    name: "first",
+                    value: values[0],
+                },
+                AbiConstant {
+                    description: "",
+                    name: "second",
+                    value: values[1],
+                },
+            ]
+            .into_boxed_slice(),
+        );
+        let candidate = AbiSchema {
+            constant_groups: test_constant_groups(kind, values),
+            ..schema::NATIVE_ABI
+        };
+        let result = validate(&candidate);
+        assert_eq!(result.is_ok(), accepted, "{kind:?}: {result:?}");
+    }
+}
+
+#[test]
+fn rejects_duplicate_or_empty_constant_groups() {
+    for groups in [
+        vec![schema::CONSTANT_GROUPS[0], schema::CONSTANT_GROUPS[0]],
+        vec![schema::ConstantGroup {
+            values: &[],
+            ..schema::CONSTANT_GROUPS[0]
+        }],
+        vec![schema::ConstantGroup {
+            description: "",
+            ..schema::CONSTANT_GROUPS[0]
+        }],
+        vec![schema::ConstantGroup {
+            description: "escape */",
+            ..schema::CONSTANT_GROUPS[0]
+        }],
+    ] {
+        let candidate = AbiSchema {
+            constant_groups: Box::leak(groups.into_boxed_slice()),
+            ..schema::NATIVE_ABI
+        };
+        assert!(matches!(validate(&candidate), Err(Error::InvalidSchema(_))));
+    }
+}
+
+#[test]
+fn rejects_duplicate_constant_names_across_groups() {
+    let group = schema::CONSTANT_GROUPS[0];
+    let groups = Box::leak(
+        vec![
+            group,
+            schema::ConstantGroup {
+                name: "another_group",
+                ..group
+            },
+        ]
+        .into_boxed_slice(),
+    );
+    let candidate = AbiSchema {
+        constant_groups: groups,
+        ..schema::NATIVE_ABI
+    };
+    assert!(
+        matches!(validate(&candidate), Err(Error::InvalidSchema(message)) if message.contains("declared more than once"))
+    );
 }

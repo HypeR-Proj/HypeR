@@ -11,7 +11,7 @@ use super::names::upper_snake;
 use super::{Error, schema};
 use invocations::validate_invocations;
 use records::validate_records;
-use schema::{AbiSchema, TransferClass};
+use schema::{AbiSchema, ConstantGroupKind, TransferClass};
 use std::collections::BTreeSet;
 
 pub fn validate(schema: &AbiSchema) -> Result<(), Error> {
@@ -201,13 +201,49 @@ fn validate_signals(schema: &AbiSchema) -> Result<(), Error> {
 
 fn validate_constants(schema: &AbiSchema) -> Result<(), Error> {
     let mut names = BTreeSet::new();
-    for constant in schema.constants {
-        validate_identifier("constant", constant.name)?;
-        if !names.insert(constant.name) {
+    let mut groups = BTreeSet::new();
+    for group in schema.constant_groups {
+        validate_identifier("constant group", group.name)?;
+        if !groups.insert(group.name) {
             return invalid(format!(
-                "constant {} is declared more than once",
-                constant.name
+                "constant group {} is declared more than once",
+                group.name
             ));
+        }
+        if group.values.is_empty() || group.description.trim().is_empty() {
+            return invalid(format!(
+                "constant group {} must have values and a description",
+                group.name
+            ));
+        }
+        // Group summaries stay on one line across the API docs and reference.
+        if group.description.contains(['\n', '\r']) || group.description.contains("*/") {
+            return invalid(format!(
+                "constant group {} has an invalid description",
+                group.name
+            ));
+        }
+        let mut values = BTreeSet::new();
+        for constant in group.values {
+            validate_identifier("constant", constant.name)?;
+            if !names.insert(constant.name) {
+                return invalid(format!(
+                    "constant {} is declared more than once",
+                    constant.name
+                ));
+            }
+            if group.kind != ConstantGroupKind::Constants && !values.insert(constant.value) {
+                return invalid(format!(
+                    "duplicate value in {:?} group {}",
+                    group.kind, group.name
+                ));
+            }
+            if group.kind == ConstantGroupKind::Flags && !constant.value.is_power_of_two() {
+                return invalid(format!(
+                    "flag {} must be a single nonzero bit",
+                    constant.name
+                ));
+            }
         }
     }
     Ok(())
@@ -262,7 +298,7 @@ fn validate_generated_constant_names(schema: &AbiSchema) -> Result<(), Error> {
             upper_snake(signal.name)
         ))?;
     }
-    for constant in schema.constants {
+    for constant in schema.constants() {
         insert(format!("HYPER_NATIVE_{}", upper_snake(constant.name)))?;
     }
     for record in schema.records {

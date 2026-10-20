@@ -5,7 +5,11 @@
 
 use super::super::names::upper_snake;
 use super::super::schema;
-use super::transfer_class_constant;
+use super::documentation::{
+    FAILURE_MASK_DOC, TRANSFER_QUERY_DOC, c_doc, constant_documentation, invocation_documentation,
+    prose_markdown, record_documentation,
+};
+use super::{constant_group_kind, transfer_class_constant};
 use schema::{AbiSchema, FieldKind};
 use std::fmt::Write as _;
 
@@ -15,6 +19,20 @@ pub(in super::super) fn render_c(schema: &AbiSchema) -> String {
     output.push_str(" *\n");
     output.push_str(" * Generated from schema/native.rs. Do not edit.\n");
     output.push_str(" */\n\n");
+    c_doc(
+        &mut output,
+        "@file\n@brief Fixed-width HypeR Native capability invocation ABI.\n\
+         The receiver handle selects authority; operation numbers are object-local.\n\
+         Constants remain integers on the wire, including values grouped as enum domains.\n\
+         See @ref hyper_native_contract for ownership and lifecycle rules.\n\
+         @defgroup hyper_native HypeR Native ABI\n@{",
+        "",
+    );
+    let mut contract = String::from("@page hyper_native_contract Native ABI semantic contract\n");
+    for rule in schema.semantic_rules {
+        let _ = writeln!(contract, "\n- {}", prose_markdown(rule));
+    }
+    c_doc(&mut output, &contract, "");
     output.push_str("#ifndef HYPER_NATIVE_H\n");
     output.push_str("#define HYPER_NATIVE_H\n\n");
     output.push_str("#include <stddef.h>\n#include <stdint.h>\n\n");
@@ -25,15 +43,30 @@ pub(in super::super) fn render_c(schema: &AbiSchema) -> String {
     output.push_str("#define HYPER_ABI_STATIC_ASSERT _Static_assert\n");
     output.push_str("#define HYPER_ABI_ALIGNOF _Alignof\n");
     output.push_str("#endif\n\n");
+    c_doc(
+        &mut output,
+        "Pre-release schema revision; zero does not promise a stable published ABI.",
+        "",
+    );
     let _ = writeln!(
         output,
         "#define HYPER_NATIVE_ABI_REVISION UINT64_C({})",
         schema.revision
     );
+    c_doc(
+        &mut output,
+        "Business argument registers, excluding the receiver and operation selectors.",
+        "",
+    );
     let _ = writeln!(
         output,
         "#define HYPER_NATIVE_INVOCATION_ARGUMENT_REGISTERS UINT32_C({})",
         schema::INVOCATION_ARGUMENT_REGISTERS
+    );
+    c_doc(
+        &mut output,
+        "Auxiliary result registers, excluding the signed status register.",
+        "",
     );
     let _ = writeln!(
         output,
@@ -41,7 +74,9 @@ pub(in super::super) fn render_c(schema: &AbiSchema) -> String {
         schema::INVOCATION_RESULT_REGISTERS
     );
     output.push_str(
-        "\ntypedef uint64_t hyper_native_handle_t;\n\
+        "\n/** Process-local, generation-qualified handle; not a KOID or pointer. */\n\
+         typedef uint64_t hyper_native_handle_t;\n\
+         /** Signed invocation status: zero for OK, negative for failure. */\n\
          typedef int64_t hyper_native_status_t;\n\n",
     );
     render_c_bit_constants(
@@ -75,11 +110,24 @@ pub(in super::super) fn render_c(schema: &AbiSchema) -> String {
         .rights
         .iter()
         .fold(0u64, |mask, right| mask | (1u64 << right.bit));
+    c_doc(
+        &mut output,
+        "All declared right bits; this mask does not grant authority to a handle.",
+        "",
+    );
     let _ = writeln!(
         output,
         "#define HYPER_NATIVE_RIGHTS_MASK UINT64_C({rights_mask:#x})\n"
     );
     for signal in schema.signals {
+        c_doc(
+            &mut output,
+            &format!(
+                "Wait signal `{}` for `{}` objects; bit positions are object-local.",
+                signal.name, signal.object
+            ),
+            "",
+        );
         let _ = writeln!(
             output,
             "#define HYPER_NATIVE_SIGNAL_{}_{} (UINT64_C(1) << {})",
@@ -91,30 +139,55 @@ pub(in super::super) fn render_c(schema: &AbiSchema) -> String {
     if !schema.signals.is_empty() {
         output.push('\n');
     }
-    render_c_constants(
-        &mut output,
-        "HYPER_NATIVE",
-        schema
-            .constants
-            .iter()
-            .map(|constant| (constant.name, constant.value)),
-    );
-    render_c_constants(
-        &mut output,
-        "HYPER_NATIVE_OP",
-        schema
-            .invocations
-            .iter()
-            .map(|value| (value.name, u64::from(value.operation))),
-    );
+    for group in schema.constant_groups {
+        c_doc(
+            &mut output,
+            &format!(
+                "@defgroup hyper_native_{} {} ({})\n@ingroup hyper_native\n{}\n@{{",
+                group.name,
+                group.name,
+                constant_group_kind(group.kind),
+                group.description.trim()
+            ),
+            "",
+        );
+        for constant in group.values {
+            c_doc(&mut output, &constant_documentation(group, constant), "");
+            let _ = writeln!(
+                output,
+                "#define HYPER_NATIVE_{} UINT64_C({})",
+                upper_snake(constant.name),
+                constant.value
+            );
+        }
+        output.push_str("/** @} */\n\n");
+    }
+    for invocation in schema.invocations {
+        c_doc(&mut output, &invocation_documentation(invocation), "");
+        let _ = writeln!(
+            output,
+            "#define HYPER_NATIVE_OP_{} UINT64_C({})\n",
+            upper_snake(invocation.name),
+            invocation.operation
+        );
+    }
     render_c_failure_result_mask(&mut output, schema);
     for record in schema.records {
+        c_doc(
+            &mut output,
+            &format!(
+                "Minimum supported prefix of `{}`, in bytes; individual calls define their buffer lengths.",
+                record.name
+            ),
+            "",
+        );
         let _ = writeln!(
             output,
             "#define HYPER_NATIVE_{}_MIN_SIZE UINT64_C({})",
             upper_snake(record.name),
             record.minimum_size
         );
+        c_doc(&mut output, &record_documentation(schema, record), "");
         let _ = writeln!(output, "typedef struct hyper_native_{}_t {{", record.name);
         let mut cursor = 0u16;
         let mut padding = 0usize;
@@ -127,6 +200,15 @@ pub(in super::super) fn render_c(schema: &AbiSchema) -> String {
                 );
                 padding += 1;
             }
+            c_doc(
+                &mut output,
+                &format!(
+                    "Wire offset {} bytes; width {} bytes.",
+                    field.offset,
+                    field.kind.size()
+                ),
+                "    ",
+            );
             match field.kind {
                 FieldKind::Bytes(size) => {
                     let _ = writeln!(output, "    uint8_t {}[{size}];", field.name);
@@ -165,14 +247,31 @@ pub(in super::super) fn render_c(schema: &AbiSchema) -> String {
         output.push('\n');
     }
     output.push_str("#undef HYPER_ABI_ALIGNOF\n#undef HYPER_ABI_STATIC_ASSERT\n\n");
+    output.push_str("/** @} */\n\n");
     output.push_str("#endif /* HYPER_NATIVE_H */\n");
     output
 }
 
 fn render_c_transfer_classes(output: &mut String, schema: &AbiSchema) {
+    c_doc(
+        output,
+        "Handle transport is forbidden for this object kind.",
+        "",
+    );
     output.push_str("#define HYPER_NATIVE_TRANSFER_CLASS_FORBIDDEN UINT32_C(0)\n");
+    c_doc(
+        output,
+        "Buffered capability transfer and rendezvous are permitted with transfer authority.",
+        "",
+    );
     output.push_str("#define HYPER_NATIVE_TRANSFER_CLASS_GENERAL UINT32_C(1)\n");
+    c_doc(
+        output,
+        "Transfer requires rendezvous or staged startup; buffered transfer is forbidden.",
+        "",
+    );
     output.push_str("#define HYPER_NATIVE_TRANSFER_CLASS_RENDEZVOUS_ONLY UINT32_C(2)\n\n");
+    c_doc(output, TRANSFER_QUERY_DOC, "");
     output.push_str(
         "static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) {\n",
     );
@@ -191,6 +290,7 @@ fn render_c_transfer_classes(output: &mut String, schema: &AbiSchema) {
 }
 
 fn render_c_failure_result_mask(output: &mut String, schema: &AbiSchema) {
+    c_doc(output, FAILURE_MASK_DOC, "");
     output.push_str(
         "static inline uint64_t hyper_native_failure_result_mask(\n    uint32_t object_kind, uint64_t operation, hyper_native_status_t status)\n{\n",
     );
@@ -246,27 +346,18 @@ fn render_c_failure_result_mask(output: &mut String, schema: &AbiSchema) {
     output.push_str("    return UINT64_C(0);\n}\n\n");
 }
 
-fn render_c_constants<'a>(
-    output: &mut String,
-    prefix: &str,
-    values: impl Iterator<Item = (&'a str, u64)>,
-) {
-    for (name, value) in values {
-        let _ = writeln!(
-            output,
-            "#define {prefix}_{} UINT64_C({value})",
-            upper_snake(name)
-        );
-    }
-    output.push('\n');
-}
-
 fn render_c_bit_constants<'a>(
     output: &mut String,
     prefix: &str,
     values: impl Iterator<Item = (&'a str, u8)>,
 ) {
     for (name, bit) in values {
+        let category = if prefix == "HYPER_NATIVE_RIGHT" {
+            "Capability right; the receiving object's method determines the required rights"
+        } else {
+            "Advertised ABI feature bit"
+        };
+        c_doc(output, &format!("{category}: `{name}`."), "");
         let _ = writeln!(
             output,
             "#define {prefix}_{} (UINT64_C(1) << {bit})",
@@ -282,6 +373,11 @@ fn render_c_u32_constants<'a>(
     values: impl Iterator<Item = (&'a str, u32)>,
 ) {
     for (name, value) in values {
+        c_doc(
+            output,
+            &format!("Object-kind tag `{name}` used with an object-local operation number."),
+            "",
+        );
         let _ = writeln!(
             output,
             "#define {prefix}_{} UINT32_C({value})",
@@ -297,6 +393,13 @@ fn render_c_i64_constants<'a>(
     values: impl Iterator<Item = (&'a str, i64)>,
 ) {
     for (name, value) in values {
+        c_doc(
+            output,
+            &format!(
+                "Invocation status `{name}`. Auxiliary results on failure require an explicit method contract."
+            ),
+            "",
+        );
         let rendered = if value < 0 {
             format!("(-INT64_C({}))", value.unsigned_abs())
         } else {

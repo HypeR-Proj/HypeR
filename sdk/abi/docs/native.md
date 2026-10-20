@@ -124,249 +124,614 @@ ABI revision: `0`.
 | `guest_mailbox` | 1 | `writable` |
 | `guest_mailbox` | 2 | `peer_closed` |
 
-## Constants
+## Scalar domains
 
-| Name | Value |
-| --- | ---: |
-| `startup_handle_purpose_execution_context` | `16` |
-| `startup_handle_purpose_object_factory` | `17` |
-| `startup_handle_purpose_system_info` | `18` |
-| `dma_fault_source_smmuv3` | `1` |
-| `dma_fault_scope_stream` | `1` |
-| `dma_fault_scope_controller` | `2` |
-| `dma_fault_address_valid` | `1` |
-| `dma_fault_read` | `2` |
-| `dma_fault_write` | `4` |
-| `process_retirement_prepared` | `0` |
-| `process_retirement_running` | `1` |
-| `process_retirement_stopping` | `2` |
-| `process_retirement_ready` | `3` |
-| `process_retirement_released` | `4` |
-| `crash_partial_memory` | `1` |
-| `crash_partial_threads` | `2` |
-| `crash_partial_handles` | `4` |
-| `crash_partial_mappings` | `8` |
-| `process_retirement_release_none` | `0` |
-| `process_retirement_release_explicit` | `1` |
-| `process_retirement_release_owner_lost` | `2` |
-| `process_retirement_release_deadline` | `3` |
-| `process_retirement_release_aborted` | `4` |
-| `crash_mapping_retained` | `1` |
-| `crash_mapping_partial` | `2` |
-| `crash_mapping_excluded_shared` | `4` |
-| `crash_mapping_excluded_file` | `8` |
-| `crash_mapping_anonymous` | `1` |
-| `crash_mapping_private_file` | `2` |
-| `crash_mapping_shared` | `3` |
-| `crash_read_max_bytes` | `65536` |
-| `memory_statistics_heap` | `1` |
-| `memory_statistics_buddy` | `2` |
-| `memory_statistics_owner` | `3` |
-| `memory_statistics_file_cache` | `4` |
-| `memory_statistics_heap_class` | `5` |
-| `memory_statistics_buddy_order_count` | `19` |
-| `memory_statistics_owner_count` | `5` |
-| `memory_statistics_heap_class_count` | `18` |
-| `vmar_memory_current` | `1` |
-| `filesystem_switch_root_max_moves` | `16` |
-| `native_block_transfer_bytes` | `524288` |
-| `native_block_batch_max` | `4` |
-| `native_block_batch_record_bytes` | `16` |
-| `native_block_transfer_frame_bytes` | `524352` |
-| `object_detail_empty` | `0` |
-| `object_detail_thread` | `1` |
-| `object_detail_vmar` | `2` |
-| `object_detail_mapping` | `3` |
-| `object_detail_channel` | `4` |
-| `object_detail_device` | `5` |
-| `object_detail_device_resource` | `6` |
-| `koid_slot_mask` | `4294967295` |
-| `vmar_allocate_exact` | `1` |
-| `system_config_application_address_limit` | `2` |
-| `system_config_page_size` | `1` |
-| `device_firmware_max_bytes` | `65536` |
-| `device_firmware_name_max_bytes` | `128` |
-| `device_bundle_max_entries` | `8` |
-| `device_firmware_field_info` | `0` |
-| `device_firmware_field_path` | `1` |
-| `device_firmware_field_compatible` | `2` |
-| `device_firmware_field_registers` | `3` |
-| `device_firmware_field_property` | `4` |
-| `device_firmware_field_property_names` | `5` |
-| `device_profile_virtio_mmio_scsi` | `1` |
-| `device_profile_userspace` | `2` |
-| `device_profile_virtio_mmio_net` | `3` |
-| `device_profile_pci_function` | `4` |
-| `device_pci_aperture_size` | `8388608` |
-| `device_resource_pci_ecam` | `256` |
-| `device_resource_pci_msi` | `257` |
-| `device_resource_pci_bar0` | `512` |
-| `device_resource_pci_intx` | `258` |
-| `device_resource_memory_64` | `1` |
-| `device_resource_prefetchable` | `2` |
-| `device_assignment_max_devices` | `4` |
-| `device_identity_compatible` | `1` |
-| `device_identity_fdt_path` | `2` |
-| `device_identity_pci_id` | `3` |
-| `io_max_clients` | `9` |
-| `guest_notification_disconnect` | `3` |
-| `guest_dynamic_alias_offset` | `68719476736` |
-| `guest_dynamic_physical_limit` | `274877906944` |
-| `native_block_memory_bytes` | `1048576` |
-| `native_block_queue_count` | `6` |
-| `native_block_queue_size` | `8` |
-| `native_block_queue_stride` | `4096` |
-| `native_block_available_offset` | `256` |
-| `native_block_used_offset` | `512` |
-| `startup_handle_purpose_device_assignment_authority` | `14` |
-| `guest_mailbox_max_message_bytes` | `256` |
-| `guest_notification_disable` | `0` |
-| `guest_notification_enable` | `1` |
-| `guest_notification_raise_config` | `2` |
-| `private_mapping_copy_on_write` | `0` |
-| `private_mapping_eager` | `1` |
-| `riscv_isa_i` | `1` |
-| `riscv_isa_m` | `2` |
-| `riscv_isa_a` | `4` |
-| `riscv_isa_f` | `8` |
-| `riscv_isa_d` | `16` |
-| `riscv_isa_c` | `32` |
-| `riscv_isa_zicsr` | `64` |
-| `riscv_isa_zifencei` | `128` |
-| `riscv_isa_sstc` | `256` |
-| `page_size` | `4096` |
-| `extensible_record_max_bytes` | `4096` |
-| `virtual_serial_max_transfer_bytes` | `4096` |
-| `virtual_serial_output_capacity` | `65536` |
-| `virtual_serial_output_header_bytes` | `4096` |
-| `virtual_serial_output_bytes` | `69632` |
-| `elf_osabi` | `63` |
-| `elf_abi_version` | `0` |
-| `process_startup_data_max_bytes` | `16384` |
-| `loader_startup_reply` | `1` |
-| `startup_handle_purpose_initial_stack_vmar` | `15` |
-| `startup_handle_purpose_resource_domain` | `1` |
-| `startup_handle_purpose_task_group` | `2` |
-| `startup_handle_purpose_task_factory` | `3` |
-| `startup_handle_purpose_executable_authority` | `4` |
-| `startup_handle_purpose_root_vmar` | `5` |
-| `startup_handle_purpose_console` | `6` |
-| `startup_handle_purpose_root_directory` | `7` |
-| `startup_handle_purpose_task_inspector` | `8` |
-| `startup_handle_purpose_object_inspector` | `9` |
-| `startup_handle_purpose_dynamic_library_directory` | `10` |
-| `startup_handle_purpose_memory_inspector` | `11` |
-| `startup_handle_purpose_cpu_inspector` | `12` |
-| `startup_handle_purpose_virtual_machine_creation_authority` | `13` |
-| `virtual_machine_architecture_aarch64` | `1` |
-| `virtual_machine_architecture_riscv64` | `2` |
-| `virtual_machine_architecture_x86_64` | `3` |
-| `virtual_platform_aarch64_reference_max_vcpus` | `8` |
-| `virtual_machine_power_cpu_on` | `1` |
-| `virtual_machine_power_cpu_off` | `2` |
-| `virtual_machine_power_system_off` | `3` |
-| `virtual_machine_power_system_reset` | `4` |
-| `virtual_platform_aarch64_reference` | `1` |
-| `virtual_platform_aarch64_reference_guest_ram_base` | `1073741824` |
-| `virtual_platform_aarch64_reference_dtb_offset` | `65536` |
-| `virtual_platform_aarch64_reference_gic_distributor_base` | `134217728` |
-| `virtual_platform_aarch64_reference_gic_distributor_size` | `65536` |
-| `virtual_platform_aarch64_reference_gic_redistributor_base` | `134873088` |
-| `virtual_platform_aarch64_reference_gic_redistributor_size` | `131072` |
-| `virtual_platform_aarch64_reference_gicv2_distributor_size` | `4096` |
-| `virtual_platform_aarch64_reference_gicv2_cpu_base` | `134283264` |
-| `virtual_platform_aarch64_reference_gicv2_cpu_size` | `8192` |
-| `virtual_platform_aarch64_reference_uart_base` | `150994944` |
-| `virtual_platform_aarch64_reference_user_mmio_base` | `167772160` |
-| `virtual_platform_aarch64_reference_user_mmio_size` | `16777216` |
-| `virtual_platform_aarch64_reference_uart_size` | `4096` |
-| `virtual_platform_aarch64_reference_uart_baud` | `115200` |
-| `virtual_platform_aarch64_reference_uart_interrupt` | `33` |
-| `virtual_platform_aarch64_reference_timer_interrupt` | `27` |
-| `virtual_platform_aarch64_reference_interrupt_count` | `256` |
-| `virtual_platform_aarch64_reference_device_interrupt_base` | `40` |
-| `virtual_platform_riscv64_reference` | `2` |
-| `virtual_platform_riscv64_reference_guest_ram_base` | `2147483648` |
-| `virtual_platform_riscv64_reference_dtb_offset` | `65536` |
-| `virtual_platform_riscv64_reference_uart_base` | `268435456` |
-| `virtual_platform_riscv64_reference_uart_size` | `4096` |
-| `virtual_platform_riscv64_reference_uart_interrupt` | `10` |
-| `virtual_platform_riscv64_reference_uart_clock_frequency` | `3686400` |
-| `virtual_platform_riscv64_reference_plic_base` | `201326592` |
-| `virtual_platform_riscv64_reference_plic_size` | `4194304` |
-| `virtual_platform_riscv64_reference_plic_num_sources` | `31` |
-| `virtual_platform_riscv64_reference_plic_supervisor_context` | `1` |
-| `virtual_machine_phase_installed` | `1` |
-| `virtual_machine_phase_running` | `2` |
-| `virtual_machine_phase_stopping` | `3` |
-| `virtual_machine_phase_stopped` | `4` |
-| `vcpu_host_cpu_unknown` | `4294967295` |
-| `virtual_cpu_phase_dormant` | `1` |
-| `virtual_cpu_phase_started` | `2` |
-| `virtual_cpu_phase_stopped` | `3` |
-| `virtual_cpu_terminal_none` | `0` |
-| `virtual_cpu_terminal_memory_fault` | `1` |
-| `virtual_cpu_terminal_mmio` | `2` |
-| `virtual_cpu_terminal_synchronous` | `3` |
-| `virtual_cpu_terminal_administrative` | `4` |
-| `directory_entry_page_capacity` | `4` |
-| `directory_entry_name_max_bytes` | `255` |
-| `directory_entry_kind_file` | `1` |
-| `directory_entry_kind_directory` | `2` |
-| `directory_entry_kind_symlink` | `3` |
-| `directory_entry_kind_other` | `4` |
-| `startup_max_handles` | `256` |
-| `deadline_infinite` | `18446744073709551615` |
-| `object_wait_many_max_items` | `64` |
-| `capability_disposition_same_rights` | `18446744073709551615` |
-| `byte_channel_max_message_bytes` | `65536` |
-| `byte_channel_max_queued_messages` | `16` |
-| `byte_channel_max_queued_bytes` | `1048576` |
-| `capability_channel_max_message_bytes` | `4096` |
-| `capability_channel_max_handles` | `64` |
-| `capability_disposition_move` | `0` |
-| `capability_disposition_duplicate` | `1` |
-| `console_max_transfer_bytes` | `4096` |
-| `directory_max_path_bytes` | `4096` |
-| `file_max_read_bytes` | `2097152` |
-| `vmo_max_size_bytes` | `4294967296` |
-| `vmo_max_transfer_bytes` | `65536` |
-| `vmo_max_contiguous_size_bytes` | `134217728` |
-| `vmar_permission_read` | `1` |
-| `vmar_permission_write` | `2` |
-| `vmar_permission_execute` | `4` |
-| `thread_name_max_bytes` | `64` |
-| `process_name_max_bytes` | `64` |
-| `process_affinity_max_words` | `4` |
-| `process_affinity_max_cpus` | `256` |
-| `process_phase_prepared` | `0` |
-| `process_phase_created` | `1` |
-| `process_phase_running` | `2` |
-| `process_phase_stopping` | `3` |
-| `process_phase_stopped` | `4` |
-| `process_phase_retiring` | `5` |
-| `process_phase_retired` | `6` |
-| `process_terminal_none` | `0` |
-| `process_terminal_requested` | `1` |
-| `process_terminal_thread_exited` | `2` |
-| `process_terminal_process_exited` | `3` |
-| `process_terminal_last_thread_exited` | `4` |
-| `process_terminal_fault` | `5` |
-| `process_terminal_task_group_stop` | `6` |
-| `task_inspector_process_page_capacity` | `8` |
-| `task_inspector_thread_page_capacity` | `8` |
-| `object_inspector_object_page_capacity` | `8` |
-| `object_inspector_handle_page_capacity` | `8` |
-| `thread_role_bootstrap` | `1` |
-| `thread_role_idle` | `2` |
-| `thread_role_kernel` | `3` |
-| `thread_role_user` | `4` |
-| `thread_role_vcpu` | `5` |
-| `thread_registry_resident` | `1` |
-| `thread_registry_retiring` | `2` |
-| `object_handle_state_unpublished` | `1` |
-| `object_handle_state_active` | `2` |
-| `object_handle_state_retired` | `3` |
+Enum domains contain mutually exclusive values; flags contain independent bits.
+Constants contain bounds, sizes, addresses and sentinels. All are exported as
+fixed-width integer constants; grouping does not change wire field types.
+
+### `core_limits` (constants)
+
+Page geometry, record bounds, identity encoding and wait limits.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `page_size` | `4096` | Native memory-management granule in bytes. |
+| `extensible_record_max_bytes` | `4096` | Upper bound on a caller-supplied extensible record, including its tail. |
+| `koid_slot_mask` | `4294967295` | Low slot bits of a KOID; the generation is required for identity. |
+| `deadline_infinite` | `18446744073709551615` | Wait without a deadline; finite deadlines use absolute monotonic nanoseconds. |
+| `object_wait_many_max_items` | `64` |  |
+
+### `system_config` (enum)
+
+Selectors for system configuration queries.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `system_config_page_size` | `1` |  |
+| `system_config_application_address_limit` | `2` |  |
+
+### `startup_limits` (constants)
+
+Executable identifiers and kernel-to-loader transport bounds.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `elf_osabi` | `63` | `HypeR`'s ELF OSABI byte; this is not a Linux or generic System V image. |
+| `elf_abi_version` | `0` |  |
+| `process_startup_data_max_bytes` | `16384` |  |
+| `startup_max_handles` | `256` |  |
+
+### `loader_startup` (enum)
+
+Kernel-to-loader startup message tags; payload semantics belong to userspace.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `loader_startup_reply` | `1` |  |
+
+### `startup_handle_purpose` (enum)
+
+Purposes assigned to capabilities in the process startup table.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `startup_handle_purpose_resource_domain` | `1` |  |
+| `startup_handle_purpose_task_group` | `2` |  |
+| `startup_handle_purpose_task_factory` | `3` |  |
+| `startup_handle_purpose_executable_authority` | `4` |  |
+| `startup_handle_purpose_root_vmar` | `5` |  |
+| `startup_handle_purpose_console` | `6` |  |
+| `startup_handle_purpose_root_directory` | `7` |  |
+| `startup_handle_purpose_task_inspector` | `8` |  |
+| `startup_handle_purpose_object_inspector` | `9` |  |
+| `startup_handle_purpose_dynamic_library_directory` | `10` |  |
+| `startup_handle_purpose_memory_inspector` | `11` |  |
+| `startup_handle_purpose_cpu_inspector` | `12` |  |
+| `startup_handle_purpose_virtual_machine_creation_authority` | `13` |  |
+| `startup_handle_purpose_device_assignment_authority` | `14` |  |
+| `startup_handle_purpose_initial_stack_vmar` | `15` |  |
+| `startup_handle_purpose_execution_context` | `16` |  |
+| `startup_handle_purpose_object_factory` | `17` |  |
+| `startup_handle_purpose_system_info` | `18` |  |
+
+### `process_phase` (enum)
+
+Process lifecycle phases.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `process_phase_prepared` | `0` |  |
+| `process_phase_created` | `1` |  |
+| `process_phase_running` | `2` |  |
+| `process_phase_stopping` | `3` |  |
+| `process_phase_stopped` | `4` |  |
+| `process_phase_retiring` | `5` |  |
+| `process_phase_retired` | `6` |  |
+
+### `process_terminal` (enum)
+
+Reasons a process stopped.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `process_terminal_none` | `0` |  |
+| `process_terminal_requested` | `1` |  |
+| `process_terminal_thread_exited` | `2` |  |
+| `process_terminal_process_exited` | `3` |  |
+| `process_terminal_last_thread_exited` | `4` |  |
+| `process_terminal_fault` | `5` |  |
+| `process_terminal_task_group_stop` | `6` |  |
+
+### `thread_role` (enum)
+
+Scheduler thread roles reported by inspection.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `thread_role_bootstrap` | `1` |  |
+| `thread_role_idle` | `2` |  |
+| `thread_role_kernel` | `3` |  |
+| `thread_role_user` | `4` |  |
+| `thread_role_vcpu` | `5` |  |
+
+### `thread_registry` (enum)
+
+Thread registry membership states.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `thread_registry_resident` | `1` |  |
+| `thread_registry_retiring` | `2` |  |
+
+### `task_limits` (constants)
+
+Task names, affinity bounds and inspection page sizes.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `thread_name_max_bytes` | `64` | UTF-8 bytes excluding any NUL terminator; control characters are rejected. |
+| `process_name_max_bytes` | `64` |  |
+| `process_affinity_max_words` | `4` |  |
+| `process_affinity_max_cpus` | `256` |  |
+| `task_inspector_process_page_capacity` | `8` |  |
+| `task_inspector_thread_page_capacity` | `8` |  |
+| `object_inspector_object_page_capacity` | `8` |  |
+| `object_inspector_handle_page_capacity` | `8` |  |
+
+### `object_detail` (enum)
+
+Payload tags for detailed object inspection.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `object_detail_empty` | `0` |  |
+| `object_detail_thread` | `1` |  |
+| `object_detail_vmar` | `2` |  |
+| `object_detail_mapping` | `3` |  |
+| `object_detail_channel` | `4` |  |
+| `object_detail_device` | `5` |  |
+| `object_detail_device_resource` | `6` |  |
+
+### `object_handle_state` (enum)
+
+Userspace handle publication states.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `object_handle_state_unpublished` | `1` |  |
+| `object_handle_state_active` | `2` |  |
+| `object_handle_state_retired` | `3` |  |
+
+### `process_retirement` (enum)
+
+Retained process lifecycle phases.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `process_retirement_prepared` | `0` |  |
+| `process_retirement_running` | `1` |  |
+| `process_retirement_stopping` | `2` |  |
+| `process_retirement_ready` | `3` |  |
+| `process_retirement_released` | `4` |  |
+
+### `process_retirement_release` (enum)
+
+Reasons retained process state was released.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `process_retirement_release_none` | `0` |  |
+| `process_retirement_release_explicit` | `1` |  |
+| `process_retirement_release_owner_lost` | `2` |  |
+| `process_retirement_release_deadline` | `3` |  |
+| `process_retirement_release_aborted` | `4` |  |
+
+### `crash_partial` (flags)
+
+Incomplete sections of retained crash state.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `crash_partial_memory` | `1` |  |
+| `crash_partial_threads` | `2` |  |
+| `crash_partial_handles` | `4` |  |
+| `crash_partial_mappings` | `8` |  |
+
+### `crash_mapping_status` (flags)
+
+Retention and exclusion flags for a crash mapping.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `crash_mapping_retained` | `1` |  |
+| `crash_mapping_partial` | `2` |  |
+| `crash_mapping_excluded_shared` | `4` |  |
+| `crash_mapping_excluded_file` | `8` |  |
+
+### `crash_mapping_kind` (enum)
+
+Backing kinds reported for a crash mapping.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `crash_mapping_anonymous` | `1` |  |
+| `crash_mapping_private_file` | `2` |  |
+| `crash_mapping_shared` | `3` |  |
+
+### `crash_limits` (constants)
+
+Maximum bytes returned by one crash-memory read.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `crash_read_max_bytes` | `65536` |  |
+
+### `memory_statistics` (enum)
+
+Selectors for detailed memory statistics.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `memory_statistics_heap` | `1` |  |
+| `memory_statistics_buddy` | `2` |  |
+| `memory_statistics_owner` | `3` |  |
+| `memory_statistics_file_cache` | `4` |  |
+| `memory_statistics_heap_class` | `5` |  |
+
+### `memory_statistics_dimensions` (constants)
+
+Dimensions of memory statistics records.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `memory_statistics_buddy_order_count` | `19` |  |
+| `memory_statistics_owner_count` | `5` |  |
+| `memory_statistics_heap_class_count` | `18` |  |
+
+### `private_mapping` (enum)
+
+Private mapping population policies.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `private_mapping_copy_on_write` | `0` | Share source pages until the mapping is written; modifications remain private. |
+| `private_mapping_eager` | `1` | Populate private pages immediately instead of deferring copying to write faults. |
+
+### `vmar_permission` (flags)
+
+Permissions which may be combined for a mapping.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `vmar_permission_read` | `1` |  |
+| `vmar_permission_write` | `2` |  |
+| `vmar_permission_execute` | `4` |  |
+
+### `vmar_allocate` (flags)
+
+Options for address-space allocation.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `vmar_allocate_exact` | `1` |  |
+
+### `vmar_memory` (flags)
+
+Options for locking currently mapped memory.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `vmar_memory_current` | `1` | Lock mappings that exist now; future mappings do not inherit the lock.  Unmapping and process teardown still release the corresponding residency. |
+
+### `vmo_limits` (constants)
+
+VMO size and transfer bounds.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `vmo_max_size_bytes` | `4294967296` |  |
+| `vmo_max_transfer_bytes` | `65536` |  |
+| `vmo_max_contiguous_size_bytes` | `134217728` |  |
+
+### `capability_disposition` (enum)
+
+Ownership operations for a transferred capability.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `capability_disposition_move` | `0` | Transfer ownership only when the operation commits; failures preserve the source. |
+| `capability_disposition_duplicate` | `1` | Keep the source handle; requires DUPLICATE in addition to transfer authority. |
+
+### `channel_limits` (constants)
+
+Channel message, queue and capability-transfer bounds.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `byte_channel_max_message_bytes` | `65536` |  |
+| `byte_channel_max_queued_messages` | `16` |  |
+| `byte_channel_max_queued_bytes` | `1048576` |  |
+| `capability_channel_max_message_bytes` | `4096` |  |
+| `capability_channel_max_handles` | `64` |  |
+| `capability_disposition_same_rights` | `18446744073709551615` | Request the source's current rights, not every right defined by the ABI. |
+
+### `console_limits` (constants)
+
+Console transfer bounds and virtual serial shared-memory layout.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `console_max_transfer_bytes` | `4096` |  |
+| `virtual_serial_max_transfer_bytes` | `4096` |  |
+| `virtual_serial_output_capacity` | `65536` | Byte slots in the producer ring; unread bytes are never overwritten. |
+| `virtual_serial_output_header_bytes` | `4096` | Byte offset of ring data after its shared atomic counter header. |
+| `virtual_serial_output_bytes` | `69632` | Exact VMO size required by `virtual_serial_register_output`. |
+
+### `directory_entry_kind` (enum)
+
+Kinds reported by directory enumeration.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `directory_entry_kind_file` | `1` |  |
+| `directory_entry_kind_directory` | `2` |  |
+| `directory_entry_kind_symlink` | `3` |  |
+| `directory_entry_kind_other` | `4` |  |
+
+### `filesystem_limits` (constants)
+
+Path, directory-page, transfer and root-switch bounds.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `directory_entry_page_capacity` | `4` |  |
+| `directory_entry_name_max_bytes` | `255` |  |
+| `directory_max_path_bytes` | `4096` |  |
+| `file_max_read_bytes` | `2097152` |  |
+| `filesystem_switch_root_max_moves` | `16` |  |
+
+### `device_profile` (enum)
+
+Physical-device assignment profiles.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `device_profile_virtio_mmio_scsi` | `1` |  |
+| `device_profile_userspace` | `2` |  |
+| `device_profile_virtio_mmio_net` | `3` |  |
+| `device_profile_pci_function` | `4` |  |
+
+### `device_identity` (enum)
+
+Selectors for device identity matching.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `device_identity_compatible` | `1` |  |
+| `device_identity_fdt_path` | `2` |  |
+| `device_identity_pci_id` | `3` |  |
+
+### `device_firmware_field` (enum)
+
+Fields exposed by firmware inspection.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `device_firmware_field_info` | `0` |  |
+| `device_firmware_field_path` | `1` |  |
+| `device_firmware_field_compatible` | `2` |  |
+| `device_firmware_field_registers` | `3` |  |
+| `device_firmware_field_property` | `4` |  |
+| `device_firmware_field_property_names` | `5` |  |
+
+### `device_resource_ids` (constants)
+
+PCI resource identifiers; BAR0 is the base of the BAR index range.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `device_resource_pci_ecam` | `256` |  |
+| `device_resource_pci_msi` | `257` |  |
+| `device_resource_pci_bar0` | `512` | Add the zero-based BAR index to identify a PCI BAR resource. |
+| `device_resource_pci_intx` | `258` |  |
+
+### `device_resource_flags` (flags)
+
+PCI resource attributes.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `device_resource_memory_64` | `1` |  |
+| `device_resource_prefetchable` | `2` |  |
+
+### `device_limits` (constants)
+
+Device discovery, assignment and PCI aperture bounds.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `device_firmware_max_bytes` | `65536` |  |
+| `device_firmware_name_max_bytes` | `128` |  |
+| `device_bundle_max_entries` | `8` |  |
+| `device_pci_aperture_size` | `8388608` |  |
+| `device_assignment_max_devices` | `4` |  |
+
+### `dma_fault_source` (enum)
+
+DMA isolation mechanisms reporting a fault.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `dma_fault_source_smmuv3` | `1` |  |
+
+### `dma_fault_scope` (enum)
+
+Scope of a DMA fault report.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `dma_fault_scope_stream` | `1` |  |
+| `dma_fault_scope_controller` | `2` |  |
+
+### `dma_fault_flags` (flags)
+
+Valid-address and access-direction flags in DMA fault reports.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `dma_fault_address_valid` | `1` | The reported address is meaningful; a controller-wide report may omit it. |
+| `dma_fault_read` | `2` |  |
+| `dma_fault_write` | `4` |  |
+
+### `native_block_layout` (constants)
+
+Shared-memory geometry and transfer bounds for the Native block initiator.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `native_block_transfer_bytes` | `524288` |  |
+| `native_block_batch_max` | `4` |  |
+| `native_block_batch_record_bytes` | `16` |  |
+| `native_block_transfer_frame_bytes` | `524352` |  |
+| `native_block_memory_bytes` | `1048576` |  |
+| `native_block_queue_count` | `6` |  |
+| `native_block_queue_size` | `8` |  |
+| `native_block_queue_stride` | `4096` |  |
+| `native_block_available_offset` | `256` |  |
+| `native_block_used_offset` | `512` |  |
+
+### `guest_notification` (enum)
+
+Guest notification control operations.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `guest_notification_disable` | `0` |  |
+| `guest_notification_enable` | `1` |  |
+| `guest_notification_raise_config` | `2` |  |
+| `guest_notification_disconnect` | `3` |  |
+
+### `io_transport_limits` (constants)
+
+I/O client, mailbox and guest alias-window bounds.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `io_max_clients` | `9` |  |
+| `guest_mailbox_max_message_bytes` | `256` |  |
+| `guest_dynamic_alias_offset` | `68719476736` |  |
+| `guest_dynamic_physical_limit` | `274877906944` |  |
+
+### `virtual_machine_architecture` (enum)
+
+Architecture identifiers for guest construction.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `virtual_machine_architecture_aarch64` | `1` |  |
+| `virtual_machine_architecture_riscv64` | `2` |  |
+| `virtual_machine_architecture_x86_64` | `3` |  |
+
+### `virtual_machine_power` (enum)
+
+Guest power-management requests.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `virtual_machine_power_cpu_on` | `1` |  |
+| `virtual_machine_power_cpu_off` | `2` |  |
+| `virtual_machine_power_system_off` | `3` |  |
+| `virtual_machine_power_system_reset` | `4` |  |
+
+### `virtual_machine_phase` (enum)
+
+Installed guest lifecycle phases.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `virtual_machine_phase_installed` | `1` |  |
+| `virtual_machine_phase_running` | `2` |  |
+| `virtual_machine_phase_stopping` | `3` |  |
+| `virtual_machine_phase_stopped` | `4` |  |
+
+### `virtual_cpu_phase` (enum)
+
+Virtual CPU lifecycle phases.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `virtual_cpu_phase_dormant` | `1` |  |
+| `virtual_cpu_phase_started` | `2` |  |
+| `virtual_cpu_phase_stopped` | `3` |  |
+
+### `virtual_cpu_terminal` (enum)
+
+Virtual CPU termination reasons.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `virtual_cpu_terminal_none` | `0` |  |
+| `virtual_cpu_terminal_memory_fault` | `1` |  |
+| `virtual_cpu_terminal_mmio` | `2` |  |
+| `virtual_cpu_terminal_synchronous` | `3` |  |
+| `virtual_cpu_terminal_administrative` | `4` |  |
+
+### `virtual_cpu_sentinels` (constants)
+
+Sentinel for an unknown host CPU assignment.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `vcpu_host_cpu_unknown` | `4294967295` | No host CPU assignment is available; do not treat this as a CPU index. |
+
+### `virtual_platform` (enum)
+
+Reference platform identifiers.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `virtual_platform_aarch64_reference` | `1` |  |
+| `virtual_platform_riscv64_reference` | `2` |  |
+
+### `virtual_platform_aarch64_layout` (constants)
+
+Immutable `AArch64` reference platform geometry shared by kernel and userspace.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `virtual_platform_aarch64_reference_max_vcpus` | `8` |  |
+| `virtual_platform_aarch64_reference_guest_ram_base` | `1073741824` |  |
+| `virtual_platform_aarch64_reference_dtb_offset` | `65536` |  |
+| `virtual_platform_aarch64_reference_gic_distributor_base` | `134217728` |  |
+| `virtual_platform_aarch64_reference_gic_distributor_size` | `65536` |  |
+| `virtual_platform_aarch64_reference_gic_redistributor_base` | `134873088` |  |
+| `virtual_platform_aarch64_reference_gic_redistributor_size` | `131072` |  |
+| `virtual_platform_aarch64_reference_gicv2_distributor_size` | `4096` |  |
+| `virtual_platform_aarch64_reference_gicv2_cpu_base` | `134283264` |  |
+| `virtual_platform_aarch64_reference_gicv2_cpu_size` | `8192` |  |
+| `virtual_platform_aarch64_reference_uart_base` | `150994944` |  |
+| `virtual_platform_aarch64_reference_user_mmio_base` | `167772160` |  |
+| `virtual_platform_aarch64_reference_user_mmio_size` | `16777216` |  |
+| `virtual_platform_aarch64_reference_uart_size` | `4096` |  |
+| `virtual_platform_aarch64_reference_uart_baud` | `115200` |  |
+| `virtual_platform_aarch64_reference_uart_interrupt` | `33` |  |
+| `virtual_platform_aarch64_reference_timer_interrupt` | `27` |  |
+| `virtual_platform_aarch64_reference_interrupt_count` | `256` |  |
+| `virtual_platform_aarch64_reference_device_interrupt_base` | `40` |  |
+
+### `virtual_platform_riscv64_layout` (constants)
+
+Immutable RISC-V reference platform geometry shared by kernel and userspace.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `virtual_platform_riscv64_reference_guest_ram_base` | `2147483648` |  |
+| `virtual_platform_riscv64_reference_dtb_offset` | `65536` |  |
+| `virtual_platform_riscv64_reference_uart_base` | `268435456` |  |
+| `virtual_platform_riscv64_reference_uart_size` | `4096` |  |
+| `virtual_platform_riscv64_reference_uart_interrupt` | `10` |  |
+| `virtual_platform_riscv64_reference_uart_clock_frequency` | `3686400` |  |
+| `virtual_platform_riscv64_reference_plic_base` | `201326592` |  |
+| `virtual_platform_riscv64_reference_plic_size` | `4194304` |  |
+| `virtual_platform_riscv64_reference_plic_num_sources` | `31` |  |
+| `virtual_platform_riscv64_reference_plic_supervisor_context` | `1` |  |
+
+### `riscv_isa` (flags)
+
+RISC-V ISA extensions accepted in guest configuration.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `riscv_isa_i` | `1` |  |
+| `riscv_isa_m` | `2` |  |
+| `riscv_isa_a` | `4` |  |
+| `riscv_isa_f` | `8` |  |
+| `riscv_isa_d` | `16` |  |
+| `riscv_isa_c` | `32` |  |
+| `riscv_isa_zicsr` | `64` |  |
+| `riscv_isa_zifencei` | `128` |  |
+| `riscv_isa_sstc` | `256` |  |
 
 ## Semantic rules
 
@@ -385,7 +750,7 @@ ABI revision: `0`.
 - system_config queries a public scalar system property by u64 key. PAGE_SIZE (1) returns the Native mapping granule in bytes, immutable for the lifetime of a process. Unknown keys return NOT_SUPPORTED. Unused argument registers must be zero. Success returns the value in value0 and zero in value1. This query requires no inspector capability and does not expose privileged observations.
 - vmar_allocate(parent, address, size, options) uses address as the low end. Options zero treats nonzero address as a hint, choosing the nearest fitting free interval with lower-base tie breaking; address zero selects the lowest free interval. VMAR_ALLOCATE_EXACT requires the exact address, including zero. Unknown flags are invalid. Size is nonzero, addresses and size page aligned, and intervals must not overflow. Success returns child in value0 and actual base in value1. Selection and reservation commit atomically within parent authority. No fitting free interval returns NO_MEMORY.
 - system_config key SYSTEM_CONFIG_APPLICATION_ADDRESS_LIMIT returns the HAL application-exclusive address limit in value0 and zero in value1. It describes profile geometry, not VMAR authority. The kernel grants ROOT_VMAR from one page to that limit.
-- Every Native process enters a caller-selected loader. Process-builder create derives the executable File into the child using explicit READ|EXECUTE|PROTECT|DUPLICATE|TRANSFER authority, and borrows the loader with READ|EXECUTE. The target is not frozen by builder creation. The kernel takes only a temporary stable loader image while preparing its restricted bootstrap mappings. Seal validates and maps only the loader's restricted Native ET_DYN bootstrap image and an empty guarded stack; the first argument register holds a ByteChannel handle. Only initial boot selects a loader by pathname: /lib/userspace-loader-hyper-<architecture> launches /init from the ramdisk root. The queued message contains loader_startup, handle_count startup_handle records, then data_size opaque bytes. size is 96; flags permits only loader_startup_reply. execution_context, object_factory and system_info are process-installed capabilities for current execution, local object allocation and public system queries. Executable is an ordinary File with READ|EXECUTE|PROTECT. The user loader acquires content protection before querying size or parsing ELF. root_vmar and stack_vmar identify child-owned mapping authority; stack_base and stack_size describe mapped usable stack bytes with an unmapped guard at each end. loader_base and loader_size describe the loader mappings. Library directories are ordinary explicitly supplied startup capabilities; the kernel neither selects nor opens them. No argv, environment, auxv, application ELF parsing or relocation belongs to this kernel entry contract. The selected runtime owns bootstrap-handle closure and mapping retirement. Closing a VMAR handle alone does not unmap or destroy its reservation.
+- Every Native process enters a caller-selected loader. Process-builder create derives the executable File into the child using explicit READ|EXECUTE|PROTECT|DUPLICATE|TRANSFER authority, and borrows the loader with READ|EXECUTE. The target is not frozen by builder creation. The kernel takes only a temporary stable loader image while preparing its restricted bootstrap mappings. Seal validates and maps only the loader's restricted Native ET_DYN bootstrap image and an empty guarded stack; the first argument register holds a ByteChannel handle. Only initial boot selects a loader by pathname: /lib/userspace-loader-hyper-&lt;architecture&gt; launches /init from the ramdisk root. The queued message contains loader_startup, handle_count startup_handle records, then data_size opaque bytes. size is 96; flags permits only loader_startup_reply. execution_context, object_factory and system_info are process-installed capabilities for current execution, local object allocation and public system queries. Executable is an ordinary File with READ|EXECUTE|PROTECT. The user loader acquires content protection before querying size or parsing ELF. root_vmar and stack_vmar identify child-owned mapping authority; stack_base and stack_size describe mapped usable stack bytes with an unmapped guard at each end. loader_base and loader_size describe the loader mappings. Library directories are ordinary explicitly supplied startup capabilities; the kernel neither selects nor opens them. No argv, environment, auxv, application ELF parsing or relocation belongs to this kernel entry contract. The selected runtime owns bootstrap-handle closure and mapping retirement. Closing a VMAR handle alone does not unmap or destroy its reservation.
 - Virtual CPU set_affinity borrows a VirtualCpu with WRITE and accepts the same nonempty little-endian u64 CPU-mask word array as process-builder affinity. Bits above the kernel CPU limit are rejected; the mask must contain a schedulable CPU. The affinity update retains the current assignment when allowed; otherwise the scheduler selects an allowed registered CPU and safely migrates the saved context. Automatic Fair balancing may later move a Ready vCPU within this allowed set; a singleton mask prevents automatic movement. OK means the update or required handoff was accepted; migration may complete before or after return. An overlapping incompatible handoff or CPU-local wait returns busy. VM stop or guest power operations may supersede the request. Stopping, detached, and reaped endpoints reject new affinity updates. VirtualCpu info extends its 24-byte prefix with host_cpu and migration_target at offsets 24 and 28, one scheduler placement observation rather than running state or a completion token. Value 0xffffffff means unavailable assignment or no pending migration; older kernels return only the original prefix.
 - Guest mapping creation borrows backend VirtualMachine WRITE and GuestMemory MAP, populates the full stable grant, and returns an owned mapping handle plus a backend-VM-local non-reused token. The backend IPA envelope must contain all sparse aliases: alias = 64 GiB + host physical address, with host addresses below 256 GiB. Unadmitted envelope holes have no RAM or page bitmap entries. The kernel constructs immutable frontend-ordered, coalesced physical extents; neither Native policy nor Linux may replace their addresses. Backend notification write64 0x28 admits one token exactly once to that unique notification route; read64 0x30/0x38/0x40/0x48 return frontend base, total bytes, status, extent count. Write64 0x50 selects an extent index; read64 0x58/0x60/0x68/0x70 return alias, frontend-relative offset, byte length, and query status. Rejection clears the old reply. Extents cover the entire frontend range without holes or overlapping physical pages. After draining vhost and releasing all page pins, only that backend route may write64 the token at 0x20 to certify quiescence. Mapping release accepts never-admitted or quiescent tokens, withdraws lookup, clears leaves, waits for every CPU translation acknowledgement and, for an IOMMU-bound backend, completed DMA invalidation, then releases backing. Closing a mapping handle alone quarantines its pages until backend VM retirement. Notification control operation 3 permanently disconnects both routes, only when no admitted mapping remains; a disconnected route never affects an address or IRQ reused by a subsequent connection.
 - Native block creation dedicates one fully resident 1048576-byte guest-memory grant permanently to one kernel virtio-scsi initiator; repeated creation from that grant fails. The backend VM must retain the matching mapping until execution and physical DMA are quiescent. Six standard split queues (control, event, and four request queues) have size 8, descriptor offsets n*4096, available offsets n*4096+256, and used offsets n*4096+512, relative to guest_base. Userspace negotiates VERSION_1 with the backend before activation. Activation enables notifications and issues READ CAPACITY(16), accepting only 512-byte sectors; capacity is never supplied by userspace. The block capability remains the data-plane owner across filesystem worker handoff; a clean unmount returns the same activated object rather than creating or activating a replacement. Reads use bounded batches across the four request queues; writes and flushes remain ordered. Requests use shared queues and blocking kernel notifications, not per-request userspace RPC. Unretired request failures permanently disconnect the initiator and never recycle its buffer. PEER_CLOSED reports disconnection. The physical pages remain retained by backend mappings until VM/DMA retirement; notification closure alone never proves DMA quiescence.
@@ -444,7 +809,7 @@ ABI revision: `0`.
 - guest_memory_transfer copies 1..4096 bytes within a GuestMemory grant; operation 0 requires READ and copies into the caller, operation 1 requires WRITE and copies from the caller. The grant retains hardware-owned backing independently of any VMO handle or VM lifetime. The original VMO still forbids direct writes, snapshots and writable Native mappings. Payload copies are not snapshots or atomic word operations; a failed write may have partial effects. Native payload operations serialize without blocking on one another (busy if occupied), and dedication to a NativeBlock initiator permanently rejects these operations even through retained grants.
 - guest_memory_scalar uses the same READ/WRITE authority and dedication exclusion: operation 0 acquire-loads an aligned 1/2/4/8-byte word (value must be zero), operation 1 release-stores a width-fitting word and executes a full memory fence before return. Offset and width must fit the grant. The store fence orders queue publication before a later suppression-flags read on weakly ordered CPUs. No pointer or mapping is exported; unsupported widths and overflow are rejected.
 - guest_interrupt_create borrows VirtualMachine WRITE and exclusively reserves an AArch64 device interrupt line, excluding built-in and physically assigned interrupts and all existing notification sources. It returns a GuestInterrupt with WRITE, TRANSFER and INSPECT. Creation is allowed while installed or running, serialized with VM stop. guest_interrupt_set_level accepts only 0 or 1 and fails once the VM begins retirement or the source closes. Closing the final active handle deasserts the line; its reservation persists until VM retirement. The source implements no UART, PCI or virtio device policy.
-- guest_notification_access requires frontend VirtualMachine WRITE and addresses an existing connection by original_base. Operation 0 reads pending interrupt status without acknowledgement, 1 reads and acknowledges that status atomically, and 2 submits a queue-index notification (value < 32). For operations 0 and 1 value must be zero; unknown operations are rejected. It shares the direct MMIO source state and serialization. PCI bus-master disable suppresses notifications; PCI memory-decode disable does not suppress this explicit transport fallback. Closure rejects accesses. No backend identity, control operation, DMA lease or epoch can be changed through this call.
+- guest_notification_access requires frontend VirtualMachine WRITE and addresses an existing connection by original_base. Operation 0 reads pending interrupt status without acknowledgement, 1 reads and acknowledges that status atomically, and 2 submits a queue-index notification (value &lt; 32). For operations 0 and 1 value must be zero; unknown operations are rejected. It shares the direct MMIO source state and serialization. PCI bus-master disable suppresses notifications; PCI memory-decode disable does not suppress this explicit transport fallback. Closure rejects accesses. No backend identity, control operation, DMA lease or epoch can be changed through this call.
 - guest_notification_configure requires frontend VirtualMachine WRITE. original_base identifies an existing connection by its creation address; base is a page-aligned 4 KiB window wholly contained in an installed userspace MMIO reservation and, while decoding is enabled, may not overlap another enabled I/O route. Flags 0 select the original virtio-MMIO register layout; bit 0 selects modern virtio-PCI, bit 1 enables memory decoding, bit 2 masks INTx, and bit 3 enables queue notifications (bus master). Unknown flags or PCI flags without bit 0 are rejected. PCI uses a 16-bit queue-index write at BAR+0x50 and a read-to-clear 8-bit ISR at BAR+0x60. Relocation, decode, and IRQ-mask changes serialize with source state and VM retirement. The operation cannot change the admitted backend, IRQs, DMA ownership, or epoch; disabling decode is not proof of backend quiescence.
 
 ## Invocations
@@ -453,240 +818,4344 @@ Auxiliary result registers are defined only for `ok` unless a result is annotate
 `also-on=<status>`. Element-count memory ranges are checked as count times the declared
 element size before any user-memory access.
 
-| Receiver | Operation | Name | Arguments | Results | Capability effects | User memory | Execution | Audit |
-| --- | ---: | --- | --- | --- | --- | --- | --- | --- |
-| `receiver: Borrow, kind=system_info, rights=0x10` | 256 | `abi_query` | — | `revision: u64`, `features: u64` | `receiver: Borrow, kind=system_info, rights=0x10` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Abi` |
-| `handle: ConsumeOnCommit, any, rights=0x0` | 0 | `handle_close` | — | — | `handle: ConsumeOnCommit, any, rights=0x0` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `source: Borrow, any, rights=0x1` | 1 | `handle_duplicate` | `requested_rights: rights` | `handle: handle` | `source: Borrow, any, rights=0x1`, `handle: produce, same-as(source), subset-from(requested_rights)` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `source: ConsumeOnCommit, any, rights=0x0` | 2 | `handle_replace` | `requested_rights: rights` | `handle: handle` | `source: ConsumeOnCommit, any, rights=0x0`, `handle: produce, same-as(source), subset-from(requested_rights)` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `handle: Borrow, any, rights=0x0` | 3 | `handle_get_info` | `output: user_address`, `output_size: byte_count` | `supported_size: byte_count` | `handle: Borrow, any, rights=0x0` | `output: Write, len=output_size bytes, max-bytes=4096, record=handle_info; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `handle: Borrow, any, rights=0x8` | 4 | `object_get_basic_info` | `output: user_address`, `output_size: byte_count` | `supported_size: byte_count` | `handle: Borrow, any, rights=0x8` | `output: Write, len=output_size bytes, max-bytes=4096, record=object_basic_info; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Object` |
-| `receiver: Borrow, kind=execution_context, rights=0x20` | 256 | `thread_yield` | — | — | `receiver: Borrow, kind=execution_context, rights=0x20` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `receiver: Borrow, kind=execution_context, rights=0x800` | 257 | `thread_exit` | `status: i64` | — | `receiver: Borrow, kind=execution_context, rights=0x800` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=NoReturn, flags=None` | `Task` |
-| `receiver: Borrow, kind=execution_context, rights=0x800` | 258 | `process_exit` | `status: i64` | — | `receiver: Borrow, kind=execution_context, rights=0x800` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=NoReturn, flags=None` | `Task` |
-| `receiver: Borrow, kind=object_factory, rights=0x8000000000` | 256 | `event_create` | `options: u32` | `handle: handle` | `receiver: Borrow, kind=object_factory, rights=0x8000000000`, `handle: produce, kind=event, fixed=0x8000f` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Object` |
-| `event: Borrow, kind=event, rights=0x80000` | 256 | `event_signal` | `clear_mask: u64`, `set_mask: u64` | — | `event: Borrow, kind=event, rights=0x80000` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Object` |
-| `object: Borrow, any, rights=0x4` | 5 | `object_wait_one` | `signals: u64`, `deadline: u64` | `observed: u64` | `object: Borrow, any, rights=0x4` | — | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` | `Object` |
-| `receiver: Borrow, kind=object_factory, rights=0x8000000000` | 257 | `byte_channel_create` | `options: u32` | `endpoint0: handle`, `endpoint1: handle` | `receiver: Borrow, kind=object_factory, rights=0x8000000000`, `endpoint0: produce, kind=byte_channel, fixed=0x3f`, `endpoint1: produce, kind=byte_channel, fixed=0x3f` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Object` |
-| `endpoint: Borrow, kind=byte_channel, rights=0x20` | 256 | `byte_channel_write` | `options: u32`, `bytes: user_address`, `byte_count: byte_count` | — | `endpoint: Borrow, kind=byte_channel, rights=0x20` | `bytes: Read, len=byte_count bytes, max-bytes=65536; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `endpoint: Borrow, kind=byte_channel, rights=0x10` | 257 | `byte_channel_read` | `options: u32`, `bytes: user_address`, `byte_capacity: byte_count` | `actual_bytes: byte_count; also-on=buffer_too_small` | `endpoint: Borrow, kind=byte_channel, rights=0x10` | `bytes: Write, len=byte_capacity bytes, max-bytes=65536; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `console: Borrow, kind=console, rights=0x10` | 256 | `console_read` | `options: u32`, `bytes: user_address`, `byte_capacity: byte_count` | `actual_bytes: byte_count; also-on=would_block` | `console: Borrow, kind=console, rights=0x10` | `bytes: Write, len=byte_capacity bytes, max-bytes=4096; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `console: Borrow, kind=console, rights=0x20` | 257 | `console_write` | `options: u32`, `bytes: user_address`, `byte_count: byte_count` | `actual_bytes: byte_count; also-on=would_block` | `console: Borrow, kind=console, rights=0x20` | `bytes: Read, len=byte_count bytes, max-bytes=4096; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `directory: Borrow, kind=directory, rights=0x10` | 256 | `directory_open_file` | `path: user_address`, `path_size: byte_count`, `requested_rights: rights`, `options: u32` | `file: handle` | `directory: Borrow, kind=directory, rights=0x10`, `file: produce, kind=file, exact-from(requested_rights), allowed=0x9800000bb, required-from=directory` | `path: Read, len=path_size bytes, max-bytes=4096; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `file: Borrow, kind=file, rights=0x10` | 256 | `file_read_at` | `options: u32`, `offset: u64`, `output: user_address`, `output_capacity: byte_count` | `actual_bytes: byte_count`, `file_size: byte_count` | `file: Borrow, kind=file, rights=0x10` | `output: Write, len=output_capacity bytes, max-bytes=2097152; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `receiver: Borrow, kind=object_factory, rights=0x8000000000` | 258 | `capability_channel_create` | `options: u32` | `endpoint0: handle`, `endpoint1: handle` | `receiver: Borrow, kind=object_factory, rights=0x8000000000`, `endpoint0: produce, kind=capability_channel, fixed=0x3f`, `endpoint1: produce, kind=capability_channel, fixed=0x3f` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Object` |
-| `endpoint: Borrow, kind=capability_channel, rights=0x20` | 256 | `capability_channel_try_send` | `options: u32`, `bytes: user_address`, `byte_count: byte_count`, `dispositions: user_address`, `disposition_count: element_count` | — | `endpoint: Borrow, kind=capability_channel, rights=0x20` | `bytes: Read, len=byte_count bytes, max-bytes=4096; order=0`, `dispositions: Read, len=disposition_count elements, max-elements=16, element-size=24, record=capability_disposition, transactional-handles=(handle, rights, expected_kind, operation), common-rights=0x2, operations=[move=0:ConsumeOnCommit/rights=0x2+duplicate=1:Borrow/rights=0x3], commit=AtomicOnOk; order=1` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `endpoint: Borrow, kind=capability_channel, rights=0x10` | 257 | `capability_channel_receive` | `deadline: u64`, `bytes: user_address`, `byte_capacity: byte_count`, `capability_slots: user_address`, `slot_count: element_count` | `actual_bytes: byte_count; also-on=buffer_too_small`, `actual_capabilities: element_count; also-on=buffer_too_small` | `endpoint: Borrow, kind=capability_channel, rights=0x10` | `bytes: Write, len=byte_capacity bytes, max-bytes=4096; order=0`, `capability_slots: ReadWrite, len=slot_count elements, max-elements=16, element-size=24, record=capability_receive_slot, typed-receive-slots=(handle, rights, expected_kind, flags), produce-transferred-handles, commit=AtomicOnOk; order=1` | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `factory: Borrow, kind=task_factory, rights=0x100000` | 256 | `process_builder_create` | `group: handle`, `domain: handle`, `executable: handle`, `loader: handle` | `builder: handle` | `factory: Borrow, kind=task_factory, rights=0x100000`, `group: Borrow, kind=task_group, rights=0x4000000`, `domain: Borrow, kind=resource_domain, rights=0x8000000`, `executable: Borrow, kind=file, rights=0x800000093`, `loader: Borrow, kind=file, rights=0x90`, `builder: produce, kind=process_builder, fixed=0xc2a, inherited-from(factory), mask=0x3000000000` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `builder: Borrow, kind=process_builder, rights=0x20` | 256 | `process_builder_set_name` | `name: user_address`, `name_size: byte_count` | — | `builder: Borrow, kind=process_builder, rights=0x20` | `name: Read, len=name_size bytes, max-bytes=64; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `builder: Borrow, kind=process_builder, rights=0x20` | 257 | `process_builder_set_data` | `data: user_address`, `data_size: byte_count` | — | `builder: Borrow, kind=process_builder, rights=0x20` | `data: Read, len=data_size bytes, max-bytes=16384; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `builder: Borrow, kind=process_builder, rights=0x20` | 258 | `process_builder_set_affinity` | `affinity_words: user_address`, `word_count: element_count` | — | `builder: Borrow, kind=process_builder, rights=0x20` | `affinity_words: Read, len=word_count elements, max-elements=4, element-size=8; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `builder: Borrow, kind=process_builder, rights=0x20` | 259 | `process_builder_add_handle` | `source: handle`, `purpose: u32`, `expected_kind: u32`, `rights: rights`, `operation: u32` | — | `builder: Borrow, kind=process_builder, rights=0x20`, `source: ByOperation(operation: move=0:ConsumeOnCommit/rights=0x2+duplicate=1:Borrow/rights=0x3), any, common-rights=0x2` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `builder: Borrow, kind=process_builder, rights=0x20` | 260 | `process_builder_seal` | — | — | `builder: Borrow, kind=process_builder, rights=0x20` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `builder: ConsumeOnCommit, kind=process_builder, rights=0x400` | 261 | `process_builder_start` | — | `process: handle`, `startup_channel: handle` | `builder: ConsumeOnCommit, kind=process_builder, rights=0x400`, `process: produce, kind=process, fixed=0x80e`, `startup_channel: produce, kind=byte_channel, fixed=0x14` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `builder: ConsumeOnCommit, kind=process_builder, rights=0x800` | 262 | `process_builder_abort` | — | — | `builder: ConsumeOnCommit, kind=process_builder, rights=0x800` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `process: Borrow, kind=process, rights=0x800` | 256 | `process_request_stop` | — | — | `process: Borrow, kind=process, rights=0x800` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `receiver: Borrow, kind=execution_context, rights=0x20` | 259 | `object_wait_many` | `items: user_address`, `item_count: element_count`, `deadline: u64` | `index: element_count`, `observed: u64` | `receiver: Borrow, kind=execution_context, rights=0x20` | `items: Read, len=item_count elements, max-elements=64, element-size=16, record=object_wait_item, borrowed-handles=(handle), required-rights=0x4; order=0` | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` | `Object` |
-| `process: Borrow, kind=process, rights=0x8` | 257 | `process_get_info` | `info: user_address`, `info_size: byte_count` | `supported_size: byte_count` | `process: Borrow, kind=process, rights=0x8` | `info: Write, len=info_size bytes, max-bytes=4096, record=process_info; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `inspector: Borrow, kind=task_inspector, rights=0x8` | 256 | `task_inspector_scan_processes` | `cursor: u64`, `records: user_address`, `capacity: element_count` | `count: element_count`, `next_cursor: u64` | `inspector: Borrow, kind=task_inspector, rights=0x8` | `records: Write, len=capacity elements, max-elements=8, element-size=96, record=task_process; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `inspector: Borrow, kind=task_inspector, rights=0x8` | 257 | `task_inspector_scan_threads` | `cursor: u64`, `records: user_address`, `capacity: element_count` | `count: element_count`, `next_cursor: u64` | `inspector: Borrow, kind=task_inspector, rights=0x8` | `records: Write, len=capacity elements, max-elements=8, element-size=104, record=task_thread; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `inspector: Borrow, kind=task_inspector, rights=0x1000000b` | 258 | `task_inspector_derive_process` | `process: handle` | `inspector: handle` | `inspector: Borrow, kind=task_inspector, rights=0x1000000b`, `process: Borrow, kind=process, rights=0x8`, `inspector: produce, kind=task_inspector, fixed=0x1000000b` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `inspector: Borrow, kind=object_inspector, rights=0x8` | 256 | `object_inspector_scan_objects` | `cursor: u64`, `records: user_address`, `capacity: element_count` | `count: element_count`, `next_cursor: u64` | `inspector: Borrow, kind=object_inspector, rights=0x8` | `records: Write, len=capacity elements, max-elements=8, element-size=104, record=object_inspection; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Object` |
-| `inspector: Borrow, kind=object_inspector, rights=0x8` | 257 | `object_inspector_scan_handles` | `process_koid: u64`, `cursor: u64`, `records: user_address`, `capacity: element_count` | `count: element_count`, `next_cursor: u64` | `inspector: Borrow, kind=object_inspector, rights=0x8` | `records: Write, len=capacity elements, max-elements=8, element-size=40, record=handle_inspection; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Object` |
-| `inspector: Borrow, kind=object_inspector, rights=0x1000000b` | 258 | `object_inspector_derive_process` | `process: handle` | `inspector: handle` | `inspector: Borrow, kind=object_inspector, rights=0x1000000b`, `process: Borrow, kind=process, rights=0x8`, `inspector: produce, kind=object_inspector, fixed=0x1000000b` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Object` |
-| `inspector: Borrow, kind=task_inspector, rights=0x1000000b` | 259 | `task_inspector_derive_task_group` | `task_group: handle` | `inspector: handle` | `inspector: Borrow, kind=task_inspector, rights=0x1000000b`, `task_group: Borrow, kind=task_group, rights=0x8`, `inspector: produce, kind=task_inspector, fixed=0x1000000b` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `inspector: Borrow, kind=object_inspector, rights=0x1000000b` | 259 | `object_inspector_derive_task_group` | `task_group: handle` | `inspector: handle` | `inspector: Borrow, kind=object_inspector, rights=0x1000000b`, `task_group: Borrow, kind=task_group, rights=0x8`, `inspector: produce, kind=object_inspector, fixed=0x1000000b` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Object` |
-| `inspector: Borrow, kind=task_inspector, rights=0x1000000b` | 260 | `task_inspector_derive_resource_domain` | `resource_domain: handle` | `inspector: handle` | `inspector: Borrow, kind=task_inspector, rights=0x1000000b`, `resource_domain: Borrow, kind=resource_domain, rights=0x8`, `inspector: produce, kind=task_inspector, fixed=0x1000000b` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `inspector: Borrow, kind=object_inspector, rights=0x1000000b` | 260 | `object_inspector_derive_resource_domain` | `resource_domain: handle` | `inspector: handle` | `inspector: Borrow, kind=object_inspector, rights=0x1000000b`, `resource_domain: Borrow, kind=resource_domain, rights=0x8`, `inspector: produce, kind=object_inspector, fixed=0x1000000b` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Object` |
-| `directory: Borrow, kind=directory, rights=0x10` | 257 | `directory_open_directory` | `path: user_address`, `path_size: byte_count`, `requested_rights: rights`, `options: u32` | `child: handle` | `directory: Borrow, kind=directory, rights=0x10`, `child: produce, kind=directory, exact-from(requested_rights), allowed=0x9800000bb, required-from=directory` | `path: Read, len=path_size bytes, max-bytes=4096; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `receiver: Borrow, kind=object_factory, rights=0x8000000000` | 259 | `vmo_create` | `size: byte_count` | `vmo: handle` | `receiver: Borrow, kind=object_factory, rights=0x8000000000`, `vmo: produce, kind=vmo, fixed=0x7b` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Object` |
-| `vmo: Borrow, kind=vmo, rights=0x10` | 256 | `vmo_read` | `offset: u64`, `bytes: user_address`, `byte_count: byte_count` | — | `vmo: Borrow, kind=vmo, rights=0x10` | `bytes: Write, len=byte_count bytes, max-bytes=65536; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `vmo: Borrow, kind=vmo, rights=0x20` | 257 | `vmo_write` | `offset: u64`, `bytes: user_address`, `byte_count: byte_count` | — | `vmo: Borrow, kind=vmo, rights=0x20` | `bytes: Read, len=byte_count bytes, max-bytes=65536; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `vmar: Borrow, kind=vmar, rights=0x40` | 256 | `vmar_allocate` | `address: u64`, `size: byte_count`, `options: u64` | `child: handle`, `address: u64` | `vmar: Borrow, kind=vmar, rights=0x40`, `child: produce, kind=vmar, fixed=0x4b, inherited-from(vmar), mask=0x1000000000` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `vmar: Borrow, kind=vmar, rights=0x40` | 257 | `vmar_map` | `vmo: handle`, `vmo_offset: u64`, `address: u64`, `size: byte_count`, `permissions: u32` | — | `vmar: Borrow, kind=vmar, rights=0x40`, `vmo: Borrow, kind=vmo, rights=0x40` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `vmar: Borrow, kind=vmar, rights=0x40` | 258 | `vmar_protect` | `address: u64`, `size: byte_count`, `permissions: u32` | — | `vmar: Borrow, kind=vmar, rights=0x40` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `vmar: Borrow, kind=vmar, rights=0x40` | 259 | `vmar_unmap` | `address: u64`, `size: byte_count` | — | `vmar: Borrow, kind=vmar, rights=0x40` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `vmar: ConsumeOnCommit, kind=vmar, rights=0x40` | 260 | `vmar_destroy` | — | — | `vmar: ConsumeOnCommit, kind=vmar, rights=0x40` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `stream: Borrow, kind=directory_stream, rights=0x10` | 256 | `directory_read` | `cookie: u64`, `records: user_address`, `capacity: element_count`, `options: u32` | `count: element_count`, `next_cookie: u64` | `stream: Borrow, kind=directory_stream, rights=0x10` | `records: Write, len=capacity elements, max-elements=4, element-size=280, record=directory_entry; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `inspector: Borrow, kind=memory_inspector, rights=0x8` | 256 | `memory_inspector_read` | `observation: user_address`, `observation_size: byte_count` | `supported_size: byte_count` | `inspector: Borrow, kind=memory_inspector, rights=0x8` | `observation: Write, len=observation_size bytes, max-bytes=4096, record=memory_observation; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Object` |
-| `inspector: Borrow, kind=cpu_inspector, rights=0x8` | 256 | `cpu_inspector_read` | `observation: user_address`, `observation_size: byte_count` | `supported_size: byte_count` | `inspector: Borrow, kind=cpu_inspector, rights=0x8` | `observation: Write, len=observation_size bytes, max-bytes=4096, record=cpu_observation; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Object` |
-| `file: Borrow, kind=file, rights=0x8` | 257 | `file_get_info` | `output: user_address`, `output_size: byte_count` | `supported_size: byte_count` | `file: Borrow, kind=file, rights=0x8` | `output: Write, len=output_size bytes, max-bytes=4096, record=file_info; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Object` |
-| `directory: Borrow, kind=directory, rights=0x8` | 258 | `directory_get_info` | `output: user_address`, `output_size: byte_count` | `supported_size: byte_count` | `directory: Borrow, kind=directory, rights=0x8` | `output: Write, len=output_size bytes, max-bytes=4096, record=directory_info; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Object` |
-| `authority: Borrow, kind=virtual_machine_creation_authority, rights=0x30000000` | 256 | `virtual_machine_creation_lease_create` | `resource_domain: handle` | `lease: handle` | `authority: Borrow, kind=virtual_machine_creation_authority, rights=0x30000000`, `resource_domain: Borrow, kind=resource_domain, rights=0x8000000`, `lease: produce, kind=virtual_machine_creation_lease, fixed=0x2000000a` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `lease: ConsumeOnCommit, kind=virtual_machine_creation_lease, rights=0x20000000` | 256 | `virtual_machine_create` | `configuration: user_address`, `configuration_size: byte_count` | `pending_virtual_machine: handle` | `lease: ConsumeOnCommit, kind=virtual_machine_creation_lease, rights=0x20000000`, `pending_virtual_machine: produce, kind=pending_virtual_machine, fixed=0xc2a` | `configuration: Read, len=configuration_size bytes, max-bytes=4096, record=virtual_machine_configuration; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20` | 256 | `pending_virtual_machine_set_memory` | `vmo: handle` | — | `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20`, `vmo: Borrow, kind=vmo, rights=0x70` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20` | 257 | `pending_virtual_machine_set_bootstrap` | `bootstrap: user_address`, `bootstrap_size: byte_count` | — | `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20` | `bootstrap: Read, len=bootstrap_size bytes, max-bytes=4096, record=virtual_cpu_bootstrap; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20` | 258 | `pending_virtual_machine_seal` | — | — | `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `pending_virtual_machine: ConsumeOnCommit, kind=pending_virtual_machine, rights=0x400` | 259 | `pending_virtual_machine_install` | — | `virtual_machine: handle`, `boot_virtual_cpu: handle` | `pending_virtual_machine: ConsumeOnCommit, kind=pending_virtual_machine, rights=0x400`, `virtual_machine: produce, kind=virtual_machine, fixed=0x82e`, `boot_virtual_cpu: produce, kind=virtual_cpu, fixed=0x42e` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `pending_virtual_machine: ConsumeOnCommit, kind=pending_virtual_machine, rights=0x800` | 260 | `pending_virtual_machine_abort` | — | — | `pending_virtual_machine: ConsumeOnCommit, kind=pending_virtual_machine, rights=0x800` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `virtual_machine: Borrow, kind=virtual_machine, rights=0x800` | 256 | `virtual_machine_request_stop` | — | — | `virtual_machine: Borrow, kind=virtual_machine, rights=0x800` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `virtual_machine: Borrow, kind=virtual_machine, rights=0x8` | 257 | `virtual_machine_get_info` | `info: user_address`, `info_size: byte_count` | `supported_size: byte_count` | `virtual_machine: Borrow, kind=virtual_machine, rights=0x8` | `info: Write, len=info_size bytes, max-bytes=4096, record=virtual_machine_info; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Object` |
-| `virtual_cpu: Borrow, kind=virtual_cpu, rights=0x8` | 256 | `virtual_cpu_get_info` | `info: user_address`, `info_size: byte_count` | `supported_size: byte_count` | `virtual_cpu: Borrow, kind=virtual_cpu, rights=0x8` | `info: Write, len=info_size bytes, max-bytes=4096, record=virtual_cpu_info; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Object` |
-| `parent: Borrow, kind=resource_domain, rights=0x800000` | 256 | `resource_domain_create` | `limits: user_address`, `limits_size: byte_count` | `child: handle` | `parent: Borrow, kind=resource_domain, rights=0x800000`, `child: produce, kind=resource_domain, fixed=0x984000b` | `limits: Read, len=limits_size bytes, max-bytes=4096, record=resource_limits; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `factory: Borrow, kind=task_factory, rights=0x400000` | 257 | `task_group_create` | `resource_domain: handle` | `group: handle` | `factory: Borrow, kind=task_factory, rights=0x400000`, `resource_domain: Borrow, kind=resource_domain, rights=0x8000000`, `group: produce, kind=task_group, fixed=0x400080f` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `virtual_cpu: Borrow, kind=virtual_cpu, rights=0x400` | 257 | `virtual_cpu_start` | — | — | `virtual_cpu: Borrow, kind=virtual_cpu, rights=0x400` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20` | 261 | `pending_virtual_machine_set_virtual_serial` | `virtual_serial: handle` | — | `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20`, `virtual_serial: ConsumeOnCommit, kind=virtual_serial, rights=0x8002` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `receiver: Borrow, kind=system_info, rights=0x10` | 257 | `clock_get_monotonic` | — | `nanoseconds: u64` | `receiver: Borrow, kind=system_info, rights=0x10` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Abi` |
-| `receiver: Borrow, kind=object_factory, rights=0x8000000000` | 260 | `virtual_serial_create` | — | `virtual_serial: handle` | `receiver: Borrow, kind=object_factory, rights=0x8000000000`, `virtual_serial: produce, kind=virtual_serial, fixed=0x803f` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `virtual_serial: Borrow, kind=virtual_serial, rights=0x20` | 256 | `virtual_serial_register_output` | `buffer: handle` | — | `virtual_serial: Borrow, kind=virtual_serial, rights=0x20`, `buffer: Borrow, kind=vmo, rights=0x70` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `virtual_serial: Borrow, kind=virtual_serial, rights=0x20` | 257 | `virtual_serial_write` | `bytes: user_address`, `byte_count: byte_count` | `actual_bytes: byte_count` | `virtual_serial: Borrow, kind=virtual_serial, rights=0x20` | `bytes: Read, len=byte_count bytes, max-bytes=4096; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `receiver: Borrow, kind=execution_context, rights=0x200000` | 260 | `thread_create` | `entry: u64`, `stack: u64`, `tls: u64`, `argument: u64`, `affinity_words: user_address`, `word_count: element_count` | `thread: handle` | `receiver: Borrow, kind=execution_context, rights=0x200000`, `thread: produce, kind=thread, fixed=0xc0d` | `affinity_words: Read, len=word_count elements, max-elements=4, element-size=8; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `thread: Borrow, kind=thread, rights=0x400` | 256 | `thread_start` | — | — | `thread: Borrow, kind=thread, rights=0x400` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `thread: Borrow, kind=thread, rights=0x800` | 257 | `thread_request_stop` | — | — | `thread: Borrow, kind=thread, rights=0x800` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `receiver: Borrow, kind=execution_context, rights=0x20` | 261 | `atomic_wait` | `address: u64`, `expected: u32`, `deadline: u64` | — | `receiver: Borrow, kind=execution_context, rights=0x20` | — | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` | `Task` |
-| `receiver: Borrow, kind=execution_context, rights=0x20` | 262 | `atomic_wake` | `address: u64`, `count: u32` | `woken: u64` | `receiver: Borrow, kind=execution_context, rights=0x20` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `receiver: Borrow, kind=execution_context, rights=0x20` | 263 | `thread_sleep` | `deadline: u64` | — | `receiver: Borrow, kind=execution_context, rights=0x20` | — | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` | `Task` |
-| `file: Borrow, kind=file, rights=0x20` | 258 | `file_write_at` | `options: u32`, `offset: u64`, `input: user_address`, `input_size: byte_count` | `actual_bytes: byte_count`, `end_offset: u64` | `file: Borrow, kind=file, rights=0x20` | `input: Read, len=input_size bytes, max-bytes=2097152; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `file: Borrow, kind=file, rights=0x20` | 259 | `file_resize` | `size: byte_count` | — | `file: Borrow, kind=file, rights=0x20` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `directory: Borrow, kind=directory, rights=0x30` | 259 | `directory_create_file` | `path: user_address`, `path_size: byte_count`, `requested_rights: rights`, `mode: u32` | `file: handle` | `directory: Borrow, kind=directory, rights=0x30`, `file: produce, kind=file, exact-from(requested_rights), allowed=0x9800000bb, required-from=directory` | `path: Read, len=path_size bytes, max-bytes=4096; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `directory: Borrow, kind=directory, rights=0x30` | 260 | `directory_create_directory` | `path: user_address`, `path_size: byte_count`, `mode: u32` | — | `directory: Borrow, kind=directory, rights=0x30` | `path: Read, len=path_size bytes, max-bytes=4096; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `directory: Borrow, kind=directory, rights=0x30` | 261 | `directory_remove` | `path: user_address`, `path_size: byte_count`, `options: u32` | — | `directory: Borrow, kind=directory, rights=0x30` | `path: Read, len=path_size bytes, max-bytes=4096; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `receiver: Borrow, kind=object_factory, rights=0x8000000000` | 261 | `wait_set_create` | `capacity: element_count` | `wait_set: handle` | `receiver: Borrow, kind=object_factory, rights=0x8000000000`, `wait_set: produce, kind=wait_set, fixed=0x4000000d` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `wait_set: Borrow, kind=wait_set, rights=0x40000000` | 256 | `wait_set_add` | `object: handle`, `signals: u64` | `registration: u64` | `wait_set: Borrow, kind=wait_set, rights=0x40000000`, `object: Borrow, any, rights=0x4` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `wait_set: Borrow, kind=wait_set, rights=0x40000000` | 257 | `wait_set_rearm` | `registration: u64` | — | `wait_set: Borrow, kind=wait_set, rights=0x40000000` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `wait_set: Borrow, kind=wait_set, rights=0x40000000` | 258 | `wait_set_remove` | `registration: u64` | — | `wait_set: Borrow, kind=wait_set, rights=0x40000000` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `wait_set: Borrow, kind=wait_set, rights=0x4` | 259 | `wait_set_wait` | `deadline: u64`, `output: user_address`, `output_size: byte_count` | — | `wait_set: Borrow, kind=wait_set, rights=0x4` | `output: Write, len=output_size bytes, max-bytes=24, record=wait_set_event; order=0` | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `receiver: Borrow, kind=execution_context, rights=0x10` | 264 | `process_get_current_id` | — | `koid: u64` | `receiver: Borrow, kind=execution_context, rights=0x10` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Task` |
-| `virtual_serial: Borrow, kind=virtual_serial, rights=0x10` | 258 | `virtual_serial_acknowledge_output` | `consumed: u64` | — | `virtual_serial: Borrow, kind=virtual_serial, rights=0x10` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `root: Borrow, kind=directory, rights=0x10` | 262 | `directory_scope_create` | `start: handle`, `rights: rights` | `directory: handle` | `root: Borrow, kind=directory, rights=0x10`, `start: Borrow, kind=directory, rights=0x10`, `directory: produce, kind=directory, exact-from(rights), allowed=0xd800000bb, required-from=root` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `directory: Borrow, kind=directory, rights=0x18` | 263 | `directory_get_metadata` | `path: user_address`, `path_length: byte_count`, `options: u32`, `output: user_address`, `output_size: byte_count` | `supported_size: byte_count` | `directory: Borrow, kind=directory, rights=0x18` | `path: Read, len=path_length bytes, max-bytes=4096; order=0`, `output: Write, len=output_size bytes, max-bytes=4096, record=file_metadata; order=1` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `file: Borrow, kind=file, rights=0x8` | 260 | `file_get_metadata` | `output: user_address`, `output_size: byte_count` | `supported_size: byte_count` | `file: Borrow, kind=file, rights=0x8` | `output: Write, len=output_size bytes, max-bytes=4096, record=file_metadata; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `directory: Borrow, kind=directory, rights=0x8` | 264 | `directory_get_self_metadata` | `output: user_address`, `output_size: byte_count` | `supported_size: byte_count` | `directory: Borrow, kind=directory, rights=0x8` | `output: Write, len=output_size bytes, max-bytes=4096, record=file_metadata; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `directory: Borrow, kind=directory, rights=0x80000010` | 265 | `directory_set_metadata` | `path: user_address`, `path_length: byte_count`, `options: u32`, `input: user_address`, `input_size: byte_count` | — | `directory: Borrow, kind=directory, rights=0x80000010` | `path: Read, len=path_length bytes, max-bytes=4096; order=1`, `input: Read, len=input_size bytes, max-bytes=4096, record=file_metadata_update; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `file: Borrow, kind=file, rights=0x80000000` | 261 | `file_set_metadata` | `input: user_address`, `input_size: byte_count` | — | `file: Borrow, kind=file, rights=0x80000000` | `input: Read, len=input_size bytes, max-bytes=4096, record=file_metadata_update; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `source: Borrow, kind=directory, rights=0x30` | 266 | `directory_rename` | `path: user_address`, `path_length: byte_count`, `destination: handle`, `new_path: user_address`, `new_path_length: byte_count` | — | `source: Borrow, kind=directory, rights=0x30`, `destination: Borrow, kind=directory, rights=0x30` | `path: Read, len=path_length bytes, max-bytes=4096; order=0`, `new_path: Read, len=new_path_length bytes, max-bytes=4096; order=1` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `source: Borrow, kind=directory, rights=0x30` | 267 | `directory_link` | `path: user_address`, `path_length: byte_count`, `destination: handle`, `new_path: user_address`, `new_path_length: byte_count` | — | `source: Borrow, kind=directory, rights=0x30`, `destination: Borrow, kind=directory, rights=0x30` | `path: Read, len=path_length bytes, max-bytes=4096; order=0`, `new_path: Read, len=new_path_length bytes, max-bytes=4096; order=1` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `directory: Borrow, kind=directory, rights=0x30` | 268 | `directory_symlink` | `path: user_address`, `path_length: byte_count`, `target: user_address`, `target_length: byte_count` | — | `directory: Borrow, kind=directory, rights=0x30` | `path: Read, len=path_length bytes, max-bytes=4096; order=0`, `target: Read, len=target_length bytes, max-bytes=4096; order=1` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `directory: Borrow, kind=directory, rights=0x10` | 269 | `directory_read_link` | `path: user_address`, `path_length: byte_count`, `output: user_address`, `capacity: byte_count` | `actual: byte_count` | `directory: Borrow, kind=directory, rights=0x10` | `path: Read, len=path_length bytes, max-bytes=4096; order=0`, `output: Write, len=capacity bytes, max-bytes=4096; order=1` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `directory: Borrow, kind=directory, rights=0x10` | 270 | `directory_canonicalize` | `path: user_address`, `path_length: byte_count`, `output: user_address`, `capacity: byte_count` | `actual: byte_count` | `directory: Borrow, kind=directory, rights=0x10` | `path: Read, len=path_length bytes, max-bytes=4096; order=0`, `output: Write, len=capacity bytes, max-bytes=4096; order=1` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `directory: Borrow, kind=directory, rights=0x30` | 271 | `directory_remove_if` | `path: user_address`, `path_length: byte_count`, `options: u32`, `expected_node_id: u64` | — | `directory: Borrow, kind=directory, rights=0x30` | `path: Read, len=path_length bytes, max-bytes=4096; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `directory: Borrow, kind=directory, rights=0x10` | 272 | `directory_open_directory_nofollow` | `path: user_address`, `path_length: byte_count`, `rights: rights` | `directory: handle` | `directory: Borrow, kind=directory, rights=0x10`, `directory: produce, kind=directory, exact-from(rights), allowed=0x9800000bb, required-from=directory` | `path: Read, len=path_length bytes, max-bytes=4096; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `file: Borrow, kind=file, rights=0x20` | 262 | `file_sync` | `scope: u32` | — | `file: Borrow, kind=file, rights=0x20` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `file: Borrow, kind=file, rights=0x100000000` | 263 | `file_lock` | `mode: u32`, `deadline: u64` | — | `file: Borrow, kind=file, rights=0x100000000` | — | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `file: Borrow, kind=file, rights=0x100000000` | 264 | `file_unlock` | — | — | `file: Borrow, kind=file, rights=0x100000000` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `receiver: Borrow, kind=system_info, rights=0x10` | 258 | `clock_get_realtime` | — | `seconds: i64`, `nanoseconds: u32` | `receiver: Borrow, kind=system_info, rights=0x10` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `directory: Borrow, kind=directory, rights=0x10` | 273 | `directory_open_file_with_options` | `path: user_address`, `path_length: byte_count`, `rights: rights`, `options: u32`, `mode: u32` | `file: handle` | `directory: Borrow, kind=directory, rights=0x10`, `file: produce, kind=file, exact-from(rights), allowed=0x9800000bb, required-from=directory` | `path: Read, len=path_length bytes, max-bytes=4096; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` | `Capability` |
-| `lease: Borrow, kind=virtual_machine_creation_lease, rights=0x8` | 257 | `virtual_machine_creation_lease_get_platform_info` | `platform_profile: u32`, `info: user_address`, `info_size: byte_count` | `supported_size: byte_count` | `lease: Borrow, kind=virtual_machine_creation_lease, rights=0x8` | `info: Write, len=info_size bytes, max-bytes=4096, record=virtual_machine_platform_info; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Object` |
-| `vmo: Borrow, kind=vmo, rights=0x10` | 258 | `vmo_create_snapshot` | — | `vmo: handle`, `byte_size: byte_count` | `vmo: Borrow, kind=vmo, rights=0x10`, `vmo: produce, kind=vmo, fixed=0x5b` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `vmar: Borrow, kind=vmar, rights=0x40` | 261 | `vmar_map_private` | `vmo: handle`, `mapping: user_address`, `mapping_size: byte_count` | — | `vmar: Borrow, kind=vmar, rights=0x40`, `vmo: Borrow, kind=vmo, rights=0x50` | `mapping: Read, len=mapping_size bytes, max-bytes=4096, record=private_mapping; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `virtual_machine: Borrow, kind=virtual_machine, rights=0x20` | 258 | `virtual_machine_get_power_request` | `request: user_address`, `request_size: byte_count` | `supported_size: byte_count` | `virtual_machine: Borrow, kind=virtual_machine, rights=0x20` | `request: Write, len=request_size bytes, max-bytes=4096, record=virtual_machine_power_request; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `virtual_machine: Borrow, kind=virtual_machine, rights=0x20` | 259 | `virtual_machine_complete_power_request` | `request_id: u64`, `accept: u32` | — | `virtual_machine: Borrow, kind=virtual_machine, rights=0x20` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `virtual_machine: Borrow, kind=virtual_machine, rights=0x20` | 260 | `virtual_machine_open_vcpu` | `vcpu_id: u32` | `virtual_cpu: handle` | `virtual_machine: Borrow, kind=virtual_machine, rights=0x20`, `virtual_cpu: produce, kind=virtual_cpu, fixed=0x42e` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `virtual_machine: Borrow, kind=virtual_machine, rights=0x20` | 261 | `virtual_machine_register_mmio` | `base: u64`, `length: u64`, `device: u64` | — | `virtual_machine: Borrow, kind=virtual_machine, rights=0x20` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `virtual_cpu: Borrow, kind=virtual_cpu, rights=0x20` | 258 | `virtual_cpu_get_mmio_request` | `request: user_address`, `request_size: byte_count` | `supported_size: byte_count` | `virtual_cpu: Borrow, kind=virtual_cpu, rights=0x20` | `request: Write, len=request_size bytes, max-bytes=4096, record=virtual_cpu_mmio_request; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `virtual_cpu: Borrow, kind=virtual_cpu, rights=0x20` | 259 | `virtual_cpu_complete_mmio` | `request_id: u64`, `operation: u32`, `value: u64` | — | `virtual_cpu: Borrow, kind=virtual_cpu, rights=0x20` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `vmo: Borrow, kind=vmo, rights=0x70` | 259 | `guest_memory_create` | — | `memory: handle` | `vmo: Borrow, kind=vmo, rights=0x70`, `memory: produce, kind=guest_memory, fixed=0x7b` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20` | 262 | `pending_virtual_machine_map_memory` | `memory: handle`, `guest_offset: u64`, `source_offset: u64`, `length: u64` | — | `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20`, `memory: Borrow, kind=guest_memory, rights=0x40` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `receiver: Borrow, kind=object_factory, rights=0x8000000000` | 262 | `vmo_create_contiguous` | `size: byte_count` | `vmo: handle` | `receiver: Borrow, kind=object_factory, rights=0x8000000000`, `vmo: produce, kind=vmo, fixed=0x7b` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `authority: Borrow, kind=device_assignment_authority, rights=0x8000` | 256 | `device_claim` | `index: u32` | `physical_device: handle` | `authority: Borrow, kind=device_assignment_authority, rights=0x8000`, `physical_device: produce, kind=physical_device, fixed=0x800f` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `device: Borrow, kind=physical_device, rights=0x8` | 256 | `physical_device_info` | `output: user_address`, `output_size: byte_count` | `supported_size: byte_count` | `device: Borrow, kind=physical_device, rights=0x8` | `output: Write, len=output_size bytes, max-bytes=4096, record=physical_device_info; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `authority: Borrow, kind=device_assignment_authority, rights=0x10000` | 257 | `vmo_get_dma_extent` | `vmo: handle`, `offset: u64`, `length: u64`, `output: user_address`, `output_size: byte_count` | `supported_size: byte_count` | `authority: Borrow, kind=device_assignment_authority, rights=0x10000`, `vmo: Borrow, kind=vmo, rights=0x50` | `output: Write, len=output_size bytes, max-bytes=4096, record=dma_extent; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `pending: Borrow, kind=pending_virtual_machine, rights=0x20` | 263 | `pending_virtual_machine_assign_device` | `device: handle`, `guest_base: u64`, `guest_irq: u32` | — | `pending: Borrow, kind=pending_virtual_machine, rights=0x20`, `device: Borrow, kind=physical_device, rights=0x8000` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `machine: Borrow, kind=virtual_machine, rights=0x20` | 262 | `guest_mailbox_create` | `base: u64`, `irq: u32` | `guest_mailbox: handle` | `machine: Borrow, kind=virtual_machine, rights=0x20`, `guest_mailbox: produce, kind=guest_mailbox, fixed=0x3e` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `mailbox: Borrow, kind=guest_mailbox, rights=0x20` | 256 | `guest_mailbox_send` | `bytes: user_address`, `length: byte_count` | — | `mailbox: Borrow, kind=guest_mailbox, rights=0x20` | `bytes: Read, len=length bytes, max-bytes=256; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `mailbox: Borrow, kind=guest_mailbox, rights=0x10` | 257 | `guest_mailbox_receive` | `bytes: user_address`, `capacity: byte_count` | `bytes: byte_count` | `mailbox: Borrow, kind=guest_mailbox, rights=0x10` | `bytes: Write, len=capacity bytes, max-bytes=256; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `frontend: Borrow, kind=virtual_machine, rights=0x20` | 263 | `guest_notification_create` | `backend: handle`, `frontend_base: u64`, `backend_base: u64`, `frontend_irq: u32`, `backend_irq: u32` | `guest_notification: handle` | `frontend: Borrow, kind=virtual_machine, rights=0x20`, `backend: Borrow, kind=virtual_machine, rights=0x20`, `guest_notification: produce, kind=guest_notification, fixed=0x2e` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `notification: Borrow, kind=guest_notification, rights=0x20` | 256 | `guest_notification_control` | `operation: u32` | `epoch: u32` | `notification: Borrow, kind=guest_notification, rights=0x20` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `memory: Borrow, kind=guest_memory, rights=0x40` | 256 | `native_block_create` | `backend: handle`, `guest_base: u64`, `notification_base: u64`, `notification_irq: u32` | `block: handle` | `memory: Borrow, kind=guest_memory, rights=0x40`, `backend: Borrow, kind=virtual_machine, rights=0x20`, `block: produce, kind=native_block, fixed=0x7e` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `block: Borrow, kind=native_block, rights=0x20` | 256 | `native_block_activate` | `readonly: u32` | `sectors: u64`, `readonly: u32` | `block: Borrow, kind=native_block, rights=0x20` | — | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `directory: Borrow, kind=directory, rights=0xa0` | 274 | `filesystem_mount` | `channel: handle`, `buffer: handle`, `path: user_address`, `path_length: byte_count`, `read_only: u64` | — | `directory: Borrow, kind=directory, rights=0xa0`, `channel: Borrow, kind=byte_channel, rights=0x34`, `buffer: Borrow, kind=vmo, rights=0x70` | `path: Read, len=path_length bytes, max-bytes=4096; order=0` | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `backend: Borrow, kind=virtual_machine, rights=0x20` | 264 | `guest_mapping_create` | `memory: handle`, `frontend_base: u64` | `mapping: handle`, `token: u64` | `backend: Borrow, kind=virtual_machine, rights=0x20`, `memory: Borrow, kind=guest_memory, rights=0x40`, `mapping: produce, kind=guest_mapping, fixed=0x2a` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `mapping: Borrow, kind=guest_mapping, rights=0x20` | 256 | `guest_mapping_release` | — | — | `mapping: Borrow, kind=guest_mapping, rights=0x20` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `authority: Borrow, kind=device_assignment_authority, rights=0x8000` | 258 | `device_claim_matching` | `profile: u32`, `identity_kind: u32`, `identity: user_address`, `length: byte_count` | `physical_device: handle` | `authority: Borrow, kind=device_assignment_authority, rights=0x8000`, `physical_device: produce, kind=physical_device, fixed=0x800f` | `identity: Read, len=length bytes, max-bytes=512; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `device: Borrow, kind=physical_device, rights=0x8` | 257 | `device_profile_info` | `output: user_address`, `output_size: byte_count` | `supported_size: byte_count` | `device: Borrow, kind=physical_device, rights=0x8` | `output: Write, len=output_size bytes, max-bytes=4096, record=device_profile_info; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `device: Borrow, kind=physical_device, rights=0x8` | 258 | `device_resource_info` | `index: u32`, `output: user_address`, `output_size: byte_count` | `supported_size: byte_count` | `device: Borrow, kind=physical_device, rights=0x8` | `output: Write, len=output_size bytes, max-bytes=4096, record=device_resource_info; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `authority: Borrow, kind=device_assignment_authority, rights=0x8` | 259 | `device_firmware_read` | `query: user_address`, `output: user_address`, `capacity: byte_count` | `value: u64` | `authority: Borrow, kind=device_assignment_authority, rights=0x8` | `query: Read, fixed-bytes=24, record=device_firmware_query; order=0`, `output: Write, len=capacity bytes, max-bytes=65536; order=1` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `authority: Borrow, kind=device_assignment_authority, rights=0x8000` | 260 | `device_claim_bundle` | `entries: user_address`, `count: element_count`, `irq_node: u32` | `physical_device: handle` | `authority: Borrow, kind=device_assignment_authority, rights=0x8000`, `physical_device: produce, kind=physical_device, fixed=0x2803f` | `entries: Read, len=count elements, max-elements=8, element-size=16, record=device_bundle_entry; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `device: Borrow, kind=physical_device, rights=0x0` | 259 | `device_mmio` | `offset: u64`, `width: u32`, `operation: u32`, `value: u64` | `value: u64` | `device: Borrow, kind=physical_device, rights=0x0` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `device: Borrow, kind=physical_device, rights=0x4` | 260 | `device_irq_pending` | — | `value: u64` | `device: Borrow, kind=physical_device, rights=0x4` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `device: Borrow, kind=physical_device, rights=0x20000` | 261 | `device_irq_complete` | `sequence: u64`, `asserted: u32` | — | `device: Borrow, kind=physical_device, rights=0x20000` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `virtual_cpu: Borrow, kind=virtual_cpu, rights=0x20` | 260 | `virtual_cpu_set_affinity` | `affinity_words: user_address`, `word_count: element_count` | — | `virtual_cpu: Borrow, kind=virtual_cpu, rights=0x20` | `affinity_words: Read, len=word_count elements, max-elements=4, element-size=8; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `receiver: Borrow, kind=system_info, rights=0x10` | 259 | `system_config` | `key: u64` | `value: u64` | `receiver: Borrow, kind=system_info, rights=0x10` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Abi` |
-| `inspector: Borrow, kind=object_inspector, rights=0x200000008` | 261 | `object_inspector_read_details` | `process_koid: u64`, `target: u64`, `cursor: u64`, `record: user_address`, `record_size: byte_count` | `supported_size: byte_count` | `inspector: Borrow, kind=object_inspector, rights=0x200000008` | `record: Write, len=record_size bytes, max-bytes=4096, record=object_details; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Object` |
-| `directory: Borrow, kind=directory, rights=0xa0` | 275 | `filesystem_unmount` | `path: user_address`, `path_length: byte_count` | — | `directory: Borrow, kind=directory, rights=0xa0` | `path: Read, len=path_length bytes, max-bytes=4096; order=0` | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `directory: Borrow, kind=directory, rights=0x4000000a0` | 276 | `filesystem_mount_ramfs` | `path: user_address`, `path_length: byte_count` | — | `directory: Borrow, kind=directory, rights=0x4000000a0` | `path: Read, len=path_length bytes, max-bytes=4096; order=0` | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `directory: Borrow, kind=directory, rights=0x4000000a0` | 277 | `filesystem_switch_root` | `request: user_address` | — | `directory: Borrow, kind=directory, rights=0x4000000a0` | `request: Read, fixed-bytes=48, record=filesystem_root_switch; order=0` | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `file: Borrow, kind=file, rights=0x800000000` | 265 | `file_protect` | — | `protection: handle`, `byte_size: byte_count` | `file: Borrow, kind=file, rights=0x800000000`, `protection: produce, kind=file_protection, fixed=0x48` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `vmar: Borrow, kind=vmar, rights=0x40` | 262 | `vmar_map_file` | `file: handle`, `protection: handle`, `mapping: user_address`, `mapping_size: byte_count` | — | `vmar: Borrow, kind=vmar, rights=0x40`, `file: Borrow, kind=file, rights=0x10`, `protection: Borrow, kind=file_protection, rights=0x40` | `mapping: Read, len=mapping_size bytes, max-bytes=4096, record=private_mapping; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `directory: Borrow, kind=directory, rights=0x10` | 278 | `directory_begin_read` | — | `stream: handle` | `directory: Borrow, kind=directory, rights=0x10`, `stream: produce, kind=directory_stream, inherited-from(directory), mask=0x1b` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `process: Borrow, kind=process, rights=0x806` | 258 | `process_derive_observer` | — | `observer: handle` | `process: Borrow, kind=process, rights=0x806`, `observer: produce, kind=process, fixed=0x6` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `task_group: Borrow, kind=task_group, rights=0x800` | 256 | `task_group_request_stop` | — | — | `task_group: Borrow, kind=task_group, rights=0x800` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `console: Borrow, kind=console, rights=0x10` | 258 | `console_discard_input` | — | `discarded: byte_count` | `console: Borrow, kind=console, rights=0x10` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `machine: Borrow, kind=virtual_machine, rights=0x20` | 265 | `guest_notification_configure` | `original_base: u64`, `base: u64`, `flags: u32` | — | `machine: Borrow, kind=virtual_machine, rights=0x20` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `machine: Borrow, kind=virtual_machine, rights=0x20` | 266 | `guest_notification_access` | `original_base: u64`, `operation: u32`, `value: u32` | `value: u32` | `machine: Borrow, kind=virtual_machine, rights=0x20` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `vmar: Borrow, kind=vmar, rights=0x1000000000` | 263 | `vmar_lock_memory` | `address: u64`, `size: byte_count`, `flags: u32` | — | `vmar: Borrow, kind=vmar, rights=0x1000000000` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `vmar: Borrow, kind=vmar, rights=0x1000000000` | 264 | `vmar_unlock_memory` | `address: u64`, `size: byte_count`, `flags: u32` | — | `vmar: Borrow, kind=vmar, rights=0x1000000000` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `builder: Borrow, kind=process_builder, rights=0x1000000020` | 263 | `process_builder_set_memory_lock` | `enabled: u32` | — | `builder: Borrow, kind=process_builder, rights=0x1000000020` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `directory: Borrow, kind=directory, rights=0x4000000a0` | 279 | `filesystem_begin_root_switch` | `request: user_address` | `transition: handle` | `directory: Borrow, kind=directory, rights=0x4000000a0`, `transition: produce, kind=root_transition, fixed=0x2a` | `request: Read, fixed-bytes=48, record=filesystem_root_switch; order=0` | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `transition: Borrow, kind=root_transition, rights=0x20` | 256 | `filesystem_finish_root_switch` | `commit: u32` | — | `transition: Borrow, kind=root_transition, rights=0x20` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `memory: Borrow, kind=guest_memory, rights=0x0` | 257 | `guest_memory_transfer` | `operation: u32`, `offset: u64`, `buffer: user_address`, `length: byte_count` | — | `memory: Borrow, kind=guest_memory, rights=0x0` | `buffer: ReadWrite, len=length bytes, max-bytes=4096; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `memory: Borrow, kind=guest_memory, rights=0x0` | 258 | `guest_memory_scalar` | `operation: u32`, `offset: u64`, `width: u32`, `value: u64` | `value: u64` | `memory: Borrow, kind=guest_memory, rights=0x0` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `machine: Borrow, kind=virtual_machine, rights=0x20` | 267 | `guest_interrupt_create` | `irq: u32` | `interrupt: handle` | `machine: Borrow, kind=virtual_machine, rights=0x20`, `interrupt: produce, kind=guest_interrupt, fixed=0x2a` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `interrupt: Borrow, kind=guest_interrupt, rights=0x20` | 256 | `guest_interrupt_set_level` | `asserted: u32` | — | `interrupt: Borrow, kind=guest_interrupt, rights=0x20` | — | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `inspector: Borrow, kind=memory_inspector, rights=0x8` | 257 | `memory_inspector_read_statistics` | `topic: u32`, `index: u32`, `statistics: user_address`, `statistics_size: byte_count` | `supported_size: byte_count` | `inspector: Borrow, kind=memory_inspector, rights=0x8` | `statistics: Write, len=statistics_size bytes, max-bytes=4096; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Object` |
-| `builder: Borrow, kind=process_builder, rights=0x2000000020` | 264 | `process_builder_retain` | `max_bytes: byte_count`, `timeout_ns: u64` | `handle: handle` | `builder: Borrow, kind=process_builder, rights=0x2000000020`, `handle: produce, kind=process_retirement, fixed=0x420000000e` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `object: Borrow, kind=process_retirement, rights=0x8` | 256 | `process_retirement_get_info` | `output: user_address`, `output_size: byte_count` | `supported_size: byte_count` | `object: Borrow, kind=process_retirement, rights=0x8` | `output: Write, len=output_size bytes, max-bytes=4096, record=process_retirement_info; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `object: Borrow, kind=process_retirement, rights=0x200000000` | 257 | `process_retirement_open_view` | — | `handle: handle` | `object: Borrow, kind=process_retirement, rights=0x200000000`, `handle: produce, kind=crash_view, fixed=0x1b` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `object: Borrow, kind=process_retirement, rights=0x4000000000` | 258 | `process_retirement_release` | — | — | `object: Borrow, kind=process_retirement, rights=0x4000000000` | — | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `object: Borrow, kind=crash_view, rights=0x8` | 256 | `crash_view_get_info` | `output: user_address`, `output_size: byte_count` | `supported_size: byte_count` | `object: Borrow, kind=crash_view, rights=0x8` | `output: Write, len=output_size bytes, max-bytes=4096, record=process_retirement_info; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `object: Borrow, kind=crash_view, rights=0x10` | 257 | `crash_view_read` | `address: u64`, `output: user_address`, `length: byte_count` | `actual_bytes: byte_count` | `object: Borrow, kind=crash_view, rights=0x10` | `output: Write, len=length bytes, max-bytes=65536; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `object: Borrow, kind=crash_view, rights=0x10` | 258 | `crash_view_thread` | `index: u64`, `output: user_address`, `output_size: byte_count` | `supported_size: byte_count`, `next_index: u64` | `object: Borrow, kind=crash_view, rights=0x10` | `output: Write, len=output_size bytes, max-bytes=4096, record=crash_thread; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `object: Borrow, kind=crash_view, rights=0x10` | 259 | `crash_view_mapping` | `index: u64`, `output: user_address`, `output_size: byte_count` | `supported_size: byte_count`, `next_index: u64` | `object: Borrow, kind=crash_view, rights=0x10` | `output: Write, len=output_size bytes, max-bytes=4096, record=crash_mapping; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `object: Borrow, kind=crash_view, rights=0x10` | 260 | `crash_view_handle` | `index: u64`, `output: user_address`, `output_size: byte_count` | `supported_size: byte_count`, `next_index: u64` | `object: Borrow, kind=crash_view, rights=0x10` | `output: Write, len=output_size bytes, max-bytes=4096, record=crash_handle; order=0` | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `receiver: Borrow, kind=execution_context, rights=0x20` | 265 | `thread_set_current_name` | `name: user_address`, `name_size: byte_count` | — | `receiver: Borrow, kind=execution_context, rights=0x20` | `name: Read, len=name_size bytes, max-bytes=64; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Task` |
-| `device: Borrow, kind=physical_device, rights=0x8008` | 262 | `device_dma_fault_info` | `output: user_address`, `output_size: byte_count` | `supported_size: byte_count` | `device: Borrow, kind=physical_device, rights=0x8008` | `output: Write, len=output_size bytes, max-bytes=4096, record=device_dma_fault_info; order=0` | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` | `Capability` |
-| `block: Borrow, kind=native_block, rights=0x0` | 257 | `native_block_transfer` | `operation: u32`, `first_sector: u64`, `buffer: user_address`, `length: byte_count` | — | `block: Borrow, kind=native_block, rights=0x0` | `buffer: ReadWrite, len=length bytes, max-bytes=524352; order=0` | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` | `Capability` |
+### `abi_query`
+
+Object-local method `abi_query`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=system_info, rights=0x10` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | `revision: u64`, `features: u64` |
+| Capability effects | `receiver: Borrow, kind=system_info, rights=0x10` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Abi` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `handle_close`
+
+Object-local method `handle_close`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `handle: ConsumeOnCommit, any, rights=0x0` |
+| Operation | 0 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | — |
+| Capability effects | `handle: ConsumeOnCommit, any, rights=0x0` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `handle_duplicate`
+
+Object-local method `handle_duplicate`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `source: Borrow, any, rights=0x1` |
+| Operation | 1 |
+| Feature | `Core` |
+| Arguments | `requested_rights: rights` |
+| Results | `handle: handle` |
+| Capability effects | `source: Borrow, any, rights=0x1`, `handle: produce, same-as(source), subset-from(requested_rights)` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `handle_replace`
+
+Object-local method `handle_replace`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `source: ConsumeOnCommit, any, rights=0x0` |
+| Operation | 2 |
+| Feature | `Core` |
+| Arguments | `requested_rights: rights` |
+| Results | `handle: handle` |
+| Capability effects | `source: ConsumeOnCommit, any, rights=0x0`, `handle: produce, same-as(source), subset-from(requested_rights)` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `handle_get_info`
+
+Object-local method `handle_get_info`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `handle: Borrow, any, rights=0x0` |
+| Operation | 3 |
+| Feature | `Core` |
+| Arguments | `output: user_address`, `output_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `handle: Borrow, any, rights=0x0` |
+| User memory | `output: Write, len=output_size bytes, max-bytes=4096, record=handle_info; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `object_get_basic_info`
+
+Object-local method `object_get_basic_info`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `handle: Borrow, any, rights=0x8` |
+| Operation | 4 |
+| Feature | `Core` |
+| Arguments | `output: user_address`, `output_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `handle: Borrow, any, rights=0x8` |
+| User memory | `output: Write, len=output_size bytes, max-bytes=4096, record=object_basic_info; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `thread_yield`
+
+Object-local method `thread_yield`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=execution_context, rights=0x20` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | — |
+| Capability effects | `receiver: Borrow, kind=execution_context, rights=0x20` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `thread_exit`
+
+Object-local method `thread_exit`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=execution_context, rights=0x800` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `status: i64` |
+| Results | — |
+| Capability effects | `receiver: Borrow, kind=execution_context, rights=0x800` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=NoReturn, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `process_exit`
+
+Object-local method `process_exit`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=execution_context, rights=0x800` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | `status: i64` |
+| Results | — |
+| Capability effects | `receiver: Borrow, kind=execution_context, rights=0x800` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=NoReturn, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `event_create`
+
+Object-local method `event_create`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=object_factory, rights=0x8000000000` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `options: u32` |
+| Results | `handle: handle` |
+| Capability effects | `receiver: Borrow, kind=object_factory, rights=0x8000000000`, `handle: produce, kind=event, fixed=0x8000f` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `event_signal`
+
+Object-local method `event_signal`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `event: Borrow, kind=event, rights=0x80000` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `clear_mask: u64`, `set_mask: u64` |
+| Results | — |
+| Capability effects | `event: Borrow, kind=event, rights=0x80000` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `object_wait_one`
+
+Object-local method `object_wait_one`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `object: Borrow, any, rights=0x4` |
+| Operation | 5 |
+| Feature | `Core` |
+| Arguments | `signals: u64`, `deadline: u64` |
+| Results | `observed: u64` |
+| Capability effects | `object: Borrow, any, rights=0x4` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `byte_channel_create`
+
+Object-local method `byte_channel_create`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=object_factory, rights=0x8000000000` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `options: u32` |
+| Results | `endpoint0: handle`, `endpoint1: handle` |
+| Capability effects | `receiver: Borrow, kind=object_factory, rights=0x8000000000`, `endpoint0: produce, kind=byte_channel, fixed=0x3f`, `endpoint1: produce, kind=byte_channel, fixed=0x3f` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `byte_channel_write`
+
+Object-local method `byte_channel_write`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `endpoint: Borrow, kind=byte_channel, rights=0x20` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `options: u32`, `bytes: user_address`, `byte_count: byte_count` |
+| Results | — |
+| Capability effects | `endpoint: Borrow, kind=byte_channel, rights=0x20` |
+| User memory | `bytes: Read, len=byte_count bytes, max-bytes=65536; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `byte_channel_read`
+
+Object-local method `byte_channel_read`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `endpoint: Borrow, kind=byte_channel, rights=0x10` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `options: u32`, `bytes: user_address`, `byte_capacity: byte_count` |
+| Results | `actual_bytes: byte_count; also-on=buffer_too_small` |
+| Capability effects | `endpoint: Borrow, kind=byte_channel, rights=0x10` |
+| User memory | `bytes: Write, len=byte_capacity bytes, max-bytes=65536; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `console_read`
+
+Object-local method `console_read`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `console: Borrow, kind=console, rights=0x10` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `options: u32`, `bytes: user_address`, `byte_capacity: byte_count` |
+| Results | `actual_bytes: byte_count; also-on=would_block` |
+| Capability effects | `console: Borrow, kind=console, rights=0x10` |
+| User memory | `bytes: Write, len=byte_capacity bytes, max-bytes=4096; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `console_write`
+
+Object-local method `console_write`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `console: Borrow, kind=console, rights=0x20` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `options: u32`, `bytes: user_address`, `byte_count: byte_count` |
+| Results | `actual_bytes: byte_count; also-on=would_block` |
+| Capability effects | `console: Borrow, kind=console, rights=0x20` |
+| User memory | `bytes: Read, len=byte_count bytes, max-bytes=4096; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `directory_open_file`
+
+Object-local method `directory_open_file`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0x10` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `path: user_address`, `path_size: byte_count`, `requested_rights: rights`, `options: u32` |
+| Results | `file: handle` |
+| Capability effects | `directory: Borrow, kind=directory, rights=0x10`, `file: produce, kind=file, exact-from(requested_rights), allowed=0x9800000bb, required-from=directory` |
+| User memory | `path: Read, len=path_size bytes, max-bytes=4096; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `file_read_at`
+
+Object-local method `file_read_at`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `file: Borrow, kind=file, rights=0x10` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `options: u32`, `offset: u64`, `output: user_address`, `output_capacity: byte_count` |
+| Results | `actual_bytes: byte_count`, `file_size: byte_count` |
+| Capability effects | `file: Borrow, kind=file, rights=0x10` |
+| User memory | `output: Write, len=output_capacity bytes, max-bytes=2097152; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `capability_channel_create`
+
+Object-local method `capability_channel_create`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=object_factory, rights=0x8000000000` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | `options: u32` |
+| Results | `endpoint0: handle`, `endpoint1: handle` |
+| Capability effects | `receiver: Borrow, kind=object_factory, rights=0x8000000000`, `endpoint0: produce, kind=capability_channel, fixed=0x3f`, `endpoint1: produce, kind=capability_channel, fixed=0x3f` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `capability_channel_try_send`
+
+Object-local method `capability_channel_try_send`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `endpoint: Borrow, kind=capability_channel, rights=0x20` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `options: u32`, `bytes: user_address`, `byte_count: byte_count`, `dispositions: user_address`, `disposition_count: element_count` |
+| Results | — |
+| Capability effects | `endpoint: Borrow, kind=capability_channel, rights=0x20` |
+| User memory | `bytes: Read, len=byte_count bytes, max-bytes=4096; order=0`, `dispositions: Read, len=disposition_count elements, max-elements=16, element-size=24, record=capability_disposition, transactional-handles=(handle, rights, expected_kind, operation), common-rights=0x2, operations=[move=0:ConsumeOnCommit/rights=0x2+duplicate=1:Borrow/rights=0x3], commit=AtomicOnOk; order=1` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `capability_channel_receive`
+
+Object-local method `capability_channel_receive`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `endpoint: Borrow, kind=capability_channel, rights=0x10` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `deadline: u64`, `bytes: user_address`, `byte_capacity: byte_count`, `capability_slots: user_address`, `slot_count: element_count` |
+| Results | `actual_bytes: byte_count; also-on=buffer_too_small`, `actual_capabilities: element_count; also-on=buffer_too_small` |
+| Capability effects | `endpoint: Borrow, kind=capability_channel, rights=0x10` |
+| User memory | `bytes: Write, len=byte_capacity bytes, max-bytes=4096; order=0`, `capability_slots: ReadWrite, len=slot_count elements, max-elements=16, element-size=24, record=capability_receive_slot, typed-receive-slots=(handle, rights, expected_kind, flags), produce-transferred-handles, commit=AtomicOnOk; order=1` |
+| Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `process_builder_create`
+
+Object-local method `process_builder_create`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `factory: Borrow, kind=task_factory, rights=0x100000` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `group: handle`, `domain: handle`, `executable: handle`, `loader: handle` |
+| Results | `builder: handle` |
+| Capability effects | `factory: Borrow, kind=task_factory, rights=0x100000`, `group: Borrow, kind=task_group, rights=0x4000000`, `domain: Borrow, kind=resource_domain, rights=0x8000000`, `executable: Borrow, kind=file, rights=0x800000093`, `loader: Borrow, kind=file, rights=0x90`, `builder: produce, kind=process_builder, fixed=0xc2a, inherited-from(factory), mask=0x3000000000` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `process_builder_set_name`
+
+Object-local method `process_builder_set_name`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `builder: Borrow, kind=process_builder, rights=0x20` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `name: user_address`, `name_size: byte_count` |
+| Results | — |
+| Capability effects | `builder: Borrow, kind=process_builder, rights=0x20` |
+| User memory | `name: Read, len=name_size bytes, max-bytes=64; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `process_builder_set_data`
+
+Object-local method `process_builder_set_data`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `builder: Borrow, kind=process_builder, rights=0x20` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `data: user_address`, `data_size: byte_count` |
+| Results | — |
+| Capability effects | `builder: Borrow, kind=process_builder, rights=0x20` |
+| User memory | `data: Read, len=data_size bytes, max-bytes=16384; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `process_builder_set_affinity`
+
+Object-local method `process_builder_set_affinity`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `builder: Borrow, kind=process_builder, rights=0x20` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | `affinity_words: user_address`, `word_count: element_count` |
+| Results | — |
+| Capability effects | `builder: Borrow, kind=process_builder, rights=0x20` |
+| User memory | `affinity_words: Read, len=word_count elements, max-elements=4, element-size=8; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `process_builder_add_handle`
+
+Object-local method `process_builder_add_handle`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `builder: Borrow, kind=process_builder, rights=0x20` |
+| Operation | 259 |
+| Feature | `Core` |
+| Arguments | `source: handle`, `purpose: u32`, `expected_kind: u32`, `rights: rights`, `operation: u32` |
+| Results | — |
+| Capability effects | `builder: Borrow, kind=process_builder, rights=0x20`, `source: ByOperation(operation: move=0:ConsumeOnCommit/rights=0x2+duplicate=1:Borrow/rights=0x3), any, common-rights=0x2` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `process_builder_seal`
+
+Object-local method `process_builder_seal`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `builder: Borrow, kind=process_builder, rights=0x20` |
+| Operation | 260 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | — |
+| Capability effects | `builder: Borrow, kind=process_builder, rights=0x20` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `process_builder_start`
+
+Object-local method `process_builder_start`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `builder: ConsumeOnCommit, kind=process_builder, rights=0x400` |
+| Operation | 261 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | `process: handle`, `startup_channel: handle` |
+| Capability effects | `builder: ConsumeOnCommit, kind=process_builder, rights=0x400`, `process: produce, kind=process, fixed=0x80e`, `startup_channel: produce, kind=byte_channel, fixed=0x14` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `process_builder_abort`
+
+Object-local method `process_builder_abort`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `builder: ConsumeOnCommit, kind=process_builder, rights=0x800` |
+| Operation | 262 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | — |
+| Capability effects | `builder: ConsumeOnCommit, kind=process_builder, rights=0x800` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `process_request_stop`
+
+Object-local method `process_request_stop`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `process: Borrow, kind=process, rights=0x800` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | — |
+| Capability effects | `process: Borrow, kind=process, rights=0x800` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `object_wait_many`
+
+Object-local method `object_wait_many`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=execution_context, rights=0x20` |
+| Operation | 259 |
+| Feature | `Core` |
+| Arguments | `items: user_address`, `item_count: element_count`, `deadline: u64` |
+| Results | `index: element_count`, `observed: u64` |
+| Capability effects | `receiver: Borrow, kind=execution_context, rights=0x20` |
+| User memory | `items: Read, len=item_count elements, max-elements=64, element-size=16, record=object_wait_item, borrowed-handles=(handle), required-rights=0x4; order=0` |
+| Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `process_get_info`
+
+Object-local method `process_get_info`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `process: Borrow, kind=process, rights=0x8` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `info: user_address`, `info_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `process: Borrow, kind=process, rights=0x8` |
+| User memory | `info: Write, len=info_size bytes, max-bytes=4096, record=process_info; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `task_inspector_scan_processes`
+
+Object-local method `task_inspector_scan_processes`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `inspector: Borrow, kind=task_inspector, rights=0x8` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count` |
+| Results | `count: element_count`, `next_cursor: u64` |
+| Capability effects | `inspector: Borrow, kind=task_inspector, rights=0x8` |
+| User memory | `records: Write, len=capacity elements, max-elements=8, element-size=96, record=task_process; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `task_inspector_scan_threads`
+
+Object-local method `task_inspector_scan_threads`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `inspector: Borrow, kind=task_inspector, rights=0x8` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count` |
+| Results | `count: element_count`, `next_cursor: u64` |
+| Capability effects | `inspector: Borrow, kind=task_inspector, rights=0x8` |
+| User memory | `records: Write, len=capacity elements, max-elements=8, element-size=104, record=task_thread; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `task_inspector_derive_process`
+
+Object-local method `task_inspector_derive_process`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `inspector: Borrow, kind=task_inspector, rights=0x1000000b` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | `process: handle` |
+| Results | `inspector: handle` |
+| Capability effects | `inspector: Borrow, kind=task_inspector, rights=0x1000000b`, `process: Borrow, kind=process, rights=0x8`, `inspector: produce, kind=task_inspector, fixed=0x1000000b` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `object_inspector_scan_objects`
+
+Object-local method `object_inspector_scan_objects`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `inspector: Borrow, kind=object_inspector, rights=0x8` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count` |
+| Results | `count: element_count`, `next_cursor: u64` |
+| Capability effects | `inspector: Borrow, kind=object_inspector, rights=0x8` |
+| User memory | `records: Write, len=capacity elements, max-elements=8, element-size=104, record=object_inspection; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `object_inspector_scan_handles`
+
+Object-local method `object_inspector_scan_handles`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `inspector: Borrow, kind=object_inspector, rights=0x8` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `process_koid: u64`, `cursor: u64`, `records: user_address`, `capacity: element_count` |
+| Results | `count: element_count`, `next_cursor: u64` |
+| Capability effects | `inspector: Borrow, kind=object_inspector, rights=0x8` |
+| User memory | `records: Write, len=capacity elements, max-elements=8, element-size=40, record=handle_inspection; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `object_inspector_derive_process`
+
+Object-local method `object_inspector_derive_process`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `inspector: Borrow, kind=object_inspector, rights=0x1000000b` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | `process: handle` |
+| Results | `inspector: handle` |
+| Capability effects | `inspector: Borrow, kind=object_inspector, rights=0x1000000b`, `process: Borrow, kind=process, rights=0x8`, `inspector: produce, kind=object_inspector, fixed=0x1000000b` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `task_inspector_derive_task_group`
+
+Object-local method `task_inspector_derive_task_group`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `inspector: Borrow, kind=task_inspector, rights=0x1000000b` |
+| Operation | 259 |
+| Feature | `Core` |
+| Arguments | `task_group: handle` |
+| Results | `inspector: handle` |
+| Capability effects | `inspector: Borrow, kind=task_inspector, rights=0x1000000b`, `task_group: Borrow, kind=task_group, rights=0x8`, `inspector: produce, kind=task_inspector, fixed=0x1000000b` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `object_inspector_derive_task_group`
+
+Object-local method `object_inspector_derive_task_group`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `inspector: Borrow, kind=object_inspector, rights=0x1000000b` |
+| Operation | 259 |
+| Feature | `Core` |
+| Arguments | `task_group: handle` |
+| Results | `inspector: handle` |
+| Capability effects | `inspector: Borrow, kind=object_inspector, rights=0x1000000b`, `task_group: Borrow, kind=task_group, rights=0x8`, `inspector: produce, kind=object_inspector, fixed=0x1000000b` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `task_inspector_derive_resource_domain`
+
+Object-local method `task_inspector_derive_resource_domain`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `inspector: Borrow, kind=task_inspector, rights=0x1000000b` |
+| Operation | 260 |
+| Feature | `Core` |
+| Arguments | `resource_domain: handle` |
+| Results | `inspector: handle` |
+| Capability effects | `inspector: Borrow, kind=task_inspector, rights=0x1000000b`, `resource_domain: Borrow, kind=resource_domain, rights=0x8`, `inspector: produce, kind=task_inspector, fixed=0x1000000b` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `object_inspector_derive_resource_domain`
+
+Object-local method `object_inspector_derive_resource_domain`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `inspector: Borrow, kind=object_inspector, rights=0x1000000b` |
+| Operation | 260 |
+| Feature | `Core` |
+| Arguments | `resource_domain: handle` |
+| Results | `inspector: handle` |
+| Capability effects | `inspector: Borrow, kind=object_inspector, rights=0x1000000b`, `resource_domain: Borrow, kind=resource_domain, rights=0x8`, `inspector: produce, kind=object_inspector, fixed=0x1000000b` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `directory_open_directory`
+
+Object-local method `directory_open_directory`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0x10` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `path: user_address`, `path_size: byte_count`, `requested_rights: rights`, `options: u32` |
+| Results | `child: handle` |
+| Capability effects | `directory: Borrow, kind=directory, rights=0x10`, `child: produce, kind=directory, exact-from(requested_rights), allowed=0x9800000bb, required-from=directory` |
+| User memory | `path: Read, len=path_size bytes, max-bytes=4096; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `vmo_create`
+
+Object-local method `vmo_create`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=object_factory, rights=0x8000000000` |
+| Operation | 259 |
+| Feature | `Core` |
+| Arguments | `size: byte_count` |
+| Results | `vmo: handle` |
+| Capability effects | `receiver: Borrow, kind=object_factory, rights=0x8000000000`, `vmo: produce, kind=vmo, fixed=0x7b` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `vmo_read`
+
+Object-local method `vmo_read`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `vmo: Borrow, kind=vmo, rights=0x10` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `offset: u64`, `bytes: user_address`, `byte_count: byte_count` |
+| Results | — |
+| Capability effects | `vmo: Borrow, kind=vmo, rights=0x10` |
+| User memory | `bytes: Write, len=byte_count bytes, max-bytes=65536; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `vmo_write`
+
+Object-local method `vmo_write`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `vmo: Borrow, kind=vmo, rights=0x20` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `offset: u64`, `bytes: user_address`, `byte_count: byte_count` |
+| Results | — |
+| Capability effects | `vmo: Borrow, kind=vmo, rights=0x20` |
+| User memory | `bytes: Read, len=byte_count bytes, max-bytes=65536; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `vmar_allocate`
+
+Object-local method `vmar_allocate`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `vmar: Borrow, kind=vmar, rights=0x40` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `address: u64`, `size: byte_count`, `options: u64` |
+| Results | `child: handle`, `address: u64` |
+| Capability effects | `vmar: Borrow, kind=vmar, rights=0x40`, `child: produce, kind=vmar, fixed=0x4b, inherited-from(vmar), mask=0x1000000000` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `vmar_map`
+
+Object-local method `vmar_map`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `vmar: Borrow, kind=vmar, rights=0x40` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `vmo: handle`, `vmo_offset: u64`, `address: u64`, `size: byte_count`, `permissions: u32` |
+| Results | — |
+| Capability effects | `vmar: Borrow, kind=vmar, rights=0x40`, `vmo: Borrow, kind=vmo, rights=0x40` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `vmar_protect`
+
+Object-local method `vmar_protect`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `vmar: Borrow, kind=vmar, rights=0x40` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | `address: u64`, `size: byte_count`, `permissions: u32` |
+| Results | — |
+| Capability effects | `vmar: Borrow, kind=vmar, rights=0x40` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `vmar_unmap`
+
+Object-local method `vmar_unmap`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `vmar: Borrow, kind=vmar, rights=0x40` |
+| Operation | 259 |
+| Feature | `Core` |
+| Arguments | `address: u64`, `size: byte_count` |
+| Results | — |
+| Capability effects | `vmar: Borrow, kind=vmar, rights=0x40` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `vmar_destroy`
+
+Object-local method `vmar_destroy`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `vmar: ConsumeOnCommit, kind=vmar, rights=0x40` |
+| Operation | 260 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | — |
+| Capability effects | `vmar: ConsumeOnCommit, kind=vmar, rights=0x40` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `directory_read`
+
+Object-local method `directory_read`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `stream: Borrow, kind=directory_stream, rights=0x10` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `cookie: u64`, `records: user_address`, `capacity: element_count`, `options: u32` |
+| Results | `count: element_count`, `next_cookie: u64` |
+| Capability effects | `stream: Borrow, kind=directory_stream, rights=0x10` |
+| User memory | `records: Write, len=capacity elements, max-elements=4, element-size=280, record=directory_entry; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `memory_inspector_read`
+
+Object-local method `memory_inspector_read`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `inspector: Borrow, kind=memory_inspector, rights=0x8` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `observation: user_address`, `observation_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `inspector: Borrow, kind=memory_inspector, rights=0x8` |
+| User memory | `observation: Write, len=observation_size bytes, max-bytes=4096, record=memory_observation; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `cpu_inspector_read`
+
+Object-local method `cpu_inspector_read`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `inspector: Borrow, kind=cpu_inspector, rights=0x8` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `observation: user_address`, `observation_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `inspector: Borrow, kind=cpu_inspector, rights=0x8` |
+| User memory | `observation: Write, len=observation_size bytes, max-bytes=4096, record=cpu_observation; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `file_get_info`
+
+Object-local method `file_get_info`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `file: Borrow, kind=file, rights=0x8` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `output: user_address`, `output_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `file: Borrow, kind=file, rights=0x8` |
+| User memory | `output: Write, len=output_size bytes, max-bytes=4096, record=file_info; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `directory_get_info`
+
+Object-local method `directory_get_info`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0x8` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | `output: user_address`, `output_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `directory: Borrow, kind=directory, rights=0x8` |
+| User memory | `output: Write, len=output_size bytes, max-bytes=4096, record=directory_info; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `virtual_machine_creation_lease_create`
+
+Object-local method `virtual_machine_creation_lease_create`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `authority: Borrow, kind=virtual_machine_creation_authority, rights=0x30000000` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `resource_domain: handle` |
+| Results | `lease: handle` |
+| Capability effects | `authority: Borrow, kind=virtual_machine_creation_authority, rights=0x30000000`, `resource_domain: Borrow, kind=resource_domain, rights=0x8000000`, `lease: produce, kind=virtual_machine_creation_lease, fixed=0x2000000a` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `virtual_machine_create`
+
+Object-local method `virtual_machine_create`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `lease: ConsumeOnCommit, kind=virtual_machine_creation_lease, rights=0x20000000` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `configuration: user_address`, `configuration_size: byte_count` |
+| Results | `pending_virtual_machine: handle` |
+| Capability effects | `lease: ConsumeOnCommit, kind=virtual_machine_creation_lease, rights=0x20000000`, `pending_virtual_machine: produce, kind=pending_virtual_machine, fixed=0xc2a` |
+| User memory | `configuration: Read, len=configuration_size bytes, max-bytes=4096, record=virtual_machine_configuration; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `pending_virtual_machine_set_memory`
+
+Object-local method `pending_virtual_machine_set_memory`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `vmo: handle` |
+| Results | — |
+| Capability effects | `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20`, `vmo: Borrow, kind=vmo, rights=0x70` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `pending_virtual_machine_set_bootstrap`
+
+Object-local method `pending_virtual_machine_set_bootstrap`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `bootstrap: user_address`, `bootstrap_size: byte_count` |
+| Results | — |
+| Capability effects | `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20` |
+| User memory | `bootstrap: Read, len=bootstrap_size bytes, max-bytes=4096, record=virtual_cpu_bootstrap; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `pending_virtual_machine_seal`
+
+Object-local method `pending_virtual_machine_seal`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | — |
+| Capability effects | `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `pending_virtual_machine_install`
+
+Object-local method `pending_virtual_machine_install`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `pending_virtual_machine: ConsumeOnCommit, kind=pending_virtual_machine, rights=0x400` |
+| Operation | 259 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | `virtual_machine: handle`, `boot_virtual_cpu: handle` |
+| Capability effects | `pending_virtual_machine: ConsumeOnCommit, kind=pending_virtual_machine, rights=0x400`, `virtual_machine: produce, kind=virtual_machine, fixed=0x82e`, `boot_virtual_cpu: produce, kind=virtual_cpu, fixed=0x42e` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `pending_virtual_machine_abort`
+
+Object-local method `pending_virtual_machine_abort`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `pending_virtual_machine: ConsumeOnCommit, kind=pending_virtual_machine, rights=0x800` |
+| Operation | 260 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | — |
+| Capability effects | `pending_virtual_machine: ConsumeOnCommit, kind=pending_virtual_machine, rights=0x800` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `virtual_machine_request_stop`
+
+Object-local method `virtual_machine_request_stop`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `virtual_machine: Borrow, kind=virtual_machine, rights=0x800` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | — |
+| Capability effects | `virtual_machine: Borrow, kind=virtual_machine, rights=0x800` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `virtual_machine_get_info`
+
+Object-local method `virtual_machine_get_info`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `virtual_machine: Borrow, kind=virtual_machine, rights=0x8` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `info: user_address`, `info_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `virtual_machine: Borrow, kind=virtual_machine, rights=0x8` |
+| User memory | `info: Write, len=info_size bytes, max-bytes=4096, record=virtual_machine_info; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `virtual_cpu_get_info`
+
+Object-local method `virtual_cpu_get_info`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `virtual_cpu: Borrow, kind=virtual_cpu, rights=0x8` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `info: user_address`, `info_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `virtual_cpu: Borrow, kind=virtual_cpu, rights=0x8` |
+| User memory | `info: Write, len=info_size bytes, max-bytes=4096, record=virtual_cpu_info; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `resource_domain_create`
+
+Object-local method `resource_domain_create`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `parent: Borrow, kind=resource_domain, rights=0x800000` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `limits: user_address`, `limits_size: byte_count` |
+| Results | `child: handle` |
+| Capability effects | `parent: Borrow, kind=resource_domain, rights=0x800000`, `child: produce, kind=resource_domain, fixed=0x984000b` |
+| User memory | `limits: Read, len=limits_size bytes, max-bytes=4096, record=resource_limits; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `task_group_create`
+
+Object-local method `task_group_create`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `factory: Borrow, kind=task_factory, rights=0x400000` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `resource_domain: handle` |
+| Results | `group: handle` |
+| Capability effects | `factory: Borrow, kind=task_factory, rights=0x400000`, `resource_domain: Borrow, kind=resource_domain, rights=0x8000000`, `group: produce, kind=task_group, fixed=0x400080f` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `virtual_cpu_start`
+
+Object-local method `virtual_cpu_start`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `virtual_cpu: Borrow, kind=virtual_cpu, rights=0x400` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | — |
+| Capability effects | `virtual_cpu: Borrow, kind=virtual_cpu, rights=0x400` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `pending_virtual_machine_set_virtual_serial`
+
+Object-local method `pending_virtual_machine_set_virtual_serial`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20` |
+| Operation | 261 |
+| Feature | `Core` |
+| Arguments | `virtual_serial: handle` |
+| Results | — |
+| Capability effects | `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20`, `virtual_serial: ConsumeOnCommit, kind=virtual_serial, rights=0x8002` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `clock_get_monotonic`
+
+Object-local method `clock_get_monotonic`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=system_info, rights=0x10` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | `nanoseconds: u64` |
+| Capability effects | `receiver: Borrow, kind=system_info, rights=0x10` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Abi` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `virtual_serial_create`
+
+Object-local method `virtual_serial_create`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=object_factory, rights=0x8000000000` |
+| Operation | 260 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | `virtual_serial: handle` |
+| Capability effects | `receiver: Borrow, kind=object_factory, rights=0x8000000000`, `virtual_serial: produce, kind=virtual_serial, fixed=0x803f` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `virtual_serial_register_output`
+
+Object-local method `virtual_serial_register_output`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `virtual_serial: Borrow, kind=virtual_serial, rights=0x20` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `buffer: handle` |
+| Results | — |
+| Capability effects | `virtual_serial: Borrow, kind=virtual_serial, rights=0x20`, `buffer: Borrow, kind=vmo, rights=0x70` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `virtual_serial_write`
+
+Object-local method `virtual_serial_write`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `virtual_serial: Borrow, kind=virtual_serial, rights=0x20` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `bytes: user_address`, `byte_count: byte_count` |
+| Results | `actual_bytes: byte_count` |
+| Capability effects | `virtual_serial: Borrow, kind=virtual_serial, rights=0x20` |
+| User memory | `bytes: Read, len=byte_count bytes, max-bytes=4096; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `thread_create`
+
+Object-local method `thread_create`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=execution_context, rights=0x200000` |
+| Operation | 260 |
+| Feature | `Core` |
+| Arguments | `entry: u64`, `stack: u64`, `tls: u64`, `argument: u64`, `affinity_words: user_address`, `word_count: element_count` |
+| Results | `thread: handle` |
+| Capability effects | `receiver: Borrow, kind=execution_context, rights=0x200000`, `thread: produce, kind=thread, fixed=0xc0d` |
+| User memory | `affinity_words: Read, len=word_count elements, max-elements=4, element-size=8; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `thread_start`
+
+Object-local method `thread_start`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `thread: Borrow, kind=thread, rights=0x400` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | — |
+| Capability effects | `thread: Borrow, kind=thread, rights=0x400` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `thread_request_stop`
+
+Object-local method `thread_request_stop`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `thread: Borrow, kind=thread, rights=0x800` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | — |
+| Capability effects | `thread: Borrow, kind=thread, rights=0x800` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `atomic_wait`
+
+Object-local method `atomic_wait`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=execution_context, rights=0x20` |
+| Operation | 261 |
+| Feature | `Core` |
+| Arguments | `address: u64`, `expected: u32`, `deadline: u64` |
+| Results | — |
+| Capability effects | `receiver: Borrow, kind=execution_context, rights=0x20` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `atomic_wake`
+
+Object-local method `atomic_wake`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=execution_context, rights=0x20` |
+| Operation | 262 |
+| Feature | `Core` |
+| Arguments | `address: u64`, `count: u32` |
+| Results | `woken: u64` |
+| Capability effects | `receiver: Borrow, kind=execution_context, rights=0x20` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `thread_sleep`
+
+Object-local method `thread_sleep`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=execution_context, rights=0x20` |
+| Operation | 263 |
+| Feature | `Core` |
+| Arguments | `deadline: u64` |
+| Results | — |
+| Capability effects | `receiver: Borrow, kind=execution_context, rights=0x20` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `file_write_at`
+
+Object-local method `file_write_at`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `file: Borrow, kind=file, rights=0x20` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | `options: u32`, `offset: u64`, `input: user_address`, `input_size: byte_count` |
+| Results | `actual_bytes: byte_count`, `end_offset: u64` |
+| Capability effects | `file: Borrow, kind=file, rights=0x20` |
+| User memory | `input: Read, len=input_size bytes, max-bytes=2097152; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `file_resize`
+
+Object-local method `file_resize`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `file: Borrow, kind=file, rights=0x20` |
+| Operation | 259 |
+| Feature | `Core` |
+| Arguments | `size: byte_count` |
+| Results | — |
+| Capability effects | `file: Borrow, kind=file, rights=0x20` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `directory_create_file`
+
+Object-local method `directory_create_file`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0x30` |
+| Operation | 259 |
+| Feature | `Core` |
+| Arguments | `path: user_address`, `path_size: byte_count`, `requested_rights: rights`, `mode: u32` |
+| Results | `file: handle` |
+| Capability effects | `directory: Borrow, kind=directory, rights=0x30`, `file: produce, kind=file, exact-from(requested_rights), allowed=0x9800000bb, required-from=directory` |
+| User memory | `path: Read, len=path_size bytes, max-bytes=4096; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `directory_create_directory`
+
+Object-local method `directory_create_directory`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0x30` |
+| Operation | 260 |
+| Feature | `Core` |
+| Arguments | `path: user_address`, `path_size: byte_count`, `mode: u32` |
+| Results | — |
+| Capability effects | `directory: Borrow, kind=directory, rights=0x30` |
+| User memory | `path: Read, len=path_size bytes, max-bytes=4096; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `directory_remove`
+
+Object-local method `directory_remove`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0x30` |
+| Operation | 261 |
+| Feature | `Core` |
+| Arguments | `path: user_address`, `path_size: byte_count`, `options: u32` |
+| Results | — |
+| Capability effects | `directory: Borrow, kind=directory, rights=0x30` |
+| User memory | `path: Read, len=path_size bytes, max-bytes=4096; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `wait_set_create`
+
+Object-local method `wait_set_create`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=object_factory, rights=0x8000000000` |
+| Operation | 261 |
+| Feature | `Core` |
+| Arguments | `capacity: element_count` |
+| Results | `wait_set: handle` |
+| Capability effects | `receiver: Borrow, kind=object_factory, rights=0x8000000000`, `wait_set: produce, kind=wait_set, fixed=0x4000000d` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `wait_set_add`
+
+Object-local method `wait_set_add`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `wait_set: Borrow, kind=wait_set, rights=0x40000000` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `object: handle`, `signals: u64` |
+| Results | `registration: u64` |
+| Capability effects | `wait_set: Borrow, kind=wait_set, rights=0x40000000`, `object: Borrow, any, rights=0x4` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `wait_set_rearm`
+
+Object-local method `wait_set_rearm`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `wait_set: Borrow, kind=wait_set, rights=0x40000000` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `registration: u64` |
+| Results | — |
+| Capability effects | `wait_set: Borrow, kind=wait_set, rights=0x40000000` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `wait_set_remove`
+
+Object-local method `wait_set_remove`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `wait_set: Borrow, kind=wait_set, rights=0x40000000` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | `registration: u64` |
+| Results | — |
+| Capability effects | `wait_set: Borrow, kind=wait_set, rights=0x40000000` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `wait_set_wait`
+
+Object-local method `wait_set_wait`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `wait_set: Borrow, kind=wait_set, rights=0x4` |
+| Operation | 259 |
+| Feature | `Core` |
+| Arguments | `deadline: u64`, `output: user_address`, `output_size: byte_count` |
+| Results | — |
+| Capability effects | `wait_set: Borrow, kind=wait_set, rights=0x4` |
+| User memory | `output: Write, len=output_size bytes, max-bytes=24, record=wait_set_event; order=0` |
+| Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `process_get_current_id`
+
+Object-local method `process_get_current_id`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=execution_context, rights=0x10` |
+| Operation | 264 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | `koid: u64` |
+| Capability effects | `receiver: Borrow, kind=execution_context, rights=0x10` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `virtual_serial_acknowledge_output`
+
+Object-local method `virtual_serial_acknowledge_output`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `virtual_serial: Borrow, kind=virtual_serial, rights=0x10` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | `consumed: u64` |
+| Results | — |
+| Capability effects | `virtual_serial: Borrow, kind=virtual_serial, rights=0x10` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `directory_scope_create`
+
+Object-local method `directory_scope_create`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `root: Borrow, kind=directory, rights=0x10` |
+| Operation | 262 |
+| Feature | `Core` |
+| Arguments | `start: handle`, `rights: rights` |
+| Results | `directory: handle` |
+| Capability effects | `root: Borrow, kind=directory, rights=0x10`, `start: Borrow, kind=directory, rights=0x10`, `directory: produce, kind=directory, exact-from(rights), allowed=0xd800000bb, required-from=root` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `directory_get_metadata`
+
+Object-local method `directory_get_metadata`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0x18` |
+| Operation | 263 |
+| Feature | `Core` |
+| Arguments | `path: user_address`, `path_length: byte_count`, `options: u32`, `output: user_address`, `output_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `directory: Borrow, kind=directory, rights=0x18` |
+| User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0`, `output: Write, len=output_size bytes, max-bytes=4096, record=file_metadata; order=1` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `file_get_metadata`
+
+Object-local method `file_get_metadata`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `file: Borrow, kind=file, rights=0x8` |
+| Operation | 260 |
+| Feature | `Core` |
+| Arguments | `output: user_address`, `output_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `file: Borrow, kind=file, rights=0x8` |
+| User memory | `output: Write, len=output_size bytes, max-bytes=4096, record=file_metadata; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `directory_get_self_metadata`
+
+Object-local method `directory_get_self_metadata`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0x8` |
+| Operation | 264 |
+| Feature | `Core` |
+| Arguments | `output: user_address`, `output_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `directory: Borrow, kind=directory, rights=0x8` |
+| User memory | `output: Write, len=output_size bytes, max-bytes=4096, record=file_metadata; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `directory_set_metadata`
+
+Object-local method `directory_set_metadata`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0x80000010` |
+| Operation | 265 |
+| Feature | `Core` |
+| Arguments | `path: user_address`, `path_length: byte_count`, `options: u32`, `input: user_address`, `input_size: byte_count` |
+| Results | — |
+| Capability effects | `directory: Borrow, kind=directory, rights=0x80000010` |
+| User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=1`, `input: Read, len=input_size bytes, max-bytes=4096, record=file_metadata_update; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `file_set_metadata`
+
+Object-local method `file_set_metadata`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `file: Borrow, kind=file, rights=0x80000000` |
+| Operation | 261 |
+| Feature | `Core` |
+| Arguments | `input: user_address`, `input_size: byte_count` |
+| Results | — |
+| Capability effects | `file: Borrow, kind=file, rights=0x80000000` |
+| User memory | `input: Read, len=input_size bytes, max-bytes=4096, record=file_metadata_update; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `directory_rename`
+
+Object-local method `directory_rename`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `source: Borrow, kind=directory, rights=0x30` |
+| Operation | 266 |
+| Feature | `Core` |
+| Arguments | `path: user_address`, `path_length: byte_count`, `destination: handle`, `new_path: user_address`, `new_path_length: byte_count` |
+| Results | — |
+| Capability effects | `source: Borrow, kind=directory, rights=0x30`, `destination: Borrow, kind=directory, rights=0x30` |
+| User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0`, `new_path: Read, len=new_path_length bytes, max-bytes=4096; order=1` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `directory_link`
+
+Object-local method `directory_link`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `source: Borrow, kind=directory, rights=0x30` |
+| Operation | 267 |
+| Feature | `Core` |
+| Arguments | `path: user_address`, `path_length: byte_count`, `destination: handle`, `new_path: user_address`, `new_path_length: byte_count` |
+| Results | — |
+| Capability effects | `source: Borrow, kind=directory, rights=0x30`, `destination: Borrow, kind=directory, rights=0x30` |
+| User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0`, `new_path: Read, len=new_path_length bytes, max-bytes=4096; order=1` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `directory_symlink`
+
+Object-local method `directory_symlink`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0x30` |
+| Operation | 268 |
+| Feature | `Core` |
+| Arguments | `path: user_address`, `path_length: byte_count`, `target: user_address`, `target_length: byte_count` |
+| Results | — |
+| Capability effects | `directory: Borrow, kind=directory, rights=0x30` |
+| User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0`, `target: Read, len=target_length bytes, max-bytes=4096; order=1` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `directory_read_link`
+
+Object-local method `directory_read_link`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0x10` |
+| Operation | 269 |
+| Feature | `Core` |
+| Arguments | `path: user_address`, `path_length: byte_count`, `output: user_address`, `capacity: byte_count` |
+| Results | `actual: byte_count` |
+| Capability effects | `directory: Borrow, kind=directory, rights=0x10` |
+| User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0`, `output: Write, len=capacity bytes, max-bytes=4096; order=1` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `directory_canonicalize`
+
+Object-local method `directory_canonicalize`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0x10` |
+| Operation | 270 |
+| Feature | `Core` |
+| Arguments | `path: user_address`, `path_length: byte_count`, `output: user_address`, `capacity: byte_count` |
+| Results | `actual: byte_count` |
+| Capability effects | `directory: Borrow, kind=directory, rights=0x10` |
+| User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0`, `output: Write, len=capacity bytes, max-bytes=4096; order=1` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `directory_remove_if`
+
+Object-local method `directory_remove_if`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0x30` |
+| Operation | 271 |
+| Feature | `Core` |
+| Arguments | `path: user_address`, `path_length: byte_count`, `options: u32`, `expected_node_id: u64` |
+| Results | — |
+| Capability effects | `directory: Borrow, kind=directory, rights=0x30` |
+| User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `directory_open_directory_nofollow`
+
+Object-local method `directory_open_directory_nofollow`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0x10` |
+| Operation | 272 |
+| Feature | `Core` |
+| Arguments | `path: user_address`, `path_length: byte_count`, `rights: rights` |
+| Results | `directory: handle` |
+| Capability effects | `directory: Borrow, kind=directory, rights=0x10`, `directory: produce, kind=directory, exact-from(rights), allowed=0x9800000bb, required-from=directory` |
+| User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `file_sync`
+
+Object-local method `file_sync`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `file: Borrow, kind=file, rights=0x20` |
+| Operation | 262 |
+| Feature | `Core` |
+| Arguments | `scope: u32` |
+| Results | — |
+| Capability effects | `file: Borrow, kind=file, rights=0x20` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `file_lock`
+
+Object-local method `file_lock`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `file: Borrow, kind=file, rights=0x100000000` |
+| Operation | 263 |
+| Feature | `Core` |
+| Arguments | `mode: u32`, `deadline: u64` |
+| Results | — |
+| Capability effects | `file: Borrow, kind=file, rights=0x100000000` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `file_unlock`
+
+Object-local method `file_unlock`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `file: Borrow, kind=file, rights=0x100000000` |
+| Operation | 264 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | — |
+| Capability effects | `file: Borrow, kind=file, rights=0x100000000` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `clock_get_realtime`
+
+Object-local method `clock_get_realtime`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=system_info, rights=0x10` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | `seconds: i64`, `nanoseconds: u32` |
+| Capability effects | `receiver: Borrow, kind=system_info, rights=0x10` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `directory_open_file_with_options`
+
+Object-local method `directory_open_file_with_options`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0x10` |
+| Operation | 273 |
+| Feature | `Core` |
+| Arguments | `path: user_address`, `path_length: byte_count`, `rights: rights`, `options: u32`, `mode: u32` |
+| Results | `file: handle` |
+| Capability effects | `directory: Borrow, kind=directory, rights=0x10`, `file: produce, kind=file, exact-from(rights), allowed=0x9800000bb, required-from=directory` |
+| User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `virtual_machine_creation_lease_get_platform_info`
+
+Object-local method `virtual_machine_creation_lease_get_platform_info`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `lease: Borrow, kind=virtual_machine_creation_lease, rights=0x8` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `platform_profile: u32`, `info: user_address`, `info_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `lease: Borrow, kind=virtual_machine_creation_lease, rights=0x8` |
+| User memory | `info: Write, len=info_size bytes, max-bytes=4096, record=virtual_machine_platform_info; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `vmo_create_snapshot`
+
+Object-local method `vmo_create_snapshot`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `vmo: Borrow, kind=vmo, rights=0x10` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | `vmo: handle`, `byte_size: byte_count` |
+| Capability effects | `vmo: Borrow, kind=vmo, rights=0x10`, `vmo: produce, kind=vmo, fixed=0x5b` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `vmar_map_private`
+
+Object-local method `vmar_map_private`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `vmar: Borrow, kind=vmar, rights=0x40` |
+| Operation | 261 |
+| Feature | `Core` |
+| Arguments | `vmo: handle`, `mapping: user_address`, `mapping_size: byte_count` |
+| Results | — |
+| Capability effects | `vmar: Borrow, kind=vmar, rights=0x40`, `vmo: Borrow, kind=vmo, rights=0x50` |
+| User memory | `mapping: Read, len=mapping_size bytes, max-bytes=4096, record=private_mapping; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `virtual_machine_get_power_request`
+
+Object-local method `virtual_machine_get_power_request`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `virtual_machine: Borrow, kind=virtual_machine, rights=0x20` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | `request: user_address`, `request_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `virtual_machine: Borrow, kind=virtual_machine, rights=0x20` |
+| User memory | `request: Write, len=request_size bytes, max-bytes=4096, record=virtual_machine_power_request; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `virtual_machine_complete_power_request`
+
+Object-local method `virtual_machine_complete_power_request`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `virtual_machine: Borrow, kind=virtual_machine, rights=0x20` |
+| Operation | 259 |
+| Feature | `Core` |
+| Arguments | `request_id: u64`, `accept: u32` |
+| Results | — |
+| Capability effects | `virtual_machine: Borrow, kind=virtual_machine, rights=0x20` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `virtual_machine_open_vcpu`
+
+Object-local method `virtual_machine_open_vcpu`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `virtual_machine: Borrow, kind=virtual_machine, rights=0x20` |
+| Operation | 260 |
+| Feature | `Core` |
+| Arguments | `vcpu_id: u32` |
+| Results | `virtual_cpu: handle` |
+| Capability effects | `virtual_machine: Borrow, kind=virtual_machine, rights=0x20`, `virtual_cpu: produce, kind=virtual_cpu, fixed=0x42e` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `virtual_machine_register_mmio`
+
+Object-local method `virtual_machine_register_mmio`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `virtual_machine: Borrow, kind=virtual_machine, rights=0x20` |
+| Operation | 261 |
+| Feature | `Core` |
+| Arguments | `base: u64`, `length: u64`, `device: u64` |
+| Results | — |
+| Capability effects | `virtual_machine: Borrow, kind=virtual_machine, rights=0x20` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `virtual_cpu_get_mmio_request`
+
+Object-local method `virtual_cpu_get_mmio_request`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `virtual_cpu: Borrow, kind=virtual_cpu, rights=0x20` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | `request: user_address`, `request_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `virtual_cpu: Borrow, kind=virtual_cpu, rights=0x20` |
+| User memory | `request: Write, len=request_size bytes, max-bytes=4096, record=virtual_cpu_mmio_request; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `virtual_cpu_complete_mmio`
+
+Object-local method `virtual_cpu_complete_mmio`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `virtual_cpu: Borrow, kind=virtual_cpu, rights=0x20` |
+| Operation | 259 |
+| Feature | `Core` |
+| Arguments | `request_id: u64`, `operation: u32`, `value: u64` |
+| Results | — |
+| Capability effects | `virtual_cpu: Borrow, kind=virtual_cpu, rights=0x20` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `guest_memory_create`
+
+Object-local method `guest_memory_create`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `vmo: Borrow, kind=vmo, rights=0x70` |
+| Operation | 259 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | `memory: handle` |
+| Capability effects | `vmo: Borrow, kind=vmo, rights=0x70`, `memory: produce, kind=guest_memory, fixed=0x7b` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `pending_virtual_machine_map_memory`
+
+Object-local method `pending_virtual_machine_map_memory`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20` |
+| Operation | 262 |
+| Feature | `Core` |
+| Arguments | `memory: handle`, `guest_offset: u64`, `source_offset: u64`, `length: u64` |
+| Results | — |
+| Capability effects | `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20`, `memory: Borrow, kind=guest_memory, rights=0x40` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `vmo_create_contiguous`
+
+Object-local method `vmo_create_contiguous`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=object_factory, rights=0x8000000000` |
+| Operation | 262 |
+| Feature | `Core` |
+| Arguments | `size: byte_count` |
+| Results | `vmo: handle` |
+| Capability effects | `receiver: Borrow, kind=object_factory, rights=0x8000000000`, `vmo: produce, kind=vmo, fixed=0x7b` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `device_claim`
+
+Object-local method `device_claim`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `authority: Borrow, kind=device_assignment_authority, rights=0x8000` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `index: u32` |
+| Results | `physical_device: handle` |
+| Capability effects | `authority: Borrow, kind=device_assignment_authority, rights=0x8000`, `physical_device: produce, kind=physical_device, fixed=0x800f` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `physical_device_info`
+
+Object-local method `physical_device_info`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `device: Borrow, kind=physical_device, rights=0x8` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `output: user_address`, `output_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `device: Borrow, kind=physical_device, rights=0x8` |
+| User memory | `output: Write, len=output_size bytes, max-bytes=4096, record=physical_device_info; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `vmo_get_dma_extent`
+
+Object-local method `vmo_get_dma_extent`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `authority: Borrow, kind=device_assignment_authority, rights=0x10000` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `vmo: handle`, `offset: u64`, `length: u64`, `output: user_address`, `output_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `authority: Borrow, kind=device_assignment_authority, rights=0x10000`, `vmo: Borrow, kind=vmo, rights=0x50` |
+| User memory | `output: Write, len=output_size bytes, max-bytes=4096, record=dma_extent; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `pending_virtual_machine_assign_device`
+
+Object-local method `pending_virtual_machine_assign_device`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `pending: Borrow, kind=pending_virtual_machine, rights=0x20` |
+| Operation | 263 |
+| Feature | `Core` |
+| Arguments | `device: handle`, `guest_base: u64`, `guest_irq: u32` |
+| Results | — |
+| Capability effects | `pending: Borrow, kind=pending_virtual_machine, rights=0x20`, `device: Borrow, kind=physical_device, rights=0x8000` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `guest_mailbox_create`
+
+Object-local method `guest_mailbox_create`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `machine: Borrow, kind=virtual_machine, rights=0x20` |
+| Operation | 262 |
+| Feature | `Core` |
+| Arguments | `base: u64`, `irq: u32` |
+| Results | `guest_mailbox: handle` |
+| Capability effects | `machine: Borrow, kind=virtual_machine, rights=0x20`, `guest_mailbox: produce, kind=guest_mailbox, fixed=0x3e` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `guest_mailbox_send`
+
+Object-local method `guest_mailbox_send`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `mailbox: Borrow, kind=guest_mailbox, rights=0x20` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `bytes: user_address`, `length: byte_count` |
+| Results | — |
+| Capability effects | `mailbox: Borrow, kind=guest_mailbox, rights=0x20` |
+| User memory | `bytes: Read, len=length bytes, max-bytes=256; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `guest_mailbox_receive`
+
+Object-local method `guest_mailbox_receive`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `mailbox: Borrow, kind=guest_mailbox, rights=0x10` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `bytes: user_address`, `capacity: byte_count` |
+| Results | `bytes: byte_count` |
+| Capability effects | `mailbox: Borrow, kind=guest_mailbox, rights=0x10` |
+| User memory | `bytes: Write, len=capacity bytes, max-bytes=256; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `guest_notification_create`
+
+Object-local method `guest_notification_create`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `frontend: Borrow, kind=virtual_machine, rights=0x20` |
+| Operation | 263 |
+| Feature | `Core` |
+| Arguments | `backend: handle`, `frontend_base: u64`, `backend_base: u64`, `frontend_irq: u32`, `backend_irq: u32` |
+| Results | `guest_notification: handle` |
+| Capability effects | `frontend: Borrow, kind=virtual_machine, rights=0x20`, `backend: Borrow, kind=virtual_machine, rights=0x20`, `guest_notification: produce, kind=guest_notification, fixed=0x2e` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `guest_notification_control`
+
+Object-local method `guest_notification_control`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `notification: Borrow, kind=guest_notification, rights=0x20` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `operation: u32` |
+| Results | `epoch: u32` |
+| Capability effects | `notification: Borrow, kind=guest_notification, rights=0x20` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `native_block_create`
+
+Object-local method `native_block_create`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `memory: Borrow, kind=guest_memory, rights=0x40` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `backend: handle`, `guest_base: u64`, `notification_base: u64`, `notification_irq: u32` |
+| Results | `block: handle` |
+| Capability effects | `memory: Borrow, kind=guest_memory, rights=0x40`, `backend: Borrow, kind=virtual_machine, rights=0x20`, `block: produce, kind=native_block, fixed=0x7e` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `native_block_activate`
+
+Object-local method `native_block_activate`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `block: Borrow, kind=native_block, rights=0x20` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `readonly: u32` |
+| Results | `sectors: u64`, `readonly: u32` |
+| Capability effects | `block: Borrow, kind=native_block, rights=0x20` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `filesystem_mount`
+
+Object-local method `filesystem_mount`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0xa0` |
+| Operation | 274 |
+| Feature | `Core` |
+| Arguments | `channel: handle`, `buffer: handle`, `path: user_address`, `path_length: byte_count`, `read_only: u64` |
+| Results | — |
+| Capability effects | `directory: Borrow, kind=directory, rights=0xa0`, `channel: Borrow, kind=byte_channel, rights=0x34`, `buffer: Borrow, kind=vmo, rights=0x70` |
+| User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0` |
+| Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `guest_mapping_create`
+
+Object-local method `guest_mapping_create`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `backend: Borrow, kind=virtual_machine, rights=0x20` |
+| Operation | 264 |
+| Feature | `Core` |
+| Arguments | `memory: handle`, `frontend_base: u64` |
+| Results | `mapping: handle`, `token: u64` |
+| Capability effects | `backend: Borrow, kind=virtual_machine, rights=0x20`, `memory: Borrow, kind=guest_memory, rights=0x40`, `mapping: produce, kind=guest_mapping, fixed=0x2a` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `guest_mapping_release`
+
+Object-local method `guest_mapping_release`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `mapping: Borrow, kind=guest_mapping, rights=0x20` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | — |
+| Capability effects | `mapping: Borrow, kind=guest_mapping, rights=0x20` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `device_claim_matching`
+
+Object-local method `device_claim_matching`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `authority: Borrow, kind=device_assignment_authority, rights=0x8000` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | `profile: u32`, `identity_kind: u32`, `identity: user_address`, `length: byte_count` |
+| Results | `physical_device: handle` |
+| Capability effects | `authority: Borrow, kind=device_assignment_authority, rights=0x8000`, `physical_device: produce, kind=physical_device, fixed=0x800f` |
+| User memory | `identity: Read, len=length bytes, max-bytes=512; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `device_profile_info`
+
+Object-local method `device_profile_info`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `device: Borrow, kind=physical_device, rights=0x8` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `output: user_address`, `output_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `device: Borrow, kind=physical_device, rights=0x8` |
+| User memory | `output: Write, len=output_size bytes, max-bytes=4096, record=device_profile_info; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `device_resource_info`
+
+Object-local method `device_resource_info`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `device: Borrow, kind=physical_device, rights=0x8` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | `index: u32`, `output: user_address`, `output_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `device: Borrow, kind=physical_device, rights=0x8` |
+| User memory | `output: Write, len=output_size bytes, max-bytes=4096, record=device_resource_info; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `device_firmware_read`
+
+Object-local method `device_firmware_read`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `authority: Borrow, kind=device_assignment_authority, rights=0x8` |
+| Operation | 259 |
+| Feature | `Core` |
+| Arguments | `query: user_address`, `output: user_address`, `capacity: byte_count` |
+| Results | `value: u64` |
+| Capability effects | `authority: Borrow, kind=device_assignment_authority, rights=0x8` |
+| User memory | `query: Read, fixed-bytes=24, record=device_firmware_query; order=0`, `output: Write, len=capacity bytes, max-bytes=65536; order=1` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `device_claim_bundle`
+
+Object-local method `device_claim_bundle`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `authority: Borrow, kind=device_assignment_authority, rights=0x8000` |
+| Operation | 260 |
+| Feature | `Core` |
+| Arguments | `entries: user_address`, `count: element_count`, `irq_node: u32` |
+| Results | `physical_device: handle` |
+| Capability effects | `authority: Borrow, kind=device_assignment_authority, rights=0x8000`, `physical_device: produce, kind=physical_device, fixed=0x2803f` |
+| User memory | `entries: Read, len=count elements, max-elements=8, element-size=16, record=device_bundle_entry; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `device_mmio`
+
+Object-local method `device_mmio`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `device: Borrow, kind=physical_device, rights=0x0` |
+| Operation | 259 |
+| Feature | `Core` |
+| Arguments | `offset: u64`, `width: u32`, `operation: u32`, `value: u64` |
+| Results | `value: u64` |
+| Capability effects | `device: Borrow, kind=physical_device, rights=0x0` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `device_irq_pending`
+
+Object-local method `device_irq_pending`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `device: Borrow, kind=physical_device, rights=0x4` |
+| Operation | 260 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | `value: u64` |
+| Capability effects | `device: Borrow, kind=physical_device, rights=0x4` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `device_irq_complete`
+
+Object-local method `device_irq_complete`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `device: Borrow, kind=physical_device, rights=0x20000` |
+| Operation | 261 |
+| Feature | `Core` |
+| Arguments | `sequence: u64`, `asserted: u32` |
+| Results | — |
+| Capability effects | `device: Borrow, kind=physical_device, rights=0x20000` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `virtual_cpu_set_affinity`
+
+Object-local method `virtual_cpu_set_affinity`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `virtual_cpu: Borrow, kind=virtual_cpu, rights=0x20` |
+| Operation | 260 |
+| Feature | `Core` |
+| Arguments | `affinity_words: user_address`, `word_count: element_count` |
+| Results | — |
+| Capability effects | `virtual_cpu: Borrow, kind=virtual_cpu, rights=0x20` |
+| User memory | `affinity_words: Read, len=word_count elements, max-elements=4, element-size=8; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `system_config`
+
+Object-local method `system_config`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=system_info, rights=0x10` |
+| Operation | 259 |
+| Feature | `Core` |
+| Arguments | `key: u64` |
+| Results | `value: u64` |
+| Capability effects | `receiver: Borrow, kind=system_info, rights=0x10` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Abi` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `object_inspector_read_details`
+
+Object-local method `object_inspector_read_details`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `inspector: Borrow, kind=object_inspector, rights=0x200000008` |
+| Operation | 261 |
+| Feature | `Core` |
+| Arguments | `process_koid: u64`, `target: u64`, `cursor: u64`, `record: user_address`, `record_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `inspector: Borrow, kind=object_inspector, rights=0x200000008` |
+| User memory | `record: Write, len=record_size bytes, max-bytes=4096, record=object_details; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `filesystem_unmount`
+
+Object-local method `filesystem_unmount`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0xa0` |
+| Operation | 275 |
+| Feature | `Core` |
+| Arguments | `path: user_address`, `path_length: byte_count` |
+| Results | — |
+| Capability effects | `directory: Borrow, kind=directory, rights=0xa0` |
+| User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0` |
+| Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `filesystem_mount_ramfs`
+
+Object-local method `filesystem_mount_ramfs`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0x4000000a0` |
+| Operation | 276 |
+| Feature | `Core` |
+| Arguments | `path: user_address`, `path_length: byte_count` |
+| Results | — |
+| Capability effects | `directory: Borrow, kind=directory, rights=0x4000000a0` |
+| User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0` |
+| Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `filesystem_switch_root`
+
+Object-local method `filesystem_switch_root`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0x4000000a0` |
+| Operation | 277 |
+| Feature | `Core` |
+| Arguments | `request: user_address` |
+| Results | — |
+| Capability effects | `directory: Borrow, kind=directory, rights=0x4000000a0` |
+| User memory | `request: Read, fixed-bytes=48, record=filesystem_root_switch; order=0` |
+| Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `file_protect`
+
+Object-local method `file_protect`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `file: Borrow, kind=file, rights=0x800000000` |
+| Operation | 265 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | `protection: handle`, `byte_size: byte_count` |
+| Capability effects | `file: Borrow, kind=file, rights=0x800000000`, `protection: produce, kind=file_protection, fixed=0x48` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `vmar_map_file`
+
+Object-local method `vmar_map_file`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `vmar: Borrow, kind=vmar, rights=0x40` |
+| Operation | 262 |
+| Feature | `Core` |
+| Arguments | `file: handle`, `protection: handle`, `mapping: user_address`, `mapping_size: byte_count` |
+| Results | — |
+| Capability effects | `vmar: Borrow, kind=vmar, rights=0x40`, `file: Borrow, kind=file, rights=0x10`, `protection: Borrow, kind=file_protection, rights=0x40` |
+| User memory | `mapping: Read, len=mapping_size bytes, max-bytes=4096, record=private_mapping; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `directory_begin_read`
+
+Object-local method `directory_begin_read`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0x10` |
+| Operation | 278 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | `stream: handle` |
+| Capability effects | `directory: Borrow, kind=directory, rights=0x10`, `stream: produce, kind=directory_stream, inherited-from(directory), mask=0x1b` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `process_derive_observer`
+
+Object-local method `process_derive_observer`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `process: Borrow, kind=process, rights=0x806` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | `observer: handle` |
+| Capability effects | `process: Borrow, kind=process, rights=0x806`, `observer: produce, kind=process, fixed=0x6` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `task_group_request_stop`
+
+Object-local method `task_group_request_stop`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `task_group: Borrow, kind=task_group, rights=0x800` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | — |
+| Capability effects | `task_group: Borrow, kind=task_group, rights=0x800` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `console_discard_input`
+
+Object-local method `console_discard_input`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `console: Borrow, kind=console, rights=0x10` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | `discarded: byte_count` |
+| Capability effects | `console: Borrow, kind=console, rights=0x10` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `guest_notification_configure`
+
+Object-local method `guest_notification_configure`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `machine: Borrow, kind=virtual_machine, rights=0x20` |
+| Operation | 265 |
+| Feature | `Core` |
+| Arguments | `original_base: u64`, `base: u64`, `flags: u32` |
+| Results | — |
+| Capability effects | `machine: Borrow, kind=virtual_machine, rights=0x20` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `guest_notification_access`
+
+Object-local method `guest_notification_access`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `machine: Borrow, kind=virtual_machine, rights=0x20` |
+| Operation | 266 |
+| Feature | `Core` |
+| Arguments | `original_base: u64`, `operation: u32`, `value: u32` |
+| Results | `value: u32` |
+| Capability effects | `machine: Borrow, kind=virtual_machine, rights=0x20` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `vmar_lock_memory`
+
+Object-local method `vmar_lock_memory`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `vmar: Borrow, kind=vmar, rights=0x1000000000` |
+| Operation | 263 |
+| Feature | `Core` |
+| Arguments | `address: u64`, `size: byte_count`, `flags: u32` |
+| Results | — |
+| Capability effects | `vmar: Borrow, kind=vmar, rights=0x1000000000` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `vmar_unlock_memory`
+
+Object-local method `vmar_unlock_memory`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `vmar: Borrow, kind=vmar, rights=0x1000000000` |
+| Operation | 264 |
+| Feature | `Core` |
+| Arguments | `address: u64`, `size: byte_count`, `flags: u32` |
+| Results | — |
+| Capability effects | `vmar: Borrow, kind=vmar, rights=0x1000000000` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `process_builder_set_memory_lock`
+
+Object-local method `process_builder_set_memory_lock`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `builder: Borrow, kind=process_builder, rights=0x1000000020` |
+| Operation | 263 |
+| Feature | `Core` |
+| Arguments | `enabled: u32` |
+| Results | — |
+| Capability effects | `builder: Borrow, kind=process_builder, rights=0x1000000020` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `filesystem_begin_root_switch`
+
+Object-local method `filesystem_begin_root_switch`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `directory: Borrow, kind=directory, rights=0x4000000a0` |
+| Operation | 279 |
+| Feature | `Core` |
+| Arguments | `request: user_address` |
+| Results | `transition: handle` |
+| Capability effects | `directory: Borrow, kind=directory, rights=0x4000000a0`, `transition: produce, kind=root_transition, fixed=0x2a` |
+| User memory | `request: Read, fixed-bytes=48, record=filesystem_root_switch; order=0` |
+| Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `filesystem_finish_root_switch`
+
+Object-local method `filesystem_finish_root_switch`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `transition: Borrow, kind=root_transition, rights=0x20` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `commit: u32` |
+| Results | — |
+| Capability effects | `transition: Borrow, kind=root_transition, rights=0x20` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `guest_memory_transfer`
+
+Object-local method `guest_memory_transfer`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `memory: Borrow, kind=guest_memory, rights=0x0` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `operation: u32`, `offset: u64`, `buffer: user_address`, `length: byte_count` |
+| Results | — |
+| Capability effects | `memory: Borrow, kind=guest_memory, rights=0x0` |
+| User memory | `buffer: ReadWrite, len=length bytes, max-bytes=4096; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `guest_memory_scalar`
+
+Object-local method `guest_memory_scalar`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `memory: Borrow, kind=guest_memory, rights=0x0` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | `operation: u32`, `offset: u64`, `width: u32`, `value: u64` |
+| Results | `value: u64` |
+| Capability effects | `memory: Borrow, kind=guest_memory, rights=0x0` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `guest_interrupt_create`
+
+Object-local method `guest_interrupt_create`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `machine: Borrow, kind=virtual_machine, rights=0x20` |
+| Operation | 267 |
+| Feature | `Core` |
+| Arguments | `irq: u32` |
+| Results | `interrupt: handle` |
+| Capability effects | `machine: Borrow, kind=virtual_machine, rights=0x20`, `interrupt: produce, kind=guest_interrupt, fixed=0x2a` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `guest_interrupt_set_level`
+
+Object-local method `guest_interrupt_set_level`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `interrupt: Borrow, kind=guest_interrupt, rights=0x20` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `asserted: u32` |
+| Results | — |
+| Capability effects | `interrupt: Borrow, kind=guest_interrupt, rights=0x20` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `memory_inspector_read_statistics`
+
+Object-local method `memory_inspector_read_statistics`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `inspector: Borrow, kind=memory_inspector, rights=0x8` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `topic: u32`, `index: u32`, `statistics: user_address`, `statistics_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `inspector: Borrow, kind=memory_inspector, rights=0x8` |
+| User memory | `statistics: Write, len=statistics_size bytes, max-bytes=4096; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Object` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `process_builder_retain`
+
+Object-local method `process_builder_retain`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `builder: Borrow, kind=process_builder, rights=0x2000000020` |
+| Operation | 264 |
+| Feature | `Core` |
+| Arguments | `max_bytes: byte_count`, `timeout_ns: u64` |
+| Results | `handle: handle` |
+| Capability effects | `builder: Borrow, kind=process_builder, rights=0x2000000020`, `handle: produce, kind=process_retirement, fixed=0x420000000e` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `process_retirement_get_info`
+
+Object-local method `process_retirement_get_info`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `object: Borrow, kind=process_retirement, rights=0x8` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `output: user_address`, `output_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `object: Borrow, kind=process_retirement, rights=0x8` |
+| User memory | `output: Write, len=output_size bytes, max-bytes=4096, record=process_retirement_info; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `process_retirement_open_view`
+
+Object-local method `process_retirement_open_view`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `object: Borrow, kind=process_retirement, rights=0x200000000` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | `handle: handle` |
+| Capability effects | `object: Borrow, kind=process_retirement, rights=0x200000000`, `handle: produce, kind=crash_view, fixed=0x1b` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `process_retirement_release`
+
+Object-local method `process_retirement_release`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `object: Borrow, kind=process_retirement, rights=0x4000000000` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | — |
+| Results | — |
+| Capability effects | `object: Borrow, kind=process_retirement, rights=0x4000000000` |
+| User memory | — |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `crash_view_get_info`
+
+Object-local method `crash_view_get_info`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `object: Borrow, kind=crash_view, rights=0x8` |
+| Operation | 256 |
+| Feature | `Core` |
+| Arguments | `output: user_address`, `output_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `object: Borrow, kind=crash_view, rights=0x8` |
+| User memory | `output: Write, len=output_size bytes, max-bytes=4096, record=process_retirement_info; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `crash_view_read`
+
+Object-local method `crash_view_read`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `object: Borrow, kind=crash_view, rights=0x10` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `address: u64`, `output: user_address`, `length: byte_count` |
+| Results | `actual_bytes: byte_count` |
+| Capability effects | `object: Borrow, kind=crash_view, rights=0x10` |
+| User memory | `output: Write, len=length bytes, max-bytes=65536; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `crash_view_thread`
+
+Object-local method `crash_view_thread`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `object: Borrow, kind=crash_view, rights=0x10` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | `index: u64`, `output: user_address`, `output_size: byte_count` |
+| Results | `supported_size: byte_count`, `next_index: u64` |
+| Capability effects | `object: Borrow, kind=crash_view, rights=0x10` |
+| User memory | `output: Write, len=output_size bytes, max-bytes=4096, record=crash_thread; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `crash_view_mapping`
+
+Object-local method `crash_view_mapping`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `object: Borrow, kind=crash_view, rights=0x10` |
+| Operation | 259 |
+| Feature | `Core` |
+| Arguments | `index: u64`, `output: user_address`, `output_size: byte_count` |
+| Results | `supported_size: byte_count`, `next_index: u64` |
+| Capability effects | `object: Borrow, kind=crash_view, rights=0x10` |
+| User memory | `output: Write, len=output_size bytes, max-bytes=4096, record=crash_mapping; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `crash_view_handle`
+
+Object-local method `crash_view_handle`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `object: Borrow, kind=crash_view, rights=0x10` |
+| Operation | 260 |
+| Feature | `Core` |
+| Arguments | `index: u64`, `output: user_address`, `output_size: byte_count` |
+| Results | `supported_size: byte_count`, `next_index: u64` |
+| Capability effects | `object: Borrow, kind=crash_view, rights=0x10` |
+| User memory | `output: Write, len=output_size bytes, max-bytes=4096, record=crash_handle; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `thread_set_current_name`
+
+Object-local method `thread_set_current_name`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=execution_context, rights=0x20` |
+| Operation | 265 |
+| Feature | `Core` |
+| Arguments | `name: user_address`, `name_size: byte_count` |
+| Results | — |
+| Capability effects | `receiver: Borrow, kind=execution_context, rights=0x20` |
+| User memory | `name: Read, len=name_size bytes, max-bytes=64; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `device_dma_fault_info`
+
+Object-local method `device_dma_fault_info`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `device: Borrow, kind=physical_device, rights=0x8008` |
+| Operation | 262 |
+| Feature | `Core` |
+| Arguments | `output: user_address`, `output_size: byte_count` |
+| Results | `supported_size: byte_count` |
+| Capability effects | `device: Borrow, kind=physical_device, rights=0x8008` |
+| User memory | `output: Write, len=output_size bytes, max-bytes=4096, record=device_dma_fault_info; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `native_block_transfer`
+
+Object-local method `native_block_transfer`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `block: Borrow, kind=native_block, rights=0x0` |
+| Operation | 257 |
+| Feature | `Core` |
+| Arguments | `operation: u32`, `first_sector: u64`, `buffer: user_address`, `length: byte_count` |
+| Results | — |
+| Capability effects | `block: Borrow, kind=native_block, rights=0x0` |
+| User memory | `buffer: ReadWrite, len=length bytes, max-bytes=524352; order=0` |
+| Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
 
 ## Public records
 
-| Name | Minimum prefix | Size | Alignment | Fields |
-| --- | ---: | ---: | ---: | --- |
-| `process_retirement_info` | 104 | 104 | 8 | `size: u32 @ 0`, `phase: u32 @ 4`, `flags: u32 @ 8`, `release_reason: u32 @ 12`, `process_koid: u64 @ 16`, `deadline_ns: u64 @ 24`, `retained_bytes: u64 @ 32`, `memory_limit: u64 @ 40`, `terminal_reason: u32 @ 48`, `fault_class: u32 @ 52`, `exit_status: i64 @ 56`, `fault_pc: u64 @ 64`, `fault_address: u64 @ 72`, `fault_syndrome: u64 @ 80`, `thread_count: u32 @ 88`, `mapping_count: u32 @ 92`, `handle_count: u32 @ 96`, `reserved: u32 @ 100` |
-| `crash_thread` | 840 | 840 | 8 | `size: u32 @ 0`, `machine: u32 @ 4`, `flags: u32 @ 8`, `reserved: u32 @ 12`, `thread_koid: u64 @ 16`, `pc: u64 @ 24`, `sp: u64 @ 32`, `tls: u64 @ 40`, `processor_state: u64 @ 48`, `general: bytes[256] @ 56`, `vector: bytes[512] @ 312`, `fp_control: bytes[16] @ 824` |
-| `crash_mapping` | 48 | 48 | 8 | `size: u32 @ 0`, `flags: u32 @ 4`, `base: u64 @ 8`, `length: u64 @ 16`, `object_offset: u64 @ 24`, `object_koid: u64 @ 32`, `permissions: u32 @ 40`, `kind: u32 @ 44` |
-| `crash_handle` | 40 | 40 | 8 | `size: u32 @ 0`, `kind: u32 @ 4`, `value: u64 @ 8`, `koid: u64 @ 16`, `rights: u64 @ 24`, `flags: u32 @ 32`, `reserved: u32 @ 36` |
-| `memory_heap_statistics` | 176 | 176 | 8 | `captured_at_ns: u64 @ 0`, `live_objects: u64 @ 8`, `live_slab_objects: u64 @ 16`, `live_large_objects: u64 @ 24`, `requested_bytes: u64 @ 32`, `peak_objects: u64 @ 40`, `peak_requested_bytes: u64 @ 48`, `allocations: u64 @ 56`, `failures: u64 @ 64`, `cached_objects: u64 @ 72`, `cache_hits: u64 @ 80`, `cache_misses: u64 @ 88`, `cache_refills: u64 @ 96`, `cache_drains: u64 @ 104`, `pressure_reclaims: u64 @ 112`, `reclaimed_objects: u64 @ 120`, `cache_cpus: u64 @ 128`, `profiling_enabled: u64 @ 136`, `page_allocations: u64 @ 144`, `page_failures: u64 @ 152`, `page_deallocations: u64 @ 160`, `peak_allocated_pages: u64 @ 168` |
-| `memory_buddy_statistics` | 24 | 24 | 8 | `captured_at_ns: u64 @ 0`, `order: u64 @ 8`, `free_blocks: u64 @ 16` |
-| `memory_owner_statistics` | 48 | 48 | 8 | `captured_at_ns: u64 @ 0`, `resident_pages: u64 @ 8`, `peak_pages: u64 @ 16`, `allocations: u64 @ 24`, `failures: u64 @ 32`, `deallocations: u64 @ 40` |
-| `memory_file_cache_statistics` | 120 | 120 | 8 | `captured_at_ns: u64 @ 0`, `payload_pages: u64 @ 8`, `metadata_slab_pages: u64 @ 16`, `metadata_large_pages: u64 @ 24`, `index_capacity: u64 @ 32`, `clean_entries: u64 @ 40`, `loading_entries: u64 @ 48`, `live_payloads: u64 @ 56`, `metadata_budget_pages: u64 @ 64`, `table_present: u64 @ 72`, `admission_enabled: u64 @ 80`, `admission_paused: u64 @ 88`, `maintenance_pending: u64 @ 96`, `maintenance_running: u64 @ 104`, `growth_requested: u64 @ 112` |
-| `memory_heap_class_statistics` | 88 | 88 | 8 | `captured_at_ns: u64 @ 0`, `pool: u64 @ 8`, `object_size: u64 @ 16`, `pages: u64 @ 24`, `capacity: u64 @ 32`, `reserved: u64 @ 40`, `cached: u64 @ 48`, `live: u64 @ 56`, `requested_bytes: u64 @ 64`, `allocations: u64 @ 72`, `deallocations: u64 @ 80` |
-| `filesystem_root_switch` | 48 | 48 | 8 | `new_root: u64 @ 0`, `new_root_length: u64 @ 8`, `put_old: u64 @ 16`, `put_old_length: u64 @ 24`, `moves: u64 @ 32`, `move_count: u64 @ 40` |
-| `filesystem_mount_move` | 32 | 32 | 8 | `source: u64 @ 0`, `source_length: u64 @ 8`, `target: u64 @ 16`, `target_length: u64 @ 24` |
-| `object_details` | 88 | 88 | 8 | `koid: u64 @ 0`, `object_kind: u32 @ 8`, `record_kind: u32 @ 12`, `next_cursor: u64 @ 16`, `payload: bytes[64] @ 24` |
-| `device_dma_fault_info` | 40 | 40 | 8 | `timestamp_ns: u64 @ 0`, `address: u64 @ 8`, `stream_id: u32 @ 16`, `source: u32 @ 20`, `scope: u32 @ 24`, `code: u32 @ 28`, `flags: u32 @ 32`, `reserved: u32 @ 36` |
-| `device_profile_info` | 32 | 32 | 8 | `profile: u32 @ 0`, `interrupt_count: u32 @ 4`, `resource_count: u32 @ 8`, `pci_identity: u32 @ 12`, `dma_bus_offset: u64 @ 16`, `aperture_size: u64 @ 24` |
-| `device_firmware_query` | 24 | 24 | 8 | `node: u32 @ 0`, `field: u32 @ 4`, `name_address: u64 @ 8`, `name_length: u64 @ 16` |
-| `device_firmware_info` | 32 | 32 | 8 | `flags: u32 @ 0`, `register_count: u32 @ 4`, `irq_number: u32 @ 8`, `irq_trigger: u32 @ 12`, `reserved0: u64 @ 16`, `reserved1: u64 @ 24` |
-| `device_bundle_entry` | 16 | 16 | 8 | `node: u32 @ 0`, `resource: u32 @ 4`, `offset: u64 @ 8` |
-| `device_resource_info` | 32 | 32 | 8 | `kind: u32 @ 0`, `flags: u32 @ 4`, `offset: u64 @ 8`, `length: u64 @ 16`, `bus_address: u64 @ 24` |
-| `physical_device_info` | 16 | 16 | 8 | `device_id: u32 @ 0`, `transport_version: u32 @ 4`, `mmio_size: u64 @ 8` |
-| `dma_extent` | 16 | 16 | 8 | `physical_base: u64 @ 0`, `length: u64 @ 8` |
-| `virtual_cpu_mmio_request` | 48 | 48 | 8 | `id: u64 @ 0`, `device: u64 @ 8`, `address: u64 @ 16`, `value: u64 @ 24`, `operation: u32 @ 32`, `width: u32 @ 36`, `reserved: u64 @ 40` |
-| `private_mapping` | 48 | 48 | 8 | `source_offset: u64 @ 0`, `source_length: u64 @ 8`, `address: u64 @ 16`, `size: u64 @ 24`, `data_offset: u64 @ 32`, `permissions: u32 @ 40`, `mode: u32 @ 44` |
-| `virtual_machine_platform_info` | 32 | 32 | 8 | `architecture: u32 @ 0`, `platform_profile: u32 @ 4`, `counter_frequency_hz: u64 @ 8`, `riscv_isa: u64 @ 16`, `aarch64_gic_version: u64 @ 24` |
-| `file_metadata` | 112 | 112 | 8 | `filesystem_id: u64 @ 0`, `mount_id: u64 @ 8`, `node_id: u64 @ 16`, `size: u64 @ 24`, `mode: u32 @ 32`, `kind: u32 @ 36`, `valid_times: u32 @ 40`, `reserved: u32 @ 44`, `accessed_seconds: i64 @ 48`, `accessed_nanoseconds: u32 @ 56`, `accessed_reserved: u32 @ 60`, `modified_seconds: i64 @ 64`, `modified_nanoseconds: u32 @ 72`, `modified_reserved: u32 @ 76`, `created_seconds: i64 @ 80`, `created_nanoseconds: u32 @ 88`, `created_reserved: u32 @ 92`, `changed_seconds: i64 @ 96`, `changed_nanoseconds: u32 @ 104`, `changed_reserved: u32 @ 108` |
-| `file_metadata_update` | 40 | 40 | 8 | `mask: u32 @ 0`, `mode: u32 @ 4`, `accessed_seconds: i64 @ 8`, `accessed_nanoseconds: u32 @ 16`, `accessed_reserved: u32 @ 20`, `modified_seconds: i64 @ 24`, `modified_nanoseconds: u32 @ 32`, `modified_reserved: u32 @ 36` |
-| `wait_set_event` | 24 | 24 | 8 | `registration: u64 @ 0`, `signals: u64 @ 8`, `sequence: u64 @ 16` |
-| `handle_info` | 16 | 16 | 8 | `object_kind: u32 @ 0`, `flags: u32 @ 4`, `rights: u64 @ 8` |
-| `object_basic_info` | 16 | 16 | 8 | `koid: u64 @ 0`, `object_kind: u32 @ 8`, `reserved: u32 @ 12` |
-| `object_wait_item` | 16 | 16 | 8 | `handle: u64 @ 0`, `signals: u64 @ 8` |
-| `process_info` | 32 | 32 | 8 | `phase: u32 @ 0`, `terminal_reason: u32 @ 4`, `detail0: u64 @ 8`, `detail1: u64 @ 16`, `reserved: u64 @ 24` |
-| `capability_disposition` | 24 | 24 | 8 | `handle: u64 @ 0`, `rights: u64 @ 8`, `expected_kind: u32 @ 16`, `operation: u32 @ 20` |
-| `capability_receive_slot` | 24 | 24 | 8 | `handle: u64 @ 0`, `rights: u64 @ 8`, `expected_kind: u32 @ 16`, `flags: u32 @ 20` |
-| `loader_startup` | 96 | 96 | 8 | `size: u32 @ 0`, `handle_count: u32 @ 4`, `data_size: u32 @ 8`, `flags: u32 @ 12`, `executable: u64 @ 16`, `root_vmar: u64 @ 24`, `stack_vmar: u64 @ 32`, `stack_base: u64 @ 40`, `stack_size: u64 @ 48`, `loader_base: u64 @ 56`, `loader_size: u64 @ 64`, `execution_context: u64 @ 72`, `object_factory: u64 @ 80`, `system_info: u64 @ 88` |
-| `startup_handle` | 16 | 16 | 8 | `purpose: u32 @ 0`, `flags: u32 @ 4`, `handle: u64 @ 8` |
-| `task_process` | 96 | 96 | 8 | `koid: u64 @ 0`, `phase: u32 @ 8`, `terminal_reason: u32 @ 12`, `pending_threads: u32 @ 16`, `active_threads: u32 @ 20`, `name_length: u32 @ 24`, `reserved: u32 @ 28`, `name: bytes[64] @ 32` |
-| `task_thread` | 104 | 104 | 8 | `koid: u64 @ 0`, `process_koid: u64 @ 8`, `role: u32 @ 16`, `registry_phase: u32 @ 20`, `name_length: u32 @ 24`, `reserved: u32 @ 28`, `runtime_ticks: u64 @ 32`, `name: bytes[64] @ 40` |
-| `memory_observation` | 144 | 144 | 8 | `captured_at_ns: u64 @ 0`, `page_size: u64 @ 8`, `total_bytes: u64 @ 16`, `managed_bytes: u64 @ 24`, `free_bytes: u64 @ 32`, `kernel_bytes: u64 @ 40`, `slab_bytes: u64 @ 48`, `large_heap_bytes: u64 @ 56`, `page_table_bytes: u64 @ 64`, `vmo_bytes: u64 @ 72`, `guest_loaned_bytes: u64 @ 80`, `guest_private_bytes: u64 @ 88`, `file_cache_bytes: u64 @ 96`, `slab_reclaimable_bytes: u64 @ 104`, `slab_sample_complete: u64 @ 112`, `file_cache_reclaimable_bytes: u64 @ 120`, `file_cache_sample_complete: u64 @ 128`, `ramfs_capacity_bytes: u64 @ 136` |
-| `cpu_observation` | 64 | 64 | 8 | `captured_at_ns: u64 @ 0`, `ticks_per_second: u64 @ 8`, `online_cpus: u64 @ 16`, `idle_ticks: u64 @ 24`, `kernel_thread_ticks: u64 @ 32`, `user_thread_ticks: u64 @ 40`, `vcpu_ticks: u64 @ 48`, `reserved: u64 @ 56` |
-| `object_inspection` | 104 | 104 | 8 | `koid: u64 @ 0`, `object_kind: u32 @ 8`, `handle_state: u32 @ 12`, `active_handles: u64 @ 16`, `supported_rights: u64 @ 24`, `strong_references: u64 @ 32`, `kernel_service_references: u64 @ 40`, `scheduler_references: u64 @ 48`, `operation_references: u64 @ 56`, `user_authority_references: u64 @ 64`, `publication_references: u64 @ 72`, `diagnostic_references: u64 @ 80`, `retirement_references: u64 @ 88`, `vm_device_binding_references: u64 @ 96` |
-| `handle_inspection` | 40 | 40 | 8 | `process_koid: u64 @ 0`, `handle: u64 @ 8`, `object_koid: u64 @ 16`, `rights: u64 @ 24`, `object_kind: u32 @ 32`, `flags: u32 @ 36` |
-| `directory_entry` | 280 | 280 | 8 | `size: u64 @ 0`, `mode: u32 @ 8`, `kind: u32 @ 12`, `name_length: u32 @ 16`, `reserved: u32 @ 20`, `name: bytes[256] @ 24` |
-| `file_info` | 40 | 40 | 8 | `filesystem_id: u64 @ 0`, `mount_id: u64 @ 8`, `node_id: u64 @ 16`, `size: u64 @ 24`, `mode: u32 @ 32`, `reserved: u32 @ 36` |
-| `directory_info` | 32 | 32 | 8 | `filesystem_id: u64 @ 0`, `mount_id: u64 @ 8`, `node_id: u64 @ 16`, `mode: u32 @ 24`, `reserved: u32 @ 28` |
-| `virtual_machine_configuration` | 32 | 32 | 8 | `guest_physical_base: u64 @ 0`, `memory_size: u64 @ 8`, `vcpu_count: u32 @ 16`, `architecture: u32 @ 20`, `platform_profile: u32 @ 24`, `flags: u32 @ 28` |
-| `virtual_cpu_bootstrap` | 64 | 64 | 8 | `entry: u64 @ 0`, `stack: u64 @ 8`, `argument0: u64 @ 16`, `argument1: u64 @ 24`, `argument2: u64 @ 32`, `argument3: u64 @ 40`, `vcpu_id: u32 @ 48`, `flags: u32 @ 52`, `reserved: u64 @ 56` |
-| `virtual_machine_power_request` | 40 | 40 | 8 | `id: u64 @ 0`, `vcpu: u32 @ 8`, `operation: u32 @ 12`, `target: u32 @ 16`, `reserved: u32 @ 20`, `entry: u64 @ 24`, `context: u64 @ 32` |
-| `virtual_machine_info` | 32 | 40 | 8 | `phase: u32 @ 0`, `vcpu_count: u32 @ 4`, `guest_physical_base: u64 @ 8`, `memory_size: u64 @ 16`, `architecture: u32 @ 24`, `platform_profile: u32 @ 28`, `resident_memory_bytes: u64 @ 32` |
-| `virtual_cpu_info` | 24 | 32 | 8 | `vcpu_id: u32 @ 0`, `phase: u32 @ 4`, `scheduler_thread_id: u64 @ 8`, `terminal_reason: u32 @ 16`, `reserved: u32 @ 20`, `host_cpu: u32 @ 24`, `migration_target: u32 @ 28` |
-| `resource_limits` | 160 | 160 | 8 | `kernel_memory_bytes: u64 @ 0`, `processes: u64 @ 8`, `threads: u64 @ 16`, `handles: u64 @ 24`, `kernel_objects: u64 @ 32`, `committed_pages: u64 @ 40`, `pinned_pages: u64 @ 48`, `guest_pages: u64 @ 56`, `ipc_messages: u64 @ 64`, `ipc_bytes: u64 @ 72`, `ipc_handles: u64 @ 80`, `subscriptions: u64 @ 88`, `timers: u64 @ 96`, `virtual_machines: u64 @ 104`, `virtual_cpus: u64 @ 112`, `device_leases: u64 @ 120`, `dma_mappings: u64 @ 128`, `user_address_spaces: u64 @ 136`, `user_mappings: u64 @ 144`, `reserved: u64 @ 152` |
+### `process_retirement_info`
+
+Minimum prefix: 104 bytes; size: 104 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `size` | `u32` |
+| 4 | `phase` | `u32` |
+| 8 | `flags` | `u32` |
+| 12 | `release_reason` | `u32` |
+| 16 | `process_koid` | `u64` |
+| 24 | `deadline_ns` | `u64` |
+| 32 | `retained_bytes` | `u64` |
+| 40 | `memory_limit` | `u64` |
+| 48 | `terminal_reason` | `u32` |
+| 52 | `fault_class` | `u32` |
+| 56 | `exit_status` | `i64` |
+| 64 | `fault_pc` | `u64` |
+| 72 | `fault_address` | `u64` |
+| 80 | `fault_syndrome` | `u64` |
+| 88 | `thread_count` | `u32` |
+| 92 | `mapping_count` | `u32` |
+| 96 | `handle_count` | `u32` |
+| 100 | `reserved` | `u32` |
+
+### `crash_thread`
+
+Minimum prefix: 840 bytes; size: 840 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `size` | `u32` |
+| 4 | `machine` | `u32` |
+| 8 | `flags` | `u32` |
+| 12 | `reserved` | `u32` |
+| 16 | `thread_koid` | `u64` |
+| 24 | `pc` | `u64` |
+| 32 | `sp` | `u64` |
+| 40 | `tls` | `u64` |
+| 48 | `processor_state` | `u64` |
+| 56 | `general` | `bytes[256]` |
+| 312 | `vector` | `bytes[512]` |
+| 824 | `fp_control` | `bytes[16]` |
+
+### `crash_mapping`
+
+Minimum prefix: 48 bytes; size: 48 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `size` | `u32` |
+| 4 | `flags` | `u32` |
+| 8 | `base` | `u64` |
+| 16 | `length` | `u64` |
+| 24 | `object_offset` | `u64` |
+| 32 | `object_koid` | `u64` |
+| 40 | `permissions` | `u32` |
+| 44 | `kind` | `u32` |
+
+### `crash_handle`
+
+Minimum prefix: 40 bytes; size: 40 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `size` | `u32` |
+| 4 | `kind` | `u32` |
+| 8 | `value` | `u64` |
+| 16 | `koid` | `u64` |
+| 24 | `rights` | `u64` |
+| 32 | `flags` | `u32` |
+| 36 | `reserved` | `u32` |
+
+### `memory_heap_statistics`
+
+Minimum prefix: 176 bytes; size: 176 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `captured_at_ns` | `u64` |
+| 8 | `live_objects` | `u64` |
+| 16 | `live_slab_objects` | `u64` |
+| 24 | `live_large_objects` | `u64` |
+| 32 | `requested_bytes` | `u64` |
+| 40 | `peak_objects` | `u64` |
+| 48 | `peak_requested_bytes` | `u64` |
+| 56 | `allocations` | `u64` |
+| 64 | `failures` | `u64` |
+| 72 | `cached_objects` | `u64` |
+| 80 | `cache_hits` | `u64` |
+| 88 | `cache_misses` | `u64` |
+| 96 | `cache_refills` | `u64` |
+| 104 | `cache_drains` | `u64` |
+| 112 | `pressure_reclaims` | `u64` |
+| 120 | `reclaimed_objects` | `u64` |
+| 128 | `cache_cpus` | `u64` |
+| 136 | `profiling_enabled` | `u64` |
+| 144 | `page_allocations` | `u64` |
+| 152 | `page_failures` | `u64` |
+| 160 | `page_deallocations` | `u64` |
+| 168 | `peak_allocated_pages` | `u64` |
+
+### `memory_buddy_statistics`
+
+Minimum prefix: 24 bytes; size: 24 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `captured_at_ns` | `u64` |
+| 8 | `order` | `u64` |
+| 16 | `free_blocks` | `u64` |
+
+### `memory_owner_statistics`
+
+Minimum prefix: 48 bytes; size: 48 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `captured_at_ns` | `u64` |
+| 8 | `resident_pages` | `u64` |
+| 16 | `peak_pages` | `u64` |
+| 24 | `allocations` | `u64` |
+| 32 | `failures` | `u64` |
+| 40 | `deallocations` | `u64` |
+
+### `memory_file_cache_statistics`
+
+Minimum prefix: 120 bytes; size: 120 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `captured_at_ns` | `u64` |
+| 8 | `payload_pages` | `u64` |
+| 16 | `metadata_slab_pages` | `u64` |
+| 24 | `metadata_large_pages` | `u64` |
+| 32 | `index_capacity` | `u64` |
+| 40 | `clean_entries` | `u64` |
+| 48 | `loading_entries` | `u64` |
+| 56 | `live_payloads` | `u64` |
+| 64 | `metadata_budget_pages` | `u64` |
+| 72 | `table_present` | `u64` |
+| 80 | `admission_enabled` | `u64` |
+| 88 | `admission_paused` | `u64` |
+| 96 | `maintenance_pending` | `u64` |
+| 104 | `maintenance_running` | `u64` |
+| 112 | `growth_requested` | `u64` |
+
+### `memory_heap_class_statistics`
+
+Minimum prefix: 88 bytes; size: 88 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `captured_at_ns` | `u64` |
+| 8 | `pool` | `u64` |
+| 16 | `object_size` | `u64` |
+| 24 | `pages` | `u64` |
+| 32 | `capacity` | `u64` |
+| 40 | `reserved` | `u64` |
+| 48 | `cached` | `u64` |
+| 56 | `live` | `u64` |
+| 64 | `requested_bytes` | `u64` |
+| 72 | `allocations` | `u64` |
+| 80 | `deallocations` | `u64` |
+
+### `filesystem_root_switch`
+
+Minimum prefix: 48 bytes; size: 48 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `new_root` | `u64` |
+| 8 | `new_root_length` | `u64` |
+| 16 | `put_old` | `u64` |
+| 24 | `put_old_length` | `u64` |
+| 32 | `moves` | `u64` |
+| 40 | `move_count` | `u64` |
+
+### `filesystem_mount_move`
+
+Minimum prefix: 32 bytes; size: 32 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `source` | `u64` |
+| 8 | `source_length` | `u64` |
+| 16 | `target` | `u64` |
+| 24 | `target_length` | `u64` |
+
+### `object_details`
+
+Minimum prefix: 88 bytes; size: 88 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `koid` | `u64` |
+| 8 | `object_kind` | `u32` |
+| 12 | `record_kind` | `u32` |
+| 16 | `next_cursor` | `u64` |
+| 24 | `payload` | `bytes[64]` |
+
+### `device_dma_fault_info`
+
+Minimum prefix: 40 bytes; size: 40 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `timestamp_ns` | `u64` |
+| 8 | `address` | `u64` |
+| 16 | `stream_id` | `u32` |
+| 20 | `source` | `u32` |
+| 24 | `scope` | `u32` |
+| 28 | `code` | `u32` |
+| 32 | `flags` | `u32` |
+| 36 | `reserved` | `u32` |
+
+### `device_profile_info`
+
+Minimum prefix: 32 bytes; size: 32 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `profile` | `u32` |
+| 4 | `interrupt_count` | `u32` |
+| 8 | `resource_count` | `u32` |
+| 12 | `pci_identity` | `u32` |
+| 16 | `dma_bus_offset` | `u64` |
+| 24 | `aperture_size` | `u64` |
+
+### `device_firmware_query`
+
+Minimum prefix: 24 bytes; size: 24 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `node` | `u32` |
+| 4 | `field` | `u32` |
+| 8 | `name_address` | `u64` |
+| 16 | `name_length` | `u64` |
+
+### `device_firmware_info`
+
+Minimum prefix: 32 bytes; size: 32 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `flags` | `u32` |
+| 4 | `register_count` | `u32` |
+| 8 | `irq_number` | `u32` |
+| 12 | `irq_trigger` | `u32` |
+| 16 | `reserved0` | `u64` |
+| 24 | `reserved1` | `u64` |
+
+### `device_bundle_entry`
+
+Minimum prefix: 16 bytes; size: 16 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `node` | `u32` |
+| 4 | `resource` | `u32` |
+| 8 | `offset` | `u64` |
+
+### `device_resource_info`
+
+Minimum prefix: 32 bytes; size: 32 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `kind` | `u32` |
+| 4 | `flags` | `u32` |
+| 8 | `offset` | `u64` |
+| 16 | `length` | `u64` |
+| 24 | `bus_address` | `u64` |
+
+### `physical_device_info`
+
+Minimum prefix: 16 bytes; size: 16 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `device_id` | `u32` |
+| 4 | `transport_version` | `u32` |
+| 8 | `mmio_size` | `u64` |
+
+### `dma_extent`
+
+Minimum prefix: 16 bytes; size: 16 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `physical_base` | `u64` |
+| 8 | `length` | `u64` |
+
+### `virtual_cpu_mmio_request`
+
+Minimum prefix: 48 bytes; size: 48 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `id` | `u64` |
+| 8 | `device` | `u64` |
+| 16 | `address` | `u64` |
+| 24 | `value` | `u64` |
+| 32 | `operation` | `u32` |
+| 36 | `width` | `u32` |
+| 40 | `reserved` | `u64` |
+
+### `private_mapping`
+
+Minimum prefix: 48 bytes; size: 48 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `source_offset` | `u64` |
+| 8 | `source_length` | `u64` |
+| 16 | `address` | `u64` |
+| 24 | `size` | `u64` |
+| 32 | `data_offset` | `u64` |
+| 40 | `permissions` | `u32` |
+| 44 | `mode` | `u32` |
+
+### `virtual_machine_platform_info`
+
+Minimum prefix: 32 bytes; size: 32 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `architecture` | `u32` |
+| 4 | `platform_profile` | `u32` |
+| 8 | `counter_frequency_hz` | `u64` |
+| 16 | `riscv_isa` | `u64` |
+| 24 | `aarch64_gic_version` | `u64` |
+
+### `file_metadata`
+
+Minimum prefix: 112 bytes; size: 112 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `filesystem_id` | `u64` |
+| 8 | `mount_id` | `u64` |
+| 16 | `node_id` | `u64` |
+| 24 | `size` | `u64` |
+| 32 | `mode` | `u32` |
+| 36 | `kind` | `u32` |
+| 40 | `valid_times` | `u32` |
+| 44 | `reserved` | `u32` |
+| 48 | `accessed_seconds` | `i64` |
+| 56 | `accessed_nanoseconds` | `u32` |
+| 60 | `accessed_reserved` | `u32` |
+| 64 | `modified_seconds` | `i64` |
+| 72 | `modified_nanoseconds` | `u32` |
+| 76 | `modified_reserved` | `u32` |
+| 80 | `created_seconds` | `i64` |
+| 88 | `created_nanoseconds` | `u32` |
+| 92 | `created_reserved` | `u32` |
+| 96 | `changed_seconds` | `i64` |
+| 104 | `changed_nanoseconds` | `u32` |
+| 108 | `changed_reserved` | `u32` |
+
+### `file_metadata_update`
+
+Minimum prefix: 40 bytes; size: 40 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `mask` | `u32` |
+| 4 | `mode` | `u32` |
+| 8 | `accessed_seconds` | `i64` |
+| 16 | `accessed_nanoseconds` | `u32` |
+| 20 | `accessed_reserved` | `u32` |
+| 24 | `modified_seconds` | `i64` |
+| 32 | `modified_nanoseconds` | `u32` |
+| 36 | `modified_reserved` | `u32` |
+
+### `wait_set_event`
+
+Minimum prefix: 24 bytes; size: 24 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `registration` | `u64` |
+| 8 | `signals` | `u64` |
+| 16 | `sequence` | `u64` |
+
+### `handle_info`
+
+Minimum prefix: 16 bytes; size: 16 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `object_kind` | `u32` |
+| 4 | `flags` | `u32` |
+| 8 | `rights` | `u64` |
+
+### `object_basic_info`
+
+Minimum prefix: 16 bytes; size: 16 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `koid` | `u64` |
+| 8 | `object_kind` | `u32` |
+| 12 | `reserved` | `u32` |
+
+### `object_wait_item`
+
+Minimum prefix: 16 bytes; size: 16 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `handle` | `u64` |
+| 8 | `signals` | `u64` |
+
+### `process_info`
+
+Minimum prefix: 32 bytes; size: 32 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `phase` | `u32` |
+| 4 | `terminal_reason` | `u32` |
+| 8 | `detail0` | `u64` |
+| 16 | `detail1` | `u64` |
+| 24 | `reserved` | `u64` |
+
+### `capability_disposition`
+
+Minimum prefix: 24 bytes; size: 24 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `handle` | `u64` |
+| 8 | `rights` | `u64` |
+| 16 | `expected_kind` | `u32` |
+| 20 | `operation` | `u32` |
+
+### `capability_receive_slot`
+
+Minimum prefix: 24 bytes; size: 24 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `handle` | `u64` |
+| 8 | `rights` | `u64` |
+| 16 | `expected_kind` | `u32` |
+| 20 | `flags` | `u32` |
+
+### `loader_startup`
+
+Minimum prefix: 96 bytes; size: 96 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `size` | `u32` |
+| 4 | `handle_count` | `u32` |
+| 8 | `data_size` | `u32` |
+| 12 | `flags` | `u32` |
+| 16 | `executable` | `u64` |
+| 24 | `root_vmar` | `u64` |
+| 32 | `stack_vmar` | `u64` |
+| 40 | `stack_base` | `u64` |
+| 48 | `stack_size` | `u64` |
+| 56 | `loader_base` | `u64` |
+| 64 | `loader_size` | `u64` |
+| 72 | `execution_context` | `u64` |
+| 80 | `object_factory` | `u64` |
+| 88 | `system_info` | `u64` |
+
+### `startup_handle`
+
+Minimum prefix: 16 bytes; size: 16 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `purpose` | `u32` |
+| 4 | `flags` | `u32` |
+| 8 | `handle` | `u64` |
+
+### `task_process`
+
+Minimum prefix: 96 bytes; size: 96 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `koid` | `u64` |
+| 8 | `phase` | `u32` |
+| 12 | `terminal_reason` | `u32` |
+| 16 | `pending_threads` | `u32` |
+| 20 | `active_threads` | `u32` |
+| 24 | `name_length` | `u32` |
+| 28 | `reserved` | `u32` |
+| 32 | `name` | `bytes[64]` |
+
+### `task_thread`
+
+Minimum prefix: 104 bytes; size: 104 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `koid` | `u64` |
+| 8 | `process_koid` | `u64` |
+| 16 | `role` | `u32` |
+| 20 | `registry_phase` | `u32` |
+| 24 | `name_length` | `u32` |
+| 28 | `reserved` | `u32` |
+| 32 | `runtime_ticks` | `u64` |
+| 40 | `name` | `bytes[64]` |
+
+### `memory_observation`
+
+Minimum prefix: 144 bytes; size: 144 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `captured_at_ns` | `u64` |
+| 8 | `page_size` | `u64` |
+| 16 | `total_bytes` | `u64` |
+| 24 | `managed_bytes` | `u64` |
+| 32 | `free_bytes` | `u64` |
+| 40 | `kernel_bytes` | `u64` |
+| 48 | `slab_bytes` | `u64` |
+| 56 | `large_heap_bytes` | `u64` |
+| 64 | `page_table_bytes` | `u64` |
+| 72 | `vmo_bytes` | `u64` |
+| 80 | `guest_loaned_bytes` | `u64` |
+| 88 | `guest_private_bytes` | `u64` |
+| 96 | `file_cache_bytes` | `u64` |
+| 104 | `slab_reclaimable_bytes` | `u64` |
+| 112 | `slab_sample_complete` | `u64` |
+| 120 | `file_cache_reclaimable_bytes` | `u64` |
+| 128 | `file_cache_sample_complete` | `u64` |
+| 136 | `ramfs_capacity_bytes` | `u64` |
+
+### `cpu_observation`
+
+Minimum prefix: 64 bytes; size: 64 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `captured_at_ns` | `u64` |
+| 8 | `ticks_per_second` | `u64` |
+| 16 | `online_cpus` | `u64` |
+| 24 | `idle_ticks` | `u64` |
+| 32 | `kernel_thread_ticks` | `u64` |
+| 40 | `user_thread_ticks` | `u64` |
+| 48 | `vcpu_ticks` | `u64` |
+| 56 | `reserved` | `u64` |
+
+### `object_inspection`
+
+Minimum prefix: 104 bytes; size: 104 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `koid` | `u64` |
+| 8 | `object_kind` | `u32` |
+| 12 | `handle_state` | `u32` |
+| 16 | `active_handles` | `u64` |
+| 24 | `supported_rights` | `u64` |
+| 32 | `strong_references` | `u64` |
+| 40 | `kernel_service_references` | `u64` |
+| 48 | `scheduler_references` | `u64` |
+| 56 | `operation_references` | `u64` |
+| 64 | `user_authority_references` | `u64` |
+| 72 | `publication_references` | `u64` |
+| 80 | `diagnostic_references` | `u64` |
+| 88 | `retirement_references` | `u64` |
+| 96 | `vm_device_binding_references` | `u64` |
+
+### `handle_inspection`
+
+Minimum prefix: 40 bytes; size: 40 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `process_koid` | `u64` |
+| 8 | `handle` | `u64` |
+| 16 | `object_koid` | `u64` |
+| 24 | `rights` | `u64` |
+| 32 | `object_kind` | `u32` |
+| 36 | `flags` | `u32` |
+
+### `directory_entry`
+
+Minimum prefix: 280 bytes; size: 280 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `size` | `u64` |
+| 8 | `mode` | `u32` |
+| 12 | `kind` | `u32` |
+| 16 | `name_length` | `u32` |
+| 20 | `reserved` | `u32` |
+| 24 | `name` | `bytes[256]` |
+
+### `file_info`
+
+Minimum prefix: 40 bytes; size: 40 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `filesystem_id` | `u64` |
+| 8 | `mount_id` | `u64` |
+| 16 | `node_id` | `u64` |
+| 24 | `size` | `u64` |
+| 32 | `mode` | `u32` |
+| 36 | `reserved` | `u32` |
+
+### `directory_info`
+
+Minimum prefix: 32 bytes; size: 32 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `filesystem_id` | `u64` |
+| 8 | `mount_id` | `u64` |
+| 16 | `node_id` | `u64` |
+| 24 | `mode` | `u32` |
+| 28 | `reserved` | `u32` |
+
+### `virtual_machine_configuration`
+
+Minimum prefix: 32 bytes; size: 32 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `guest_physical_base` | `u64` |
+| 8 | `memory_size` | `u64` |
+| 16 | `vcpu_count` | `u32` |
+| 20 | `architecture` | `u32` |
+| 24 | `platform_profile` | `u32` |
+| 28 | `flags` | `u32` |
+
+### `virtual_cpu_bootstrap`
+
+Minimum prefix: 64 bytes; size: 64 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `entry` | `u64` |
+| 8 | `stack` | `u64` |
+| 16 | `argument0` | `u64` |
+| 24 | `argument1` | `u64` |
+| 32 | `argument2` | `u64` |
+| 40 | `argument3` | `u64` |
+| 48 | `vcpu_id` | `u32` |
+| 52 | `flags` | `u32` |
+| 56 | `reserved` | `u64` |
+
+### `virtual_machine_power_request`
+
+Minimum prefix: 40 bytes; size: 40 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `id` | `u64` |
+| 8 | `vcpu` | `u32` |
+| 12 | `operation` | `u32` |
+| 16 | `target` | `u32` |
+| 20 | `reserved` | `u32` |
+| 24 | `entry` | `u64` |
+| 32 | `context` | `u64` |
+
+### `virtual_machine_info`
+
+Minimum prefix: 32 bytes; size: 40 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `phase` | `u32` |
+| 4 | `vcpu_count` | `u32` |
+| 8 | `guest_physical_base` | `u64` |
+| 16 | `memory_size` | `u64` |
+| 24 | `architecture` | `u32` |
+| 28 | `platform_profile` | `u32` |
+| 32 | `resident_memory_bytes` | `u64` |
+
+### `virtual_cpu_info`
+
+Minimum prefix: 24 bytes; size: 32 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `vcpu_id` | `u32` |
+| 4 | `phase` | `u32` |
+| 8 | `scheduler_thread_id` | `u64` |
+| 16 | `terminal_reason` | `u32` |
+| 20 | `reserved` | `u32` |
+| 24 | `host_cpu` | `u32` |
+| 28 | `migration_target` | `u32` |
+
+### `resource_limits`
+
+Minimum prefix: 160 bytes; size: 160 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `kernel_memory_bytes` | `u64` |
+| 8 | `processes` | `u64` |
+| 16 | `threads` | `u64` |
+| 24 | `handles` | `u64` |
+| 32 | `kernel_objects` | `u64` |
+| 40 | `committed_pages` | `u64` |
+| 48 | `pinned_pages` | `u64` |
+| 56 | `guest_pages` | `u64` |
+| 64 | `ipc_messages` | `u64` |
+| 72 | `ipc_bytes` | `u64` |
+| 80 | `ipc_handles` | `u64` |
+| 88 | `subscriptions` | `u64` |
+| 96 | `timers` | `u64` |
+| 104 | `virtual_machines` | `u64` |
+| 112 | `virtual_cpus` | `u64` |
+| 120 | `device_leases` | `u64` |
+| 128 | `dma_mappings` | `u64` |
+| 136 | `user_address_spaces` | `u64` |
+| 144 | `user_mappings` | `u64` |
+| 152 | `reserved` | `u64` |
