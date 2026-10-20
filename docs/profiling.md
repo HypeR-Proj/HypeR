@@ -132,6 +132,15 @@ path authority, and exact-ELF flame-graph generation. CI runs both GICv3 and
 GICv2. Host tests cover GIC SPI routing; Loom exercises the production admission
 state with stop/recycle racing an IRQ writer and with a stale deadline.
 
+On a four-core Raspberry Pi 5, a file-copy capture collected 9,323 samples
+across all four CPUs, with no ring overwrites and one IRQ contention drop.
+A separate, coarser capture of repeated copies produced 65 samples with no
+reported loss; exporting it and symbolizing against the exact image ELF produced
+folded stacks and an SVG. Automatic stop, duplicate-start rejection and explicit
+all-CPU disarming were also checked on the board. These runs validate capture
+and export mechanics, not storage throughput or a representative hotspot
+distribution.
+
 The architecture follows Arm's [PMUv3 register definitions](https://developer.arm.com/documentation/ddi0601/latest/)
 and the [Arm PMU firmware binding](https://www.kernel.org/doc/Documentation/devicetree/bindings/arm/pmu.yaml).
 The renderer is repository-owned; it needs Python and LLVM, with no downloaded

@@ -5,6 +5,8 @@
 
 pub(crate) mod address_space;
 mod notifications;
+mod ownership;
+pub(super) use ownership::host_owned;
 #[cfg(all(
     CONFIG_ARCH_AARCH64,
     all(feature = "kernel-test", feature = "io-dma-revoke-test")
@@ -71,17 +73,6 @@ impl Environment for KernelEnvironment {
     fn now_microseconds() -> u64 {
         crate::kernel::time::monotonic_microseconds()
     }
-}
-
-pub(super) fn host_owned(node: &PlatformDevice) -> bool {
-    // Even unsupported translation providers must remain outside assignable
-    // resource bundles. Otherwise a future isolated master could be bypassed by
-    // claiming its controller through the generic firmware/MMIO interface.
-    node.property("#iommu-cells").is_some()
-        || node.is_compatible("arm,smmu-v3")
-        || node.is_compatible("brcm,bcm2712-iommu")
-        || node.is_compatible("pci-host-ecam-generic")
-        || node.property("msi-controller").is_some()
 }
 
 pub(super) fn initialize(

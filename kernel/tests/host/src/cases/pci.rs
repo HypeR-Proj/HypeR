@@ -9,6 +9,9 @@ use std::cell::Cell;
 #[path = "pci/ecam.rs"]
 mod ecam;
 
+#[path = "../../../../src/kernel/device/iommu/ownership.rs"]
+mod controller_ownership;
+
 use hyper::{
     drivers::{
         pci::{Error, LinkFailure, LinkState, Prepared, Transport},
@@ -385,6 +388,7 @@ fn firmware_with_dma(memory_size: u64, dma: Option<&[u32]>) -> Vec<PlatformDevic
     tree.cells("#size-cells", &[2]);
     tree.cells("ranges", &[0x02000000, 0, 0, 0x1f, 0, 0, 0xfffffffc]);
     tree.cells("msi-parent", &[2]);
+    tree.property("msi-controller", b"");
     if let Some(dma) = dma {
         tree.cells("dma-ranges", dma);
     }
@@ -425,6 +429,7 @@ fn firmware_with_dma(memory_size: u64, dma: Option<&[u32]>) -> Vec<PlatformDevic
     tree.end();
     tree.begin("msi-controller@1000130000");
     tree.property("compatible", b"brcm,bcm2712-mip\0");
+    tree.property("msi-controller", b"");
     tree.cells("phandle", &[2]);
     tree.cells(
         "reg",
@@ -442,6 +447,69 @@ fn firmware_with_dma(memory_size: u64, dma: Option<&[u32]>) -> Vec<PlatformDevic
     let mut scanner = DeviceScanner::for_dependency_graph(&claims);
     crate::require_ok(fdt::discover_from_bytes_with(&blob, &mut scanner));
     crate::require_ok(scanner.finish())
+}
+
+#[test]
+fn pci_handoff_does_not_conflict_with_its_own_msi_controllers() {
+    let nodes = firmware(0x4000_0000);
+    let controllers: Vec<_> = nodes
+        .iter()
+        .filter(|node| node.property("msi-controller").is_some())
+        .collect();
+    assert_eq!(controllers.len(), 2);
+    for node in controllers {
+        assert!(
+            !controller_ownership::host_owned(&nodes, node),
+            "{} must remain available to the mediated PCI preparation path",
+            node.path()
+        );
+        // The final catalogue reservation still excludes these controllers
+        // from raw userspace firmware claims, even if preparation fails.
+        assert!(hyper::drivers::pci::owns_handoff_node(&nodes, node));
+    }
+}
+
+#[test]
+fn unrelated_msi_and_translation_controllers_remain_host_owned() {
+    let mut tree = Tree::default();
+    tree.begin("");
+    tree.cells("#address-cells", &[2]);
+    tree.cells("#size-cells", &[2]);
+    tree.begin("memory@0");
+    tree.property("device_type", b"memory\0");
+    tree.cells("reg", &[0, 0, 0, 0x4000_0000]);
+    tree.end();
+    for (name, compatible, property) in [
+        ("its", "arm,gic-v3-its", "msi-controller"),
+        ("mip", "brcm,bcm2712-mip", "msi-controller"),
+        ("smmu", "arm,smmu-v3", "#iommu-cells"),
+        ("iommu", "brcm,bcm2712-iommu", "#iommu-cells"),
+        ("unknown-iommu", "test,iommu", "#iommu-cells"),
+        ("ecam", "pci-host-ecam-generic", "#address-cells"),
+    ] {
+        tree.begin(name);
+        tree.property("compatible", format!("{compatible}\0").as_bytes());
+        tree.cells(property, &[0]);
+        tree.end();
+    }
+    tree.end();
+    let blob = tree.finish();
+    let mut scanner = DeviceScanner::for_dependency_graph(&[]);
+    crate::require_ok(fdt::discover_from_bytes_with(&blob, &mut scanner));
+    let nodes = crate::require_ok(scanner.finish());
+    let controllers: Vec<_> = nodes
+        .iter()
+        .filter(|node| !node.compatibles().is_empty())
+        .collect();
+    assert_eq!(controllers.len(), 6);
+    for node in controllers {
+        assert!(
+            controller_ownership::host_owned(&nodes, node),
+            "{}",
+            node.path()
+        );
+        assert!(!hyper::drivers::pci::owns_handoff_node(&nodes, node));
+    }
 }
 
 #[test]
