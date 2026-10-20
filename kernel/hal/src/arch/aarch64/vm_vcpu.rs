@@ -100,7 +100,7 @@ unsafe fn activate_admitted(
     let result = interrupts.with(|controller| {
         let vcpu = VirtualCpuId::new(vcpu_id);
         controller.synchronize(vcpu, context.vgic.slots())?;
-        let _ = controller.refill(vcpu, context.vgic.slots_mut())?;
+        let _ = controller.refill_current(vcpu, context.vgic.slots_mut())?;
         Ok::<(), hyper::vm::arm::gic::RuntimeError>(())
     });
     if let Err(error) = result {
@@ -274,7 +274,7 @@ pub(crate) fn deliver_software_interrupt_group(
                 controller.inject(interrupt, VirtualCpuId::new(index))?;
             }
         }
-        let _ = controller.refill(current, context.vgic.slots_mut())?;
+        let _ = controller.refill_current(current, context.vgic.slots_mut())?;
         Ok::<(), hyper::vm::arm::gic::RuntimeError>(())
     });
     if let Err(error) = result {
@@ -343,7 +343,7 @@ pub(crate) fn update_guest_device_interrupt(
             vcpu
         };
         controller.set_line(interrupt, target, asserted)?;
-        let _ = controller.refill(vcpu, context.vgic.slots_mut())?;
+        let _ = controller.refill_current(vcpu, context.vgic.slots_mut())?;
         Ok::<(), hyper::vm::arm::gic::RuntimeError>(())
     });
     if let Err(error) = result {
@@ -407,7 +407,7 @@ pub(crate) fn reconcile_active_interrupts(
     let result = interrupts.with(|controller| {
         let vcpu = VirtualCpuId::new(vcpu_id);
         controller.synchronize(vcpu, context.vgic.slots())?;
-        let _ = controller.refill(vcpu, context.vgic.slots_mut())?;
+        let _ = controller.refill_current(vcpu, context.vgic.slots_mut())?;
         Ok::<(), hyper::vm::arm::gic::RuntimeError>(())
     });
     if let Err(error) = result {
