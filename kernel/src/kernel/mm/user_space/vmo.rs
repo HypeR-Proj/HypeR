@@ -1358,6 +1358,7 @@ fn page_ref<Backend: PageBackend, Account: MemoryAccount>(
     optional_page_ref(inner, index)?.ok_or(VmoError::InvalidRange)
 }
 
+#[cfg(test)]
 pub(super) fn resident_pages<Backend: PageBackend, Account: MemoryAccount>(
     object: &MappingObject<Backend, Account>,
     offset: u64,

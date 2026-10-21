@@ -25,6 +25,7 @@ static KERNEL_ROOT: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Error {
+    Edit(hyper::mm::table_edit::Error),
     Allocation,
     InvalidAddress,
     InvalidRange,
@@ -102,14 +103,7 @@ fn hardware_identifier(identifier: u16) -> u64 {
     }
 }
 
-#[derive(Clone, Copy)]
-pub(crate) struct MappingPage {
-    pub(crate) address: u64,
-    pub(crate) physical: PhysicalAddress,
-    pub(crate) readable: bool,
-    pub(crate) writable: bool,
-    pub(crate) executable: bool,
-}
+use hyper::hal::user::{MappingPage, MappingUpdate};
 #[derive(Clone, Copy)]
 pub(crate) struct PreparedAddressSpace {
     root: u64,
@@ -222,15 +216,8 @@ fn map_page(
     page: MappingPage,
     allocator: &mut impl FnMut(usize) -> Option<PhysicalAddress>,
 ) -> Result<(), Error> {
-    if page.address >= USER_LIMIT
-        || page.address & 4095 != 0
-        || page.physical.get() & 4095 != 0
-        || page.physical.get() >= registers::PHYSICAL_ADDRESS_LIMIT
-        || (page.writable && !page.readable)
-    {
-        return Err(Error::InvalidAddress);
-    }
-    if !page.readable && !page.executable {
+    let descriptor = leaf_descriptor(page)?;
+    if descriptor == 0 {
         return Ok(());
     }
     let mut table = root;
@@ -252,19 +239,9 @@ fn map_page(
     if read_entry(table, slot)? != 0 {
         return Err(Error::Conflict);
     }
-    let mut flags =
-        registers::PTE_VALID | registers::PTE_USER | registers::PTE_ACCESSED | registers::PTE_DIRTY;
-    if page.readable {
-        flags |= registers::PTE_READ;
-    }
-    if page.writable {
-        flags |= registers::PTE_WRITE;
-    }
-    if page.executable {
-        flags |= registers::PTE_EXECUTE;
-    }
-    write_entry(table, slot, (page.physical.get() >> 2) | flags)
+    write_entry(table, slot, descriptor)
 }
+
 fn validate_table(table: PhysicalAddress) -> Result<(), Error> {
     if table.get() == 0 || table.get() & 4095 != 0 || table.get() >= 1 << 36 {
         Err(Error::InvalidAddress)
@@ -421,4 +398,133 @@ pub(crate) unsafe fn copy_from_exposed(source: *const u8, destination: *mut u8, 
 pub(crate) unsafe fn copy_to_exposed(source: *const u8, destination: *mut u8, length: usize) {
     // SAFETY: The byte-loop mechanism has the same requirements in either direction.
     unsafe { copy_from_exposed(source, destination, length) };
+}
+
+/// Builds a candidate hierarchy while leaving the retained old root immutable.
+///
+/// # Safety
+/// The caller retains the old hierarchy and supplies exclusive copied/new
+/// pages. Both table and data owners survive acknowledged root retirement.
+pub(crate) unsafe fn edit_address_space(
+    previous: &PreparedAddressSpace,
+    mut enumerate: impl FnMut(&mut dyn FnMut(MappingUpdate)),
+    pages: &mut impl hyper::mm::table_edit::Pages,
+) -> Result<PreparedAddressSpace, Error> {
+    let mut storage = EditStorage { pages };
+    let mut editor =
+        hyper::mm::table_edit::Editor::new(PhysicalAddress::new(previous.root << 12), &mut storage)
+            .map_err(Error::Edit)?;
+    let mut result = Ok(());
+    enumerate(&mut |update| {
+        if result.is_err() {
+            return;
+        }
+        result = (|| match update {
+            MappingUpdate::Unmap { address, length } => {
+                if address
+                    .checked_add(length)
+                    .is_none_or(|end| end > USER_LIMIT)
+                {
+                    return Err(Error::InvalidAddress);
+                }
+                editor.clear(address, length).map_err(Error::Edit)
+            }
+            MappingUpdate::Map(page) => {
+                let descriptor = leaf_descriptor(page)?;
+                editor.set(page.address, descriptor).map_err(Error::Edit)
+            }
+        })();
+    });
+    result?;
+    let root = editor.root().get();
+    // SAFETY: Complete candidate descriptor stores before root publication.
+    unsafe { asm!("fence rw, rw", options(nostack, preserves_flags)) };
+    Ok(PreparedAddressSpace {
+        root: root >> 12,
+        generation: previous.generation,
+    })
+}
+
+struct EditStorage<'a, P> {
+    pages: &'a mut P,
+}
+impl<P: hyper::mm::table_edit::Pages> hyper::mm::table_edit::Storage for EditStorage<'_, P> {
+    const LEVELS: usize = 3;
+    fn read(
+        &self,
+        table: PhysicalAddress,
+        slot: usize,
+    ) -> Result<u64, hyper::mm::table_edit::Error> {
+        if slot >= 512 {
+            return Err(hyper::mm::table_edit::Error::InvalidRange);
+        }
+        read_entry(table, slot).map_err(|_| hyper::mm::table_edit::Error::Storage)
+    }
+    fn write(
+        &mut self,
+        table: PhysicalAddress,
+        slot: usize,
+        value: u64,
+    ) -> Result<(), hyper::mm::table_edit::Error> {
+        if slot >= 512 {
+            return Err(hyper::mm::table_edit::Error::InvalidRange);
+        }
+        write_entry(table, slot, value).map_err(|_| hyper::mm::table_edit::Error::Storage)
+    }
+    fn writable(
+        &mut self,
+        old: Option<PhysicalAddress>,
+    ) -> Result<PhysicalAddress, hyper::mm::table_edit::Error> {
+        let table = self
+            .pages
+            .writable(old)
+            .ok_or(hyper::mm::table_edit::Error::Storage)?;
+        validate_table(table).map_err(|_| hyper::mm::table_edit::Error::Storage)?;
+        Ok(table)
+    }
+    fn discard(&mut self, table: PhysicalAddress) -> Result<(), hyper::mm::table_edit::Error> {
+        if self.pages.discard(table) {
+            Ok(())
+        } else {
+            Err(hyper::mm::table_edit::Error::Storage)
+        }
+    }
+    fn child(entry: u64) -> Result<Option<PhysicalAddress>, hyper::mm::table_edit::Error> {
+        if entry == 0 {
+            return Ok(None);
+        }
+        if entry & 15 != registers::PTE_VALID {
+            return Err(hyper::mm::table_edit::Error::InvalidEntry);
+        }
+        Ok(Some(PhysicalAddress::new((entry >> 10) << 12)))
+    }
+    fn link(table: PhysicalAddress) -> u64 {
+        (table.get() >> 2) | registers::PTE_VALID
+    }
+}
+
+fn leaf_descriptor(page: MappingPage) -> Result<u64, Error> {
+    if page.address >= USER_LIMIT
+        || page.address & 4095 != 0
+        || page.physical.get() & 4095 != 0
+        || page.physical.get() >= registers::PHYSICAL_ADDRESS_LIMIT
+        || (page.writable && !page.readable)
+    {
+        return Err(Error::InvalidAddress);
+    }
+    if !page.readable && !page.executable {
+        return Ok(0);
+    }
+    let mut flags =
+        registers::PTE_VALID | registers::PTE_USER | registers::PTE_ACCESSED | registers::PTE_DIRTY;
+    if page.readable {
+        flags |= registers::PTE_READ;
+    }
+    if page.writable {
+        flags |= registers::PTE_WRITE;
+    }
+    if page.executable {
+        flags |= registers::PTE_EXECUTE;
+    }
+    Ok((page.physical.get() >> 2) | flags)
 }

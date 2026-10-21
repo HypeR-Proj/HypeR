@@ -17,6 +17,7 @@ mod authority;
 mod contract;
 mod free_ranges;
 mod index;
+mod inline_buffer;
 #[cfg(not(test))]
 mod kernel_adapter;
 #[cfg(not(test))]
@@ -34,8 +35,7 @@ pub(crate) use vmo::{ExclusiveHardwareWriteLease, WritableMappingLease};
 
 pub(crate) use address_space::{
     AddressSpaceError, CrashMapping, CrashMappingKind, CrashMemory, CrashReadError, MappingChange,
-    MappingSnapshot, MappingToken, PreparedMappingChange, PreparedPageSnapshot, PreparedUserWrite,
-    UserAddressSpace, Vmar,
+    MappingToken, PreparedMappingChange, PreparedUserWrite, UserAddressSpace, Vmar,
 };
 #[cfg(not(test))]
 pub(crate) use authority::ExecutableAuthority;

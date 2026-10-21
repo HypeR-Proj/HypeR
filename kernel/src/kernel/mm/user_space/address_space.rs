@@ -7,13 +7,16 @@ mod file;
 mod observation;
 mod records;
 mod residency;
+mod updates;
+#[cfg(test)]
+use hyper::mm::PhysicalAddress;
 pub(crate) use observation::{CrashMapping, CrashMappingKind, CrashMemory, CrashReadError};
 
 use alloc::vec::Vec;
 use core::mem::{ManuallyDrop, size_of};
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use hyper::mm::{FallibleArc, ForeignMemory, PAGE_SIZE, PhysicalAddress};
+use hyper::mm::{FallibleArc, ForeignMemory, PAGE_SIZE};
 use hyper::sync::InterruptSpinLock;
 
 use super::contract::{
@@ -22,11 +25,12 @@ use super::contract::{
 };
 use super::free_ranges::FreeRanges;
 use super::index::{self, Entry, Index};
+use super::inline_buffer::InlineBuffer;
 use records::MappingIndex;
 
 use super::vmo::{
     ExecutableVmo, MappingObject, PrivateMappingMode, PrivateView, SnapshotVmo, VmoError,
-    WritableMappingLease, WritableVmo, resident_pages,
+    WritableMappingLease, WritableVmo,
 };
 
 #[cfg(not(test))]
@@ -289,7 +293,7 @@ struct AddressSpaceState<Backend: PageBackend, Account: MemoryAccount> {
     next_vmar_id: u64,
     authority_epoch: u64,
     mapping_epoch: u64,
-    user_writes: Vec<UserWriteRange>,
+    user_writes: InlineBuffer<UserWriteRange>,
     user_write_charge: Option<Account::Charge>,
     next_user_write_id: u64,
 }
@@ -374,7 +378,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
                 next_vmar_id: 1,
                 authority_epoch: 1,
                 mapping_epoch: 1,
-                user_writes: Vec::new(),
+                user_writes: InlineBuffer::default(),
                 user_write_charge: None,
                 next_user_write_id: 1,
             }),
@@ -1149,7 +1153,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
         }
         let plan = self.prepare_copy(source, Access::Read)?;
         let mut copied = 0usize;
-        for segment in &plan.segments {
+        for segment in plan.segments.iter() {
             let length =
                 usize::try_from(segment.length).map_err(|_| AddressSpaceError::SizeOverflow)?;
             let end = copied
@@ -1179,7 +1183,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
         }
         let plan = self.prepare_copy(destination, Access::Write)?;
         let mut copied = 0usize;
-        for segment in &plan.segments {
+        for segment in plan.segments.iter() {
             let length =
                 usize::try_from(segment.length).map_err(|_| AddressSpaceError::SizeOverflow)?;
             let end = copied
@@ -1222,11 +1226,11 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
         let capacity = count
             .checked_add(1)
             .ok_or(AddressSpaceError::SizeOverflow)?;
-        let mut charge = self.try_storage_charge::<UserWriteRange>(capacity)?;
-        let mut records = Vec::new();
-        records
-            .try_reserve_exact(capacity)
-            .map_err(|_| AddressSpaceError::Allocation)?;
+        let mut charge = self.try_storage_charge::<UserWriteRange>(
+            InlineBuffer::<UserWriteRange>::allocated_capacity(capacity),
+        )?;
+        let mut records =
+            InlineBuffer::try_with_capacity(capacity).map_err(|_| AddressSpaceError::Allocation)?;
         let retired = self.state.with(|state| {
             if state.sealed {
                 return Err(AddressSpaceError::Stopped);
@@ -1239,7 +1243,9 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
             // Other admissions change next_user_write_id. Releases only shrink
             // the set, so this preallocated capacity covers all current records
             // plus our new one. Only Copy metadata moves with IRQs masked.
-            records.extend_from_slice(&state.user_writes);
+            for record in state.user_writes.iter().copied() {
+                records.push(record);
+            }
             records.push(UserWriteRange {
                 id: reservation_id,
                 range: destination,
@@ -1347,18 +1353,25 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
         self.release_user_write(reservation);
     }
 
-    /// Pins one writable atomic word without ordinary byte copies. The mapping
-    /// token never aliases a replacement mapping at the same virtual address.
-    pub(crate) fn pin_atomic_u32(
+    /// Resolves process-private wait identity without touching or pinning data.
+    /// A concurrent unmap may retire this mapping, but its never-reused token
+    /// can only match waiters on that same old mapping, never its replacement.
+    pub(crate) fn atomic_wait_key(
         &self,
         address: UserAddress,
-    ) -> Result<PinnedAtomicWord<Backend, Account>, AddressSpaceError<Backend::Error, Account::Error>>
-    {
+    ) -> SpaceResult<Backend, Account, MappingToken> {
+        let snapshot = self.snapshot();
+        Ok(Self::atomic_mapping(&snapshot, address)?.snapshot.token)
+    }
+
+    fn atomic_mapping(
+        snapshot: &AddressSpaceSnapshot<Backend, Account>,
+        address: UserAddress,
+    ) -> SpaceResult<Backend, Account, &Mapping<Backend, Account>> {
         if !address.get().is_multiple_of(4) {
             return Err(AddressSpaceError::InvalidRange);
         }
         let range = UserSlice::new(address, 4).map_err(|_| AddressSpaceError::InvalidRange)?;
-        let snapshot = self.snapshot();
         if snapshot.sealed {
             return Err(AddressSpaceError::Stopped);
         }
@@ -1371,6 +1384,18 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
         if !mapping.snapshot.permissions.contains(Access::Write) {
             return Err(AddressSpaceError::WriteDenied);
         }
+        Ok(mapping)
+    }
+
+    /// Pins one writable atomic word without ordinary byte copies. The mapping
+    /// token never aliases a replacement mapping at the same virtual address.
+    pub(crate) fn pin_atomic_u32(
+        &self,
+        address: UserAddress,
+    ) -> Result<PinnedAtomicWord<Backend, Account>, AddressSpaceError<Backend::Error, Account::Error>>
+    {
+        let snapshot = self.snapshot();
+        let mapping = Self::atomic_mapping(&snapshot, address)?;
         let offset =
             mapping.snapshot.object_offset + address.get() - mapping.snapshot.range.base().get();
         if !mapping.object.writable_backing(offset, 4)? {
@@ -1421,11 +1446,14 @@ impl<Backend: PageBackend, Account: MemoryAccount> UserAddressSpace<Backend, Acc
             return Err(AddressSpaceError::InvalidRange);
         }
         let count = snapshot.mappings.records.overlapping(range).count();
-        let temporary_charge = self.try_storage_charge::<CopySegment<Backend, Account>>(count)?;
-        let mut segments = Vec::new();
-        segments
-            .try_reserve_exact(count)
-            .map_err(|_| AddressSpaceError::Allocation)?;
+        let temporary_charge =
+            self.try_storage_charge::<CopySegment<Backend, Account>>(InlineBuffer::<
+                CopySegment<Backend, Account>,
+            >::allocated_capacity(
+                count
+            ))?;
+        let mut segments =
+            InlineBuffer::try_with_capacity(count).map_err(|_| AddressSpaceError::Allocation)?;
         let mut cursor = range.base();
         for mapping in snapshot.mappings.records.overlapping(range) {
             let Some(overlap) = intersection(mapping.snapshot.range, range) else {
@@ -1625,6 +1653,7 @@ impl<'a, Backend: PageBackend, Account: MemoryAccount> PreparedMappingChange<'a,
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn snapshots(&self) -> impl Iterator<Item = MappingSnapshot> + '_ {
         self.replacement
             .records
@@ -1640,6 +1669,7 @@ impl<'a, Backend: PageBackend, Account: MemoryAccount> PreparedMappingChange<'a,
         self.next_mapping_epoch
     }
 
+    #[cfg(test)]
     pub(crate) fn resident_pages(
         &self,
         token: MappingToken,
@@ -1657,7 +1687,7 @@ impl<'a, Backend: PageBackend, Account: MemoryAccount> PreparedMappingChange<'a,
         let charge = self
             .address_space
             .try_storage_charge::<Option<PhysicalAddress>>(count)?;
-        let pages = resident_pages(
+        let pages = super::vmo::resident_pages(
             &mapping.object,
             mapping.snapshot.object_offset,
             mapping.snapshot.range.length(),
@@ -1734,6 +1764,7 @@ impl<'a, Backend: PageBackend, Account: MemoryAccount> PreparedMappingChange<'a,
     }
 }
 
+#[cfg(test)]
 pub(crate) struct PreparedPageSnapshot<Backend: PageBackend, Account: MemoryAccount> {
     pages: Vec<Option<PhysicalAddress>>,
     _charge: Option<Account::Charge>,
@@ -1741,6 +1772,7 @@ pub(crate) struct PreparedPageSnapshot<Backend: PageBackend, Account: MemoryAcco
     _pins: FallibleArc<MappingSet<Backend, Account>>,
 }
 
+#[cfg(test)]
 impl<Backend: PageBackend, Account: MemoryAccount> PreparedPageSnapshot<Backend, Account> {
     pub(crate) fn page_is_writable(&self, index: usize) -> bool {
         let mapping = &self.mapping;
@@ -1830,13 +1862,13 @@ struct CopySegment<Backend: PageBackend, Account: MemoryAccount> {
 }
 
 struct CopyPlan<Backend: PageBackend, Account: MemoryAccount> {
-    segments: Vec<CopySegment<Backend, Account>>,
+    segments: InlineBuffer<CopySegment<Backend, Account>>,
     _temporary_charge: Option<Account::Charge>,
 }
 
 impl<Backend: PageBackend, Account: MemoryAccount> CopyPlan<Backend, Account> {
     fn pin_private_ranges(&mut self) -> SpaceResult<Backend, Account, ()> {
-        for segment in &mut self.segments {
+        for segment in self.segments.iter_mut() {
             let CopyBacking::Mapping(object) = &segment.object else {
                 continue;
             };
@@ -1866,7 +1898,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> CopyPlan<Backend, Account> {
             return Err(AddressSpaceError::SizeMismatch);
         }
         let mut copied = 0usize;
-        for segment in &self.segments {
+        for segment in self.segments.iter() {
             let length =
                 usize::try_from(segment.length).map_err(|_| AddressSpaceError::SizeOverflow)?;
             let end = copied
@@ -1900,7 +1932,7 @@ impl<Backend: PageBackend, Account: MemoryAccount> CopyPlan<Backend, Account> {
         }
 
         let mut copied = 0usize;
-        for segment in &self.segments {
+        for segment in self.segments.iter() {
             if copied == source.len() {
                 break;
             }

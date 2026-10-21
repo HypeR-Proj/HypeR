@@ -5,6 +5,7 @@
 
 use super::*;
 use alloc::boxed::Box;
+use alloc::vec::Vec;
 
 #[cfg(CONFIG_ARCH_AARCH64)]
 mod busy_detach;
@@ -208,7 +209,7 @@ fn check_pageable_roots(
     let pages = || {
         let tables = native
             .state
-            .with(|state| state.current._tables.pages.len() as u64);
+            .with(|state| state.current._tables.len() as u64);
         domain
             .usage()
             .committed(ResourceKind::CommittedPages)
