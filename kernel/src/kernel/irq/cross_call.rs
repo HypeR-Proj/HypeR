@@ -433,6 +433,10 @@ pub(crate) fn service() {
         if reasons.contains(KernelRpcReasons::GUEST_STAGE2) {
             service_local_irq_mailbox();
         }
+        #[cfg(all(CONFIG_ARCH_AARCH64, feature = "pmu-profiling"))]
+        if reasons.contains(KernelRpcReasons::PMU_CONTROL) {
+            crate::kernel::profile::service_control();
+        }
     }
 }
 

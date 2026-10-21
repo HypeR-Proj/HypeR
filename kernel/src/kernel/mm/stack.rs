@@ -283,14 +283,18 @@ pub fn guard_page_is_unmapped(statistics: StackStatistics) -> Result<bool, Error
 
 pub(crate) fn exception_stack_bounds(cpu: usize, pointer: usize) -> Option<(usize, usize)> {
     let cpu = CpuIndex::new(cpu)?;
-    CPU_STACKS.with(|stacks| {
-        let stacks = &stacks[cpu];
-        [&stacks.irq, &stacks.emergency]
-            .into_iter()
-            .flatten()
-            .map(KernelStack::bounds)
-            .find(|(bottom, top)| *bottom <= pointer && pointer <= *top)
-    })
+    // Crash and PMU unwinding may interrupt a stack-registry update. They must
+    // neither wait for that lock nor poll cross-CPU work while sampling.
+    CPU_STACKS
+        .try_with(|stacks| {
+            let stacks = &stacks[cpu];
+            [&stacks.irq, &stacks.emergency]
+                .into_iter()
+                .flatten()
+                .map(KernelStack::bounds)
+                .find(|(bottom, top)| *bottom <= pointer && pointer <= *top)
+        })
+        .flatten()
 }
 
 /// Discards the live call chain and restarts execution at a clean stack top.
