@@ -1190,6 +1190,22 @@ impl VirtualGic {
         Ok(filled)
     }
 
+    /// Refills the current owner's bank and consumes its already-reflected prompt.
+    ///
+    /// The caller must own this vCPU and install the returned bank before it
+    /// resumes, or stop execution if hardware installation fails. Keep the
+    /// controller lock across this operation so later producers publish a new
+    /// prompt. Notifications for other vCPUs are retained.
+    pub fn refill_current(
+        &mut self,
+        vcpu: VirtualCpuId,
+        slots: &mut [Option<ListEntry>],
+    ) -> Result<usize, RuntimeError> {
+        let filled = self.refill(vcpu, slots)?;
+        self.reconcile_targets &= !(1u64 << vcpu.get());
+        Ok(filled)
+    }
+
     fn rebuild_listed(&mut self, cpu: usize, slots: &ValidatedSlots) -> Result<(), RuntimeError> {
         for index in self.deliveries[cpu].listed.iter().copied() {
             self.entries[index.0 as usize].listed_position = None;

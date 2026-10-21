@@ -288,7 +288,7 @@ impl VmInterruptController {
             state
                 .controller
                 .deactivate(vcpu, interrupt, source, split_eoi)?;
-            state.controller.refill(vcpu, slots)?;
+            state.controller.refill_current(vcpu, slots)?;
             Ok(false)
         })
     }
@@ -371,7 +371,7 @@ impl VmInterruptController {
             };
             let _ = state
                 .controller
-                .refill(vcpu, slots)
+                .refill_current(vcpu, slots)
                 .map_err(AccessError::Controller)?;
             Ok(value)
         })

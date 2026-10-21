@@ -53,7 +53,7 @@ pub fn refresh_running_vgic(
         let vcpu = VirtualCpuId::new(vcpu_id);
         controller.synchronize(vcpu, context.vgic.slots())?;
         set_timer_level(controller, interrupts, vcpu, timer_asserted)?;
-        let _ = controller.refill(vcpu, context.vgic.slots_mut())?;
+        let _ = controller.refill_current(vcpu, context.vgic.slots_mut())?;
         Ok::<(), VgicError>(())
     });
     result.inspect_err(|_| {
