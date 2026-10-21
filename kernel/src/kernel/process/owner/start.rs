@@ -3,6 +3,8 @@
 
 //! Atomic child Process preparation, publication, and rollback.
 
+use crate::kernel::capability::handle_wire;
+
 use super::handle_transactions::PreparedHandleConsumption;
 use super::*;
 
@@ -152,7 +154,7 @@ fn prepare_bootstrap(
         .flat_map(ProcessHandleBatchReservation::values)
         .skip(count);
     let mut next = || match values.next() {
-        Some(v) => v.get(),
+        Some(v) => handle_wire::to_abi(*v),
         None => process_invariant_violation(),
     };
     let root_vmar = next();
@@ -190,7 +192,7 @@ fn prepare_bootstrap(
         .map(|(capability, value)| HyperNativeStartupHandle {
             purpose: capability.purpose(),
             flags: 0,
-            handle: value.get(),
+            handle: handle_wire::to_abi(*value),
         });
     super::super::bootstrap::prepare(
         &build.child().process().resource_domain(),

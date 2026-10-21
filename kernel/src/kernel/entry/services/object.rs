@@ -3,6 +3,8 @@
 
 //! Native object service calls under borrowed Process authority.
 
+use crate::kernel::capability::handle_wire;
+
 use crate::kernel::capability::InvocationReceiver;
 
 use super::ProcessServices;
@@ -173,7 +175,7 @@ impl ObjectServices for ProcessServices<'_> {
             .map_err(|_| ProcessError::Allocation)?;
         for record in encoded.chunks_exact(record_size) {
             let (raw_handle, signals) = decode_wait_item(record)?;
-            let handle = HandleValue::try_from_raw(raw_handle).map_err(ProcessError::from)?;
+            let handle = handle_wire::from_abi(raw_handle).map_err(ProcessError::from)?;
             resolved.push(ResolvedWaitEntry {
                 object: self.process.resolve_waitable(handle, Rights::WAIT)?,
                 signals,

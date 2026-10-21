@@ -377,7 +377,7 @@ impl ObjectInspector {
                 return Err(Error::AccessDenied);
             }
             let process = find_process_by_koid(process, self.scope).ok_or(Error::NotFound)?;
-            let handle = crate::kernel::capability::HandleValue::try_from_raw(target)
+            let handle = crate::kernel::capability::handle_wire::from_abi(target)
                 .map_err(|_| Error::NotFound)?;
             process
                 .inspect_handle_object(handle)

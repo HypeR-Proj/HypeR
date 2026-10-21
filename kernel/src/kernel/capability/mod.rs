@@ -14,6 +14,7 @@ mod handle;
 mod transfer;
 
 pub(crate) use super::authority::Rights;
+pub(crate) use handle::wire as handle_wire;
 pub(crate) use handle::{
     ClosedHandle, DirectHandleTransfer, HandleBatchReservation, HandleBatchReservationStorage,
     HandleError, HandleFlags, HandleInfo, HandleReservation, HandleScanCursor, HandleSidecar,

@@ -3,6 +3,8 @@
 
 //! Fallible construction of one dormant boot Process.
 
+use crate::kernel::capability::handle_wire;
+
 use crate::kernel::accounting::ResourceDomain;
 use crate::kernel::capability::{HandleValue, PreparedHandle};
 use crate::kernel::process::{
@@ -166,16 +168,16 @@ fn install_bootstrap<const N: usize>(
         handle_count: (N - 2) as u32,
         data_size: 0,
         flags: 0,
-        executable: extra[0].get(),
-        root_vmar: values[root].get(),
-        stack_vmar: values[stack].get(),
+        executable: handle_wire::to_abi(extra[0]),
+        root_vmar: handle_wire::to_abi(values[root]),
+        stack_vmar: handle_wire::to_abi(values[stack]),
         stack_base: layout.stack_base,
         stack_size: layout.stack_size,
         loader_base: layout.loader_base,
         loader_size: layout.loader_size,
-        execution_context: extra[2].get(),
-        object_factory: extra[3].get(),
-        system_info: extra[4].get(),
+        execution_context: handle_wire::to_abi(extra[2]),
+        object_factory: handle_wire::to_abi(extra[3]),
+        system_info: handle_wire::to_abi(extra[4]),
     };
     let records = purposes
         .iter()
@@ -185,7 +187,7 @@ fn install_bootstrap<const N: usize>(
         .map(|(_, (purpose, value))| HyperNativeStartupHandle {
             purpose: *purpose,
             flags: 0,
-            handle: value.get(),
+            handle: handle_wire::to_abi(*value),
         });
     let prepared = match crate::kernel::process::bootstrap::prepare(
         &boot.process.resource_domain(),
@@ -214,5 +216,5 @@ fn install_bootstrap<const N: usize>(
             ],
         )
         .map_err(|failure| Error::Process(failure.error))?;
-    Ok(published[1].get())
+    Ok(handle_wire::to_abi(published[1]))
 }

@@ -3,6 +3,8 @@
 
 //! Native guest I/O syscall validation.
 
+use crate::kernel::capability::handle_wire;
+
 use crate::kernel::capability::InvocationReceiver;
 
 use crate::kernel::abi::native::services::NativeAction;
@@ -294,7 +296,7 @@ pub(in crate::kernel::abi::native) fn sys_guest_mapping_create(
             .map_err(status_from_vm_service_error)
     })();
     NativeAction::Return(match result {
-        Ok((handle, token)) => success([handle.get(), token]),
+        Ok((handle, token)) => success([handle_wire::to_abi(handle), token]),
         Err(error) => failure(error),
     })
 }

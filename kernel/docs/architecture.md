@@ -404,8 +404,9 @@ as a nonzero 64-bit KOID with the slot in its low bits. A linear reservation
 belongs to the canonical allocation until directory detachment and final
 payload destruction finish.
 Abandoned construction returns its reservation through the same path. Reuse
-advances the generation; exhausted generations retire their slots permanently,
-so stale snapshots never identify a replacement object. Object-directory
+advances the generation, wrapping to one at the maximum. Live objects have
+distinct identities, but historical IDs may identify replacement objects after
+reuse and cannot substitute for counted references. Object-directory
 pagination uses a separate registration sequence rather than KOID ordering.
 The allocator retains one 16-byte free-list node per reusable slot at the
 object high-water mark on 64-bit targets, including outstanding reservations

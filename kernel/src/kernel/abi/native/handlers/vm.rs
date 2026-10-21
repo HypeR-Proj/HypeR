@@ -3,6 +3,8 @@
 
 //! Native vm syscall validation.
 
+use crate::kernel::capability::handle_wire;
+
 use crate::kernel::abi::native::Arguments;
 use crate::kernel::abi::native::services::{NativeAction, VmServices};
 use crate::kernel::abi::native::status::{
@@ -184,7 +186,7 @@ pub(in crate::kernel::abi::native) fn sys_pending_virtual_machine_install(
             .map_err(status_from_vm_service_error)
     });
     NativeAction::Return(match result {
-        Ok([machine, vcpu]) => success([machine.get(), vcpu.get()]),
+        Ok([machine, vcpu]) => success([handle_wire::to_abi(machine), handle_wire::to_abi(vcpu)]),
         Err(status) => failure(status),
     })
 }

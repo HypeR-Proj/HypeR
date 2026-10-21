@@ -7,6 +7,8 @@ pub(super) mod memory_statistics;
 mod object_details;
 pub(super) use object_details::encode_object_details;
 
+use crate::kernel::capability::handle_wire;
+
 use alloc::vec::Vec;
 
 use hyper::abi::native::{
@@ -85,7 +87,7 @@ pub(super) fn parse_u32(value: u64) -> Result<u32, HyperNativeStatus> {
 }
 
 pub(super) fn parse_handle(raw: u64) -> Result<HandleValue, HyperNativeStatus> {
-    HandleValue::try_from_raw(raw).map_err(status_from_handle_error)
+    handle_wire::from_abi(raw).map_err(status_from_handle_error)
 }
 
 pub(super) fn decode_resource_limits(
@@ -1287,7 +1289,7 @@ pub(super) fn encode_handle_inspection(
     write_u64(
         &mut record,
         core::mem::offset_of!(Record, handle),
-        snapshot.handle.value.get(),
+        handle_wire::to_abi(snapshot.handle.value),
     );
     write_u64(
         &mut record,

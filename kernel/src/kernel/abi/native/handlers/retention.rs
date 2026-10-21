@@ -4,6 +4,8 @@
 //! Bounded postmortem operations. Each output is copied from an owned record;
 //! no target lock is held while touching the observer's userspace memory.
 
+use crate::kernel::capability::handle_wire;
+
 use crate::kernel::capability::InvocationReceiver;
 
 use crate::kernel::abi::native::services::NativeAction;
@@ -223,7 +225,7 @@ pub(in crate::kernel::abi::native) fn sys_crash_view_handle(
             abi::HYPER_NATIVE_CRASH_HANDLE_MIN_SIZE as u32,
         );
         write_u32(&mut record, 4, handle.info.kind.get());
-        write_u64(&mut record, 8, handle.value.get());
+        write_u64(&mut record, 8, handle_wire::to_abi(handle.value));
         write_u64(&mut record, 16, handle.info.koid.get());
         write_u64(&mut record, 24, handle.info.rights.bits());
         write_u32(&mut record, 32, handle.info.flags.bits());

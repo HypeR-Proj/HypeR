@@ -3,6 +3,8 @@
 
 //! Native ipc syscall validation.
 
+use crate::kernel::capability::handle_wire;
+
 use crate::kernel::abi::native::Arguments;
 use crate::kernel::abi::native::services::{IpcServices, NativeAction};
 use crate::kernel::abi::native::status::{
@@ -33,7 +35,7 @@ pub(in crate::kernel::abi::native) fn sys_byte_channel_create(
         .create_byte_channel()
         .map_err(status_from_byte_channel_service_error)
     {
-        Ok([first, second]) => success([first.get(), second.get()]),
+        Ok([first, second]) => success([handle_wire::to_abi(first), handle_wire::to_abi(second)]),
         Err(status) => failure(status),
     }
 }
@@ -50,7 +52,7 @@ pub(in crate::kernel::abi::native) fn sys_capability_channel_create(
         .create_capability_channel()
         .map_err(status_from_capability_channel_service_error)
     {
-        Ok([first, second]) => success([first.get(), second.get()]),
+        Ok([first, second]) => success([handle_wire::to_abi(first), handle_wire::to_abi(second)]),
         Err(status) => failure(status),
     }
 }

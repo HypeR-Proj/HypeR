@@ -3,13 +3,15 @@
 
 //! One-shot gates for syscall IRQ suspension and contended MM detach tests.
 
+use crate::kernel::capability::handle_wire;
+
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use hyper::abi::native::{HYPER_NATIVE_OP_ABI_QUERY, NativeInvocation};
 use hyper::cpu::CpuIndex;
 use hyper::sync::InterruptMaskGuard;
 
-use crate::kernel::capability::{HandleValue, Rights};
+use crate::kernel::capability::Rights;
 use crate::kernel::mm::user_space::NativeAddressSpace;
 use crate::kernel::object::ObjectKind;
 use crate::kernel::process::{Process, UserThread};
@@ -137,7 +139,7 @@ pub(super) fn hold_syscall(process: &Process, thread: &UserThread, invocation: N
     {
         return;
     }
-    let Ok(handle) = HandleValue::try_from_raw(invocation.target()) else {
+    let Ok(handle) = handle_wire::from_abi(invocation.target()) else {
         return;
     };
     if !process

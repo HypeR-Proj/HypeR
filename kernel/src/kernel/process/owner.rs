@@ -473,6 +473,8 @@ impl PreparedProcess {
                 return Err(create_failure_from_arc(error, address_space));
             }
         };
+        let handles = HandleTable::new(crate::kernel::random::next_u64());
+        let handle_accounting = HandleAccounting::new(handles.new_sidecar());
         let inner = ProcessInner {
             directory: super::directory::Membership::new(id),
             id,
@@ -482,14 +484,14 @@ impl PreparedProcess {
             name: PublishedOnce::new(),
             image,
             domain,
-            handles: ProcessLock::new(HandleTable::new()),
+            handles: ProcessLock::new(handles),
             state: ProcessLock::new(ProcessState {
                 lifecycle: ProcessLifecycle::prepared(),
                 address_space: Some(address_space),
                 group_membership: None,
                 process_charge: Some(process_charge),
                 threads: None,
-                handle_accounting: HandleAccounting::new(),
+                handle_accounting,
                 handle_table_charge: None,
                 handles_retired: false,
                 stopping_handle_cursor: 0,
@@ -1032,6 +1034,17 @@ impl Process {
         if self.inner.retention.publish(retention).is_err() {
             process_invariant_violation();
         }
+    }
+
+    /// Compares live retention ownership, not a historical diagnostic KOID.
+    pub(crate) fn is_retention_target(
+        &self,
+        control: &super::retention::ProcessRetirement,
+    ) -> bool {
+        self.inner
+            .retention
+            .get()
+            .is_some_and(|retention| core::ptr::eq(&**retention, &*control.retention))
     }
 
     pub(super) fn retention_budget(

@@ -201,8 +201,9 @@ pub(crate) fn scan(cursor: ObjectScanCursor) -> ObjectSnapshotPage {
     ObjectSnapshotPage { entries, len, next }
 }
 
-/// Pins one exact generation for inspection. The registry lock is released
-/// before the caller reads payload state; the reference grants no operations.
+/// Pins the currently registered object with this diagnostic ID. IDs may be
+/// reused after final destruction. The registry lock is released before the
+/// caller reads payload state; the reference grants no operations.
 pub(crate) fn lookup_diagnostic(koid: u64) -> Option<ErasedKernelRef<Diagnostic>> {
     DIRECTORY.with(|directory| {
         let mut entry = directory.head.as_deref();
