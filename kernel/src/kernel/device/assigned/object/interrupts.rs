@@ -196,7 +196,11 @@ impl PhysicalDevice {
     }
 }
 
-fn interrupt_handler(_: VirtualInterrupt, context: usize) -> HandlerResult {
+fn interrupt_handler(
+    _: VirtualInterrupt,
+    context: usize,
+    _frame: &crate::hal::irq::InterruptFrame<'_>,
+) -> HandlerResult {
     // SAFETY: the registration is owned by the final KernelRef allocation and
     // synchronized unregister precedes its release. Callbacks never acquire
     // registrations or mutate the IRQ registry.

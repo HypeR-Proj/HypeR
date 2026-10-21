@@ -238,7 +238,9 @@ pub enum HandlerResult {
     HandledAndUnmaskLocal(VirtualInterrupt),
 }
 
-pub type Handler = fn(VirtualInterrupt, usize) -> HandlerResult;
+/// Synchronous IRQ handler. The frame view is CPU-local and cannot be retained.
+pub type Handler =
+    fn(VirtualInterrupt, usize, &crate::hal::irq::InterruptFrame<'_>) -> HandlerResult;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Capabilities {
@@ -266,10 +268,19 @@ struct IrqMapping {
 }
 
 impl IrqMapping {
-    fn dispatch_handlers(&mut self, hardware: InterruptId, per_cpu: bool) -> HandlerDispatch {
+    fn dispatch_handlers(
+        &mut self,
+        hardware: InterruptId,
+        per_cpu: bool,
+        frame: &crate::hal::irq::InterruptFrame<'_>,
+    ) -> HandlerDispatch {
         let mut actions = HandlerActions::default();
         for entry in &self.handlers {
-            actions.record((entry.handler)(self.virtual_interrupt, entry.context));
+            actions.record((entry.handler)(
+                self.virtual_interrupt,
+                entry.context,
+                frame,
+            ));
         }
 
         let outcome = if actions.handled {
@@ -1064,8 +1075,8 @@ pub fn unregister(mut registration: Registration) -> Result<(), UnregisterFailur
 }
 
 /// Dispatches an interrupt already acknowledged by architecture exception entry.
-pub fn dispatch(hardware: InterruptId) {
-    let outcome = match with_state(|state| Ok(state.dispatch_one(hardware))) {
+pub fn dispatch(hardware: InterruptId, frame: &crate::hal::irq::InterruptFrame<'_>) {
+    let outcome = match with_state(|state| Ok(state.dispatch_one(hardware, frame))) {
         Ok(outcome) => outcome,
         Err(Error::NotInitialized) => {
             crate::kernel::irq::exception::fatal_interrupt("controller not initialized", None)
@@ -1212,7 +1223,11 @@ impl InterruptState {
             })
     }
 
-    fn dispatch_one(&mut self, hardware: InterruptId) -> DispatchOutcome {
+    fn dispatch_one(
+        &mut self,
+        hardware: InterruptId,
+        frame: &crate::hal::irq::InterruptFrame<'_>,
+    ) -> DispatchOutcome {
         let outcome = match self.mapping_position_by_hardware(hardware) {
             None => self.dispatch_unmapped_source(hardware),
             Some((domain, mapping)) => match self.domains[domain].mappings[mapping].lifecycle {
@@ -1222,7 +1237,7 @@ impl InterruptState {
                 MappingLifecycle::Enabling
                 | MappingLifecycle::Active
                 | MappingLifecycle::Disabling => {
-                    self.dispatch_mapped_source(hardware, domain, mapping)
+                    self.dispatch_mapped_source(hardware, domain, mapping, frame)
                 }
             },
         };
@@ -1260,9 +1275,11 @@ impl InterruptState {
         hardware: InterruptId,
         domain: usize,
         mapping: usize,
+        frame: &crate::hal::irq::InterruptFrame<'_>,
     ) -> DispatchOutcome {
         let per_cpu = self.controller.is_per_cpu(hardware);
-        let dispatch = self.domains[domain].mappings[mapping].dispatch_handlers(hardware, per_cpu);
+        let dispatch =
+            self.domains[domain].mappings[mapping].dispatch_handlers(hardware, per_cpu, frame);
         match self.apply_handler_actions(hardware, &dispatch) {
             Some(outcome) => outcome,
             None => dispatch.outcome,

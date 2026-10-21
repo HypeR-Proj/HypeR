@@ -577,8 +577,15 @@ extern "C" fn dispatch_native_irq(frame: &mut NativeFrame) -> u64 {
             super::interrupts::clear_software_interrupt();
             crate::arch::irq::service_kernel_rpc_interrupt(origin)
         }
-        5 => crate::arch::irq::dispatch_entry(InterruptId::new(0), origin),
-        9 => match crate::arch::irq::claim_and_dispatch_external_entry(origin) {
+        5 => crate::arch::irq::dispatch_entry(
+            InterruptId::new(0),
+            origin,
+            &crate::hal::irq::InterruptFrame::unavailable(),
+        ),
+        9 => match crate::arch::irq::claim_and_dispatch_external_entry(
+            origin,
+            &crate::hal::irq::InterruptFrame::unavailable(),
+        ) {
             Some(action) => action,
             None => return 0,
         },

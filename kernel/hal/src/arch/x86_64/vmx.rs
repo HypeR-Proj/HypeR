@@ -924,6 +924,7 @@ fn handle_external_interrupt() {
         match crate::arch::irq::dispatch_entry(
             hyper::hal::interrupt::InterruptId::new(vector),
             hyper::hal::interrupt::InterruptOrigin::Guest,
+            &crate::hal::irq::InterruptFrame::unavailable(),
         ) {
             hyper::hal::interrupt::EntryAction::Resume { postlude } => {
                 // VM exits remain cooperative until x86 provides a qualified

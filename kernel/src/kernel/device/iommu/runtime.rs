@@ -195,7 +195,11 @@ fn rollback(mut runtime: Runtime) {
     }
 }
 
-fn handler(_: interrupt::VirtualInterrupt, _: usize) -> interrupt::HandlerResult {
+fn handler(
+    _: interrupt::VirtualInterrupt,
+    _: usize,
+    _frame: &crate::hal::irq::InterruptFrame<'_>,
+) -> interrupt::HandlerResult {
     IRQ_COUNT.fetch_add(1, Ordering::Relaxed);
     let _ = WORK.request(); // This entry's IRQ tail services the durable prompt.
     interrupt::HandlerResult::HandledAndMaskLocal

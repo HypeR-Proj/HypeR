@@ -126,7 +126,11 @@ pub(super) fn initialize_local_cpu() -> Result<(), Error> {
     start_local_tick(crate::kernel::time::counter_frequency_hz()?)
 }
 
-fn handle_host_timer(_interrupt: VirtualInterrupt, _context: usize) -> HandlerResult {
+fn handle_host_timer(
+    _interrupt: VirtualInterrupt,
+    _context: usize,
+    _frame: &crate::hal::irq::InterruptFrame<'_>,
+) -> HandlerResult {
     if let Err(error) = crate::kernel::time::handle_timer_interrupt() {
         crate::kernel::irq::exception::fatal_timer(error);
     }
