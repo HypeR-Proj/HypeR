@@ -392,33 +392,6 @@ pub(crate) fn inject_saved_guest_device_interrupt(
         .map_err(Into::into)
 }
 
-/// Reconciles saved interrupt-model work into the active local vGIC bank.
-pub(crate) fn reconcile_active_interrupts(
-    context: &mut VcpuContext,
-    vcpu_id: u32,
-    interrupts: &VmInterruptController,
-) -> Result<(), Error> {
-    // SAFETY: The active-vCPU owner calls with local IRQs masked and retains
-    // exclusive ownership of this CPU's live virtual interface.
-    if let Err(error) = unsafe { context.deactivate_vgic() } {
-        super::disable_vgic();
-        return Err(error.into());
-    }
-    let result = interrupts.with(|controller| {
-        let vcpu = VirtualCpuId::new(vcpu_id);
-        controller.synchronize(vcpu, context.vgic.slots())?;
-        let _ = controller.refill_current(vcpu, context.vgic.slots_mut())?;
-        Ok::<(), hyper::vm::arm::gic::RuntimeError>(())
-    });
-    if let Err(error) = result {
-        super::disable_vgic();
-        return Err(error.into());
-    }
-    // SAFETY: Synchronization and refill completed for this same local bank.
-    unsafe { context.activate_vgic()? };
-    Ok(())
-}
-
 /// Requests a prompt exit from a guest currently running on `cpu`.
 ///
 /// The VM-owned reconcile bit is the durable condition. The targeted SGI is

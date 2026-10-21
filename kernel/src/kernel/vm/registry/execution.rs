@@ -173,9 +173,12 @@ impl VmBinding {
             .map_err(|_| Error::UnknownVcpu)
     }
 
-    pub(in crate::kernel) fn take_interrupt_reconcile(&self, vcpu: u32) -> Result<bool, Error> {
+    pub(in crate::kernel) fn claim_detached_interrupt_reconcile(
+        &self,
+        vcpu: u32,
+    ) -> Result<bool, Error> {
         self.endpoint(vcpu)
-            .map(|endpoint| endpoint.take_reconcile())
+            .map(|endpoint| endpoint.claim_detached_reconcile())
     }
 
     pub(in crate::kernel) fn restore_interrupt_reconcile(&self, vcpu: u32) -> Result<(), Error> {
