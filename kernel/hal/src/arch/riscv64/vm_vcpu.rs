@@ -223,17 +223,6 @@ fn reconcile_saved(
     Ok(())
 }
 
-pub(crate) fn reconcile_active_interrupts(
-    context: &mut VcpuContext,
-    vcpu: u32,
-    interrupts: &VmInterruptController,
-) -> Result<(), Error> {
-    if !owns(context) {
-        return Err(Error::Owner);
-    }
-    reconcile_saved(context, vcpu, interrupts)
-}
-
 pub(crate) fn update_guest_device_interrupt(
     context: &mut VcpuContext,
     vcpu: u32,

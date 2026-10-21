@@ -56,7 +56,7 @@ pub(crate) unsafe fn activate(
         // which mutates after this exchange publishes a new bit that survives
         // this activation and prompts the scheduler-authoritative running CPU.
         let reconcile_claimed = match execution.vm_binding() {
-            Some(binding) => match binding.take_interrupt_reconcile(execution.vcpu_id) {
+            Some(binding) => match binding.claim_detached_interrupt_reconcile(execution.vcpu_id) {
                 Ok(claimed) => claimed,
                 Err(error) => {
                     release_execution_or_fail(execution, execution_claim);
@@ -115,42 +115,10 @@ pub(crate) unsafe fn activate(
             };
         }
     }
-    // Close the first controller-refill window before local callback
-    // publication. A producer racing after this claim observes the scheduler's
-    // already-Running Thread, sends a guest-exit prompt for its durable VM
-    // work, and leaves that work set until IRQ-tail reactivation.
-    let final_reconcile = {
-        // SAFETY: Hardware is active but unpublished, and this scheduler-owned
-        // pointer remains exclusively owned with IRQs masked.
-        let execution = unsafe { &mut *execution };
-        match execution.vm_binding() {
-            Some(binding) => match binding.take_interrupt_reconcile(execution.vcpu_id) {
-                Ok(claimed) => claimed,
-                Err(error) => {
-                    rollback_unpublished_activation(execution, execution_claim, consumed_reconcile);
-                    return Err(HardwareTransitionError::Registry(error));
-                }
-            },
-            None => false,
-        }
-    };
-    if final_reconcile {
-        // SAFETY: Hardware is active locally, guest execution has not begun,
-        // and this scheduler-owned pointer remains exclusive with IRQs masked.
-        let execution_ref = unsafe { &mut *execution };
-        let interrupts = core::ptr::from_ref(execution_ref.interrupts());
-        // SAFETY: The strong VM binding retains the fixed controller.
-        let interrupts = unsafe { &*interrupts };
-        if let Err(error) = crate::hal::vm::reconcile_active_interrupts(
-            &mut execution_ref.hardware,
-            execution_ref.vcpu_id,
-            interrupts,
-        ) {
-            restore_reconcile_if_claimed(execution_ref, true);
-            rollback_unpublished_activation(execution_ref, execution_claim, consumed_reconcile);
-            return Err(HardwareTransitionError::Reconcile(error));
-        }
-    }
+    // A publication after the pre-admission claim must survive until IRQ-tail
+    // detachment. In-place LR refresh cannot satisfy a remote quiescence
+    // request, so there is no second claim or refresh while resident. The
+    // publisher prompts the scheduler-authoritative CPU even during entry.
     // SAFETY: All temporary references ended; the scheduler-origin pointer
     // remains pinned and exclusive for the active run.
     if let Err(publication) = unsafe { super::active_vcpu::set_raw(execution, execution_claim) } {
@@ -173,12 +141,12 @@ pub(crate) unsafe fn activate(
         return match rollback {
             Ok(()) => match super::timer::set_guest_timer_source_enabled(false) {
                 Ok(()) => {
-                    restore_reconcile_if_claimed(execution, consumed_reconcile || final_reconcile);
+                    restore_reconcile_if_claimed(execution, consumed_reconcile);
                     release_execution_or_fail(execution, execution_claim);
                     Err(HardwareTransitionError::Active(publication_error))
                 }
                 Err(timer) => {
-                    restore_reconcile_if_claimed(execution, consumed_reconcile || final_reconcile);
+                    restore_reconcile_if_claimed(execution, consumed_reconcile);
                     crate::kernel::crash::fatal(format_args!(
                         "HypeR: publication rollback detached hardware but could not mask guest timer source: publication={publication_error:?}, timer={timer:?}"
                     ));
@@ -415,39 +383,6 @@ fn restore_reconcile_if_claimed(execution: &super::VcpuExecution, claimed: bool)
     }
 }
 
-fn rollback_unpublished_activation(
-    execution: &mut super::VcpuExecution,
-    claim: Option<super::registry::VmExecutionClaim>,
-    restore_reconcile: bool,
-) {
-    let interrupts = core::ptr::from_ref(execution.interrupts());
-    // SAFETY: The strong VM binding retains this fixed controller through the
-    // rollback transaction.
-    let interrupts = unsafe { &*interrupts };
-    // SAFETY: Hardware is active but callback publication and guest execution
-    // have not begun; local IRQs remain masked.
-    if let Err(error) = unsafe {
-        crate::hal::vm::deactivate_hardware(
-            &mut execution.hardware,
-            execution.vcpu_id,
-            interrupts,
-            crate::kernel::time::monotonic_ticks(),
-        )
-    } {
-        fatal_ambiguous_hardware(
-            "unpublished activation rollback could not detach hardware",
-            error,
-        )
-    }
-    restore_reconcile_if_claimed(execution, restore_reconcile);
-    if let Err(error) = super::timer::set_guest_timer_source_enabled(false) {
-        crate::kernel::crash::fatal(format_args!(
-            "HypeR: unpublished activation rollback could not mask guest timer source: {error:?}"
-        ));
-    }
-    release_execution_or_fail(execution, claim);
-}
-
 fn claim_execution(
     execution: &super::VcpuExecution,
     cpu: hyper::cpu::CpuIndex,
@@ -476,7 +411,6 @@ pub(crate) enum HardwareTransitionError {
     Execution(super::registry::VmExecutionError),
     InvalidExecution,
     Memory(super::memory::Error),
-    Reconcile(crate::hal::vm::ActiveInterruptReconcileError),
     Registry(super::registry::Error),
 }
 

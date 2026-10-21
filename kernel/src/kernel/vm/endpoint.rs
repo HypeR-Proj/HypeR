@@ -324,8 +324,8 @@ impl VcpuEndpoint {
             .with(|state| complete_publication(state, waiter, outcome));
     }
 
-    pub(super) fn take_reconcile(&self) -> bool {
-        self.reconcile.take()
+    pub(super) fn claim_detached_reconcile(&self) -> bool {
+        self.reconcile.claim_before_admission()
     }
 
     pub(super) fn restore_reconcile(&self) {
