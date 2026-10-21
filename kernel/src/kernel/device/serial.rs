@@ -192,7 +192,11 @@ fn install(
     }))
 }
 
-fn handle_interrupt(_interrupt: VirtualInterrupt, _context: usize) -> HandlerResult {
+fn handle_interrupt(
+    _interrupt: VirtualInterrupt,
+    _context: usize,
+    _frame: &crate::hal::irq::InterruptFrame<'_>,
+) -> HandlerResult {
     let mut received = [RuntimeReceivedByte::EMPTY; MAX_DRAIN];
     let (count, handled) = HOST_CONSOLE.with(|slot| {
         let Some(runtime) = slot.as_ref() else {

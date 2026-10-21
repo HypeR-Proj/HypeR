@@ -346,7 +346,11 @@ fn update_active_interrupts(
     Ok(Some(result))
 }
 
-fn handle_interrupt(_interrupt: VirtualInterrupt, _context: usize) -> HandlerResult {
+fn handle_interrupt(
+    _interrupt: VirtualInterrupt,
+    _context: usize,
+    _frame: &crate::hal::irq::InterruptFrame<'_>,
+) -> HandlerResult {
     match update_active_interrupts(crate::hal::vm::handle_virtual_timer_interrupt) {
         Ok(Some(Ok(true))) => {
             set_local_source_masked(true);
@@ -371,7 +375,11 @@ fn handle_interrupt(_interrupt: VirtualInterrupt, _context: usize) -> HandlerRes
     }
 }
 
-fn handle_maintenance_interrupt(_interrupt: VirtualInterrupt, context: usize) -> HandlerResult {
+fn handle_maintenance_interrupt(
+    _interrupt: VirtualInterrupt,
+    context: usize,
+    _frame: &crate::hal::irq::InterruptFrame<'_>,
+) -> HandlerResult {
     if !crate::hal::vm::maintenance_interrupt_pending() {
         return HandlerResult::NotHandled;
     }
@@ -415,7 +423,11 @@ fn handle_maintenance_interrupt(_interrupt: VirtualInterrupt, context: usize) ->
 /// host tick is therefore used as an allocation-free recovery edge. Its normal
 /// path is one CPU-local relaxed load; vGIC reconciliation occurs only while
 /// this source is known to be masked.
-fn handle_source_recovery(_interrupt: VirtualInterrupt, context: usize) -> HandlerResult {
+fn handle_source_recovery(
+    _interrupt: VirtualInterrupt,
+    context: usize,
+    _frame: &crate::hal::irq::InterruptFrame<'_>,
+) -> HandlerResult {
     if !local_source_masked() {
         return HandlerResult::NotHandled;
     }

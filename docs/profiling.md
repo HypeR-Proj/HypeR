@@ -104,16 +104,20 @@ visible. An empty or truncated capture cannot produce a successful graph.
   default maximum of eight), plus metadata, only in profiling builds. These
   bounded static buffers remain allocated between captures; they are not page
   cache. Feature-off builds contain no PMU buffers or IRQ sampling hook.
-- Each CPU initializes and disables its PMU once during CPU startup. Ordinary
-  IRQs only compare against the immutable local PMU route; they do not construct
-  a sample, read the clock, or reconcile profiling state. Start and stop publish
-  a generation-qualified request and notify other CPUs using the existing
-  kernel RPC IPI doorbell. This does not allocate a new interrupt or use the
-  synchronous RPC transaction/wait path. Each CPU programs its own registers.
-- The IRQ observer does not allocate or symbolize, never waits for a buffer or
+- Each CPU initializes and disables its PMU once during CPU startup. PMU
+  overflow is a registered IRQ handler, selected by ordinary IRQ-domain routing.
+  There is no PMU observer, route filter, or capture-state check in common
+  exception entry. The generic IRQ frame view borrows the private frame without
+  copying registers; only the selected PMU handler requests a snapshot. Start
+  and stop publish a generation-qualified request and notify other CPUs using
+  the existing kernel RPC IPI doorbell. This does not allocate a new interrupt
+  or use the synchronous RPC transaction/wait path. Each CPU programs its own
+  registers.
+- The PMU handler runs under the IRQ registry lock, like other registered
+  handlers. It does not allocate or symbolize, never waits for a buffer or
   scheduler lock, and dereferences only validated local kernel-stack frames.
-  It disables the counter while collecting at most 16 frames. Contention drops
-  a sample instead of delaying the interrupted CPU.
+  It disables the counter while collecting at most 16 frames. Buffer contention
+  drops a sample instead of waiting.
 - A capture lasts 1–300 seconds; a period is 1 million–1 billion **cycles**, not
   nanoseconds. All CPUs acknowledge disarming before another capture can reset
   their buffers. A kernel callout requests stop at the deadline even if the

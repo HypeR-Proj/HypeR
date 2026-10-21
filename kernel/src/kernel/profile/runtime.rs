@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::{DEPTH, INFO_SIZE, Result, SAMPLE_SIZE};
-use crate::hal::pmu::{self, SampleContext};
+use crate::hal::irq::{InterruptFrame, InterruptedRegisters};
+use crate::hal::pmu;
+use crate::kernel::irq::interrupt::{HandlerResult, VirtualInterrupt};
 use core::ptr::addr_of;
 use hyper::abi::native::*;
 use hyper::cpu::{CpuIndex, MAX_CPUS, PerCpu};
@@ -169,10 +171,9 @@ fn install(
     EXPIRY
         .publish(expiry)
         .map_err(|_| "PMU expiry already installed")?;
-    // All local PMUs are disabled before activating the first route. The
-    // observer can acknowledge a stale pending overflow even if activation
+    // All local PMUs are disabled before activating the first route. Each
+    // registered handler can clear a stale pending overflow even if activation
     // fails partway, but READY never permits an incomplete capture to start.
-    pmu::install(routes, observe).map_err(|_| "PMU observer already installed")?;
     for (index, &id) in routes[..n].iter().enumerate() {
         if index == 0 || id >= 32 {
             let prepared = domain
@@ -181,7 +182,7 @@ fn install(
                     InterruptPriority::Low,
                     InterruptTrigger::Level,
                     0,
-                    |_, _| interrupt::HandlerResult::Handled,
+                    handle_interrupt,
                 )
                 .map_err(|_| "PMU IRQ registration")?;
             if id >= 32 {
@@ -429,7 +430,12 @@ fn encode(words: &[u64], bytes: &mut [u8]) {
 
 // Called only for this CPU's discovered PMU IRQ, with local IRQs masked.
 // Ordinary interrupts never enter this path or inspect profiling control state.
-fn observe(context: SampleContext) {
+fn handle_interrupt(_: VirtualInterrupt, _: usize, frame: &InterruptFrame<'_>) -> HandlerResult {
+    sample_overflow(frame);
+    HandlerResult::Handled
+}
+
+fn sample_overflow(frame: &InterruptFrame<'_>) {
     let Some(cpu) = crate::kernel::cpu::current_index() else {
         return;
     };
@@ -446,6 +452,11 @@ fn observe(context: SampleContext) {
         return;
     }
     pmu::stop();
+    let Some(context) = frame.registers() else {
+        ADMISSION.close(owner);
+        let _ = notify_control();
+        return;
+    };
     let Ok(now) = time::monotonic_nanoseconds() else {
         ADMISSION.close(owner);
         let _ = notify_control();
@@ -458,10 +469,14 @@ fn observe(context: SampleContext) {
             sample.0[0] = buffer.count;
             sample.0[1] = now;
             sample.0[2] = cpu.get() as u64;
-            sample.0[3] = context.world;
+            sample.0[3] = match context.origin {
+                hyper::hal::interrupt::InterruptOrigin::Host => 0,
+                hyper::hal::interrupt::InterruptOrigin::Native { .. } => 1,
+                hyper::hal::interrupt::InterruptOrigin::Guest => 2,
+            };
             sample.0[6] = DROPPED[cpu].load(Ordering::Relaxed);
             sample.0[7] = period;
-            if context.world == 0 {
+            if matches!(context.origin, hyper::hal::interrupt::InterruptOrigin::Host) {
                 unwind(cpu, context, &mut sample);
             }
             buffer.samples[buffer.count as usize % CAPACITY] = sample;
@@ -478,7 +493,7 @@ fn observe(context: SampleContext) {
     }
 }
 
-fn unwind(cpu: CpuIndex, context: SampleContext, sample: &mut Sample) {
+fn unwind(cpu: CpuIndex, context: InterruptedRegisters, sample: &mut Sample) {
     let base = addr_of!(__image_start) as usize;
     let end = addr_of!(__rodata_start) as usize;
     let offset = |pc: usize| (base..end).contains(&pc).then(|| (pc - base) as u64);

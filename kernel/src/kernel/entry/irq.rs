@@ -41,7 +41,11 @@ pub(crate) fn dispatch_kernel_rpc_entry(origin: InterruptOrigin) -> Action {
 /// either action. Local interrupts must remain masked. Dispatch is
 /// allocation-free but may invoke registered interrupt-safe handlers under the
 /// IRQ registry lock.
-pub(crate) fn dispatch(interrupt: InterruptId, origin: InterruptOrigin) -> Action {
+pub(crate) fn dispatch(
+    interrupt: InterruptId,
+    origin: InterruptOrigin,
+    frame: &crate::hal::irq::InterruptFrame<'_>,
+) -> Action {
     let irq = match crate::kernel::task::preempt::enter_irq() {
         Ok(irq) => irq,
         Err(error) => {
@@ -52,7 +56,7 @@ pub(crate) fn dispatch(interrupt: InterruptId, origin: InterruptOrigin) -> Actio
         crate::kernel::irq::interrupt::complete(interrupt);
         Action::Stop
     } else {
-        crate::kernel::irq::interrupt::dispatch(interrupt);
+        crate::kernel::irq::interrupt::dispatch(interrupt, frame);
         crate::kernel::time::service_irq_prompt();
         crate::kernel::reaper::service_irq_prompt();
         crate::kernel::log::service_irq_prompt();
@@ -304,8 +308,11 @@ fn fail_detached_stop(error: crate::kernel::vm::vcpu::DetachedStopError) -> ! {
 // architectural interrupt acknowledgement. Keeping target selection below
 // `arch` leaves this narrow adapter intentionally unused on other targets.
 #[allow(dead_code)]
-pub(crate) fn claim_and_dispatch_external(origin: InterruptOrigin) -> Option<Action> {
-    crate::kernel::irq::acknowledge_external().map(|interrupt| dispatch(interrupt, origin))
+pub(crate) fn claim_and_dispatch_external(
+    origin: InterruptOrigin,
+    frame: &crate::hal::irq::InterruptFrame<'_>,
+) -> Option<Action> {
+    crate::kernel::irq::acknowledge_external().map(|interrupt| dispatch(interrupt, origin, frame))
 }
 
 /// Publishes a remote CPU's exact interrupt snapshot and stops that CPU.

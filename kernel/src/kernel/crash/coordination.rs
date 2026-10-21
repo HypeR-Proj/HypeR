@@ -120,6 +120,7 @@ pub(crate) fn is_ready() -> bool {
 fn crash_stop_interrupt(
     _interrupt: super::super::irq::interrupt::VirtualInterrupt,
     _context: usize,
+    _frame: &crate::hal::irq::InterruptFrame<'_>,
 ) -> super::super::irq::interrupt::HandlerResult {
     super::super::irq::interrupt::HandlerResult::Handled
 }

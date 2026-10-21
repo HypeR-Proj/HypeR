@@ -91,7 +91,11 @@ pub(crate) fn notify(cpu: CpuIndex) {
     }
 }
 
-fn handle(_interrupt: VirtualInterrupt, _context: usize) -> HandlerResult {
+fn handle(
+    _interrupt: VirtualInterrupt,
+    _context: usize,
+    _frame: &crate::hal::irq::InterruptFrame<'_>,
+) -> HandlerResult {
     #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     if let Some(cpu) = crate::kernel::cpu::current_index() {
         // The counter is only an observation point; it publishes no protected

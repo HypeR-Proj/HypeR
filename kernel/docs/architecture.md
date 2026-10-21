@@ -302,6 +302,15 @@ Thread stack while its owned invocation runs in interruptible Thread context;
 no private-frame reference enters policy. Other architecture mechanism code must not call kernel
 logging, boot failure, scheduling, IRQ dispatch, or VM policy directly.
 
+Synchronous physical-IRQ dispatch also carries an opaque, CPU-affine
+`hal::irq::InterruptFrame` view. Its borrow ends before IRQ-tail scheduling;
+handlers cannot access or mutate the architecture-private frame. Passing the
+view does not copy registers. A handler selected by normal IRQ-domain routing
+may explicitly request an owned register snapshot; AArch64 supplies PC, SP, FP
+and the interrupted world, while other backends currently report no snapshot.
+The PMU overflow handler uses this path, with no profiling observer or PMU
+route comparison in common exception entry.
+
 On AArch64, Rust computes the complete guest `HCR_EL2` return regime before
 each world switch and passes it through the architecture-private guest-run
 frame. Guest entry enables stage 2, selects AArch64 EL1, clears host-only
