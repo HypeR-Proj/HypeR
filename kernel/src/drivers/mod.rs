@@ -11,3 +11,4 @@ pub mod power;
 pub mod rtc;
 pub mod serial;
 pub mod timer;
+pub mod trng;
