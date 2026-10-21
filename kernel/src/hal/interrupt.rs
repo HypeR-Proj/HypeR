@@ -90,12 +90,16 @@ impl KernelRpcReasons {
     const KNOWN_BITS: u8 = Self::LOCAL_IRQ_LIFECYCLE.0
         | Self::STAGE1_TLB_SHOOTDOWN.0
         | Self::USER_ADDRESS_SPACE.0
-        | Self::GUEST_STAGE2.0;
+        | Self::GUEST_STAGE2.0
+        | Self::PMU_CONTROL.0;
     pub const NONE: Self = Self(0);
     pub const LOCAL_IRQ_LIFECYCLE: Self = Self(1 << 0);
     pub const STAGE1_TLB_SHOOTDOWN: Self = Self(1 << 1);
     pub const USER_ADDRESS_SPACE: Self = Self(1 << 2);
     pub const GUEST_STAGE2: Self = Self(1 << 3);
+    /// Reconcile the calling CPU with the durable profiling request. This uses
+    /// the shared IPI doorbell, independently of synchronous RPC transactions.
+    pub const PMU_CONTROL: Self = Self(1 << 4);
 
     pub const fn bits(self) -> u8 {
         self.0

@@ -3,12 +3,10 @@
 
 //! Native machine-root ownership, admission, and acknowledged replacement.
 
-use alloc::vec::Vec;
-use core::mem::{ManuallyDrop, size_of};
+use core::mem::ManuallyDrop;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use hyper::cpu::PerCpu;
-use hyper::mm::allocator::heap::PageOwner;
 use hyper::mm::{AddressSpaceResidency, FallibleArc, PAGE_SIZE, ResidencyError, UniqueFallibleArc};
 use hyper::sync::InterruptSpinLock;
 
@@ -16,8 +14,8 @@ use super::kernel_adapter::DomainCharge;
 use super::{
     Access, AddressError, AddressSpaceError as LogicalError, DomainAccount, KernelPageBackend,
     KernelPageError, MappingChange, MemoryAccount, MemoryCharge, Permissions,
-    PreparedMappingChange, PreparedPageSnapshot, PreparedUserWrite, UserAddress, UserAddressSpace,
-    UserSlice, VmoError, WritableVmo,
+    PreparedMappingChange, PreparedUserWrite, UserAddress, UserAddressSpace, UserSlice, VmoError,
+    WritableVmo,
 };
 use crate::kernel::accounting::{
     CommittedCharge, ResourceAmount, ResourceDomain, ResourceError, ResourceKind,
@@ -145,84 +143,8 @@ impl From<ResourceError> for Error {
     }
 }
 
-struct TablePage {
-    // Drop the physical owner before releasing its resource-domain charge.
-    _block: PageBlock,
-    _charge: DomainCharge,
-}
-
-struct TablePagePool {
-    pages: Vec<TablePage>,
-    _storage_charge: DomainCharge,
-    account: DomainAccount,
-    error: Option<Error>,
-}
-
-impl TablePagePool {
-    fn try_new(capacity: usize, account: DomainAccount) -> Result<Self, Error> {
-        let bytes = capacity
-            .checked_mul(size_of::<TablePage>())
-            .and_then(|bytes| u64::try_from(bytes).ok())
-            .ok_or(Error::SizeOverflow)?;
-        let storage_charge = account
-            .try_charge(MemoryCharge {
-                kernel_bytes: bytes,
-                ..MemoryCharge::default()
-            })
-            .map_err(Error::Resource)?;
-        let mut pages = Vec::new();
-        pages
-            .try_reserve_exact(capacity)
-            .map_err(|_| Error::Allocation)?;
-        Ok(Self {
-            pages,
-            _storage_charge: storage_charge,
-            account,
-            error: None,
-        })
-    }
-
-    fn allocate(&mut self, order: usize) -> Option<hyper::mm::PhysicalAddress> {
-        if order != 0 || self.pages.len() == self.pages.capacity() {
-            self.error = Some(Error::Allocation);
-            return None;
-        }
-        let charge = match self.account.try_charge(MemoryCharge {
-            committed_pages: 1,
-            pinned_pages: 1,
-            ..MemoryCharge::default()
-        }) {
-            Ok(charge) => charge,
-            Err(error) => {
-                self.error = Some(Error::Resource(error));
-                return None;
-            }
-        };
-        let block = match PageBlock::allocate_for(0, PageOwner::PageTable) {
-            Ok(block) => block,
-            Err(error) => {
-                self.error = Some(Error::Page(error));
-                return None;
-            }
-        };
-        let Some(address) = crate::kernel::mm::memory::linear_address(block.physical().get())
-        else {
-            self.error = Some(Error::Unsupported);
-            return None;
-        };
-        // SAFETY: The new PageBlock is uniquely owned and the permanent linear
-        // map covers its complete writable page.
-        unsafe {
-            core::ptr::with_exposed_provenance_mut::<u8>(address).write_bytes(0, PAGE_SIZE as usize)
-        };
-        let physical = block.physical();
-        self.pages.push(TablePage {
-            _block: block,
-            _charge: charge,
-        });
-        Some(physical)
-    }
-}
+mod tables;
+use tables::TablePagePool;
 
 struct MachineImage {
     epoch: u64,
@@ -403,13 +325,7 @@ impl NativeAddressSpace {
         let logical = UserAddressSpace::try_new(window, range, KernelPageBackend, account.clone())?;
         let reserved = crate::kernel::mm::translation_id::reserve::<HostAsid>(plan.asid_bits())?;
         let initial_epoch = logical.mapping_epoch();
-        let image = build_image(
-            reserved.generation(),
-            initial_epoch,
-            0,
-            account.clone(),
-            |_| {},
-        )?;
+        let image = empty_image(reserved.generation(), initial_epoch, account.clone())?;
         let residency = AddressSpaceResidency::try_new(initial_epoch)?;
         let identifier = reserved.activate()?;
         Ok(owner.write(Self {
@@ -585,6 +501,15 @@ impl NativeAddressSpace {
         }
     }
 
+    pub(crate) fn atomic_wait_key(
+        &self,
+        address: UserAddress,
+    ) -> Result<super::MappingToken, Error> {
+        self.logical
+            .atomic_wait_key(address)
+            .map_err(Error::Logical)
+    }
+
     pub(crate) fn pin_atomic_u32(
         &self,
         address: UserAddress,
@@ -628,57 +553,29 @@ impl NativeAddressSpace {
         crate::kernel::task::scheduler::preempt_enable_without_reschedule(pin)
             .map_err(|_| Error::Transport)?;
         published?;
-        let count = logical.snapshots().count();
-        let bytes = count
-            .checked_mul(size_of::<(
-                super::MappingSnapshot,
-                PreparedPageSnapshot<KernelPageBackend, DomainAccount>,
-            )>())
-            .and_then(|bytes| u64::try_from(bytes).ok())
-            .ok_or(Error::SizeOverflow)?;
-        let _snapshot_charge = self
-            .account
-            .try_charge(MemoryCharge {
-                kernel_bytes: bytes,
-                ..MemoryCharge::default()
-            })
-            .map_err(Error::Resource)?;
-        let mut mappings = Vec::new();
-        mappings
-            .try_reserve_exact(count)
-            .map_err(|_| Error::Allocation)?;
-        let mut leaf_count = 0usize;
-        for snapshot in logical.snapshots() {
-            let pages = logical.resident_pages(snapshot.token)?;
-            leaf_count = leaf_count
-                .checked_add(pages.pages().iter().flatten().count())
-                .ok_or(Error::SizeOverflow)?;
-            mappings.push((snapshot, pages));
-        }
-        let image = build_image(
-            self.identifier.generation(),
-            logical.next_epoch(),
-            leaf_count,
-            self.account.clone(),
-            |visit| {
-                for (snapshot, pages) in &mappings {
-                    for (index, physical) in pages.pages().iter().copied().enumerate() {
-                        let Some(physical) = physical else {
-                            continue;
-                        };
-                        let offset = (index as u64) * PAGE_SIZE;
-                        visit(crate::hal::user::MappingPage {
-                            address: snapshot.range.base().get() + offset,
-                            physical,
-                            readable: snapshot.permissions.contains(Access::Read),
-                            writable: snapshot.permissions.contains(Access::Write)
-                                && pages.page_is_writable(index),
-                            executable: snapshot.permissions.contains(Access::Execute),
-                        });
-                    }
-                }
-            },
-        )?;
+        let previous = self.state.with(|state| {
+            if state.current.epoch != logical.base_epoch() {
+                return Err(Error::Residency(ResidencyError::StaleEpoch));
+            }
+            Ok(state.current.clone())
+        })?;
+        let mut tables = previous._tables.fork(logical.next_epoch());
+        let mut logical_result = Ok(());
+        // SAFETY: The previous image remains retained. The fork copies each
+        // edited table before writing and owns shared untouched tables directly.
+        // Logical snapshots retain every mapped data page through commit/abort.
+        let root = unsafe {
+            crate::hal::user::edit_host_address_space(
+                &previous.root,
+                |visit| {
+                    logical_result = logical.visit_updates(visit);
+                },
+                &mut tables,
+            )
+        };
+        logical_result?;
+        let root = table_result(root, &mut tables)?;
+        let image = finish_image(logical.next_epoch(), root, tables, self.account.clone())?;
         Ok(PreparedNativeChange {
             owner: self,
             logical,
@@ -1147,37 +1044,40 @@ fn execute_cut(
     }
 }
 
-fn build_image(
+fn empty_image(
     generation: u64,
     epoch: u64,
-    leaf_count: usize,
     account: DomainAccount,
-    enumerate: impl FnMut(&mut dyn FnMut(crate::hal::user::MappingPage)),
 ) -> Result<FallibleArc<MachineImage>, Error> {
-    let capacity = crate::hal::user::table_page_capacity(leaf_count).ok_or(Error::SizeOverflow)?;
-    let mut tables = TablePagePool::try_new(capacity, account.clone())?;
+    let mut tables = TablePagePool::empty(epoch, account.clone());
     let root = {
         let mut allocator = |order| tables.allocate(order);
         // SAFETY: TablePagePool returns uniquely owned zeroed PageTable blocks
         // and is moved intact into the resulting image through acknowledged
         // retirement. The stable software owner identity is retained independently
         // of the hardware ASID lease acquired at each activation.
-        unsafe {
-            crate::hal::user::prepare_host_address_space(generation, enumerate, &mut allocator)
-        }
+        unsafe { crate::hal::user::prepare_host_address_space(generation, |_| {}, &mut allocator) }
     };
-    let root = match root {
-        Ok(root) => root,
-        Err(error) => {
-            return Err(match tables.error.take() {
-                Some(allocation_error) => allocation_error,
-                None => Error::Hal(error),
-            });
-        }
-    };
+    let root = table_result(root, &mut tables)?;
+    finish_image(epoch, root, tables, account)
+}
+
+fn table_result(
+    root: Result<crate::hal::user::PreparedAddressSpace, crate::hal::user::AddressSpaceError>,
+    tables: &mut TablePagePool,
+) -> Result<crate::hal::user::PreparedAddressSpace, Error> {
     if let Some(error) = tables.error.take() {
         return Err(error);
     }
+    root.map_err(Error::Hal)
+}
+
+fn finish_image(
+    epoch: u64,
+    root: crate::hal::user::PreparedAddressSpace,
+    tables: TablePagePool,
+    account: DomainAccount,
+) -> Result<FallibleArc<MachineImage>, Error> {
     let object_charge = account
         .try_charge(MemoryCharge {
             kernel_bytes: FallibleArc::<MachineImage>::allocation_size() as u64,

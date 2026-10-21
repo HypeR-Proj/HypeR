@@ -9,9 +9,11 @@ use hyper::cpu::{CpuIndex, MAX_CPUS, PerCpu};
 use hyper::drivers::platform::PlatformDevice;
 use hyper::hal::interrupt::{InterruptId, InterruptPriority, InterruptTrigger};
 use hyper::sync::{
-    InterruptSpinLock,
+    InterruptMaskGuard, InterruptSpinLock, PublishedOnce,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
+
+use crate::kernel::time::{self, Callout, CalloutRef, TimerEvent};
 
 const CAPACITY: usize = 256;
 type Lock<T> = InterruptSpinLock<T, crate::hal::irq::LocalMask>;
@@ -42,12 +44,10 @@ static CONTROL: Lock<Config> = Lock::new(Config {
 static BUFFERS: PerCpu<Lock<Buffer>> = PerCpu::new([const { Lock::new(Buffer::new()) }; MAX_CPUS]);
 static ADMISSION: super::admission::Admission<MAX_CPUS> = super::admission::Admission::new();
 static PERIOD: AtomicU64 = AtomicU64::new(0);
-static DEADLINE: AtomicU64 = AtomicU64::new(0);
-static ROUTES: PerCpu<AtomicU64> = PerCpu::new([const { AtomicU64::new(0) }; MAX_CPUS]);
-static PROBED: PerCpu<AtomicBool> = PerCpu::new([const { AtomicBool::new(false) }; MAX_CPUS]);
 static SUPPORTED: PerCpu<AtomicBool> = PerCpu::new([const { AtomicBool::new(false) }; MAX_CPUS]);
 static DROPPED: PerCpu<AtomicU64> = PerCpu::new([const { AtomicU64::new(0) }; MAX_CPUS]);
 static READY: AtomicBool = AtomicBool::new(false);
+static EXPIRY: PublishedOnce<Callout<()>> = PublishedOnce::new();
 unsafe extern "C" {
     static __image_start: u8;
     static __rodata_start: u8;
@@ -60,9 +60,20 @@ pub(crate) fn owns_node(node: &PlatformDevice) -> bool {
         || node.is_compatible("arm,cortex-a72-pmu")
 }
 
+/// Takes local PMU ownership once, before this CPU enables interrupts. Discovery
+/// and route activation happen later, after all admitted CPUs have quiesced
+/// inherited counter state. Unsupported CPUs never access PMU registers.
+pub(crate) fn initialize_local_cpu() {
+    if let Some(cpu) = crate::kernel::cpu::current_index()
+        && pmu::available()
+    {
+        pmu::initialize();
+        SUPPORTED[cpu].store(true, Ordering::Release);
+    }
+}
+
 /// Discovers the firmware PPI or per-CPU SPI routes. No guessed interrupt numbers.
-/// Partial failure keeps the observer quiescing PMUs and any installed routes idle;
-/// profiling remains unavailable.
+/// Partial failure leaves counters disabled and profiling unavailable.
 pub(crate) fn initialize(
     nodes: &[PlatformDevice],
     domain: crate::kernel::irq::interrupt::IrqDomainId,
@@ -85,6 +96,9 @@ fn install(
     let n = crate::kernel::cpu::online_cpu_count();
     if n == 0 || n > 64 {
         return Err("more than 64 CPUs");
+    }
+    if SUPPORTED.iter().take(n).any(|v| !v.load(Ordering::Acquire)) {
+        return Err("PMUv3 unavailable on an admitted CPU");
     }
     let mut routes = [0u32; MAX_CPUS];
     if cells.len() == 3 && cells[0] == 1 {
@@ -151,14 +165,14 @@ fn install(
             return Err("duplicate PMU SPI");
         }
     }
-    // Publish the quiescing observer before activating any controller route.
-    // If registration fails partway, timer IRQs still disable each local PMU;
-    // no capture can start because READY remains false.
-    for (index, &id) in routes[..n].iter().enumerate() {
-        let cpu = CpuIndex::new(index).ok_or("invalid CPU")?;
-        ROUTES[cpu].store(u64::from(id), Ordering::Release);
-    }
-    pmu::install(observe).map_err(|_| "PMU observer already installed")?;
+    let expiry = Callout::try_new((), expire).map_err(|_| "PMU expiry callout allocation")?;
+    EXPIRY
+        .publish(expiry)
+        .map_err(|_| "PMU expiry already installed")?;
+    // All local PMUs are disabled before activating the first route. The
+    // observer can acknowledge a stale pending overflow even if activation
+    // fails partway, but READY never permits an incomplete capture to start.
+    pmu::install(routes, observe).map_err(|_| "PMU observer already installed")?;
     for (index, &id) in routes[..n].iter().enumerate() {
         if index == 0 || id >= 32 {
             let prepared = domain
@@ -200,12 +214,7 @@ pub(crate) fn start(period: u64, seconds: u64) -> Result<u64> {
         return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
     }
     CONTROL.with(|config| {
-        if !READY.load(Ordering::Acquire)
-            || SUPPORTED
-                .iter()
-                .take(crate::kernel::cpu::online_cpu_count())
-                .any(|v| !v.load(Ordering::Acquire))
-        {
+        if !READY.load(Ordering::Acquire) {
             return Err(HYPER_NATIVE_STATUS_NOT_SUPPORTED);
         }
         if ADMISSION.requested() != 0 || !ADMISSION.quiescent() {
@@ -221,6 +230,15 @@ pub(crate) fn start(period: u64, seconds: u64) -> Result<u64> {
         let deadline = now
             .checked_add(seconds * 1_000_000_000)
             .ok_or(HYPER_NATIVE_STATUS_INVALID_ARGUMENT)?;
+        let timer = EXPIRY.get().ok_or(HYPER_NATIVE_STATUS_NOT_SUPPORTED)?;
+        let ticks = time::deadline_from_monotonic_nanoseconds(deadline)
+            .map_err(|_| HYPER_NATIVE_STATUS_INTERNAL)?;
+        // Prepare expiry before publishing the capture. A previously running
+        // callback is serialized by CONTROL and checks this capture's deadline;
+        // reset preserves its separately scheduled successor.
+        timer
+            .reset(ticks)
+            .map_err(|_| HYPER_NATIVE_STATUS_INTERNAL)?;
         for buffer in BUFFERS.iter() {
             buffer.with(|buffer| buffer.count = 0);
         }
@@ -233,26 +251,110 @@ pub(crate) fn start(period: u64, seconds: u64) -> Result<u64> {
             deadline,
         };
         PERIOD.store(period, Ordering::Relaxed);
-        DEADLINE.store(deadline, Ordering::Relaxed);
         ADMISSION.publish(generation);
+        if !notify_control() {
+            ADMISSION.close(generation);
+            let _ = timer.cancel();
+            let _ = notify_control();
+            return Err(HYPER_NATIVE_STATUS_INTERNAL);
+        }
         Ok(generation)
     })
 }
 
-/// Disarms asynchronously on each CPU's next IRQ. BUSY means stop is requested
-/// but one CPU has not yet acknowledged; callers retry, never spin in the kernel.
+/// Prompts every CPU to disarm through the existing kernel IPI. BUSY means stop
+/// is requested but an admitted CPU has not acknowledged; callers retry, never
+/// spin in the kernel. Late start prompts cannot admit a closed generation.
 pub(crate) fn stop(generation: u64) -> Result<()> {
     CONTROL.with(|config| {
         if generation == 0 || generation != config.generation {
             return Err(HYPER_NATIVE_STATUS_BAD_STATE);
         }
         ADMISSION.close(generation);
+        let notified = notify_control();
+        if let Some(timer) = EXPIRY.get() {
+            timer.cancel().map_err(|_| HYPER_NATIVE_STATUS_INTERNAL)?;
+        }
+        if !notified {
+            return Err(HYPER_NATIVE_STATUS_INTERNAL);
+        }
         if !ADMISSION.quiescent() {
             Err(HYPER_NATIVE_STATUS_BUSY)
         } else {
             Ok(())
         }
     })
+}
+
+/// The normal-context callout never waits for another CPU. Checking the current
+/// deadline under CONTROL makes a callback already claimed before cancel/reset
+/// harmless to a newer capture. The callout's lifetime is the kernel lifetime.
+fn expire(_: &(), _: CalloutRef<'_>, _: TimerEvent) {
+    let notified = CONTROL.with(|config| {
+        let request = ADMISSION.requested();
+        if request == 0 {
+            return true;
+        }
+        if time::monotonic_nanoseconds().is_ok_and(|now| now < config.deadline) {
+            return true;
+        }
+        ADMISSION.close(request);
+        notify_control()
+    });
+    if !notified {
+        crate::pr_warn!("HypeR: PMU stop notification failed; capture remains retained");
+    }
+}
+
+/// Called with IRQs masked (CONTROL or PMU entry). Notifications are coalesced
+/// prompts, not commands: each recipient reconciles the latest durable request.
+/// No shared RPC payload, transaction lock, acknowledgement spin or self-IPI.
+fn notify_control() -> bool {
+    let current = crate::kernel::cpu::current_index();
+    let mut delivered = true;
+    for index in 0..crate::kernel::cpu::online_cpu_count() {
+        if let Some(cpu) = CpuIndex::new(index)
+            && Some(cpu) != current
+        {
+            delivered &= crate::hal::irq::notify_kernel_rpc(
+                cpu,
+                hyper::hal::interrupt::KernelRpcReasons::PMU_CONTROL,
+            );
+        }
+    }
+    service_control();
+    delivered
+}
+
+/// Bounded local register work, called by IPI dispatch or cooperative RPC polling.
+/// It must not take CONTROL: the publisher may hold it while sending the IPI.
+pub(crate) fn service_control() {
+    // SAFETY: This nonblocking routine stays on the calling CPU. The guard
+    // serializes PMU control with overflow handling even during RPC polling
+    // outside physical IRQ entry, and restores the exact prior mask state.
+    let _mask = unsafe { InterruptMaskGuard::<crate::hal::irq::LocalMask>::acquire() };
+    let Some(cpu) = crate::kernel::cpu::current_index() else {
+        return;
+    };
+    if !SUPPORTED[cpu].load(Ordering::Acquire) {
+        return;
+    }
+    let request = ADMISSION.requested();
+    let owner = ADMISSION.owner(cpu.get());
+    if owner != 0 && owner != request {
+        pmu::stop();
+        ADMISSION.release(cpu.get());
+    }
+    if request == 0 || owner == request || !ADMISSION.claim(cpu.get(), request) {
+        return;
+    }
+    // Claim first: a racing stop must retain this capture until the hardware
+    // has stopped, including a stop between claim and programming the counter.
+    pmu::start(PERIOD.load(Ordering::Relaxed));
+    if ADMISSION.requested() != request {
+        pmu::stop();
+        ADMISSION.release(cpu.get());
+    }
 }
 
 /// Info uses `cpu=u64::MAX`; otherwise read the first retained sample at/after
@@ -325,67 +427,31 @@ fn encode(words: &[u64], bytes: &mut [u8]) {
     }
 }
 
-fn observe(interrupt: InterruptId, context: SampleContext) {
+// Called only for this CPU's discovered PMU IRQ, with local IRQs masked.
+// Ordinary interrupts never enter this path or inspect profiling control state.
+fn observe(context: SampleContext) {
     let Some(cpu) = crate::kernel::cpu::current_index() else {
         return;
     };
-    if ROUTES[cpu].load(Ordering::Acquire) == 0 {
-        return;
-    }
-    if !PROBED[cpu].swap(true, Ordering::Relaxed) {
-        let available = pmu::available();
-        if available {
-            pmu::initialize();
-        }
-        SUPPORTED[cpu].store(available, Ordering::Release);
-    }
-    if !SUPPORTED[cpu].load(Ordering::Relaxed) {
-        return;
-    }
-    let request = ADMISSION.requested();
-    if request == 0 {
-        if ADMISSION.owner(cpu.get()) != 0
-            || u64::from(interrupt.get()) == ROUTES[cpu].load(Ordering::Relaxed)
-        {
-            pmu::stop();
-            if ADMISSION.owner(cpu.get()) != 0 {
-                ADMISSION.release(cpu.get());
-            }
-        }
-        return;
-    }
-    let Ok(now) = crate::kernel::time::monotonic_nanoseconds() else {
+    let owner = ADMISSION.owner(cpu.get());
+    if owner == 0 || ADMISSION.requested() != owner {
+        // A pending level interrupt may outlive the capture that generated it.
         pmu::stop();
-        if ADMISSION.owner(cpu.get()) != 0 {
-            ADMISSION.release(cpu.get());
-        }
-        ADMISSION.close(request);
-        return;
-    };
-    if now >= DEADLINE.load(Ordering::Relaxed) {
-        if request != 0 {
-            ADMISSION.close(request);
-        }
-        if ADMISSION.owner(cpu.get()) != 0 {
-            pmu::stop();
+        if owner != 0 {
             ADMISSION.release(cpu.get());
         }
         return;
     }
-    let period = PERIOD.load(Ordering::Relaxed);
-    if ADMISSION.owner(cpu.get()) != request {
-        // Claim the packed generation before arming; control cannot recycle
-        // the buffer until this CPU disarms and releases its admitted writer.
-        if !ADMISSION.claim(cpu.get(), request) {
-            return;
-        }
-        pmu::start(period);
-        return;
-    }
-    if u64::from(interrupt.get()) != ROUTES[cpu].load(Ordering::Relaxed) || !pmu::overflowed() {
+    if !pmu::overflowed() {
         return;
     }
     pmu::stop();
+    let Ok(now) = time::monotonic_nanoseconds() else {
+        ADMISSION.close(owner);
+        let _ = notify_control();
+        return;
+    };
+    let period = PERIOD.load(Ordering::Relaxed);
     if BUFFERS[cpu]
         .try_with(|buffer| {
             let mut sample = Sample([0; 24]);
@@ -405,7 +471,7 @@ fn observe(interrupt: InterruptId, context: SampleContext) {
     {
         DROPPED[cpu].fetch_add(1, Ordering::Relaxed);
     }
-    if ADMISSION.requested() == request {
+    if ADMISSION.requested() == owner {
         pmu::reload(period);
     } else {
         ADMISSION.release(cpu.get());

@@ -104,13 +104,24 @@ visible. An empty or truncated capture cannot produce a successful graph.
   default maximum of eight), plus metadata, only in profiling builds. These
   bounded static buffers remain allocated between captures; they are not page
   cache. Feature-off builds contain no PMU buffers or IRQ sampling hook.
+- Each CPU initializes and disables its PMU once during CPU startup. Ordinary
+  IRQs only compare against the immutable local PMU route; they do not construct
+  a sample, read the clock, or reconcile profiling state. Start and stop publish
+  a generation-qualified request and notify other CPUs using the existing
+  kernel RPC IPI doorbell. This does not allocate a new interrupt or use the
+  synchronous RPC transaction/wait path. Each CPU programs its own registers.
 - The IRQ observer does not allocate or symbolize, never waits for a buffer or
   scheduler lock, and dereferences only validated local kernel-stack frames.
   It disables the counter while collecting at most 16 frames. Contention drops
   a sample instead of delaying the interrupted CPU.
 - A capture lasts 1–300 seconds; a period is 1 million–1 billion **cycles**, not
   nanoseconds. All CPUs acknowledge disarming before another capture can reset
-  their buffers. A dead controller cannot leave sampling enabled indefinitely.
+  their buffers. A kernel callout requests stop at the deadline even if the
+  controller has exited or no PMU overflow occurs. Deadline delivery depends on
+  the timer worker being scheduled and target CPUs servicing their control
+  notifications. Stop reports `BUSY` while a CPU still owns the capture; buffers
+  remain retained until it disarms. Late pending PMU interrupts are acknowledged
+  even after a capture stops.
 - This version samples cycles only. It has no event multiplexing, instruction or
   cache-miss event selection, per-thread attribution, user/guest symbolization,
   DWARF unwinding, or precise-event/skid correction. Native and guest execution
@@ -127,7 +138,8 @@ visible. An empty or truncated capture cannot produce a successful graph.
 
 `make test-pmu ARCH=aarch64` builds an opt-in kernel and a development Native
 fixture. The QEMU scenario checks per-CPU overflow, bounded ring overwrite,
-exclusive capture admission, automatic stop, restart generations, executable
+exclusive capture admission, IPI start/stop on every CPU, autonomous deadline
+stop, cancelled deadlines crossing a new capture, restart generations, executable
 path authority, and exact-ELF flame-graph generation. CI runs both GICv3 and
 GICv2. Host tests cover GIC SPI routing; Loom exercises the production admission
 state with stop/recycle racing an IRQ writer and with a stale deadline.

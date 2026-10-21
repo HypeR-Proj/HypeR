@@ -642,6 +642,16 @@ coordinates mappings and usercopy. Follow a `prepare_*` method through
 Preparation and publication are distinct: resource acquisition or validation
 may fail without making a partially prepared mapping visible.
 
+[Incremental translation edits](../kernel/src/mm/table_edit.rs) copy only touched
+paths in the AArch64/RISC-V Native page-table hierarchy. An immutable persistent
+index retains the candidate's exact table set; unchanged table pages are shared
+with the prior root. Logical edits enumerate changed ranges or changed private
+backing versions without collecting whole-space resident-page vectors. Removing
+a range prunes empty table paths. None of this bypasses epoch validation or
+acknowledged cross-CPU retirement: old roots, their tables and removed data pages
+remain owned until stale translations are unusable. Guest stage-2 tables use
+their separate implementation.
+
 For private writable views, read `prepare_private_write` and
 [private backing versions](../kernel/src/kernel/mm/user_space/vmo/private_view.rs).
 The [Native user runner](../kernel/src/kernel/entry/user.rs) is the other end

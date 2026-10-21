@@ -265,8 +265,8 @@ pub(crate) fn wake(process: &Process, address: u64, count: u32) -> Result<u64, E
     if !address.is_multiple_of(4) {
         return Err(Error::InvalidInput);
     }
-    let word =
-        process.retry_user_memory(|space| space.pin_atomic_u32(UserAddress::new(address)))?;
+    let key =
+        process.retry_user_memory(|space| space.atomic_wait_key(UserAddress::new(address)))?;
     bucket(address).with(|state| {
         let mut woke = 0;
         let mut current = state.waiters;
@@ -276,7 +276,7 @@ pub(crate) fn wake(process: &Process, address: u64, count: u32) -> Result<u64, E
             if woke == u64::from(count) {
                 break;
             }
-            if waiter.key == word.token
+            if waiter.key == key
                 && waiter.address == address
                 && scheduler::notify_registered_with(ticket, || {})
                     .map_err(ProcessError::from)?

@@ -8,6 +8,23 @@ use core::ptr::NonNull;
 
 use crate::abi::native::{NativeInvocation, NativeResult};
 
+/// One resident 4 KiB user leaf; descriptor encoding remains architecture-owned.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MappingPage {
+    pub address: u64,
+    pub physical: crate::mm::PhysicalAddress,
+    pub readable: bool,
+    pub writable: bool,
+    pub executable: bool,
+}
+
+/// Ordered edits against an immutable, retained prior translation hierarchy.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MappingUpdate {
+    Unmap { address: u64, length: u64 },
+    Map(MappingPage),
+}
+
 /// Owned register evidence copied only after a Native machine run has ended.
 /// Architectural register layouts remain explicit; unused words are zero.
 #[derive(Clone, Copy)]

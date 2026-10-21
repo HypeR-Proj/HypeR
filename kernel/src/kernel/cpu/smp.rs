@@ -386,6 +386,8 @@ fn try_secondary_entry(cpu_index: usize) -> Result<Infallible, Error> {
     if super::current_index() != Some(cpu_index) {
         return Err(Error::InvalidCpuIndex);
     }
+    #[cfg(all(CONFIG_ARCH_AARCH64, feature = "pmu-profiling"))]
+    super::super::profile::initialize_local_cpu();
     super::super::irq::initialize_local_cpu().map_err(Error::LocalInterrupt)?;
     super::super::time::initialize_local_cpu().map_err(Error::LocalTimer)?;
     let stack = super::super::task::scheduler::install_current_idle()?;

@@ -9,7 +9,9 @@ mod admission;
 #[cfg(all(CONFIG_ARCH_AARCH64, feature = "pmu-profiling"))]
 mod runtime;
 #[cfg(all(CONFIG_ARCH_AARCH64, feature = "pmu-profiling"))]
-pub(crate) use runtime::{initialize, owns_node, query, start, stop};
+pub(crate) use runtime::{
+    initialize, initialize_local_cpu, owns_node, query, service_control, start, stop,
+};
 
 #[cfg(all(CONFIG_ARCH_AARCH64, feature = "pmu-profiling"))]
 pub(crate) const DEPTH: usize = 16;
