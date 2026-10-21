@@ -19,6 +19,7 @@ pub mod hw;
 pub mod log;
 pub mod mm;
 pub mod platform;
+pub mod random;
 pub mod sync;
 pub mod time;
 pub mod vm;

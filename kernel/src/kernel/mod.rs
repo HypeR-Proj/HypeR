@@ -28,6 +28,7 @@ pub mod log;
 pub mod mm;
 pub(crate) mod object;
 pub(crate) mod process;
+pub mod random;
 pub(crate) mod reaper;
 pub mod sync;
 pub mod task;

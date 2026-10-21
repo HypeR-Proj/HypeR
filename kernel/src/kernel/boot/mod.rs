@@ -196,8 +196,17 @@ fn try_prepare_boot_environment(inputs: ProtocolInputs) -> Result<Infallible, Pr
     let early_console = initialize_early_console(&platform, command_line)?;
     crate::pr_info!("HypeR: DTB at {:#x}", dtb_address);
 
-    let kernel_base =
-        select_kernel_base(command_line, chosen.kaslr_seed(), image_layout.total_size)?;
+    let hardware_seed = crate::hal::platform::random_seed(essential.cpu_power());
+    super::random::initialize(chosen.kaslr_seed(), chosen.rng_seed(), hardware_seed);
+    // Timing alone is sufficient for the general non-security PRNG, but does
+    // not silently enable KASLR without a firmware or hardware seed.
+    let has_seed =
+        chosen.kaslr_seed().is_some() || chosen.rng_seed().is_some() || hardware_seed.is_some();
+    let kernel_base = select_kernel_base(
+        command_line,
+        has_seed.then(super::random::next_u64),
+        image_layout.total_size,
+    )?;
     let initial_ramdisk = select_initial_ramdisk(
         &platform,
         inputs.initial_ramdisk.or(chosen.initial_ramdisk()),
@@ -275,6 +284,9 @@ fn discover_boot_inputs(
 fn report_chosen_errors(chosen: &chosen::Properties) {
     if let Some(error) = chosen.command_line_error() {
         crate::pr_warn!("HypeR: ignoring invalid DTB bootargs: {error:?}");
+    }
+    if let Some(error) = chosen.rng_seed_error() {
+        crate::pr_warn!("HypeR: ignoring invalid DTB rng-seed: {error:?}");
     }
     if let Some(error) = chosen.kaslr_seed_error() {
         crate::pr_warn!("HypeR: ignoring invalid DTB kaslr-seed: {error:?}");

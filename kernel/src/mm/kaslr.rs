@@ -10,7 +10,8 @@ pub enum Error {
     InvalidImage,
 }
 
-/// Selects an aligned image offset inside a bounded virtual-address window.
+/// Selects an aligned image offset using the common PRNG. Seed provenance
+/// remains boot policy; deterministic generation does not add entropy.
 pub fn select_offset(
     seed: u64,
     image_size: u64,
@@ -28,16 +29,8 @@ pub fn select_offset(
         .checked_sub(image_span)
         .ok_or(Error::ImageTooLarge)?;
     let slots = maximum_offset / alignment + 1;
-    Ok(mix_seed(seed) % slots * alignment)
-}
-
-fn mix_seed(mut value: u64) -> u64 {
-    // SplitMix64's finalizer removes correlations in firmware-provided bits.
-    value ^= value >> 30;
-    value = value.wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    value ^= value >> 27;
-    value = value.wrapping_mul(0x94d0_49bb_1331_11eb);
-    value ^ (value >> 31)
+    let upper = core::num::NonZeroU64::new(slots).ok_or(Error::InvalidImage)?;
+    Ok(crate::random::Random::new(seed).below(upper) * alignment)
 }
 
 fn align_up(value: u64, alignment: u64) -> Option<u64> {

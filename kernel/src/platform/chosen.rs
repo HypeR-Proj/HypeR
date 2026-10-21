@@ -16,11 +16,13 @@ pub const MAX_COMMAND_LINE_SIZE: usize = 512;
 pub enum Error {
     DuplicateBootargs,
     DuplicateKaslrSeed,
+    DuplicateRngSeed,
     DuplicateInitrdEnd,
     DuplicateInitrdStart,
     InvalidEncoding,
     InvalidInitrd,
     InvalidKaslrSeed,
+    InvalidRngSeed,
     InvalidTree,
     TooLong,
 }
@@ -98,6 +100,8 @@ pub struct Properties {
     command_line_error: Option<Error>,
     kaslr_seed: Option<u64>,
     kaslr_seed_error: Option<Error>,
+    rng_seed: Option<u64>,
+    rng_seed_error: Option<Error>,
     initial_ramdisk: Option<PhysicalRange>,
 }
 
@@ -108,6 +112,16 @@ impl Properties {
 
     pub const fn kaslr_seed(&self) -> Option<u64> {
         self.kaslr_seed
+    }
+
+    /// A bounded fold of the bootloader's rng-seed bytes for the general PRNG.
+    /// This is diversification, not an entropy estimate or cryptographic hash.
+    pub const fn rng_seed(&self) -> Option<u64> {
+        self.rng_seed
+    }
+
+    pub const fn rng_seed_error(&self) -> Option<Error> {
+        self.rng_seed_error
     }
 
     pub const fn command_line_error(&self) -> Option<Error> {
@@ -131,6 +145,8 @@ pub struct Discovery {
     command_line_error: Option<Error>,
     kaslr_seed: Option<u64>,
     kaslr_seed_error: Option<Error>,
+    rng_seed: Option<u64>,
+    rng_seed_error: Option<Error>,
     initrd_start: Option<u64>,
     initrd_end: Option<u64>,
 }
@@ -144,6 +160,8 @@ impl Discovery {
             command_line_error: None,
             kaslr_seed: None,
             kaslr_seed_error: None,
+            rng_seed: None,
+            rng_seed_error: None,
             initrd_start: None,
             initrd_end: None,
         }
@@ -166,6 +184,8 @@ impl Discovery {
             command_line_error: self.command_line_error,
             kaslr_seed: self.kaslr_seed,
             kaslr_seed_error: self.kaslr_seed_error,
+            rng_seed: self.rng_seed,
+            rng_seed_error: self.rng_seed_error,
             initial_ramdisk,
         })
     }
@@ -192,6 +212,22 @@ impl Discovery {
                         Ok(seed) => self.kaslr_seed = Some(seed),
                         Err(_) => self.kaslr_seed_error = Some(Error::InvalidKaslrSeed),
                     }
+                }
+            }
+            "rng-seed" => {
+                if self.rng_seed.is_some() || self.rng_seed_error.is_some() {
+                    self.rng_seed = None;
+                    self.rng_seed_error = Some(Error::DuplicateRngSeed);
+                } else if property.bytes().is_empty() || property.bytes().len() > 256 {
+                    self.rng_seed_error = Some(Error::InvalidRngSeed);
+                } else {
+                    let mut random = crate::random::Random::new(property.bytes().len() as u64);
+                    for chunk in property.bytes().chunks(8) {
+                        let mut word = [0; 8];
+                        word[..chunk.len()].copy_from_slice(chunk);
+                        random.mix(u64::from_le_bytes(word));
+                    }
+                    self.rng_seed = Some(random.next_u64());
                 }
             }
             "linux,initrd-start" => {
