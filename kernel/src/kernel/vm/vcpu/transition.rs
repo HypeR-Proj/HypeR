@@ -115,17 +115,19 @@ pub(crate) unsafe fn activate(
             };
         }
     }
-    // Close the first controller-refill window before local callback
-    // publication. A producer racing after this claim observes the scheduler's
-    // already-Running Thread, sends a guest-exit prompt for its durable VM
-    // work, and leaves that work set until IRQ-tail reactivation.
+    // Refresh changes which arrived during hardware loading, but do not
+    // consume their publication. Admission has already reserved a resident
+    // bank: a remote active-register transaction may now be waiting for this
+    // bank to detach. Refilling LRs cannot satisfy that request. Its guest-exit
+    // prompt must remain actionable at IRQ tail, even if it arrived before
+    // this refresh. Only the claim before admission may consume publication.
     let final_reconcile = {
         // SAFETY: Hardware is active but unpublished, and this scheduler-owned
         // pointer remains exclusively owned with IRQs masked.
         let execution = unsafe { &mut *execution };
         match execution.vm_binding() {
-            Some(binding) => match binding.take_interrupt_reconcile(execution.vcpu_id) {
-                Ok(claimed) => claimed,
+            Some(binding) => match binding.interrupt_reconcile_pending(execution.vcpu_id) {
+                Ok(pending) => pending,
                 Err(error) => {
                     rollback_unpublished_activation(execution, execution_claim, consumed_reconcile);
                     return Err(HardwareTransitionError::Registry(error));

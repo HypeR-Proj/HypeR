@@ -28,8 +28,10 @@ impl ReconcilePublication {
 
     /// Claims all work published before this exchange.
     ///
-    /// A producer racing after the exchange leaves `pending` set for the
-    /// final pre-entry check or the targeted IRQ-tail reconciliation.
+    /// Claim before reserving a hardware bank. A producer racing after the
+    /// exchange leaves `pending` set for targeted IRQ-tail detachment. An
+    /// in-place LR refresh must only observe this bit: publication may also
+    /// request VM-wide quiescence, which requires releasing bank residency.
     pub(super) fn take(&self) -> bool {
         self.pending.swap(false, Ordering::AcqRel)
     }
