@@ -20,6 +20,7 @@ pub(super) use local::{
 };
 
 use alloc::boxed::Box;
+use alloc::vec::Vec;
 use hyper::cpu::{CpuIndex, PerCpu};
 use hyper::sync::InterruptSpinLock;
 
@@ -359,18 +360,26 @@ struct RetirementTicket {
 /// elements can never exceed the scheduler's fixed Thread capacity even when
 /// creators race a stalled reaper.
 struct RetirementQueue {
-    entries: [Option<RetirementTicket>; super::THREAD_CAPACITY],
+    entries: Box<[Option<RetirementTicket>]>,
     head: usize,
     length: usize,
 }
 
 impl RetirementQueue {
-    const fn new() -> Self {
-        Self {
-            entries: [const { None }; super::THREAD_CAPACITY],
+    fn new() -> Result<Self, Error> {
+        // Prepare the entire queue before scheduler publication. In particular,
+        // large configured capacities must not construct an equally large
+        // temporary on the boot stack. Enqueue/dequeue never allocate.
+        let mut entries = Vec::new();
+        entries
+            .try_reserve_exact(super::THREAD_CAPACITY)
+            .map_err(|_| Error::Allocation)?;
+        entries.resize_with(super::THREAD_CAPACITY, || None);
+        Ok(Self {
+            entries: entries.into_boxed_slice(),
             head: 0,
             length: 0,
-        }
+        })
     }
 
     fn push(&mut self, retired: RetirementTicket) -> Result<(), Error> {
@@ -549,6 +558,7 @@ impl Scheduler {
     }
 
     pub fn new(boot_cpu: CpuIndex) -> Result<Self, Error> {
+        let retirements = RetirementQueue::new()?;
         let bootstrap =
             hyper::mm::try_box(Thread::bootstrap(boot_cpu)?).map_err(|_| Error::Allocation)?;
         let boot_idle_id = match ThreadId::from_scheduler_parts(1, 1) {
@@ -567,7 +577,7 @@ impl Scheduler {
             deferred_blocked_handoff: None,
             balance_cursor: 0,
             terminated: ThreadQueue::new(),
-            retirements: RetirementQueue::new(),
+            retirements,
         })
     }
 

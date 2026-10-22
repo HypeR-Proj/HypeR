@@ -13,7 +13,7 @@ use hyper::sync::InterruptSpinLock;
 use super::page_block::PageBlock;
 
 const MAX_CPUS: usize = hyper::config::MAX_CPUS as usize;
-const MAX_STACKS: usize = hyper::config::MAX_KERNEL_STACKS as usize;
+const MAX_STACKS: usize = hyper::config::KERNEL_STACK_SLOTS;
 const WATERMARK_BYTE: u8 = 0xa5;
 const WATERMARK_WORD: u64 = u64::from_ne_bytes([WATERMARK_BYTE; 8]);
 const STACK_CANARY: u64 = 0x4859_5045_5253_544b;

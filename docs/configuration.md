@@ -18,57 +18,174 @@ deployment policy in the Linux I/O VM.
 | `BOARD_CONFIG` | Physical devices, guest definitions, disk partitions and mount policy |
 | Component and service declarations | Build targets, required child programs, startup and capability grants |
 
-The ordinary build remains the full system with test programs excluded. Start
-with [the default selection](../configs/default.json), or use
-[the minimal selection](../configs/minimal.json) and
-[its QEMU board](../boards/qemu-minimal.json):
+The root [Kconfig](../Kconfig) sources the configuration definitions owned by
+[bootstrap/stage1](../bootstrap/stage1/Kconfig), [app](../app/Kconfig),
+[svc](../svc/Kconfig) and [tests/app](../tests/app/Kconfig). These files own
+program defaults, deployment dependencies, menu labels and help.
+`component.mk` binds those symbols to Cargo targets and installed paths; it does
+not repeat their normal-product defaults or executable dependencies.
+
+The saved `.config` is the product selection used by both builds and packaging.
+[`configs/default_defconfig`](../configs/default_defconfig) is a minimal preset;
+omitted values take their defaults from Kconfig. Without a local `.config`,
+ordinary builds use the same Kconfig defaults. Test programs default to disabled.
+
+Default and saved products use the same selection and admission code. Saving
+an unchanged default selection does not change the executable set or startup
+graph. The formal mount job is derived from the formal fstab, independently of
+whether a product file was supplied. Packaging checks required startup images
+for the default product as well as explicitly trimmed products.
+
+Generated `target/.../deployment.json`, bootstrap profiles, fstab, component
+manifests and build records are projections of these inputs, not additional
+editable configuration sources. Hardware-specific board policy and capability
+grants remain separate from executable selection: choosing a program does not
+grant it a device or decide when it starts.
+
+Board resources and boot profiles describe how the selected programs are used.
+They do not add missing programs back into the selection. In particular, an
+`io-vm` boot profile still requires its declared bootstrap provider and actual
+I/O VM payload in the archive. Every shipped profile is validated at build time,
+including profiles not selected by the default boot command line.
+
+## Interactive configuration
+
+The repository root configures the complete product; the kernel also retains
+an independent menu:
 
 ```sh
-make board-build ARCH=aarch64 \
-  SYSTEM_CONFIG=configs/minimal.json BOARD_CONFIG=boards/qemu-minimal.json
-make board-run ARCH=aarch64 \
-  SYSTEM_CONFIG=configs/minimal.json BOARD_CONFIG=boards/qemu-minimal.json
+make menuconfig
+make -C kernel menuconfig
 ```
 
-`BOARD` remains the `qemu` platform; `BOARD_CONFIG` selects its concrete resource
-and partition layout. A configuration file name does not introduce another
-firmware or I/O VM platform.
+The top-level menu separates these owners:
 
-The minimal product keeps the bootstrap handoff, I/O and EROFS services,
-component management, journal and an interactive shell with a few diagnostic
-tools. It omits FAT workers, the managed guest fleet and most ordinary tools.
-Its board has only the independent system partition and no persistent data
-mount. This is a runnable product selection, not a kernel self-test image.
-Other system-only selections may retain VM manager: their empty initial fleet
-is packaged at `/etc/hyper/vms.json` rather than referring to an absent `/data`.
+- **Kernel** opens the kernel's own menu for architecture, address widths,
+  stacks, scheduler limits and other Kconfig settings.
+- **Bootstrap stage1** selects its filesystem workers, services and tools.
+- **System** selects formal applications, filesystem workers, background
+  services and optional test programs.
+
+Program checkboxes come from the domain Kconfig files. They control both Cargo
+executable targets and image membership. Shared libraries follow actual Cargo
+and ELF dependencies; there is no second library selection list to maintain.
+Stage1 and formal copies are independent: disabling `CONFIG_BOOT_APP_FS_FAT` does not
+disable `CONFIG_SYSTEM_APP_FS_FAT_SYSTEM`. Filesystem support selection changes available
+workers, not fstab or partition formats.
+
+The product menu saves to the ignored local `.config`. Subsequent root
+`make` commands automatically select it, including its separate product output
+directories. An explicit `SYSTEM_CONFIG` takes precedence; `SYSTEM_CONFIG=`
+uses the full default product without reading the local file. To edit another
+product instead:
+
+```sh
+make menuconfig SYSTEM_CONFIG=/tmp/hyper-product.config
+make board-build SYSTEM_CONFIG=/tmp/hyper-product.config
+```
+
+Only explicit saves change files. The kernel submenu saves `kernel/.config`
+(or `CONFIG_FILE`) independently; discarding product edits does not undo a
+kernel save. **Build policy** selects optional production Cargo features and
+the path to structured runtime boot policy. `BOARD_CONFIG` remains a separate
+hardware and mount policy input.
+
+Kconfig `depends on` relations constrain deployment. For example, the formal
+FAT worker depends on fs-backend, which depends on component-manager. Bootstrap
+workers depend on the bootstrap filesystem backend, which depends on stage1
+init. Keeping a dispatcher does not force every filesystem worker into the
+image. Multiple prerequisites use `&&`; transitive dependencies are resolved
+independently of declaration order and cycles are rejected.
+
+Each program remains independently selectable. Dependencies live in its Kconfig
+definition and can change without redefining a fixed bundle. Component-manager
+itself does not depend on a particular startup coordinator or journal provider.
+The shipped system-startup coordinator does require console-raw, journal and
+bootstrap-retire. Separately, the selected profile's actual startup images and
+capability sources are validated during composition, so changing a program
+selection alone cannot leave a dangling reference in a bootable image.
+
+The audited deployment prerequisites are:
+
+| Component | Required deployment |
+| --- | --- |
+| Stage1 console-raw | Stage1 init (console capability and channel setup) |
+| Stage1 fallback-sh, fs-backend, io-runtime | Stage1 console-raw (recovery I/O or service log transport) |
+| Stage1 FS workers, mount, umount | Stage1 fs-backend |
+| Formal console-raw, journal, bootstrap-retire | Component-manager |
+| system-startup | Component-manager, console-raw, journal, bootstrap-retire |
+| Formal fs-backend, io-runtime, vm-runtime | Component-manager |
+| Formal FS workers, mount, umount | Formal fs-backend |
+| Formal terminal-service | Formal console-raw |
+| Formal session-manager | Component-manager, journal, terminal-service, sh |
+| Formal vm-manager | Component-manager, vm-runtime |
+| componentctl, journalctl, vmm | Component-manager, journal, vm-manager respectively |
+| editor | Terminal-service |
+| FS worker, retirement/service, terminal probes | FS backend, component-manager, terminal-service respectively |
+
+`cat`, `ls` and other ordinary byte/file tools do not require a terminal service.
+`less` retains its nonterminal copy path; shell retains script execution without
+a terminal. Their interactive use still requires delegated terminal capabilities.
+Keeping the shell does not force vm-manager or fs-backend into the product:
+those connections are optional. Similarly, I/O VM is not a fixed prerequisite
+of filesystem services: the selected boot profile supplies the block provider.
+The packer also checks bootstrap console grants for formal journal/session
+startup, storage grants, successor images and every shipped boot profile.
+
+Disabling a prerequisite in the menu also disables dependent programs. Enabling
+a program without its prerequisites produces a dependency error. A hand-edited
+file that explicitly enables an unavailable program is rejected by the build;
+the build never silently adds omitted programs back. Full boot-profile,
+service-image and board admission still runs during image composition. Kconfig
+does not replace runtime component routing, startup order or filesystem probing.
+
+Run configuration commands separately from builds: `make menuconfig all` is rejected because
+Make reads product selection before executing targets. Navigate with arrows,
+Enter and Escape; Space or Y/N toggles programs, `/` searches, `?` shows the
+installation path and dependencies, and S saves. Both menus use Python's
+standard `curses` module and require an interactive terminal of at least 56x12.
 
 ## Userspace selection
 
-`SYSTEM_CONFIG` is a versioned JSON document. `boot` and `system` select
-executable components using their staged names from `make app-manifest`:
+The product uses the same `CONFIG_NAME=value` / `# CONFIG_NAME is not set`
+syntax and Rust parser as the kernel. `SYSTEM_CONFIG` selects another complete
+configuration, not an overlay. For example, a defconfig can disable both FAT
+workers and two tools:
 
-```json
-{
-  "version": 1,
-  "boot": {
-    "base": "default",
-    "exclude": ["fs-fat"]
-  },
-  "system": {
-    "base": "default",
-    "exclude": ["fs-fat-system", "editor", "less"]
-  }
-}
+```text
+# CONFIG_BOOT_APP_FS_FAT is not set
+# CONFIG_SYSTEM_APP_FS_FAT_SYSTEM is not set
+# CONFIG_SYSTEM_APP_EDITOR is not set
+# CONFIG_SYSTEM_APP_LESS is not set
 ```
 
-`base: "default"` starts from the ordinary selection for that environment.
-`base: "none"` starts from no executables and `include` is an explicit allowlist.
-Omitted lists are empty. A name may not occur in both `include` and `exclude`.
-Unknown names, wrong-environment names, duplicate keys and unsupported fields
-are errors. Bootstrap and formal names are independent even when they install
-to the same relative path: `fs-fat` and `fs-fat-system` both become `svc/fs-fat`
-inside their own filesystem. Some staged names contain a directory, such as
-`svc/journal`; use the registry name exactly.
+The workflow is:
+
+```sh
+make defconfig                          # configs/default_defconfig -> .config
+make menuconfig                         # edit product; Kernel opens its own menu
+make olddefconfig                       # fill new defaults, report removed settings
+make savedefconfig                      # export differences from defaults to ./defconfig
+make defconfig SYSTEM_DEFCONFIG=configs/custom_defconfig
+make savedefconfig SYSTEM_DEFCONFIG_OUTPUT=configs/custom_defconfig
+# Work on a separate product without replacing the local one:
+make defconfig SYSTEM_CONFIG=/tmp/product.config
+```
+
+`defconfig` replaces the selected product file. `olddefconfig` preserves valid
+selections, drops obsolete or unavailable ones with warnings, and rejects invalid
+values of known symbols. `savedefconfig` writes a minimal fragment, not a second
+active configuration. None of these root commands modifies `kernel/.config`;
+use `make -C kernel defconfig` to reset the kernel. Normal builds reject unknown
+symbols, duplicate assignments and invalid types. No JSON product selection is
+accepted. The internal JSON communication between configuration tools and the
+generated image manifests are derived records, not editable alternatives.
+
+Program symbols use `CONFIG_BOOT_APP_` and `CONFIG_SYSTEM_APP_` followed by the
+uppercased staged name with punctuation replaced by underscores. For example,
+`fs-fat-system` is `CONFIG_SYSTEM_APP_FS_FAT_SYSTEM`, and `svc/journal` is
+`CONFIG_SYSTEM_APP_SVC_JOURNAL`. The registry rejects missing definitions,
+ambiguous symbol names and options with no registered program.
 
 Selection controls Cargo executable targets, installation and final image
 membership together. Shared-library providers are built from the selected
@@ -100,15 +217,22 @@ system filesystem: omitting that worker now fails archive admission before
 boot. The builder reports the missing dependency instead of silently restoring
 an excluded program. Custom profiles declare their own early worker dependencies.
 
-Ordinary `system` profiles exclude test binaries. An explicit product `include`
-may opt into a registered test program regardless of profile membership;
-runtime acceptance uses this to add its command reporter to the minimal product.
-Development fixtures may also select their test profile explicitly. Neither
+Ordinary `system` configurations exclude test binaries. Setting a test program
+symbol to `y` explicitly opts in;
+runtime acceptance generates its own trimmed selection with the command reporter
+under the test output directory; it is not a second production configuration.
+Development fixtures may select their test profile explicitly when no saved
+product constrains the executable set. A saved product never implicitly enables
+test binaries just because a development profile was requested. Neither
 mechanism turns on kernel fault injection or self-tests.
 
 ## Selectable boot profiles
 
-Products may define up to 16 `boot-profiles`. The fixed `default` entry is
+Set `CONFIG_BOOT_POLICY="path/to/boot-policy.json"` to select a structured
+runtime policy file. Paths are relative to the repository root, or absolute;
+exporting a defconfig does not change their base directory. The policy accepts
+only `boot-profiles` and `storage-providers`, not build selections. Its validated
+contents contribute to the product identity. It may define up to 16 `boot-profiles`. The fixed `default` entry is
 mandatory. Each is installed as `/etc/hyper/boot-profiles/NAME.json` in the
 initial archive. Without this section, composition generates `default` from
 the selected bootstrap service graph and board resources, preserving ordinary
@@ -116,7 +240,6 @@ I/O VM boot. Profile names contain 1–63 ASCII letters, digits, `_` or `-`.
 
 ```json
 {
-  "version": 1,
   "boot-profiles": {
     "default": {
       "version": 1,
@@ -184,17 +307,14 @@ capabilities, supplies readiness when it supplies filesystem volumes, and owns
 its private migration protocol. A recovery profile may omit `handoff`; a
 provider's `successor` is required only when handoff is configured.
 
-Formal storage candidates are configured separately, for example:
+Formal storage candidates can be declared in the same boot policy file:
 
 ```json
 {
-  "version": 1,
-  "system": {
-    "storage-providers": [
-      {"component": "/io-runtime", "image": "/svc/io-runtime"},
-      {"component": "/disk-driver", "image": "/svc/disk-driver"}
-    ]
-  }
+  "storage-providers": [
+    {"component": "/io-runtime", "image": "/svc/io-runtime"},
+    {"component": "/disk-driver", "image": "/svc/disk-driver"}
+  ]
 }
 ```
 
@@ -246,6 +366,10 @@ selection in its JSON document:
 | `heap-profiling` | No per-size-class heap occupancy and traffic counters; general memory accounting remains |
 
 The default feature set preserves the existing production behavior.
+It is declared once in `kernel/Cargo.toml`'s `features.default`; kernel Make
+derives the defaults from that graph, filtering capabilities by the manifest's
+architecture availability metadata. The product does not carry another default
+feature list. An explicit feature set replaces these defaults.
 `pmu-profiling` is opt-in; see [PMU sampling](profiling.md).
 `heap-profiling` is opt-in; see [memory diagnostics](memory-diagnostics.md).
 Memory ownership, capability checks, device isolation, IPC and the scheduler are
@@ -254,11 +378,91 @@ in the kernel's Kconfig file; a capability has one feature owner instead of
 competing Cargo and Kconfig toggles.
 
 Older local kernel configurations may contain `CONFIG_CRASH_CONSOLE` or
-`CONFIG_HEAP_PROFILING`. Run `make olddefconfig ARCH=aarch64` to remove obsolete
+`CONFIG_HEAP_PROFILING`. Run `make -C kernel olddefconfig ARCH=aarch64` to remove obsolete
 settings with an explicit warning while retaining recognized address, stack and
 resource limits. Select the corresponding Cargo features separately if needed;
 the removed values do not silently add features. Do not reset an otherwise
 customized configuration merely to change optional functionality.
+
+### Kernel architecture and resource configuration
+
+`make -C kernel defconfig ARCH=aarch64` resolves the selected
+[`kernel/configs/`](../kernel/configs/) fragment against
+[`kernel/Kconfig`](../kernel/Kconfig). Common defaults live in Kconfig rather
+than being copied into every architecture fragment. `make -C kernel config` edits the
+existing selection as line-by-line prompts; enter `?` at a value prompt for help.
+
+For a full-screen terminal menu, run:
+
+```sh
+make -C kernel menuconfig ARCH=aarch64
+# Edit a separate configuration without touching kernel/.config:
+make -C kernel menuconfig ARCH=riscv64 CONFIG_FILE=/tmp/hyper-riscv.config
+```
+
+The menu requires Python 3 with its standard `curses` module and an interactive
+terminal of at least 56 columns by 12 rows. It is also available under **Kernel**
+in the top-level product menu. An existing configuration is preserved on entry;
+`ARCH` supplies the initial defconfig only when that file does not exist.
+Use Up/Down to navigate, Enter to open categories or edit values, Space or Y/N
+to toggle booleans, `?` for help, and `/` to search visible settings. PageUp,
+PageDown, Home and End navigate long lists. Ctrl-U clears an edit field.
+Save explicitly with S; Q/Left/Escape returns to the parent menu and offers
+save/discard at the root. Ctrl-C discards unsaved edits and restores the terminal.
+Opening the menu or cancelling never creates or overwrites the destination.
+Saves replace the file atomically after validation. Changing architecture hides
+unsupported settings immediately; KASLR cannot be selected on RISC-V or x86-64.
+The selected architecture must still match `ARCH` in subsequent build commands.
+
+The terminal frontend uses the same Rust resolver and kernel constraints as
+normal builds. It does not maintain a second schema or relax dependency checks.
+This submenu edits kernel Kconfig settings; the enclosing product menu edits
+userspace selection. Optional kernel Cargo features remain the separate
+`KERNEL_FEATURES` or product JSON input described above.
+
+Architecture is a required `choice`: select exactly one of
+`CONFIG_ARCH_AARCH64=y`, `CONFIG_ARCH_RISCV64=y`, or `CONFIG_ARCH_X86_64=y`.
+Generated configurations contain only the selected architecture assignment.
+Multiple enabled architectures fail validation. The selected architecture must
+also match the bare-metal Cargo target; host tests may compile a different
+platform's portable models.
+
+Dependent settings are absent when their architecture is not selected, both
+in the generated configuration and in exported Rust constants. For example,
+RISC-V and x86-64 configurations do not contain `CONFIG_ARM64_*` settings.
+`CONFIG_RANDOMIZE_BASE` is AArch64-only: the other backends currently select
+fixed kernel addresses. Explicitly enabling an unavailable option or assigning
+an unavailable numeric/string setting is an error during normal configuration
+or build. Disabled boolean assignments are accepted and omitted from generated
+output. `olddefconfig` removes unavailable or obsolete settings with a warning
+and preserves applicable tuning.
+
+The configuration tool and Cargo share validation of supported PA widths,
+power-of-two stack sizes, and scheduler capacity. Duplicate assignments,
+unknown keys, dependency cycles, and conflicting choices are errors, rather
+than silently taking the last value. Generated files retain menu headings to
+separate architecture, scheduler, stack-size and logging settings.
+
+`CONFIG_SCHED_MAX_THREADS` is the scheduler's reserved entry capacity, including
+bootstrap, idle threads, kernel workers, Native threads and vCPUs. Its fixed
+table keeps published slot addresses stable and reserves the retirement queue
+so Thread exit does not allocate. This remains a real implementation limit;
+it is not a reservation of every Thread's physical stack pages. Stack pages
+are allocated on demand. Runtime stack-slot capacity is derived from this
+thread capacity plus two exception stacks per configured CPU, excluding the
+bootstrap Thread, which has its own boot stack. IRQ/emergency stacks therefore
+do not consume the configured scheduler capacity.
+
+The old independent `CONFIG_MAX_KERNEL_STACKS` setting has been removed.
+After migration, `CONFIG_SCHED_MAX_THREADS` defaults to 1024; set it explicitly
+if a different thread budget is needed. Removing this budget entirely would
+require a growable scheduler registry and allocation-free retirement storage.
+
+`CONFIG_ARM64_MAX_GIC_REDISTRIBUTOR_REGIONS` has also been removed. The
+allocation-free discovery scratch list retains its internal capacity of 16,
+like the other firmware range lists. This is a count of contiguous GICR MMIO
+ranges, not a CPU count: one region can contain Redistributors for many CPUs.
+It is intentionally independent of `CONFIG_MAX_CPUS`.
 
 ## Test builds
 

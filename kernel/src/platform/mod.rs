@@ -13,8 +13,9 @@ pub const MAX_NO_MAP_REGIONS: usize = 32;
 /// Maximum number of independent contiguous GICR ranges retained during
 /// allocation-free discovery. One range may contain Redistributors for many
 /// CPUs; this is deliberately independent from [`MAX_CPUS`].
-pub const MAX_GIC_REDISTRIBUTOR_REGIONS: usize =
-    crate::config::ARM64_MAX_GIC_REDISTRIBUTOR_REGIONS as usize;
+/// Like the memory and MMIO range lists, this is early-discovery scratch
+/// capacity, not an independently configurable hardware or CPU count.
+pub const MAX_GIC_REDISTRIBUTOR_REGIONS: usize = 16;
 pub const MAX_PLIC_CONTEXTS: usize = MAX_CPUS;
 pub const MAX_CPUS: usize = crate::config::MAX_CPUS as usize;
 

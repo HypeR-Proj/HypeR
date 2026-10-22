@@ -112,11 +112,11 @@ static/dynamic linking probes
 and Rust std smoke programs. Specialized VM smoke binaries remain owned by their
 acceptance targets.
 
-Use `SYSTEM_CONFIG` to select a smaller product without editing the component
-registry. It controls both compilation and deployment; selecting only an image
+Use `make menuconfig` to select a smaller product without editing the component
+registry. Its saved `.config` controls both compilation and deployment; selecting only an image
 profile is no longer the only way to remove applications or filesystem workers.
-The [configuration guide](configuration.md) covers explicit allowlists, required
-runtime children, kernel features and independent output directories.
+The [configuration guide](configuration.md) covers domain Kconfig definitions, executable
+dependencies, kernel features and independent output directories.
 
 Feature-specific fixtures build the selected component graph and stage its
 executables and DSOs together. `APP_FEATURES` selects package-qualified Cargo

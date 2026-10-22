@@ -48,8 +48,8 @@ use crate::pr_debug;
 pub(crate) use balance::initialize as initialize_load_balancing;
 
 /// Maximum scheduler-owned Thread population, including the bootstrap Thread.
-pub(crate) const THREAD_CAPACITY: usize = hyper::config::MAX_KERNEL_STACKS as usize + 1;
-const _: () = assert!(hyper::config::MAX_KERNEL_STACKS > 0);
+pub(crate) const THREAD_CAPACITY: usize = hyper::config::SCHED_MAX_THREADS as usize;
+const _: () = assert!(THREAD_CAPACITY > hyper::cpu::MAX_CPUS);
 
 /// Scheduler ticks granted by the initial Fair round-robin backend.
 ///

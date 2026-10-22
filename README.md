@@ -291,7 +291,7 @@ when adopting changed board policy or guest startup files.
   IPC, virtualization, storage and image packaging.
 - [Development guide](docs/development.md): editor setup, testing, source layout,
   and contribution requirements.
-- [Product configuration](docs/configuration.md): optional kernel capabilities,
+- [Product configuration](docs/configuration.md): top-level `make menuconfig`, optional kernel capabilities,
   userspace component selection and a minimal QEMU system.
 - [PMU profiling](docs/profiling.md): opt-in AArch64 cycle sampling, kernel
   call chains, folded-stack export and flame graphs.

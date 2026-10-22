@@ -343,7 +343,7 @@ fn select_kernel_base(
     discovered_seed: Option<u64>,
     image_size: u64,
 ) -> Result<u64, PreparationError> {
-    let kaslr_seed = if hyper::config::RANDOMIZE_BASE
+    let kaslr_seed = if cfg!(CONFIG_RANDOMIZE_BASE)
         && !command_line.is_some_and(|arguments| arguments.contains("nokaslr"))
     {
         discovered_seed
