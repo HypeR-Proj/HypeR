@@ -18,10 +18,10 @@ pub(super) struct HandleAccounting {
 }
 
 impl HandleAccounting {
-    pub(super) const fn new() -> Self {
+    pub(super) const fn new(index: HandleSidecar<HandleChargeLocation>) -> Self {
         Self {
             records: None,
-            index: HandleSidecar::new(),
+            index,
         }
     }
 
@@ -41,7 +41,7 @@ impl HandleAccounting {
     }
 
     pub(super) fn take_index(&mut self) -> HandleSidecar<HandleChargeLocation> {
-        core::mem::replace(&mut self.index, HandleSidecar::new())
+        self.index.take()
     }
 
     pub(super) fn install(

@@ -3,6 +3,8 @@
 
 //! Boot-time Native ABI contract self-test.
 
+use crate::kernel::capability::handle_wire;
+
 use hyper::abi::native::{
     HYPER_NATIVE_ABI_REVISION, HYPER_NATIVE_BYTE_CHANNEL_MAX_MESSAGE_BYTES,
     HYPER_NATIVE_CAPABILITY_CHANNEL_MAX_HANDLES, HYPER_NATIVE_CAPABILITY_CHANNEL_MAX_MESSAGE_BYTES,
@@ -1559,7 +1561,7 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
         HandleFlags::NONE,
     )
     .map_err(|_| SelfTestError::RecordEncoding)?;
-    let mut receiver_table = HandleTable::new();
+    let mut receiver_table = HandleTable::new(0x15a9_3d7b_4c62_8e01);
     let storage = receiver_table
         .reservation_storage_snapshot_for(1)
         .map_err(|_| SelfTestError::RecordEncoding)?;
@@ -2061,11 +2063,11 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
     }
     let before_private_calls = services.calls.get();
     for arguments in [
-        [1_u64 << 24 | 2, 0x2000, 47, 0, 0, 0],
-        [1_u64 << 24 | 2, 0x2000, 48, 1, 0, 0],
-        [1_u64 << 24 | 2, 0x2000, 48, 0, 1, 0],
+        [0x0f37_79b9_7f4a_7c12, 0x2000, 47, 0, 0, 0],
+        [0x0f37_79b9_7f4a_7c12, 0x2000, 48, 1, 0, 0],
+        [0x0f37_79b9_7f4a_7c12, 0x2000, 48, 0, 1, 0],
         [
-            1_u64 << 24 | 2,
+            0x0f37_79b9_7f4a_7c12,
             0x2000,
             HYPER_NATIVE_EXTENSIBLE_RECORD_MAX_BYTES + 1,
             0,
@@ -2084,11 +2086,25 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
         }
     }
     for arguments in [
-        [1_u64 << 24 | 2, 1_u64 << 24 | 3, 0x2000, 47, 0, 0],
-        [1_u64 << 24 | 2, 1_u64 << 24 | 3, 0x2000, 48, 1, 0],
         [
-            1_u64 << 24 | 2,
-            1_u64 << 24 | 3,
+            0x0f37_79b9_7f4a_7c12,
+            0x0f37_79b9_7f4a_7c13,
+            0x2000,
+            47,
+            0,
+            0,
+        ],
+        [
+            0x0f37_79b9_7f4a_7c12,
+            0x0f37_79b9_7f4a_7c13,
+            0x2000,
+            48,
+            1,
+            0,
+        ],
+        [
+            0x0f37_79b9_7f4a_7c12,
+            0x0f37_79b9_7f4a_7c13,
             0x2000,
             HYPER_NATIVE_EXTENSIBLE_RECORD_MAX_BYTES + 1,
             0,
@@ -2115,11 +2131,18 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
     for (operation, arguments) in [
         (
             NativeOperation::VmarMapPrivate,
-            [1_u64 << 24 | 2, 0x2000, 48, 0, 0, 0],
+            [0x0f37_79b9_7f4a_7c12, 0x2000, 48, 0, 0, 0],
         ),
         (
             NativeOperation::VmarMapFile,
-            [1_u64 << 24 | 2, 1_u64 << 24 | 3, 0x2000, 48, 0, 0],
+            [
+                0x0f37_79b9_7f4a_7c12,
+                0x0f37_79b9_7f4a_7c13,
+                0x2000,
+                48,
+                0,
+                0,
+            ],
         ),
     ] {
         let mapping_services = RejectingServices {
@@ -2464,16 +2487,16 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
         return Err(SelfTestError::ConsoleValidation);
     }
     let builder_authorities = [
-        1_u64 << 24 | 2,
-        1_u64 << 24 | 3,
-        1_u64 << 24 | 4,
-        1_u64 << 24 | 5,
+        0x0f37_79b9_7f4a_7c12,
+        0x0f37_79b9_7f4a_7c13,
+        0x0f37_79b9_7f4a_7c14,
+        0x0f37_79b9_7f4a_7c15,
         0,
         0,
     ];
     let decoded = parse_builder_create(&builder_authorities)
         .map_err(|_| SelfTestError::ProcessBuilderValidation)?;
-    if [decoded.0, decoded.1, decoded.2, decoded.3].map(HandleValue::get)
+    if [decoded.0, decoded.1, decoded.2, decoded.3].map(handle_wire::to_abi)
         != builder_authorities[..4]
     {
         return Err(SelfTestError::ProcessBuilderValidation);
@@ -2513,7 +2536,7 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
         invoke(
             NativeOperation::ProcessBuilderAddHandle,
             [
-                1_u64 << 24 | 2,
+                0x0f37_79b9_7f4a_7c12,
                 1,
                 u64::MAX,
                 0,
@@ -2527,7 +2550,7 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
         invoke(
             NativeOperation::ProcessBuilderAddHandle,
             [
-                1_u64 << 24 | 2,
+                0x0f37_79b9_7f4a_7c12,
                 1,
                 u64::from(HYPER_NATIVE_OBJECT_EVENT),
                 0,
@@ -2537,7 +2560,7 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
         ),
     );
     let same_rights_builder_handle = parse_builder_handle(&[
-        1_u64 << 24 | 2,
+        0x0f37_79b9_7f4a_7c12,
         1,
         u64::from(HYPER_NATIVE_OBJECT_EVENT),
         HYPER_NATIVE_CAPABILITY_DISPOSITION_SAME_RIGHTS,

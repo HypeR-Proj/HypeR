@@ -358,11 +358,12 @@ decision to publish a supported userspace ABI.
 
 An object has a 64-bit `Koid` for diagnostics and tracing. Its low 32 bits hold
 a nonzero reusable slot; its high 32 bits hold a generation. A slot is returned
-only after final payload destruction; reuse advances its generation, and generation
-exhaustion permanently retires that slot. Full KOIDs never repeat within a
-boot. Neither a KOID nor its slot can open an object or authorize an operation.
-Diagnostic consumers must compare the full value and must not infer creation
-order from it. Language runtimes with a 32-bit process-ID surface may expose
+only after final payload destruction; reuse advances its generation, wrapping
+to one after the maximum. KOIDs are unique among live objects, but a complete
+value can repeat after destruction. Neither a KOID nor its slot can open an
+object or authorize an operation. Diagnostic queries describe the current
+object and cannot establish identity across destruction and reuse. Consumers
+must not infer creation order from an ID. Language runtimes with a 32-bit process-ID surface may expose
 the slot using `HYPER_NATIVE_KOID_SLOT_MASK`; that value is unique while the
 object remains alive and reusable afterward. Native interfaces retain the full
 KOID, and process operations continue to require handles.
@@ -408,9 +409,31 @@ lock, with no allocation or scheduler state change inside it. Numeric phases,
 roles, kinds, and rights remain the canonical ABI facts, while SDKs and
 diagnostic tools provide human-readable interpretation.
 
-`HandleValue` is a nonzero, process-local, opaque `u64` containing a slot and a
-large generation. Security does not depend on secrecy. Slot reuse never makes
-a practical stale handle valid; a slot is retired before generation wrap. The Native table does not depend on a narrower descriptor namespace.
+A Native handle is a process-local `u64` whose most significant byte is
+`0x0F`. Zero denotes an absent or invalid handle. All other high-byte values
+are reserved and rejected as handles. The invocation ABI still returns its
+signed status separately from its unsigned result words.
+
+Each Process handle table selects a fixed XOR mask over the low 56 bits when
+constructed. The `0x0F` prefix guarantees a nonzero handle even when XOR clears
+the entire payload. Only the handle module knows its internal slot/generation
+encoding; kernel business code carries an opaque
+`HandleValue`, and explicit ABI adapters serialize the masked value. Userspace
+must not infer allocation order, payload bit fields, or numeric relationships.
+The mask is not a security boundary and does not replace ownership or rights checks.
+Slot reuse advances the generation, wrapping to one at its maximum without
+retiring slot capacity. Numeric values can repeat: using a closed, replaced,
+or moved handle is a caller error and may operate on a later entry with the
+same value. Generation checks reduce accidental stale-value reuse; they do not
+promise permanent invalidation. The Native table does not depend on a narrower
+descriptor namespace.
+
+Inspector enumeration and crash records expose exactly the masked value held by
+the observed Process. Detailed handle queries decode in that Process's table,
+not the inspector's. Cross-process transfers install a destination-local value;
+KOIDs remain unchanged. A concurrently closed handle can disappear between
+observation and lookup. The ABI adapter rejects values outside the `0x0F` class;
+the table unmasks and validates the payload before using its slot index.
 
 A handle entry contains a user-authority reference, rights, and handle flags.
 Lookup under the process handle-table lock validates generation, object type,
@@ -427,8 +450,9 @@ storage charge only after both pages have been returned. In-transit message
 ownership does not retain a committed move's source page.
 
 Sparse page-directory metadata remains allocated and charged until Process
-retirement. It records the maximum generation used by each page; reconstruction
-starts above that maximum, and an exhausted page identity is never reused.
+retirement. It records the maximum generation used during each backing page's
+lifetime; reconstruction advances that maximum with wrap and starts a new
+maximum for the new backing. Empty page slots remain reusable after wrap.
 Missing-page lookups fail without dereferencing released storage. Live handles
 are never relocated, and partially occupied pages are retained. Reclamation
 does bounded work over empty pages and their own free-list entries, without

@@ -8,6 +8,11 @@ use core::array;
 use core::num::NonZeroU64;
 use core::sync::atomic::{AtomicU64, Ordering};
 
+use hyper::abi::native::{
+    HYPER_NATIVE_HANDLE_PREFIX as HANDLE_PREFIX,
+    HYPER_NATIVE_HANDLE_PREFIX_MASK as HANDLE_PREFIX_MASK,
+};
+
 use super::super::authority::{HandleRights, PropagationRights};
 use super::super::object::{
     ActiveHandleError, ActiveHandleOwner, Diagnostic, ErasedKernelRef, KernelObject, Koid,
@@ -18,11 +23,22 @@ use super::Rights;
 
 const SLOT_BITS: u32 = 24;
 const SLOT_MASK: u64 = (1 << SLOT_BITS) - 1;
-const GENERATION_LIMIT: u64 = u64::MAX >> SLOT_BITS;
+const PAYLOAD_MASK: u64 = !HANDLE_PREFIX_MASK;
+const GENERATION_LIMIT: u64 = PAYLOAD_MASK >> SLOT_BITS;
 const MAX_SLOTS: usize = SLOT_MASK as usize;
 const MAX_RESERVATION_SLOTS: usize = 64;
 const DIAGNOSTIC_PAGE_CAPACITY: usize = 8;
 const DIAGNOSTIC_SLOT_BUDGET: usize = 256;
+
+/// Generations reduce accidental stale-value reuse; they are not eternal
+/// identities. Closed values may repeat after wrap. Zero is never published.
+const fn next_generation(generation: u64) -> u64 {
+    if generation == GENERATION_LIMIT {
+        1
+    } else {
+        generation + 1
+    }
+}
 
 mod page;
 mod storage;
@@ -68,41 +84,61 @@ impl ReservationId {
     }
 }
 
-/// Nonzero opaque handle value interpreted only by its owning Process.
+/// Nonzero opaque handle with the ABI's 0x0F prefix, interpreted by its owning Process.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct HandleValue(NonZeroU64);
 
-impl HandleValue {
-    /// Validates one untrusted raw ABI value before it reaches table decoding.
-    pub(crate) fn try_from_raw(raw: u64) -> Result<Self, HandleError> {
-        let value = NonZeroU64::new(raw).ok_or(HandleError::InvalidHandle)?;
+/// Table-local encoding masks all 56 payload bits. The separate 0x0F prefix
+/// guarantees nonzero values even when XOR clears the entire payload.
+/// Slot/generation fields and the mask are private, not security secrets.
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct HandleCodec {
+    mask: u64,
+}
+
+impl HandleCodec {
+    const fn new(seed: u64) -> Self {
+        let mask = seed & PAYLOAD_MASK;
+        Self {
+            mask: if mask == 0 { 1 } else { mask },
+        }
+    }
+
+    fn encode(self, slot: usize, generation: u64) -> HandleValue {
+        if slot >= MAX_SLOTS || generation == 0 || generation > GENERATION_LIMIT {
+            unreachable_handle_value();
+        }
+        let payload = (generation << SLOT_BITS) | (slot as u64 + 1);
+        let raw = HANDLE_PREFIX | (payload ^ self.mask);
+        match NonZeroU64::new(raw) {
+            Some(value) => HandleValue(value),
+            None => unreachable_handle_value(),
+        }
+    }
+
+    fn decode(self, value: HandleValue) -> Result<(usize, u64), HandleError> {
+        let raw = (value.0.get() & PAYLOAD_MASK) ^ self.mask;
         let slot = raw & SLOT_MASK;
         let generation = raw >> SLOT_BITS;
         if slot == 0 || generation == 0 {
             return Err(HandleError::InvalidHandle);
         }
-        Ok(Self(value))
+        Ok((slot as usize - 1, generation))
     }
 
-    pub(crate) const fn get(self) -> u64 {
-        self.0.get()
-    }
-
-    fn encode(slot: usize, generation: u64) -> Self {
-        let raw = (generation << SLOT_BITS) | (slot as u64 + 1);
-        // Slot indices and generations are private validated table state. Their
-        // encoded value is nonzero because both fields begin at one.
-        match NonZeroU64::new(raw) {
-            Some(value) => Self(value),
-            None => unreachable_handle_value(),
+    /// For values already validated under the same exclusive table borrow.
+    fn require_decoded(self, value: HandleValue) -> (usize, u64) {
+        match self.decode(value) {
+            Ok(decoded) => decoded,
+            Err(_) => unreachable_handle_value(),
         }
     }
-
-    fn decode(self) -> (usize, u64) {
-        let raw = self.0.get();
-        ((raw & SLOT_MASK) as usize - 1, raw >> SLOT_BITS)
-    }
 }
+
+pub(crate) mod wire;
+
+#[cfg(test)]
+mod encoding_tests;
 
 #[cold]
 fn unreachable_handle_value() -> ! {
@@ -354,11 +390,12 @@ enum Slot {
         generation: u64,
         handle: PreparedHandle,
     },
-    Retired,
+    Empty,
 }
 
 /// Unsynchronized table state owned and locked by one Process.
 pub(crate) struct HandleTable {
+    codec: HandleCodec,
     slots: SlotStore,
     free_head: Option<usize>,
     free_slots: usize,
@@ -375,8 +412,11 @@ enum TableLifecycle {
 }
 
 impl HandleTable {
-    pub(crate) const fn new() -> Self {
+    /// Fixes this namespace's encoding for its entire lifetime. Production
+    /// callers supply one seed from the kernel generator at process creation.
+    pub(crate) const fn new(seed: u64) -> Self {
         Self {
+            codec: HandleCodec::new(seed),
             slots: SlotStore::new(),
             free_head: None,
             free_slots: 0,
@@ -384,6 +424,12 @@ impl HandleTable {
             lifecycle: TableLifecycle::Active,
             next_teardown_generation: 1,
         }
+    }
+
+    /// Creates an accounting index in this exact namespace without exporting
+    /// its codec or slot numbering to the Process owner.
+    pub(crate) fn new_sidecar<T>(&self) -> HandleSidecar<T> {
+        HandleSidecar::new(self.codec)
     }
 
     /// Returns the persistent logical-slot growth required by one reservation.
@@ -461,7 +507,7 @@ impl HandleTable {
         for _ in 0..count {
             let (index, generation) = self.reserve_free_slot(reservation);
             storage.slots.push(ReservedSlot { index, generation });
-            storage.values.push(HandleValue::encode(index, generation));
+            storage.values.push(self.codec.encode(index, generation));
         }
         Ok(HandleBatchReservation {
             reservation,
@@ -511,6 +557,7 @@ impl HandleTable {
             generations[position] = generation;
         }
         Ok(HandleReservation {
+            codec: self.codec,
             reservation,
             slots: selected,
             generations,
@@ -617,6 +664,9 @@ impl HandleTable {
     }
 
     fn validate_reservation<const N: usize>(&self, token: &HandleReservation<N>) {
+        if token.codec != self.codec {
+            super::invariant_violation();
+        }
         if !matches!(self.lifecycle, TableLifecycle::Active) {
             super::invariant_violation();
         }
@@ -640,11 +690,7 @@ impl HandleTable {
         for position in 0..N {
             let index = token.slots[position];
             let generation = token.generations[position];
-            if generation == GENERATION_LIMIT {
-                self.slots.replace(index, Slot::Retired);
-            } else {
-                self.publish_vacant_slot(index, generation + 1);
-            }
+            self.publish_vacant_slot(index, next_generation(generation));
         }
         token.completed = true;
     }
@@ -713,14 +759,15 @@ impl HandleTable {
         if generation == 0 || generation > GENERATION_LIMIT {
             super::invariant_violation();
         }
-        let (index, expected) = value.decode();
+        let (index, expected) = self.codec.require_decoded(value);
         match self.slots.get_mut(index) {
             Some(Slot::Occupied {
                 generation: found, ..
             }) if *found == expected => *found = generation,
             _ => super::invariant_violation(),
         }
-        HandleValue::encode(index, generation)
+        self.slots.record_generation(index, generation);
+        self.codec.encode(index, generation)
     }
 
     pub(crate) fn get_info(&self, value: HandleValue) -> Result<HandleInfo, HandleError> {
@@ -762,7 +809,7 @@ impl HandleTable {
         while slot < end && len < DIAGNOSTIC_PAGE_CAPACITY {
             if let Some(Slot::Occupied { generation, handle }) = self.slots.get(slot) {
                 entries[len] = Some(HandleSnapshot {
-                    value: HandleValue::encode(slot, *generation),
+                    value: self.codec.encode(slot, *generation),
                     info: HandleInfo {
                         koid: handle.object().koid(),
                         kind: handle.object().kind(),
@@ -1009,7 +1056,7 @@ impl HandleTable {
             } else {
                 None
             };
-            let (index, generation) = request.value.decode();
+            let (index, generation) = self.codec.require_decoded(request.value);
             transaction_storage.entries.push(TransferEntry {
                 source: match request.operation {
                     HandleTransferOperation::Move => TransferSource::Move { index, generation },
@@ -1028,10 +1075,10 @@ impl HandleTable {
                 Some(request) => request,
                 None => super::invariant_violation(),
             };
-            let (index, generation) = request.value.decode();
+            let (index, generation) = self.codec.require_decoded(request.value);
             let handle = match request.operation {
                 HandleTransferOperation::Move => {
-                    let slot = self.slots.replace(index, Slot::Retired);
+                    let slot = self.slots.replace(index, Slot::Empty);
                     let Slot::Occupied { handle, .. } = slot else {
                         unreachable_handle_value();
                     };
@@ -1062,6 +1109,7 @@ impl HandleTable {
         };
 
         Ok(HandleTransferClaim {
+            codec: self.codec,
             transfer,
             entries: transaction_storage.entries,
             handles: Some(transaction_storage.handles),
@@ -1111,8 +1159,8 @@ impl HandleTable {
             Some(storage) => storage,
             None => super::invariant_violation(),
         };
-        let (index, generation) = value.decode();
-        let slot = self.slots.replace(index, Slot::Retired);
+        let (index, generation) = self.codec.require_decoded(value);
+        let slot = self.slots.replace(index, Slot::Empty);
         let Slot::Occupied { handle, .. } = slot else {
             unreachable_handle_value();
         };
@@ -1136,6 +1184,7 @@ impl HandleTable {
         };
 
         Ok(HandleTransferClaim {
+            codec: self.codec,
             transfer,
             entries: transaction_storage.entries,
             handles: Some(transaction_storage.handles),
@@ -1144,6 +1193,9 @@ impl HandleTable {
     }
 
     fn validate_transfer(&self, claim: &HandleTransferClaim) {
+        if claim.codec != self.codec {
+            super::invariant_violation();
+        }
         if !matches!(self.lifecycle, TableLifecycle::Active) {
             super::invariant_violation();
         }
@@ -1217,11 +1269,7 @@ impl HandleTable {
         for (entry, handle) in claim.entries.iter().zip(handles.iter_mut()) {
             handle.rights = entry.requested_rights.decompose();
             if let TransferSource::Move { index, generation } = entry.source {
-                if generation == GENERATION_LIMIT {
-                    self.slots.replace(index, Slot::Retired);
-                } else {
-                    self.publish_vacant_slot(index, generation + 1);
-                }
+                self.publish_vacant_slot(index, next_generation(generation));
             }
         }
         self.active_transfers -= 1;
@@ -1237,87 +1285,36 @@ impl HandleTable {
         )
     }
 
-    /// Atomically replaces a source handle with an attenuated new value.
-    ///
-    /// Allocation and authority validation finish while the source remains
-    /// unchanged. The final source removal and destination publication only
-    /// move an already-active owner and cannot fail.
-    #[cfg(test)]
+    /// Attenuates rights and advances the value in place, including generation
+    /// wrap. Validation precedes mutation; the active owner never leaves the
+    /// slot, and replacement needs neither allocation nor a second slot.
     pub(crate) fn replace(
         &mut self,
         value: HandleValue,
         rights: Rights,
     ) -> Result<HandleValue, HandleError> {
-        let snapshot = self.replace_storage_snapshot(value, rights)?;
-        let mut plan = match snapshot {
-            Some(snapshot) => Some(HandleTableStoragePlan::try_new(snapshot)?),
-            None => None,
-        };
-        self.replace_with_plan(value, rights, &mut plan)
-    }
-
-    pub(crate) fn replace_storage_snapshot(
-        &self,
-        value: HandleValue,
-        rights: Rights,
-    ) -> Result<Option<HandleTableStorageSnapshot>, HandleError> {
         self.ensure_active()?;
         let source = self.lookup(value)?;
         if !source.rights.contains(rights.decompose()) {
             return Err(HandleError::AccessDenied);
         }
-        let (_, source_generation) = value.decode();
-        if source_generation == GENERATION_LIMIT {
-            self.reservation_storage_snapshot_for(1).map(Some)
-        } else {
-            Ok(None)
-        }
+        let (index, previous) = self.codec.require_decoded(value);
+        let generation = next_generation(previous);
+        match self.slots.get_mut(index) {
+            Some(Slot::Occupied {
+                generation: current,
+                handle,
+            }) => {
+                *current = generation;
+                handle.rights = rights.decompose();
+            }
+            _ => unreachable_handle_value(),
+        };
+        self.slots.record_generation(index, generation);
+        Ok(self.codec.encode(index, generation))
     }
 
-    pub(crate) fn replace_with_plan(
-        &mut self,
-        value: HandleValue,
-        rights: Rights,
-        plan: &mut Option<HandleTableStoragePlan>,
-    ) -> Result<HandleValue, HandleError> {
-        let expected = self.replace_storage_snapshot(value, rights)?;
-        if expected != plan.as_ref().map(HandleTableStoragePlan::snapshot) {
-            super::invariant_violation();
-        }
-        let (source_index, source_generation) = value.decode();
-
-        if source_generation != GENERATION_LIMIT {
-            let source = self.slots.replace(source_index, Slot::Retired);
-            let Slot::Occupied { mut handle, .. } = source else {
-                unreachable_handle_value();
-            };
-            handle.rights = rights.decompose();
-            let generation = source_generation + 1;
-            self.slots
-                .replace(source_index, Slot::Occupied { generation, handle });
-            return Ok(HandleValue::encode(source_index, generation));
-        }
-
-        // A generation-exhausted slot cannot be reused. Reserve the replacement
-        // destination before retiring it so TableFull leaves the source intact.
-        let reservation = ReservationId::allocate()?;
-        let plan = match plan.as_mut() {
-            Some(plan) => plan,
-            None => super::invariant_violation(),
-        };
-        self.install_storage_plan(plan);
-        let (destination, generation) = self.reserve_free_slot(reservation);
-        let source = self.slots.replace(source_index, Slot::Retired);
-        let Slot::Occupied { mut handle, .. } = source else {
-            unreachable_handle_value();
-        };
-        handle.rights = rights.decompose();
-        self.slots
-            .replace(destination, Slot::Occupied { generation, handle });
-        Ok(HandleValue::encode(destination, generation))
-    }
-
-    /// Detaches one published handle and advances or retires its slot.
+    /// Detaches one published handle and returns its slot for reuse.
     ///
     /// The returned owner remains active and must be completed only after the
     /// caller releases the Process handle-table lock.
@@ -1327,7 +1324,7 @@ impl HandleTable {
     }
 
     fn remove_active(&mut self, value: HandleValue) -> Result<ClosedHandle, HandleError> {
-        let (index, generation) = value.decode();
+        let (index, generation) = self.codec.decode(value)?;
         let slot = self
             .slots
             .get_mut(index)
@@ -1339,13 +1336,11 @@ impl HandleTable {
         if !matches!(slot, Slot::Occupied { generation: found, .. } if *found == generation) {
             return Err(HandleError::InvalidHandle);
         }
-        let removed = self.slots.replace(index, Slot::Retired);
+        let removed = self.slots.replace(index, Slot::Empty);
         let Slot::Occupied { handle, .. } = removed else {
             unreachable_handle_value();
         };
-        if generation != GENERATION_LIMIT {
-            self.publish_vacant_slot(index, generation + 1);
-        }
+        self.publish_vacant_slot(index, next_generation(generation));
         Ok(ClosedHandle {
             handle: Some(handle),
         })
@@ -1380,7 +1375,7 @@ impl HandleTable {
             ),
             _ => unreachable_handle_value(),
         };
-        let value = HandleValue::encode(index, generation);
+        let value = self.codec.encode(index, generation);
         match self.remove_active(value) {
             Ok(closed) => Some((HandleSnapshot { value, info }, closed)),
             Err(_) => unreachable_handle_value(),
@@ -1432,7 +1427,7 @@ impl HandleTable {
             Some(Slot::Occupied { generation, .. }) => *generation,
             _ => unreachable_handle_value(),
         };
-        match self.remove_active(HandleValue::encode(index, generation)) {
+        match self.remove_active(self.codec.encode(index, generation)) {
             Ok(closed) => Some(closed),
             Err(_) => unreachable_handle_value(),
         }
@@ -1476,7 +1471,7 @@ impl HandleTable {
     }
 
     fn lookup(&self, value: HandleValue) -> Result<&PreparedHandle, HandleError> {
-        let (index, generation) = value.decode();
+        let (index, generation) = self.codec.decode(value)?;
         match self.slots.get(index) {
             Some(Slot::Occupied {
                 generation: found,
@@ -1487,12 +1482,6 @@ impl HandleTable {
             }) if *found == generation => Err(HandleError::Busy),
             _ => Err(HandleError::InvalidHandle),
         }
-    }
-}
-
-impl Default for HandleTable {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -1564,6 +1553,7 @@ impl HandleTransferStorage {
 /// Reversible ownership of exact claimed source slots.
 #[must_use = "commit or roll back the handle transfer claim"]
 pub(crate) struct HandleTransferClaim {
+    codec: HandleCodec,
     transfer: ReservationId,
     entries: Vec<TransferEntry>,
     handles: Option<Vec<PreparedHandle>>,
@@ -1596,7 +1586,7 @@ impl HandleTransferClaim {
     pub(crate) fn values(&self) -> impl Iterator<Item = HandleValue> + '_ {
         self.entries.iter().filter_map(|entry| match entry.source {
             TransferSource::Move { index, generation } => {
-                Some(HandleValue::encode(index, generation))
+                Some(self.codec.encode(index, generation))
             }
             TransferSource::Copy => None,
         })
@@ -2001,11 +1991,7 @@ impl HandleBatchReservation {
         }
 
         for slot in &self.slots[count..] {
-            if slot.generation == GENERATION_LIMIT {
-                table.slots.replace(slot.index, Slot::Retired);
-            } else {
-                table.publish_vacant_slot(slot.index, slot.generation + 1);
-            }
+            table.publish_vacant_slot(slot.index, next_generation(slot.generation));
         }
         self.slots.truncate(count);
         self.values.truncate(count);
@@ -2108,11 +2094,7 @@ impl HandleBatchReservation {
             ) {
                 super::invariant_violation();
             }
-            if slot.generation == GENERATION_LIMIT {
-                table.slots.replace(slot.index, Slot::Retired);
-            } else {
-                table.publish_vacant_slot(slot.index, slot.generation + 1);
-            }
+            table.publish_vacant_slot(slot.index, next_generation(slot.generation));
         }
         self.completed = true;
         RetiredHandleBatchReservationStorage {
@@ -2139,6 +2121,7 @@ impl Drop for HandleBatchReservation {
 /// Every exit path must explicitly publish or abort the token.
 #[must_use = "publish or abort the handle-slot reservation"]
 pub(crate) struct HandleReservation<const N: usize> {
+    codec: HandleCodec,
     reservation: ReservationId,
     slots: [usize; N],
     generations: [u64; N],
@@ -2149,7 +2132,8 @@ impl<const N: usize> HandleReservation<N> {
     /// Returns the future values while every corresponding slot is unresolved.
     pub(crate) fn values(&self) -> [HandleValue; N] {
         array::from_fn(|position| {
-            HandleValue::encode(self.slots[position], self.generations[position])
+            self.codec
+                .encode(self.slots[position], self.generations[position])
         })
     }
 

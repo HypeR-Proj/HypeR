@@ -3,6 +3,8 @@
 
 //! Native semantic-error to wire-status translation and result construction.
 
+use crate::kernel::capability::handle_wire;
+
 use hyper::abi::native::{
     HYPER_NATIVE_STATUS_ACCESS_DENIED, HYPER_NATIVE_STATUS_BAD_HANDLE,
     HYPER_NATIVE_STATUS_BAD_STATE, HYPER_NATIVE_STATUS_BUFFER_TOO_SMALL, HYPER_NATIVE_STATUS_BUSY,
@@ -32,7 +34,7 @@ use super::services::{ConsoleServiceError, ObjectServiceError, ProcessBuilderSer
 
 pub(super) fn handle_result(result: Result<HandleValue, HyperNativeStatus>) -> NativeResult {
     match result {
-        Ok(value) => success([value.get(), 0]),
+        Ok(value) => success([handle_wire::to_abi(value), 0]),
         Err(status) => failure(status),
     }
 }

@@ -3,6 +3,8 @@
 
 //! Native directory traversal and file I/O syscalls.
 
+use crate::kernel::capability::handle_wire;
+
 use crate::kernel::abi::native::Arguments;
 use crate::kernel::abi::native::services::{NativeAction, VfsServices};
 use crate::kernel::abi::native::status::{
@@ -583,7 +585,7 @@ pub(in crate::kernel::abi::native) fn sys_file_protect(
             .map_err(status_from_vfs_service_error)
     })();
     NativeAction::Return(match result {
-        Ok((handle, size)) => success([handle.get(), size]),
+        Ok((handle, size)) => success([handle_wire::to_abi(handle), size]),
         Err(error) => failure(error),
     })
 }

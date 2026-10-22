@@ -3,6 +3,8 @@
 
 //! Admission tests use real generation handles independently of payload mocks.
 
+use crate::kernel::capability::handle_wire;
+
 use core::cell::{Cell, RefCell};
 
 use hyper::abi::native::{self as abi, NativeInvocation, NativeOperation};
@@ -93,7 +95,7 @@ pub(super) fn run() -> Result<(), ()> {
             .map_err(|_| ())
     };
     let prepared = [prepare(Rights::SIGNAL)?, prepare(Rights::INSPECT)?];
-    let mut table = HandleTable::new();
+    let mut table = HandleTable::new(0x15a9_3d7b_4c62_8e01);
     let storage = table.reservation_storage_snapshot_for(2).map_err(|_| ())?;
     let mut storage = Some(HandleTableStoragePlan::try_new(storage).map_err(|_| ())?);
     let reservation = table.reserve_with_plan::<2>(&mut storage).map_err(|_| ())?;
@@ -111,11 +113,14 @@ pub(super) fn run() -> Result<(), ()> {
     // EventSignal and AbiQuery intentionally share a numeric selector.
     if NativeOperation::AbiQuery.operation() != NativeOperation::EventSignal.operation()
         || !matches!(
-            admitted(signal.get(), NativeOperation::AbiQuery.operation()),
+            admitted(
+                handle_wire::to_abi(signal),
+                NativeOperation::AbiQuery.operation()
+            ),
             Ok((_, NativeOperation::EventSignal))
         )
         || !fails(
-            inspect.get(),
+            handle_wire::to_abi(inspect),
             NativeOperation::EventSignal.operation(),
             abi::HYPER_NATIVE_STATUS_ACCESS_DENIED,
         )
@@ -130,7 +135,7 @@ pub(super) fn run() -> Result<(), ()> {
             abi::HYPER_NATIVE_STATUS_BAD_HANDLE,
         )
         || !fails(
-            signal.get(),
+            handle_wire::to_abi(signal),
             u64::MAX,
             abi::HYPER_NATIVE_STATUS_NOT_SUPPORTED,
         )
@@ -138,10 +143,25 @@ pub(super) fn run() -> Result<(), ()> {
         return Err(());
     }
 
+    // Changing only the wire class must not reach the same live table slot.
+    let payload = handle_wire::to_abi(signal) & !abi::HYPER_NATIVE_HANDLE_PREFIX_MASK;
+    for prefix in (0..=255_u64)
+        .map(|byte| byte << 56)
+        .filter(|&prefix| prefix != abi::HYPER_NATIVE_HANDLE_PREFIX)
+    {
+        if !fails(
+            prefix | payload,
+            NativeOperation::EventSignal.operation(),
+            abi::HYPER_NATIVE_STATUS_BAD_HANDLE,
+        ) {
+            return Err(());
+        }
+    }
+
     // Context validation must not be skipped after kind and rights admission.
     services.context_allowed.set(false);
     if !fails(
-        signal.get(),
+        handle_wire::to_abi(signal),
         NativeOperation::EventSignal.operation(),
         abi::HYPER_NATIVE_STATUS_ACCESS_DENIED,
     ) {
@@ -155,7 +175,7 @@ pub(super) fn run() -> Result<(), ()> {
         .map_err(|_| ())?
         .complete();
     if !fails(
-        signal.get(),
+        handle_wire::to_abi(signal),
         NativeOperation::EventSignal.operation(),
         abi::HYPER_NATIVE_STATUS_BAD_HANDLE,
     ) {

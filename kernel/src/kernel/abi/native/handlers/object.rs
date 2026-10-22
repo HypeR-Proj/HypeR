@@ -3,6 +3,8 @@
 
 //! Native object syscall validation.
 
+use crate::kernel::capability::handle_wire;
+
 use crate::kernel::abi::native::Arguments;
 use crate::kernel::abi::native::services::{NativeAction, ObjectServiceError, ObjectServices};
 use crate::kernel::abi::native::status::{
@@ -99,7 +101,7 @@ pub(in crate::kernel::abi::native) fn sys_wait_set_create(
         )
     })();
     NativeAction::Return(match result {
-        Ok(value) => success([value.get(), 0]),
+        Ok(value) => success([handle_wire::to_abi(value), 0]),
         Err(error) => failure(status_from_object_service_error(error)),
     })
 }

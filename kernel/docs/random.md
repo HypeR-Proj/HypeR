@@ -18,6 +18,9 @@ serializes draws on multiple CPUs. Bulk fills acquire it for at most 64 bytes
 at a time; they never copy to userspace under this lock. There is no timer,
 interrupt sampling hook, worker, or periodic reseeding cost.
 
+Process creation draws one seed for its handle table's fixed numeric mask.
+Handle operations do not draw random numbers or acquire the PRNG lock.
+
 Before KASLR and SMP, boot mixes the boot counter, `/chosen/kaslr-seed`, optional
 `/chosen/rng-seed`, and one optional hardware sample. `rng-seed` accepts 1–256
 bytes, folds them into a word, and rejects duplicate or invalid properties

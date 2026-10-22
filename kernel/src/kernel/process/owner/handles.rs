@@ -35,16 +35,6 @@ struct PreparedTableStorage {
     charge: Option<CommittedCharge>,
 }
 
-impl PreparedTableStorage {
-    const fn empty() -> Self {
-        Self {
-            slots: None,
-            index: HandleSidecarPlan::empty(),
-            charge: None,
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
 pub(super) enum HandleAdmission {
     Published,
@@ -608,6 +598,8 @@ impl Process {
     /// Unlike capability transfer, this path requires an object operation
     /// right and no propagation right. `expected_koid` binds the claim to the
     /// object resolved by the syscall adapter before entering the coordinator.
+    /// The caller retains that resolved object until this claim is established;
+    /// the KOID comparison never recovers authority from a historical ID.
     pub(crate) fn prepare_handle_consumption(
         &self,
         value: HandleValue,
@@ -904,48 +896,15 @@ impl Process {
         value: HandleValue,
         rights: Rights,
     ) -> Result<HandleValue, ProcessError> {
-        loop {
-            let snapshot = self.inner.state.with(|state| {
-                require_handle_phase(state.lifecycle.phase())?;
-                Ok::<_, ProcessError>(
-                    self.inner
-                        .handles
-                        .with(|table| table.replace_storage_snapshot(value, rights))?,
-                )
-            })?;
-            let mut storage = match snapshot {
-                Some(snapshot) => self.prepare_table_storage_plan(snapshot)?,
-                None => PreparedTableStorage::empty(),
-            };
-            let attempt = self.inner.state.with(|state| {
-                require_handle_phase(state.lifecycle.phase())?;
-                let current = self
-                    .inner
-                    .handles
-                    .with(|table| table.replace_storage_snapshot(value, rights))?;
-                if current != snapshot {
-                    return Ok::<_, ProcessError>(None);
-                }
-                let replacement = self
-                    .inner
-                    .handles
-                    .with(|table| table.replace_with_plan(value, rights, &mut storage.slots))?;
-                if let Some(snapshot) = snapshot {
-                    install_table_storage_charge(state, snapshot, &mut storage.charge);
-                    state.handle_accounting.install_storage(&mut storage.index);
-                }
-                state.handle_accounting.replace(value, replacement);
-                Ok(Some(replacement))
-            });
-            match attempt {
-                Ok(Some(replacement)) => {
-                    self.reclaim_handle_pages();
-                    return Ok(replacement);
-                }
-                Ok(None) => drop(storage),
-                Err(error) => return Err(error),
-            }
-        }
+        self.inner.state.with(|state| {
+            require_handle_phase(state.lifecycle.phase())?;
+            let replacement = self
+                .inner
+                .handles
+                .with(|table| table.replace(value, rights))?;
+            state.handle_accounting.replace(value, replacement);
+            Ok(replacement)
+        })
     }
 
     pub(crate) fn close_handle(&self, value: HandleValue) -> Result<(), ProcessError> {

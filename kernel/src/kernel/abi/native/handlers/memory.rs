@@ -3,6 +3,8 @@
 
 //! Native memory syscall validation.
 
+use crate::kernel::capability::handle_wire;
+
 use crate::kernel::abi::native::Arguments;
 use crate::kernel::abi::native::services::{MemoryServices, NativeAction};
 use crate::kernel::abi::native::status::{
@@ -87,7 +89,7 @@ pub(in crate::kernel::abi::native) fn sys_vmar_allocate(
             .map_err(status_from_memory_service_error)
     };
     NativeAction::Return(match result {
-        Ok((handle, address)) => success([handle.get(), address]),
+        Ok((handle, address)) => success([handle_wire::to_abi(handle), address]),
         Err(status) => failure(status),
     })
 }
@@ -184,7 +186,7 @@ pub(in crate::kernel::abi::native) fn sys_vmo_create_snapshot(
             .map_err(status_from_memory_service_error)
     })();
     NativeAction::Return(match result {
-        Ok((handle, size)) => success([handle.get(), size]),
+        Ok((handle, size)) => success([handle_wire::to_abi(handle), size]),
         Err(error) => failure(error),
     })
 }

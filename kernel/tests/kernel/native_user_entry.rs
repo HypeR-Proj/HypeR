@@ -18,6 +18,8 @@ pub(super) use aarch64::run;
 #[cfg(CONFIG_ARCH_RISCV64)]
 pub(super) use riscv64::run;
 
+use crate::kernel::capability::handle_wire;
+
 use crate::kernel::accounting::ResourceDomain;
 use crate::kernel::mm::user_space::{UserAddress, UserSlice, prepare_native_entry_self_test};
 use crate::kernel::process::{
@@ -117,7 +119,7 @@ fn prepare_process(
         let destination = UserSlice::new(UserAddress::new(stack_range.base().get() + offset), 8)
             .map_err(|_| Error::AddressSpace)?;
         process
-            .copy_to_user(destination, &handle.get().to_le_bytes())
+            .copy_to_user(destination, &handle_wire::to_abi(handle).to_le_bytes())
             .map_err(|_| Error::AddressSpace)?;
     }
     if !process_is_discoverable(&process) {
@@ -135,7 +137,7 @@ fn event_handle(process: &Process) -> Result<crate::kernel::capability::HandleVa
     process
         .copy_from_user(source, &mut bytes)
         .map_err(|_| Error::AddressSpace)?;
-    crate::kernel::capability::HandleValue::try_from_raw(u64::from_le_bytes(bytes))
+    crate::kernel::capability::handle_wire::from_abi(u64::from_le_bytes(bytes))
         .map_err(|_| Error::Construction)
 }
 

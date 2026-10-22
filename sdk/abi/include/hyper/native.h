@@ -74,7 +74,9 @@
  *
  * - process_get_current_id returns the calling Process KOID for observation only. It creates no handle or operational authority and is not a PID-to-handle lookup.
  *
- * - KOIDs encode a nonzero 32-bit slot in bits 0..31 and a 32-bit generation in bits 32..63. Full KOIDs never repeat within a boot. A slot remains unique until final payload destruction, after which reuse advances its generation; generation exhaustion permanently retires the slot. Full KOIDs are required for durable correlation. A language runtime with a 32-bit process ID surface may expose the KOID slot, accepting reuse after object destruction. Neither form grants authority or permits identifier-to-handle conversion; KOIDs do not encode creation order.
+ * - Handles are opaque nonzero process-local u64 values with bits 63..56 fixed to 0x0F. Zero is the absent/invalid handle sentinel; all other high-byte values are reserved and rejected as handles. Invocations return a separate signed status and unsigned result words. The low 56 bits are masked table-local data: callers must not infer slot/generation fields, allocation order, or numeric relationships. Slot reuse advances a wrapping generation without permanently retiring capacity; numeric values may repeat. Using a closed, replaced, or moved handle is a caller error and may operate on a later entry with that value. Inspector and retained crash records report the exact value held by the observed Process; queries use that Process namespace. Transfers publish destination-local values. Numeric values alone never grant authority outside the owning Process.
+ *
+ * - KOIDs encode a nonzero 32-bit slot in bits 0..31 and a 32-bit generation in bits 32..63. A slot remains unique until final payload destruction, after which reuse advances its generation, wrapping to one at the maximum. Live objects have distinct IDs, but complete values may repeat after destruction. Diagnostic queries describe the current object and do not establish identity across destruction and reuse. A language runtime with a 32-bit process ID surface may expose the KOID slot, accepting reuse after object destruction. Neither form grants authority or permits identifier-to-handle conversion; KOIDs do not encode creation order. Kernel operations retain direct counted object references rather than recovering authority from historical IDs.
  *
  * - Ramfs storage and namespace policy remain kernel-owned; disk filesystem parsing runs in userspace. Open File and Directory objects pin their nodes after unlink. Directory WRITE permits namespace mutation; File WRITE permits content mutation. directory_create_file exclusively creates a regular file and publishes its requested handle atomically with the new name. Mode accepts permission bits 0777. directory_remove options 0 removes a non-directory entry without following the final symlink; 1 removes an empty directory. file_write_at options 0 uses offset, 1 atomically appends (offset must be zero); returns actual bytes and end offset. Transfers may complete short. file_resize zero-fills extension. Active file protections reject content changes through every File alias.
  *
@@ -840,6 +842,41 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * Wait signal `peer_closed` for `guest_mailbox` objects; bit positions are object-local.
  */
 #define HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_PEER_CLOSED (UINT64_C(1) << 2)
+
+/**
+ * @defgroup hyper_native_handle_encoding handle_encoding (constants)
+ * @ingroup hyper_native
+ * Handle value classes; the remaining bits are opaque process-local data.
+ * @{
+ */
+/**
+ * `handle_invalid` in the `handle_encoding` constants domain.
+ *
+ * Handle value classes; the remaining bits are opaque process-local data.
+ * Numeric parameter or sentinel, not an enum discriminant.
+ *
+ * No handle is present. This value never identifies a live handle.
+ */
+#define HYPER_NATIVE_HANDLE_INVALID UINT64_C(0)
+/**
+ * `handle_prefix_mask` in the `handle_encoding` constants domain.
+ *
+ * Handle value classes; the remaining bits are opaque process-local data.
+ * Numeric parameter or sentinel, not an enum discriminant.
+ *
+ * Selects the most significant byte of a wire handle.
+ */
+#define HYPER_NATIVE_HANDLE_PREFIX_MASK UINT64_C(18374686479671623680)
+/**
+ * `handle_prefix` in the `handle_encoding` constants domain.
+ *
+ * Handle value classes; the remaining bits are opaque process-local data.
+ * Numeric parameter or sentinel, not an enum discriminant.
+ *
+ * Live handles have prefix 0x0F; all other prefixes are reserved.
+ */
+#define HYPER_NATIVE_HANDLE_PREFIX UINT64_C(1080863910568919040)
+/** @} */
 
 /**
  * @defgroup hyper_native_core_limits core_limits (constants)

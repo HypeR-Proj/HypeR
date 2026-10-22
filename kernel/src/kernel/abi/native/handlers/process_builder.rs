@@ -3,6 +3,8 @@
 
 //! Native process builder syscall validation.
 
+use crate::kernel::capability::handle_wire;
+
 use crate::kernel::abi::native::Arguments;
 use crate::kernel::abi::native::services::{NativeAction, ProcessBuilderServices};
 use crate::kernel::abi::native::status::{
@@ -12,7 +14,6 @@ use crate::kernel::abi::native::wire::{
     parse_affinity_request, parse_builder_create, parse_builder_handle, parse_builder_text,
     require_zero,
 };
-use crate::kernel::capability::HandleValue;
 use crate::kernel::capability::InvocationReceiver;
 use hyper::abi::native::{
     HYPER_NATIVE_PROCESS_NAME_MAX_BYTES, HYPER_NATIVE_PROCESS_STARTUP_DATA_MAX_BYTES,
@@ -121,7 +122,7 @@ pub(in crate::kernel::abi::native) fn sys_process_builder_start(
         .start_process_builder(receiver)
         .map_err(status_from_process_builder_service_error);
     NativeAction::Return(match result {
-        Ok(handles) => success(handles.map(HandleValue::get)),
+        Ok(handles) => success(handles.map(handle_wire::to_abi)),
         Err(status) => failure(status),
     })
 }

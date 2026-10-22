@@ -86,8 +86,8 @@ impl<T: Default> DirectoryPlan<T> {
 #[derive(Default)]
 struct Entry {
     page: Option<Page<Slot>>,
-    // Persist across backing release. A recreated page starts strictly above
-    // every generation ever stored here; exhausted identities are never reused.
+    // Maximum generation in this backing's lifetime, retained across release.
+    // Reconstruction advances it (wrapping to one) and starts a new maximum.
     high_generation: u64,
     busy: usize,
     empty_previous: Option<usize>,
@@ -127,7 +127,7 @@ impl HandleTableStoragePlan {
         let directory = DirectoryPlan::prepare(snapshot.directory_chunk)?;
         let mut pages = [const { None }; MAX_NEW_PAGES];
         for (slot, &index) in pages.iter_mut().zip(&snapshot.pages[..snapshot.count]) {
-            *slot = Some((index, Page::try_new(page_slots(index), |_| Slot::Retired)?));
+            *slot = Some((index, Page::try_new(page_slots(index), |_| Slot::Empty)?));
         }
         Ok(Self {
             snapshot,
@@ -140,7 +140,7 @@ impl HandleTableStoragePlan {
     }
     #[cfg(test)]
     pub(crate) fn force_allocation_failure_for_test() -> Result<(), HandleError> {
-        Page::<Slot>::try_new(usize::MAX, |_| Slot::Retired).map(drop)
+        Page::<Slot>::try_new(usize::MAX, |_| Slot::Empty).map(drop)
     }
 }
 
@@ -159,7 +159,7 @@ fn generation(slot: &Slot) -> u64 {
         | Slot::Reserved { generation, .. }
         | Slot::TransferReserved { generation, .. }
         | Slot::Occupied { generation, .. } => *generation,
-        Slot::Retired => 0,
+        Slot::Empty => 0,
     }
 }
 
@@ -263,11 +263,7 @@ impl SlotStore {
         };
         let page = index / SLOTS_PER_PAGE;
         let old_busy = busy(&old);
-        self.entry_mut(page).high_generation = self
-            .entry(page)
-            .high_generation
-            .max(new_generation)
-            .max(generation(&old));
+        self.record_generation(index, new_generation.max(generation(&old)));
         if old_busy != new_busy {
             if new_busy {
                 if self.entry(page).busy == 0 {
@@ -368,11 +364,15 @@ impl SlotStore {
         }
         (ids, count)
     }
-    pub(super) fn fresh_generation(&self, page: usize) -> u64 {
-        match self.entry(page).high_generation.checked_add(1) {
-            Some(next) if next <= GENERATION_LIMIT => next,
-            _ => super::super::invariant_violation(),
-        }
+    pub(super) fn record_generation(&mut self, index: usize, generation: u64) {
+        let entry = self.entry_mut(index / SLOTS_PER_PAGE);
+        entry.high_generation = entry.high_generation.max(generation);
+    }
+    pub(super) fn fresh_generation(&mut self, page: usize) -> u64 {
+        let entry = self.entry_mut(page);
+        let generation = next_generation(entry.high_generation);
+        entry.high_generation = generation;
+        generation
     }
     pub(super) fn empty_page(&self) -> Option<usize> {
         self.empty
@@ -386,10 +386,8 @@ impl SlotStore {
             Some(page) => page,
             None => super::super::invariant_violation(),
         };
-        if self.entry(page).high_generation < GENERATION_LIMIT {
-            self.entry_mut(page).vacant_next = self.vacant;
-            self.vacant = Some(page);
-        }
+        self.entry_mut(page).vacant_next = self.vacant;
+        self.vacant = Some(page);
         self.advance_epoch();
         backing
     }
@@ -407,25 +405,23 @@ impl SlotStore {
 }
 
 pub(crate) struct HandleSidecar<T> {
+    codec: super::HandleCodec,
     directory: Directory<Option<Page<Option<T>>>>,
 }
 pub(crate) struct HandleSidecarPlan<T> {
     directory: DirectoryPlan<Option<Page<Option<T>>>>,
     pages: [Option<(usize, Page<Option<T>>)>; MAX_NEW_PAGES],
 }
-impl<T> HandleSidecarPlan<T> {
-    pub(crate) const fn empty() -> Self {
-        Self {
-            directory: DirectoryPlan(None),
-            pages: [const { None }; MAX_NEW_PAGES],
-        }
-    }
-}
 impl<T> HandleSidecar<T> {
-    pub(crate) const fn new() -> Self {
+    pub(super) const fn new(codec: super::HandleCodec) -> Self {
         Self {
+            codec,
             directory: Directory::new(),
         }
+    }
+    /// Detaches storage while preserving the owning namespace for the empty index.
+    pub(crate) fn take(&mut self) -> Self {
+        core::mem::replace(self, Self::new(self.codec))
     }
     pub(crate) fn growth_bytes(snapshot: HandleTableStorageSnapshot) -> Option<usize> {
         snapshot.count.checked_mul(PAGE_BYTES)?.checked_add(
@@ -458,7 +454,7 @@ impl<T> HandleSidecar<T> {
         }
     }
     pub(crate) fn get(&self, value: HandleValue) -> Option<&T> {
-        let index = value.decode().0;
+        let index = self.codec.decode(value).ok()?.0;
         self.directory
             .get(index / SLOTS_PER_PAGE)?
             .as_ref()?
@@ -467,7 +463,7 @@ impl<T> HandleSidecar<T> {
             .as_ref()
     }
     pub(crate) fn replace(&mut self, value: HandleValue, entry: Option<T>) -> Option<T> {
-        let index = value.decode().0;
+        let index = self.codec.require_decoded(value).0;
         match self
             .directory
             .get_mut(index / SLOTS_PER_PAGE)

@@ -3,6 +3,8 @@
 
 //! Process-facing IPC transactions and user-memory commit ordering.
 
+use crate::kernel::capability::handle_wire;
+
 use crate::kernel::capability::InvocationReceiver;
 
 use alloc::vec::Vec;
@@ -626,7 +628,7 @@ fn decode_send_disposition(
 ) -> Result<CapabilitySendDisposition, CapabilityChannelServiceError> {
     let decoded = capability_wire::decode_send(record)
         .map_err(|_| CapabilityChannelServiceError::InvalidInput)?;
-    let value = HandleValue::try_from_raw(decoded.handle)
+    let value = handle_wire::from_abi(decoded.handle)
         .map_err(|_| CapabilityChannelServiceError::InvalidInput)?;
     let offered_rights = match decoded.rights {
         RightsOffer::Same => None,
@@ -671,7 +673,14 @@ fn encode_receive_slot(record: &mut [u8], value: HandleValue, contract: Capabili
         Some(kind) => kind.get(),
         None => capability_service_invariant("process receive contract is untyped"),
     };
-    if capability_wire::encode_receive(record, value.get(), contract.rights.bits(), kind).is_err() {
+    if capability_wire::encode_receive(
+        record,
+        handle_wire::to_abi(value),
+        contract.rights.bits(),
+        kind,
+    )
+    .is_err()
+    {
         capability_service_invariant("validated slot contract failed wire encoding");
     }
 }

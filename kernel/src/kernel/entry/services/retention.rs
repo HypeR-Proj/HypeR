@@ -64,7 +64,7 @@ impl RetentionServices for ProcessServices<'_> {
         let control = handle
             .resolve::<ProcessRetirement>(Rights::INSPECT_DETAILS)
             .map_err(crate::kernel::process::ProcessError::from)?;
-        if control.object().info().process_koid == self.process.koid().get() {
+        if self.process.is_retention_target(control.object()) {
             return Err(Error::Process(ProcessError::Handle(
                 crate::kernel::capability::HandleError::AccessDenied,
             )));

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Reusable object-identity slots with non-repeating generations.
+//! Reusable diagnostic identity slots, owned until final object destruction.
 
 use alloc::boxed::Box;
 use core::num::{NonZeroU32, NonZeroU64};
@@ -44,11 +44,19 @@ impl Koid {
         self.0.get()
     }
 
-    fn next_generation(self) -> Option<Self> {
-        self.get()
-            .checked_add(1u64 << u32::BITS)
-            .and_then(NonZeroU64::new)
-            .map(Self)
+    fn next_generation(self) -> Self {
+        let next = self.get().wrapping_add(1u64 << u32::BITS);
+        // Keep generation zero unpublished, including after wrap. The slot
+        // is unchanged and cannot be reused until its reservation is dropped.
+        let next = if next >> u32::BITS == 0 {
+            next | (1u64 << u32::BITS)
+        } else {
+            next
+        };
+        match NonZeroU64::new(next) {
+            Some(next) => Self(next),
+            None => hyper::debug::invariant_failure("KOID slot invariant"),
+        }
     }
 }
 
@@ -174,17 +182,13 @@ impl KoidReservation<'_> {
 
 impl Drop for KoidReservation<'_> {
     fn drop(&mut self) {
-        if let Some(mut slot) = self.slot.take()
-            && let Some(next) = slot.koid.next_generation()
-        {
-            slot.koid = next;
+        if let Some(mut slot) = self.slot.take() {
+            slot.koid = slot.koid.next_generation();
             self.allocator.slots.with(|slots| {
                 slot.next = slots.available.take();
                 slots.available = Some(slot);
             });
         }
-        // An exhausted generation permanently retires its slot. Dropping that
-        // node outside the lock cannot make any old full KOID valid again.
     }
 }
 

@@ -367,6 +367,28 @@ pub const HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_WRITABLE: u64 = 1_u64 << 1;
 /// Wait signal `peer_closed` for `guest_mailbox` objects; bit positions are object-local.
 pub const HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_PEER_CLOSED: u64 = 1_u64 << 2;
 
+/// `handle_invalid` in the `handle_encoding` constants domain.
+///
+/// Handle value classes; the remaining bits are opaque process-local data.
+/// Numeric parameter or sentinel, not an enum discriminant.
+///
+/// No handle is present. This value never identifies a live handle.
+pub const HYPER_NATIVE_HANDLE_INVALID: u64 = 0;
+/// `handle_prefix_mask` in the `handle_encoding` constants domain.
+///
+/// Handle value classes; the remaining bits are opaque process-local data.
+/// Numeric parameter or sentinel, not an enum discriminant.
+///
+/// Selects the most significant byte of a wire handle.
+pub const HYPER_NATIVE_HANDLE_PREFIX_MASK: u64 = 18374686479671623680;
+/// `handle_prefix` in the `handle_encoding` constants domain.
+///
+/// Handle value classes; the remaining bits are opaque process-local data.
+/// Numeric parameter or sentinel, not an enum discriminant.
+///
+/// Live handles have prefix 0x0F; all other prefixes are reserved.
+pub const HYPER_NATIVE_HANDLE_PREFIX: u64 = 1080863910568919040;
+
 /// `page_size` in the `core_limits` constants domain.
 ///
 /// Page geometry, record bounds, identity encoding and wait limits.

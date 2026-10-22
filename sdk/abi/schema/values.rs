@@ -66,6 +66,16 @@ macro_rules! constant_groups {
 }
 
 constant_groups! {
+    /// Handle value classes; the remaining bits are opaque process-local data.
+    constants handle_encoding {
+        /// No handle is present. This value never identifies a live handle.
+        handle_invalid = 0,
+        /// Selects the most significant byte of a wire handle.
+        handle_prefix_mask = 0xff_u64 << 56,
+        /// Live handles have prefix 0x0F; all other prefixes are reserved.
+        handle_prefix = 0x0f_u64 << 56,
+    }
+
     /// Page geometry, record bounds, identity encoding and wait limits.
     constants core_limits {
         /// Native memory-management granule in bytes.
