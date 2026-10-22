@@ -12,6 +12,8 @@ pub struct BootState {
     pub platform: PlatformInfo,
     pub essential: crate::hal::platform::EssentialInfo,
     pub early_console: Option<ConsoleInfo>,
+    #[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
+    pub command_line: Option<hyper::platform::chosen::CommandLine>,
     pub memory: PreparedMemory,
     pub dtb_address: u64,
     pub image_physical_start: u64,

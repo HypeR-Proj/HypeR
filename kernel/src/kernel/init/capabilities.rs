@@ -6,7 +6,7 @@
 use crate::kernel::accounting::{ResourceDomain, ResourceDomainObject};
 use crate::kernel::capability::{HandleFlags, PreparedHandle, Rights};
 use crate::kernel::inspect::{CpuInspector, MemoryInspector, ObjectInspector, TaskInspector};
-use crate::kernel::mm::user_space::VmarObject;
+use crate::kernel::mm::user_space::{self, VmarObject, VmoObject};
 use crate::kernel::object::{KernelObject, ObjectPublication, UserExportableObject};
 use crate::kernel::process::{TaskFactory, TaskGroup, TaskGroupObject};
 use crate::kernel::vm::objects::VirtualMachineCreationAuthority;
@@ -15,9 +15,9 @@ use super::Error;
 use super::bootstrap::{self, BootProcess};
 
 #[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
-const CORE_HANDLE_COUNT: usize = 11;
+const CORE_HANDLE_COUNT: usize = 12;
 #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
-const CORE_HANDLE_COUNT: usize = 10;
+const CORE_HANDLE_COUNT: usize = 11;
 
 const HAS_VM_AUTHORITY: bool = crate::hal::vm::userspace_vm_lifecycle_available();
 const HAS_DEVICE_AUTHORITY: bool = crate::kernel::device::assigned::available();
@@ -35,6 +35,7 @@ const CORE_PURPOSES: [u32; CORE_HANDLE_COUNT] = [
     purpose(hyper::abi::native::HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_CPU_INSPECTOR),
     purpose(hyper::abi::native::HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_ROOT_VMAR),
     purpose(hyper::abi::native::HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_INITIAL_STACK_VMAR),
+    purpose(hyper::abi::native::HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_BOOT_COMMAND_LINE),
     #[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
     purpose(hyper::abi::native::HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_CONSOLE),
 ];
@@ -170,7 +171,7 @@ fn prepare_handles(
     }
     #[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
     {
-        handles[10] = Some(prepare_handle(
+        handles[11] = Some(prepare_handle(
             crate::kernel::device::console::SystemConsole::try_publication(domain)
                 .map_err(Error::ConsoleObject)?,
             Rights::DUPLICATE
@@ -196,6 +197,7 @@ fn prepare_handles(
                     .union(Rights::MAP_DMA),
             )?);
     }
+    handles[10] = Some(prepare_boot_command_line(domain)?);
     // Prepare the root VMAR last. Its one-per-address-space publication claim
     // needs explicit rollback, while every earlier handle is self-contained.
     let address_space = init.process.address_space_owner()?;
@@ -244,6 +246,30 @@ fn optional_authority_slot(
             hyper::debug::invariant_failure("init::capabilities::optional_authority_slot invariant")
         }
     }
+}
+
+// Keep the bounded payload buffer off the bootstrap transaction's stack frame.
+#[inline(never)]
+fn prepare_boot_command_line(domain: &ResourceDomain) -> Result<PreparedHandle, Error> {
+    const MAX: usize = hyper::abi::native::HYPER_NATIVE_BOOT_COMMAND_LINE_MAX_BYTES as usize;
+    const _: () = assert!(hyper::platform::chosen::MAX_COMMAND_LINE_SIZE <= MAX);
+    let source = crate::kernel::boot::with_command_line(|command_line| {
+        let text = command_line.map_or("", |value| value.as_str());
+        let mut bytes = [0_u8; 8 + MAX];
+        bytes[..8].copy_from_slice(&(text.len() as u64).to_le_bytes());
+        bytes[8..8 + text.len()].copy_from_slice(text.as_bytes());
+        user_space::SnapshotVmo::try_from_bytes(
+            &bytes[..8 + text.len()],
+            user_space::KernelPageBackend,
+            user_space::DomainAccount::new(domain.clone()),
+        )
+    })
+    .map_err(|error| Error::MemoryObject(user_space::MemoryObjectError::Vmo(error)))?;
+    let object = VmoObject::from_snapshot(source, domain).map_err(Error::MemoryObject)?;
+    prepare_handle(
+        ObjectPublication::try_new(object).map_err(Error::Object)?,
+        Rights::READ.union(Rights::INSPECT),
+    )
 }
 
 fn prepare_handle<T: UserExportableObject>(

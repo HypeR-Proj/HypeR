@@ -91,11 +91,14 @@ publication.
 
 ## Supervision handoff
 
-Stage-1 validates the core manifest, starts raw console and storage services,
-and waits for mounts in the archive's `/etc/fstab`. The I/O VM starts independently
-of the business VM manager; keeping Native storage alive does not require a
-business fleet or provisioning connection. Bootstrap contains no terminal service
-or line discipline, and launches its byte-stream fallback shell only on failure.
+Stage-1 validates the selected profile and its service manifest. The default
+profile starts raw console, I/O VM storage and filesystem services, then waits
+for mounts in the archive's `/etc/fstab`. Another profile can select a Native
+storage provider or recovery without I/O. The I/O VM, when selected, starts
+independently of the business VM manager; keeping Native storage alive does not
+require a business fleet or provisioning connection. Bootstrap contains no
+terminal service or line discipline. The default profile launches its byte-stream
+fallback shell only on failure; a recovery-only profile may launch it directly.
 
 Once `/system` is an independent mount, stage-1 prepares a reversible root
 transition. It starts `/svc/component-manager` in a separate candidate task
@@ -106,8 +109,12 @@ commit point. Before commit, failure retains stage-1 ownership and rolls the
 namespace back for recovery. After commit, the formal environment owns failure
 handling and retirement timing; stage-1 does not restart its fallback shell.
 
-Component-manager forwards domain resources to system-startup, which replaces bootstrap console, I/O and filesystem providers with formal processes. The running I/O VM and mounted filesystem identities survive adoption:
-the VM does not reboot and volumes are not remounted. New providers start before
+Component-manager forwards domain resources to system-startup, which replaces
+the offered bootstrap console, storage and filesystem providers with admitted
+formal processes. The selected storage implementation owns its migration
+protocol. With the default I/O VM provider, the running VM and mounted filesystem
+identities survive adoption: the VM does not reboot and volumes are not remounted.
+New providers start before
 predecessors retire. A failed adoption retains still-needed predecessor resources.
 The finite coordinator applies the formal fstab through a mount job, starts
 formal services and configures the VM fleet. An independent retirement job
@@ -116,15 +123,67 @@ bootstrap-retired progress fact. Data mount failures are handled in the formal e
 return to stage-1. See the [handoff contract](bootstrap-handoff.md) for transfer
 records, ownership and retirement conditions.
 
-The boot `/etc/hyper/init.json` selects the independent root and successor:
+## Boot profiles
+
+The archive contains `/etc/hyper/boot-profiles/default.json` and may contain
+other named profiles. With no selector, stage-1 uses `default`. A firmware or
+QEMU kernel command-line argument selects another profile:
+
+```text
+hyper.boot-profile=recovery
+```
+
+Names contain 1–63 ASCII letters, digits, underscores or hyphens. Missing,
+malformed or repeated explicit selectors fail instead of falling back to
+`default`. The kernel forwards the firmware command line as an immutable startup
+capability; it does not parse profiles, launch I/O providers or decide root layout.
+
+A profile selects a service manifest, I/O source and optional root handoff:
 
 ```json
 {
-  "system-root": "/system",
-  "put-old": "/boot",
-  "system-init": "/svc/component-manager"
+  "version": 1,
+  "services": "/etc/hyper/services.json",
+  "io": {
+    "kind": "io-vm",
+    "service": "io-runtime",
+    "successor": "/io-runtime"
+  },
+  "handoff": {
+    "system-root": "/system",
+    "put-old": "/boot",
+    "system-init": "/svc/component-manager"
+  },
+  "requires": ["/vm/io.itb"]
 }
 ```
+
+`io.kind` is `io-vm`, `service` or `none`. The selected `service` is a name in
+that profile's bootstrap manifest, while `successor` is a component instance in
+the formal environment's admitted provider policy. Only an `io-vm` provider
+receives VM-creation authority. A `service` provider can implement a userspace
+storage driver without starting an I/O VM. This is a provider contract, not an
+additional physical disk driver shipped by the default product. `none` starts
+no storage provider; it is useful for recovery or a root prepared independently.
+The chosen manifest determines which processes actually start. A profile without
+`handoff` retains bootstrap supervision and recovery instead of starting system
+init.
+
+Product `boot-profiles` configuration defines the packaged profiles; omitted
+configuration generates the default from the selected bootstrap services. Every
+profile, including non-default ones, is checked against the actual boot archive:
+its manifest, service executables, required files and configured worker paths
+must be present there, and bootstrap executables must be static. Files existing
+only in the build tree or formal system image do not satisfy boot dependencies.
+I/O VM image preparation is needed only if at least one packaged profile selects
+`io-vm`. The formal environment independently defines permitted successors and
+their capability requirements; choosing a native provider cannot satisfy a
+formal service that explicitly requires the I/O VM broker.
+Each provider process has one handoff role: the selected storage provider cannot
+also own `console.system` or `filesystem.attach`. Keep these independently
+supervised services separate. Multiple storage replacement candidates may be
+declared in the formal policy; only the candidate selected by the actual offered
+storage owner starts.
 
 `system-root` is resolved before the switch; `put-old` and `system-init` name
 locations in the new namespace. Formal `/etc/hyper/components.json` selects the

@@ -37,7 +37,11 @@ filesystem worker groups, must also be retired by their explicit owners.
 ## Candidate launch
 
 Stage-1 selects an independently mounted filesystem and successor using its own
-`etc/hyper/init.json`:
+selected boot profile. Profiles live in `/etc/hyper/boot-profiles`; `default.json`
+is mandatory. Kernel boot arguments are opaque input to userspace: stage-1 reads
+`hyper.boot-profile=<name>` to select another installed profile. It does not
+silently fall back when an explicitly requested profile is missing or invalid.
+The profile's `handoff` section selects the root and successor:
 
 ```json
 {"system-root":"/system","put-old":"/boot","system-init":"/svc/component-manager"}
@@ -82,14 +86,15 @@ Private startup purposes are:
 
 These are userspace protocol roles, not operation selectors or sender handle IDs.
 The description contains a little-endian `u64` byte length followed by at most
-32 KiB of UTF-8 JSON. Version 3 has these fields:
+32 KiB of UTF-8 JSON. Version 4 has these fields:
 
 ```json
 {
-  "version": 3,
+  "version": 4,
   "root_mount": 7,
   "boot_root": "/boot",
-  "services": [{"name": "io-runtime", "image": "/svc/io-runtime", "critical": true, "provider": "io"}],
+  "services": [{"name": "io-runtime", "image": "/svc/io-runtime", "critical": true, "provider": "storage"}],
+  "storage_successor": "/io-runtime",
   "storage_ready": true,
   "slots": [{"key": 1, "rights": 0}]
 }
@@ -97,12 +102,25 @@ The description contains a little-endian `u64` byte length followed by at most
 
 This example illustrates the shape, not a valid complete inventory. Each
 service record supplies labels for an already launched process. Its nullable
-`provider` field identifies `console`, `io` or `filesystem` ownership; roles are
-unique and come from typed boot capabilities rather than executable names. Stage-1's
+`provider` field identifies `console`, `storage` or `filesystem` ownership; roles are
+unique. The selected profile explicitly identifies the storage owner and its
+formal successor; device-assignment authority alone does not identify an I/O VM.
+Other roles come from typed boot capabilities rather than executable names. Stage-1's
 dependency graph and capability-grant policy are not serialized. System-startup
 loads its migration policy and binds replacement components to the offered
-provider roles without relaunching their resources. `storage_ready` reports the bootstrap mount attempt; it says
-nothing about later mounts or whether retirement is safe.
+provider roles without relaunching their resources. `storage_ready` reports the
+selected provider's bootstrap readiness result. It is true when no storage
+readiness channel was requested; that case still requires an independent root
+before handoff. It says nothing about later mounts or whether retirement is safe.
+
+`storage_successor` is present exactly when a storage provider is offered.
+It names a component instance, not an executable or process handle. Formal policy
+must explicitly declare that instance as a resident, prepared `storage` provider
+before accepting supervision. Several storage implementations may be declared;
+only the selected one is started. An absent storage owner does not start the
+I/O runtime. An offered owner without an admitted replacement rejects preparation.
+This keeps plugin selection in stage-1 policy while formal policy retains control
+over the implementations allowed to take ownership.
 
 Unknown fields and versions, oversized offers, repeated or reserved slot keys,
 unsupported object roles, and out-of-range service indices are rejected before
@@ -140,7 +158,7 @@ than failing after the irreversible MOVE.
 | 31 | Diagnostic console | Console |
 | 32 | Fixed bootstrap environment | Directory |
 | 33 | Fixed system environment | Directory |
-| 34 | I/O owner transfer endpoint | CapabilityChannel |
+| 34 | Storage owner transfer endpoint | CapabilityChannel |
 | 35 | Filesystem manager transfer endpoint | CapabilityChannel |
 | 36 | Old console drain control | ByteChannel |
 | 37 | Pending root transition | RootTransition |
@@ -154,7 +172,7 @@ count. Process keys refer to the corresponding description entry, not a PID.
 
 The candidate registers the complete typed receive only after validation.
 Stage-1 observes receiver readiness while continuing to watch core service and
-candidate termination. It sends the exact bytes `HYPER-INIT-HANDOFF/3`, without
+candidate termination. It sends the exact bytes `HYPER-INIT-HANDOFF/4`, without
 a terminator, alongside the capability inventory. Process supervisors and the root-transition token use MOVE;
 management leases are duplicated so their active counts cannot transiently
 reach zero. A successful rendezvous commits the whole transfer. A separate
@@ -194,7 +212,8 @@ Supervision transfer alone is insufficient to retire the boot filesystem.
 The currently running boot providers still own resources and executable
 mappings. System-startup must establish replacement owners before stopping them:
 
-- The I/O VM, vCPUs, physical assignments, mailbox identities and DMA leases
+- A storage plugin must transfer all live resources needed by its successor.
+  For the I/O VM implementation, the VM, vCPUs, physical assignments, mailbox identities and DMA leases
   must survive the old runtime. Hardware consumers quiesce at completed request
   boundaries; transferring ownership must not reset the VM or device.
 - Filesystem replacements preserve the mounted transport, shared buffer and
@@ -223,7 +242,7 @@ boot backing have retired. Outstanding references defer retirement; they are
 not bypassed through forced unmount or a guessed timeout. Errors and retries
 after adoption remain formal-environment policy.
 
-System-startup starts the formal raw console, adopts I/O ownership, then adopts the
+System-startup starts the formal raw console, adopts selected storage ownership, then adopts the
 filesystem manager and workers before reading its formal fstab. Failed storage
 adoption disables retirement and leaves failure handling with the formal environment.
 Before resource transfer, original providers remain available. After transfer
@@ -234,7 +253,7 @@ a separate `bootstrap-retire` job. Only exit zero after teardown and unmount
 publishes the bootstrap-retired progress fact. Retirement follows formal mounts; business VM fleet readiness does not determine
 whether storage resources have transferred.
 Live core services without a provider-replacement protocol remain supervised
-and defer the entire retirement attempt. The supported console, I/O and
+and defer the entire retirement attempt. The console, selected storage and
 filesystem replacements do not implicitly replace arbitrary configured core
 services. Only completed noncritical one-shots may be retired without a
 replacement; critical exits remain subject to normal supervision.
@@ -279,15 +298,25 @@ are private to the two environments, with no kernel device-specific policy:
 
 | Purpose | Role |
 | --- | --- |
-| `0x80080010` | I/O resource handoff channel |
+| `0x80080010` | Storage plugin resource handoff channel |
 | `0x80080011` | Filesystem resource handoff channel |
-| `0x80080012` | I/O description VMO |
 | `0x80080013` | Filesystem description VMO |
 | `0x80080014` | Predecessor raw-console drain channel |
 | `0x80080020` | Replacement readiness writer |
 | `0x80080021` | Old filesystem worker Process supervisors |
 
-The I/O predecessor sends `HYPER-IO-DESCRIBE/2` and a length-prefixed, bounded
+The storage migration channel is bidirectional and opaque to system-startup.
+The coordinator forwards it to the selected formal replacement and waits for
+`HYPER-SERVICE-ADOPTED/1` on the separate readiness writer. The predecessor and
+replacement own their transfer protocol, including resource validation and the
+commit boundary. A new native storage driver does not require teaching stage-1
+or system-startup about its device state. It must keep serving before commit,
+lock any mappings needed during transfer, and retain committed owners if
+readiness reporting fails. The existing `NativeBlock` transport still uses guest
+memory; this profile mechanism does not introduce a new native physical block
+driver or change that kernel transport.
+
+The I/O VM predecessor sends `HYPER-IO-DESCRIBE/2` and a length-prefixed, bounded
 JSON description VMO (32 KiB maximum). The system replacement validates the
 role/type/right inventory and ordinary guest-RAM bounds before receiving
 `HYPER-IO-ADOPT/2`. The atomic MOVE includes the running VM and vCPUs, physical
@@ -309,7 +338,7 @@ may insert a virtio-console endpoint by publishing its configuration and a
 standard PCIe presence-change interrupt.
 Bootstrap provides an empty slot, without a console device or agent protocol.
 The broker accepts business clients only in the formal owner.
-`HYPER-IO-READY/2` confirms the resumed owner is serving. This adoption readiness
+`HYPER-SERVICE-ADOPTED/1` confirms the resumed owner is serving. This adoption readiness
 record is separate from the unchanged bootstrap storage-readiness protocol.
 
 The filesystem predecessor describes volume identities, labels and mounted

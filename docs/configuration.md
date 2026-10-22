@@ -14,7 +14,7 @@ deployment policy in the Linux I/O VM.
 | --- | --- |
 | `CONFIG_FILE` | Kernel architecture, address widths, stack sizes and numeric limits |
 | `KERNEL_FEATURES` | Optional production kernel capabilities |
-| `SYSTEM_CONFIG` | Bootstrap and formal executable selection, optionally kernel features |
+| `SYSTEM_CONFIG` | Executable selection, selectable boot profiles, formal storage successors and optional kernel features |
 | `BOARD_CONFIG` | Physical devices, guest definitions, disk partitions and mount policy |
 | Component and service declarations | Build targets, required child programs, startup and capability grants |
 
@@ -95,14 +95,128 @@ recognizes the volume magic and locates the corresponding worker. Omitting
 `fs-fat` does not make FAT mount syntax invalid at build time: requesting a FAT
 mount without any reachable FAT worker produces an explicit runtime error.
 Change the board's fstab when an omitted filesystem is no longer intended to be
-mounted. An EROFS root still requires a reachable EROFS worker before formal
-startup; deployment selection does not infer or repair that policy.
+mounted. The generated boot profile declares the worker for the board's known
+system filesystem: omitting that worker now fails archive admission before
+boot. The builder reports the missing dependency instead of silently restoring
+an excluded program. Custom profiles declare their own early worker dependencies.
 
 Ordinary `system` profiles exclude test binaries. An explicit product `include`
 may opt into a registered test program regardless of profile membership;
 runtime acceptance uses this to add its command reporter to the minimal product.
 Development fixtures may also select their test profile explicitly. Neither
 mechanism turns on kernel fault injection or self-tests.
+
+## Selectable boot profiles
+
+Products may define up to 16 `boot-profiles`. The fixed `default` entry is
+mandatory. Each is installed as `/etc/hyper/boot-profiles/NAME.json` in the
+initial archive. Without this section, composition generates `default` from
+the selected bootstrap service graph and board resources, preserving ordinary
+I/O VM boot. Profile names contain 1–63 ASCII letters, digits, `_` or `-`.
+
+```json
+{
+  "version": 1,
+  "boot-profiles": {
+    "default": {
+      "version": 1,
+      "services": "/etc/hyper/services.json",
+      "io": {
+        "kind": "io-vm",
+        "service": "io-runtime",
+        "successor": "/io-runtime"
+      },
+      "requires": [
+        "/etc/fstab",
+        "/etc/hyper/filesystem.json",
+        "/etc/hyper/storage.json",
+        "/etc/hyper/io-clients.conf",
+        "/svc/fs-erofs"
+      ],
+      "handoff": {
+        "system-root": "/system",
+        "put-old": "/boot",
+        "system-init": "/svc/component-manager"
+      }
+    }
+  }
+}
+```
+
+`services` names an archive-local service manifest. The ordinary manifest at
+`/etc/hyper/services.json` is generated from the configured service graph;
+alternate manifests must be explicitly packaged as boot files. Profile paths
+are canonical absolute paths; `requires` lists up to 128 additional files the
+provider or its children need before handoff. The builder checks these against
+the archive itself, including archive-local symlinks. A file present only in the
+formal system or build directory cannot satisfy a bootstrap dependency.
+
+Every shipped profile is checked, including unselected profiles. Their service
+graphs use the production stage1 parser and capability policy. Each service
+must have a packed, executable static ELF matching the bootstrap architecture.
+For `io-vm`, the packed board configuration and the referenced I/O VM FIT must
+also exist. Dynamic runtime choices, such as a format discovered only by
+reading disk magic, still need explicit `requires` declarations when they are
+critical to reaching the formal root; this is dependency admission, not a
+simulation of arbitrary service code.
+
+The kernel forwards the boot command line without interpreting profile policy.
+Stage1 selects `default` unless it sees `hyper.boot-profile=NAME`. Unknown,
+malformed or repeated selectors produce a bootstrap error instead of selecting
+another profile. QEMU accepts this token in the kernel `-append` command line;
+Pi firmware accepts it in `cmdline.txt`.
+
+The I/O source chooses the bootstrap provider independently of root handoff:
+
+| `io.kind` | Meaning |
+| --- | --- |
+| `io-vm` | Start the named provider with the explicit VM creation capability; the shipped implementation is `io-runtime` |
+| `service` | Start a named userspace provider with no VM creation capability; its executable may implement a different storage source |
+| `none` | No selected storage provider; a root needed for handoff must already be independently prepared |
+
+The generic service option defines the integration boundary; this patch does
+not add a Native physical block driver. A provider receives only the declared
+capabilities, supplies readiness when it supplies filesystem volumes, and owns
+its private migration protocol. A recovery profile may omit `handoff`; a
+provider's `successor` is required only when handoff is configured.
+
+Formal storage candidates are configured separately, for example:
+
+```json
+{
+  "version": 1,
+  "system": {
+    "storage-providers": [
+      {"component": "/io-runtime", "image": "/svc/io-runtime"},
+      {"component": "/disk-driver", "image": "/svc/disk-driver"}
+    ]
+  }
+}
+```
+
+The example's custom driver must be implemented and explicitly deployed before
+that candidate is usable. Composition declares these as prepared resident
+storage components; only the selected profile's `successor` is adopted. An
+unlisted successor is rejected. If the list is absent, composition declares the
+shipped `/io-runtime` successor only when a handoff profile uses `io-vm`.
+The common handoff transports an opaque migration endpoint; it does not parse
+the I/O VM's private description. See [the handoff contract](bootstrap-handoff.md).
+
+Profiles still have to satisfy the chosen formal services. For example, the
+current VM manager's I/O broker grant requires a bootstrap provider offering
+that broker; a generic driver does not acquire one automatically. Such known
+missing grants fail composition. Use a compatible formal service selection.
+
+The board's `io-vm` section is optional for products whose sources do not need
+an I/O VM; such products must define explicit boot profiles for their alternate
+source rather than relying on the generated I/O VM default. All included
+profiles contribute to the appliance requirement: if
+any profile needs one, the board section and image are required, even when it
+is not the default. If none does, board composition skips appliance fetching
+and packaging, including stale appliance entries left by an earlier build.
+The current guest disk/network declarations use the I/O VM backend and still
+require its board section. Removing that section alone does not implement a
+replacement guest backend.
 
 ## Kernel features
 
