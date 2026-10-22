@@ -15,6 +15,20 @@ Early boot retains 256 KiB for allocation-free discovery and scheduler setup;
 that capacity is not available to a normal syscall. Do not increase a runtime
 stack or reduce an ABI batch merely to hide a large temporary.
 
+Stack sizes must be powers of two: 16–256 KiB for Thread stacks and 16–128 KiB
+for IRQ/emergency stacks. The configuration tool rejects unsupported sizes
+before writing the output file; Cargo enforces the same constraints.
+
+Stack count is derived, not a second tunable limit. The runtime arena has
+`CONFIG_SCHED_MAX_THREADS - 1 + 2 * CONFIG_MAX_CPUS` slots: bootstrap owns a
+separate boot stack, and each configured CPU has an IRQ and emergency stack.
+Physical stack pages are allocated on demand. The scheduler table and
+retirement queue remain bounded by `CONFIG_SCHED_MAX_THREADS`; see
+[kernel configuration](../../docs/configuration.md#kernel-architecture-and-resource-configuration).
+The retirement queue is allocated once during scheduler preparation, without
+constructing a capacity-sized temporary on the boot stack. The compact-address
+CI image also runs with the maximum configured Thread capacity (16384).
+
 ## Reproducing the checks
 
 Run `make test-stack ARCH=aarch64`. This builds a dedicated initramfs in

@@ -5,6 +5,13 @@ SPDX-License-Identifier: Apache-2.0
 
 # Kernel configuration
 
+Use `make menuconfig` in `kernel/` for interactive editing (`make config` offers
+line-oriented input), `make defconfig` to reset to architecture defaults, and
+`make olddefconfig` to migrate an existing configuration. Build preparation
+creates `.config` only when it is absent or selects a different architecture;
+timestamps on Kconfig sources never reset an existing selection. `CONFIG_FILE`
+selects an external saved configuration and must already exist when building.
+
 Kconfig selects architecture, address widths, stack sizes, CPU limits, timer
 parameters and logging limits. Cargo features select optional functionality.
 Each function has one boolean selector; there is no second Kconfig switch for
@@ -31,6 +38,8 @@ make -C kernel image ARCH=aarch64 KERNEL_FEATURES=
 Make defaults are `rtc runtime-symbols crash-console` on AArch64 and
 `rtc runtime-symbols` on RISC-V and x86-64. `heap-profiling` and `pmu-profiling` are off everywhere. See
 [PMU recording and export](../../docs/profiling.md) for limits and authority.
+The defaults come from `features.default` in `Cargo.toml`, filtered by that
+manifest's architecture availability metadata; Make has no parallel feature list.
 Direct Cargo builds default to the AArch64 set; use `--no-default-features`
 and an explicit `--features` list to select a different configuration.
 The mechanism crates have no implicit defaults: the kernel forwards each chosen

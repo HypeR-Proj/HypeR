@@ -143,10 +143,10 @@ payloads remain under `kernel/target/guest/`.
 Select another architecture explicitly:
 
 ```sh
-make defconfig ARCH=riscv64
+make -C kernel defconfig ARCH=riscv64
 make test-qemu ARCH=riscv64
 
-make defconfig ARCH=x86_64
+make -C kernel defconfig ARCH=x86_64
 make image ARCH=x86_64
 make test-image ARCH=x86_64
 ```
@@ -162,7 +162,7 @@ Useful targets:
 | `make image ARCH=<arch>` | Build the canonical ELF and delivery image |
 | `make sdk` | Assemble the AArch64 Native SDK under `target/sdk/aarch64` |
 | `make sdk-check` / `make sdk-test` | Verify SDK generation, publication, compilation, and portable runtime behavior |
-| `make native-initramfs` | Package bootstrap and system programs in RAM as deterministic `newc`, with the same init handoff |
+| `make native-initramfs` | Build the test-only RAMFS handoff fixture; product images use independent system storage |
 | `make` / `make run ARCH=aarch64` | Build while preserving persistent disk contents / start existing artifacts |
 | `make rebuild` | Repack the board disk, resetting persistent contents |
 | `make test-native` | Verify the Native service graph, command execution, and managed Linux VM console attach/detach under QEMU |
@@ -171,8 +171,16 @@ Useful targets:
 | `make test ARCH=<arch>` | Run kernel host, Kconfig, and kallsyms tests |
 | `make test-image ARCH=<arch>` | Verify the ELF, relocation, image, and architecture contract |
 | `make test-qemu ARCH=<arch>` | Run the architecture's QEMU acceptance test where supported |
-| `make verify ARCH=<arch>` | Run kernel checks, tests, supported QEMU acceptance, and release/image validation |
-| `make verify-all` | Verify the AArch64 kernel, SDK, and Native system together |
+| `make release ARCH=<arch>` | Build and verify a stripped copy of the canonical kernel image |
+| `sh tests/ci/run.sh <suite>` | Run the same named suite or serial aggregate as CI; see the [suite catalog](../tests/ci/README.md) |
+
+The old `verify`, `verify-runtime`, `verify-image`, `verify-boot`, `verify-smp`,
+`check-all`, `test-all` and `verify-all` Make targets have been removed. Use
+`make image` followed by `make test-image` for image validation, `make test-qemu`
+for kernel runtime tests, and the named CI suites for combined checks. The CI
+dispatcher owns suite composition; Make owns individual builds and fixtures.
+Run suites serially within one checkout because feature variants share output
+paths.
 
 The default AArch64 image is written to:
 
@@ -200,13 +208,15 @@ HypeR uses an in-tree, dependency-free Kconfig-like tool. It reads
 and exports declared symbols as checked Rust `cfg` values and typed constants.
 
 ```sh
-make config       # interactive configuration
-make olddefconfig # accept defaults for newly introduced symbols
-make defconfig    # restore the selected QEMU architecture defaults
+make menuconfig                 # product; Kernel opens its independent menu
+make defconfig                  # restore product defaults into .config
+make olddefconfig               # migrate the product .config
+make -C kernel olddefconfig      # migrate kernel/.config
+make -C kernel defconfig         # restore kernel architecture defaults
 ```
 
 `CONFIG_FILE` selects an alternate complete configuration without replacing a
-developer's `.config`:
+developer's `kernel/.config`:
 
 ```sh
 make image ARCH=aarch64 CONFIG_FILE=kernel/configs/qemu_aarch64_defconfig
