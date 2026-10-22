@@ -60,7 +60,7 @@ FAT or EROFS workers own each mount; file operations reach the worker directly t
 cache hits stay in the kernel.
 HypeR Native reserves a future network endpoint without establishing a link.
 
-The default [boot/system layout](docs/boot-layout.md) keeps only static bootstrap
+The default [boot/system layout](docs/architecture/boot-layout.md) keeps only static bootstrap
 and recovery services in the initial RAM archive. Stage-1 mounts the independent
 EROFS system volume temporarily at `/system`, switches it to `/`, then starts
 formal init. Formal tools, services and shared libraries live in `/bin`, `/svc`
@@ -84,8 +84,8 @@ kernel. The selected I/O VM interfaces are **virtio-scsi** for storage,
 Storage and guest virtio-net have passed QEMU functional acceptance, including
 network reset and VM restart. vfio-user remains planned. Other device models are
 evaluated case by case, without a general support commitment.
-See the [architecture boundaries](kernel/docs/architecture.md#device-driver-placement)
-and [I/O VM design](docs/io-vm.md) for details.
+See the [architecture boundaries](kernel/docs/architecture/README.md#device-driver-placement)
+and [I/O VM design](docs/design/virtualization/io-vm.md) for details.
 
 ## Why run HypeR?
 
@@ -125,7 +125,7 @@ physical device retirement/recovery still require hardware qualification.
 
 The Native ABI is pre-release. Broad hardware support, general-purpose virtual
 I/O, device assignment, and transactional multi-vCPU reconfiguration remain unfinished.
-See [implementation status](docs/status.md) and the [roadmap](docs/roadmap.md).
+See [implementation status](docs/project/status.md) and the [roadmap](docs/project/roadmap.md).
 
 ## Exploratory Pi 5 I/O measurements
 
@@ -233,10 +233,10 @@ performance survey are complete. The next priorities are:
   mechanisms and the separate SDHCI path. The goal is to protect HypeR memory
   and authority from the I/O VM; guests still depend on it for I/O. MMIO and
   Pi 5 deployments remain trusted I/O VM configurations. See the
-  [current isolation contract](kernel/docs/io-isolation.md).
+  [current isolation contract](kernel/docs/design/io-isolation.md).
 
-See the [roadmap](docs/roadmap.md) for scope and acceptance criteria, and the
-[Pi 5 boot guide](kernel/docs/rpi5.md) for the recommended firmware setup.
+See the [roadmap](docs/project/roadmap.md) for scope and acceptance criteria, and the
+[Pi 5 boot guide](kernel/docs/usage/rpi5.md) for the recommended firmware setup.
 
 ## Try it
 
@@ -244,11 +244,11 @@ See the [roadmap](docs/roadmap.md) for scope and acceptance criteria, and the
 [HypeR Pi 5 releases](https://github.com/roolrz/HypeR-pi5-images/releases).
 Decompress the whole-disk `.img.xz` and flash the resulting `.img` to an SD card.
 See the [artifact guide](https://github.com/roolrz/HypeR-pi5-images/blob/main/ARTIFACTS.md)
-to choose an image, the [Pi 5 boot guide](kernel/docs/rpi5.md) for serial-console
-setup, and [image distribution](docs/image-distribution.md) for build and licensing details.
+to choose an image, the [Pi 5 boot guide](kernel/docs/usage/rpi5.md) for serial-console
+setup, and [image distribution](docs/usage/deployment/image-distribution.md) for build and licensing details.
 
 **QEMU:** build and run locally with the commands below.
-With the [prerequisites](docs/getting-started.md#prerequisites) installed, run
+With the [prerequisites](docs/learn/getting-started.md#prerequisites) installed, run
 from the repository root:
 
 ```sh
@@ -260,7 +260,7 @@ make run
 The build normally imports the protocol version 3 appliance from the committed
 GHCR digest pin. Owner-controlled GPT discovery currently needs the updated
 block-management backend through `IO_VM_PACKAGE`; its release is not yet pinned.
-See [I/O VM build and validation](docs/io-vm.md#build-and-validation)
+See [I/O VM build and validation](docs/design/virtualization/io-vm.md#build-and-validation)
 for package requirements and the `boards/qemu.json` deployment.
 
 This boots the AArch64 system with the HypeR shell and a resident Linux I/O VM
@@ -277,33 +277,36 @@ persistent data volume at `/data`. System init adopts the existing core services
 and launches VM management. Start the default guest with
 `vmm start alpine`; Alpine enables its network interface and starts DHCP
 automatically. Later builds preserve on-disk VM definitions, guest images and
-root filesystems; see [updating existing deployments](docs/board-storage.md#updating-existing-deployments)
+root filesystems; see [updating existing deployments](docs/usage/deployment/board-storage.md#updating-existing-deployments)
 when adopting changed board policy or guest startup files.
 
 ## Explore and contribute
 
-- [Documentation website and local build](docs/documentation.md): generated
+- [Documentation index](docs/README.md): learn, architecture design, detailed
+  design, usage and project status, with [application manuals](docs/usage/applications/README.md)
+  grouped by task.
+- [Documentation website and local build](docs/usage/development/documentation.md): generated
   Markdown, Rustdoc and C SDK references, checked on pull requests and published
   to GitHub Pages after updates to `main`.
 
-- [Reading the code](docs/reading-the-code.md): a contributor’s guide to code paths,
+- [Reading the code](docs/learn/reading-the-code.md): a contributor’s guide to code paths,
   subsystem ownership, debugging and tests—from boot and scheduling to memory,
   IPC, virtualization, storage and image packaging.
-- [Development guide](docs/development.md): editor setup, testing, source layout,
+- [Development guide](docs/usage/development/development.md): editor setup, testing, source layout,
   and contribution requirements.
-- [Product configuration](docs/configuration.md): top-level `make menuconfig`, optional kernel capabilities,
+- [Product configuration](docs/usage/deployment/configuration.md): top-level `make menuconfig`, optional kernel capabilities,
   userspace component selection and a minimal QEMU system.
-- [PMU profiling](docs/profiling.md): opt-in AArch64 cycle sampling, kernel
+- [PMU profiling](docs/usage/diagnostics/profiling.md): opt-in AArch64 cycle sampling, kernel
   call chains, folded-stack export and flame graphs.
-- [Architecture](kernel/docs/architecture.md): kernel boundaries and ownership.
-- [Pi 5 image distribution](docs/image-distribution.md): image builds, release
+- [Architecture](kernel/docs/architecture/README.md): kernel boundaries and ownership.
+- [Pi 5 image distribution](docs/usage/deployment/image-distribution.md): image builds, release
   artifacts, dependency pins, and component licensing.
-- [Shell and text filtering](docs/shell.md): pipelines, file redirection, and grep.
-- [Service management](docs/services.md): units, targets, lifecycle, journal and status tools.
-- [Native userspace](kernel/docs/native-init.md) and [SDK](sdk/README.md): host
+- [Shell and text filtering](docs/usage/applications/shell.md): pipelines, file redirection, and grep.
+- [Component supervision](docs/design/services/components.md): declarations, capability routes, lifecycle and journal.
+- [Native userspace](kernel/docs/design/native-init.md) and [SDK](sdk/README.md): host
   services and application interfaces.
 - [Issues](https://github.com/roolrz/HypeR/issues): bugs, experiments, and design
   discussions. Architecture work, tests, and rigorous reviews are welcome.
 
-[Apache-2.0](LICENSE). External guest images have [separate licensing obligations](docs/development.md#guest-artifacts-and-licensing).
+[Apache-2.0](LICENSE). External guest images have [separate licensing obligations](docs/usage/development/development.md#guest-artifacts-and-licensing).
 For vulnerability reporting, see [SECURITY.md](SECURITY.md).
