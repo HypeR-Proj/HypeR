@@ -38,7 +38,7 @@ filesystem worker groups, must also be retired by their explicit owners.
 
 Stage-1 selects an independently mounted filesystem and successor using its own
 selected boot profile. Profiles live in `/etc/hyper/boot-profiles`; `default.json`
-is mandatory. Kernel boot arguments are opaque input to userspace: stage-1 reads
+is mandatory. The kernel forwards arguments it does not recognize; stage-1 reads
 `hyper.boot-profile=<name>` to select another installed profile. It does not
 silently fall back when an explicitly requested profile is missing or invalid.
 The profile's `handoff` section selects the root and successor:
@@ -46,6 +46,16 @@ The profile's `handoff` section selects the root and successor:
 ```json
 {"system-root":"/system","put-old":"/boot","system-init":"/svc/component-manager"}
 ```
+
+Stage-1 gives the candidate a separate `BOOT_COMMAND_LINE` startup handle holding
+the arguments it did not recognize. This uses the bounded, length-prefixed UTF-8
+VMO format described in [Native startup](../kernel/docs/native-init.md), with
+`READ | INSPECT` rights. Reading consumes and closes the handle; the SDK returns
+an owned string. It is not part of the supervision inventory and is not added to
+component `argv` or environment variables. Stage-1 retains its string through
+reversible launch attempts and builds a fresh immutable VMO for each candidate;
+a failed attempt does not consume the next attempt's arguments. The current
+component-manager reports any unrecognized remainder once and continues.
 
 The system image contains existing `/boot`, `/tmp` and ordinary volume mountpoints.
 Stage-1 begins a reversible root transition. The system filesystem becomes `/`;

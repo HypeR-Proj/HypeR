@@ -12,7 +12,7 @@ use super::{irq, log, mm, time};
 pub(crate) mod image;
 mod state;
 
-/// Borrows firmware arguments after boot-state publication. Userspace policy
+/// Borrows arguments left after kernel boot processing. Userspace policy
 /// interprets these bytes; this accessor neither selects services nor profiles.
 #[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
 pub(crate) fn with_command_line<R>(read: impl FnOnce(Option<&chosen::CommandLine>) -> R) -> R {
@@ -244,7 +244,7 @@ fn try_prepare_boot_environment(inputs: ProtocolInputs) -> Result<Infallible, Pr
         essential,
         early_console,
         #[cfg(not(all(feature = "kernel-test", feature = "kernel-self-test")))]
-        command_line: command_line.copied(),
+        command_line: command_line.map(|line| line.without_arguments(&["earlycon", "nokaslr"])),
         memory,
         dtb_address: dtb_address as u64,
         image_physical_start: image_layout.physical_start,

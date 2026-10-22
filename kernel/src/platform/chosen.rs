@@ -92,6 +92,28 @@ impl CommandLine {
                     .is_some_and(|(argument_name, _)| argument_name == name)
         })
     }
+
+    /// Removes named flags and `name=value` arguments without changing the
+    /// order or bytes of other arguments. Separating whitespace is normalized.
+    pub fn without_arguments(&self, names: &[&str]) -> Self {
+        let mut remaining = Self::EMPTY;
+        for argument in self.as_str().split_ascii_whitespace() {
+            let name = argument.split_once('=').map_or(argument, |(name, _)| name);
+            if names.contains(&name) {
+                continue;
+            }
+            if remaining.length != 0 {
+                remaining.bytes[remaining.length] = b' ';
+                remaining.length += 1;
+            }
+            let end = remaining.length + argument.len();
+            // Removing arguments and collapsing separators cannot grow the
+            // validated source, whose length already fits this buffer.
+            remaining.bytes[remaining.length..end].copy_from_slice(argument.as_bytes());
+            remaining.length = end;
+        }
+        remaining
+    }
 }
 
 #[derive(Clone, Copy)]

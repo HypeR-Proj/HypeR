@@ -135,8 +135,18 @@ hyper.boot-profile=recovery
 
 Names contain 1–63 ASCII letters, digits, underscores or hyphens. Missing,
 malformed or repeated explicit selectors fail instead of falling back to
-`default`. The kernel forwards the firmware command line as an immutable startup
-capability; it does not parse profiles, launch I/O providers or decide root layout.
+`default`. Boot arguments are consumed one stage at a time. The kernel handles
+`earlycon` and `nokaslr`, then supplies the remaining arguments in an immutable
+`BOOT_COMMAND_LINE` startup VMO. Stage-1 consumes `hyper.boot-profile` and gives
+its remainder to system init through the same startup purpose. The kernel does
+not parse profiles, launch I/O providers or decide root layout.
+
+Arguments are separated by ASCII whitespace; there is no shell quoting or
+expansion. Each stage preserves unrecognized argument bytes, order and duplicate
+keys while normalizing separators to spaces. Invalid recognized profile selectors
+fail in stage-1 rather than being forwarded. Component-manager currently defines
+no boot arguments: it reports any remainder once and continues booting. Boot
+arguments are separate from process `argv` and environment variables.
 
 A profile selects a service manifest, I/O source and optional root handoff:
 
