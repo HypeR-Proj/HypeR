@@ -160,11 +160,15 @@ reading disk magic, still need explicit `requires` declarations when they are
 critical to reaching the formal root; this is dependency admission, not a
 simulation of arbitrary service code.
 
-The kernel forwards the boot command line without interpreting profile policy.
+The kernel consumes `earlycon` and `nokaslr`, then forwards unrecognized boot
+arguments without interpreting profile policy.
 Stage1 selects `default` unless it sees `hyper.boot-profile=NAME`. Unknown,
 malformed or repeated selectors produce a bootstrap error instead of selecting
 another profile. QEMU accepts this token in the kernel `-append` command line;
-Pi firmware accepts it in `cmdline.txt`.
+Pi firmware accepts it in `cmdline.txt`. Stage1 forwards all arguments other than
+its selector to system init in a read-only startup VMO. Unknown arguments are not
+validated against a cross-stage registry; each stage recognizes only its own
+parameters. See [boot argument forwarding](boot-layout.md#boot-profiles).
 
 The I/O source chooses the bootstrap provider independently of root handoff:
 

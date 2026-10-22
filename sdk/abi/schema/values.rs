@@ -102,7 +102,7 @@ constant_groups! {
         elf_abi_version = 0,
         process_startup_data_max_bytes = 16 * 1024,
         startup_max_handles = 256,
-        /// Maximum UTF-8 firmware command-line payload, excluding its length prefix.
+        /// Maximum UTF-8 boot-argument payload, excluding its length prefix.
         boot_command_line_max_bytes = 512,
     }
 
@@ -131,10 +131,11 @@ constant_groups! {
         startup_handle_purpose_execution_context = 16,
         startup_handle_purpose_object_factory = 17,
         startup_handle_purpose_system_info = 18,
-        /// Initial process only: immutable VMO with READ | INSPECT rights.
+        /// Unconsumed boot arguments: immutable VMO with READ | INSPECT rights.
         /// Contains a little-endian u64 byte length followed by that many UTF-8
         /// bytes (no NUL), bounded by `BOOT_COMMAND_LINE_MAX_BYTES`. The kernel
-        /// forwards firmware text without interpreting userspace boot policy.
+        /// passes unrecognized arguments to its initial process. Each userspace
+        /// boot stage may pass its own remainder to the successor under this purpose.
         startup_handle_purpose_boot_command_line = 19,
     }
 

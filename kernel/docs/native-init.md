@@ -204,11 +204,14 @@ grants omit it.
 
 The kernel selects `/init` as the first application's executable and starts it
 through the bootstrap userspace loader; it neither interprets the service manifest nor
-preloads system services. It supplies an immutable `BOOT_COMMAND_LINE` VMO to
-the initial process: an eight-byte little-endian byte length followed by at most
+preloads system services. After handling `earlycon` and `nokaslr`, it supplies
+unrecognized arguments in an immutable `BOOT_COMMAND_LINE` VMO to the initial
+process: an eight-byte little-endian byte length followed by at most
 512 UTF-8 bytes without NUL. Its `READ | INSPECT` rights confer no configuration
-or device authority. The SDK consumes it with `Startup::take_boot_command_line`;
-the kernel does not interpret userspace selectors.
+or device authority. `Startup::take_boot_command_line` copies the text and closes
+the handle, including on read failure. Userspace can prepare a new immutable VMO
+with `startup::create_boot_command_line` to pass its unconsumed arguments to a
+successor. The kernel does not interpret userspace selectors.
 
 Stage-1 selects `/etc/hyper/boot-profiles/default.json`, or the named profile
 selected by `hyper.boot-profile=NAME`, then validates that profile's service and

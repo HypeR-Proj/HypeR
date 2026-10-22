@@ -993,7 +993,7 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * Executable identifiers and kernel-to-loader transport bounds.
  * Numeric parameter or sentinel, not an enum discriminant.
  *
- * Maximum UTF-8 firmware command-line payload, excluding its length prefix.
+ * Maximum UTF-8 boot-argument payload, excluding its length prefix.
  */
 #define HYPER_NATIVE_BOOT_COMMAND_LINE_MAX_BYTES UINT64_C(512)
 /** @} */
@@ -1151,10 +1151,11 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * Purposes assigned to capabilities in the process startup table.
  * Select one value; this is not a bit mask.
  *
- * Initial process only: immutable VMO with READ | INSPECT rights.
+ * Unconsumed boot arguments: immutable VMO with READ | INSPECT rights.
  *  Contains a little-endian u64 byte length followed by that many UTF-8
  *  bytes (no NUL), bounded by `BOOT_COMMAND_LINE_MAX_BYTES`. The kernel
- *  forwards firmware text without interpreting userspace boot policy.
+ *  passes unrecognized arguments to its initial process. Each userspace
+ *  boot stage may pass its own remainder to the successor under this purpose.
  */
 #define HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_BOOT_COMMAND_LINE UINT64_C(19)
 /** @} */

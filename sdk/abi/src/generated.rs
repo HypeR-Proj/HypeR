@@ -461,7 +461,7 @@ pub const HYPER_NATIVE_STARTUP_MAX_HANDLES: u64 = 256;
 /// Executable identifiers and kernel-to-loader transport bounds.
 /// Numeric parameter or sentinel, not an enum discriminant.
 ///
-/// Maximum UTF-8 firmware command-line payload, excluding its length prefix.
+/// Maximum UTF-8 boot-argument payload, excluding its length prefix.
 pub const HYPER_NATIVE_BOOT_COMMAND_LINE_MAX_BYTES: u64 = 512;
 
 /// `loader_startup_reply` in the `loader_startup` enum domain.
@@ -565,10 +565,11 @@ pub const HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_SYSTEM_INFO: u64 = 18;
 /// Purposes assigned to capabilities in the process startup table.
 /// Select one value; this is not a bit mask.
 ///
-/// Initial process only: immutable VMO with READ | INSPECT rights.
+/// Unconsumed boot arguments: immutable VMO with READ | INSPECT rights.
 ///  Contains a little-endian u64 byte length followed by that many UTF-8
 ///  bytes (no NUL), bounded by `BOOT_COMMAND_LINE_MAX_BYTES`. The kernel
-///  forwards firmware text without interpreting userspace boot policy.
+///  passes unrecognized arguments to its initial process. Each userspace
+///  boot stage may pass its own remainder to the successor under this purpose.
 pub const HYPER_NATIVE_STARTUP_HANDLE_PURPOSE_BOOT_COMMAND_LINE: u64 = 19;
 
 /// `process_phase_prepared` in the `process_phase` enum domain.
