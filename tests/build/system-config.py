@@ -251,7 +251,7 @@ class ProductTests(unittest.TestCase):
                             '# CONFIG_BOOT_APP_FS_FAT is not set\n')
         full, minimal = self.root / '.config', self.root / 'defconfig'
         kernel = ROOT / 'kernel/.config'
-        before_kernel = kernel.read_bytes()
+        before_kernel = kernel.read_bytes() if kernel.exists() else None
         def make(command, **settings):
             return subprocess.run(['make', '--no-print-directory', command,
                                    *[f'{key}={value}' for key, value in settings.items()]],
@@ -274,7 +274,7 @@ class ProductTests(unittest.TestCase):
         self.assertNotEqual(rejected.returncode, 0)
         self.assertIn('CONFIG_SYSTEM_APP_VM_MANAGER', rejected.stderr)
         self.assertEqual(full.read_bytes(), original)
-        self.assertEqual(kernel.read_bytes(), before_kernel)
+        self.assertEqual(kernel.read_bytes() if kernel.exists() else None, before_kernel)
 
     def test_product_kernel_section_cannot_enable_test_hooks(self):
         for name in ('kernel-test', 'io-dma-revoke-test', 'kernel-self-test', 'missing'):
