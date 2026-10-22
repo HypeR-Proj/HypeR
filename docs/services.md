@@ -91,14 +91,29 @@ declarations may use routed protocols but cannot silently override those grants.
 
 Component-manager reports startup progress alongside ordinary service logs. A
 single opening line identifies the manager, architecture and boot time. Complete
-status lines show component descriptions, observed durations and coordinator
-milestones, followed by a compact lifecycle summary. `START`, `RUNNING`, `DONE`
-and `FAILED` describe process state, not protocol readiness. There is no animation,
-row rewriting or console-wide log suppression. Timings begin when the manager
-observes a launch; completion rows include the observed run duration. They are
-not hardware or guest boot benchmarks. The retirement service remains visible
-through completion. Coordinator exit or a 60-second deadline ends the temporary
-report without changing service readiness, logging or resource ownership.
+status lines show component descriptions and coordinator milestones, followed by
+a compact lifecycle summary. A row is emitted only when the state or launch
+generation changes; worker counts and other ordinary detail updates remain
+queryable with `componentctl status`. `START`, `RUNNING`, `DONE` and `FAILED`
+describe process state, not protocol readiness. `START` has no duration yet;
+`RUNNING` shows `start` latency, and terminal states show `total` time from the
+observed start through retirement. Both use milliseconds with two decimal places.
+Already-running processes whose launch was not observed show `time unknown`.
+Milestone `+` times and the final duration are relative to the manager's opening
+banner, whose `boot +` timestamp is relative to kernel boot.
+
+Exit reasons are reported immediately through lifecycle diagnostics. The display
+does not add a redundant `STOP` row while resources retire; it reports the final
+`DONE`, `FAILED` or `STOPPED` result, including bootstrap retirement. New failure
+details remain visible even if the state does not change. Restart generations are
+identified, and unfinished cleanup and retries are counted in the final summary.
+Incomplete startup includes commands for inspecting component state and logs.
+Rows fit an 80-column serial console; long component paths wrap without losing
+identity, while clipped descriptions and diagnostic previews have an ellipsis.
+There is no animation, row rewriting or console-wide log suppression. Timings are
+observations, not hardware or guest boot benchmarks. Coordinator exit or a
+60-second deadline ends the temporary report without changing service readiness,
+logging or resource ownership.
 
 Formal io-runtime, fs-backend and vm-manager receive separate stdout/stderr
 channels registered with journal before launch. Their children inherit those
@@ -211,7 +226,10 @@ silently rebound or replayed against a new service generation.
 The manager reports Process termination as soon as it observes it, before waiting
 for descendant or resource retirement. Reports include the instance path,
 generation, Process KOID and kernel termination reason (exit status, requested
-stop, or fault). The last reason remains in `componentctl status`. Launch failures
+stop, or fault). A successful non-critical exit is an informational
+`exited successfully (status 0)` record, not a failure notice; its original kernel
+reason remains in `componentctl status`. Critical exits still report directly to
+Console even for status zero. Launch failures
 and startup deadlines are also reported even when no Process was created.
 
 `program.critical` selects direct Console reporting in addition to journal;
