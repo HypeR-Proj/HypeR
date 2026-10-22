@@ -8,8 +8,8 @@ SPDX-License-Identifier: Apache-2.0
 The production kernel boot path starts one Native userspace process from the
 firmware-provided initial ramdisk. Linux guest autostart is userspace policy.
 In the default deployment, stage-1 init starts core storage and recovery
-services, then transfers supervision to system init. System init switches the
-VFS root and provisions the VM manager, which creates isolated VM runtimes
+services, provisionally switches the VFS root, then transfers supervision to the
+formal component manager. System startup provisions the VM manager, which creates isolated VM runtimes
 through Native capabilities. These stages and paths beyond initial startup are
 not kernel requirements. Kernel self-test images contain no Linux loader or
 default VM. See the [boot layout](../../docs/boot-layout.md) for the default
@@ -204,15 +204,21 @@ grants omit it.
 
 The kernel selects `/init` as the first application's executable and starts it
 through the bootstrap userspace loader; it neither interprets the service manifest nor
-preloads system services. Stage-1 init reads the core graph at
-`/etc/hyper/services.json` through its root `Directory`, validates its dependency
-and capability graph, and uses the one-shot `ProcessBuilder` object to construct
-each child. The candidate system init validates the combined core/system graph
-before accepting the existing Process supervisors. That rendezvous commits
-supervision ownership; the subsequent namespace switch is a separate commit.
-A failed switch preserves the old root and leaves core services supervised by
-system init, without launching formal services. A failed pre-commit handoff
-instead leaves supervision with stage-1 init.
+preloads system services. It supplies an immutable `BOOT_COMMAND_LINE` VMO to
+the initial process: an eight-byte little-endian byte length followed by at most
+512 UTF-8 bytes without NUL. Its `READ | INSPECT` rights confer no configuration
+or device authority. The SDK consumes it with `Startup::take_boot_command_line`;
+the kernel does not interpret userspace selectors.
+
+Stage-1 selects `/etc/hyper/boot-profiles/default.json`, or the named profile
+selected by `hyper.boot-profile=NAME`, then validates that profile's service and
+capability graph before constructing children with `ProcessBuilder`. These
+paths and provider choices are userspace policy. Before starting the candidate
+system supervisor, stage-1 provisionally switches to the independent root.
+The candidate validates the offered inventory and formal provider policy before
+accepting the existing Process supervisors. That rendezvous commits supervision
+ownership and the candidate commits the root transition. A failed pre-commit
+handoff rolls back the provisional root and leaves supervision with stage-1.
 
 A builder owns every staged startup capability immediately after successful
 insertion. Starting a
