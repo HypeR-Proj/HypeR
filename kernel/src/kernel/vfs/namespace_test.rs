@@ -238,7 +238,7 @@ pub(crate) fn run() -> Result<(), TestError> {
             == replacement.metadata()?.location.node_id,
         "rename target atomically changes identity",
     )?;
-    request_budget_follows_caller(&root, &domain)?;
+    request_budget_follows_caller(&root)?;
     trailing_directory_mutations(&root, &domain, &scratch)?;
     deep_directory_rename(&root, &domain, &scratch)?;
     active_handle_lock_lifetime(&root, &domain)?;
@@ -292,17 +292,27 @@ fn active_handle_lock_lifetime(
     Ok(())
 }
 
-fn request_budget_follows_caller(
-    root: &DirectoryObject,
-    creator: &ResourceDomain,
-) -> Result<(), TestError> {
+fn request_budget_follows_caller(root: &DirectoryObject) -> Result<(), TestError> {
     use crate::kernel::accounting::ResourceKind;
+    // Earlier cases release published objects asynchronously. Their shared
+    // domain can shrink during these requests, independently of scratch use.
+    let creator =
+        ResourceDomain::try_new_root(ResourceLimits::UNLIMITED).map_err(Error::Resource)?;
+    let root = DirectoryObject::scope(root, root, &creator)?;
+    let creator_before = creator.usage();
+    // No creator headroom: even a temporary charge released before the final
+    // snapshot must fail instead of hiding incorrect request sponsorship.
+    creator
+        .set_local_limits(ResourceLimits::UNLIMITED.with(
+            ResourceKind::KernelMemoryBytes,
+            creator_before.total(ResourceKind::KernelMemoryBytes),
+        ))
+        .map_err(Error::Resource)?;
     let caller = ResourceDomain::try_new_root(
         ResourceLimits::UNLIMITED.with(ResourceKind::KernelMemoryBytes, 4096),
     )
     .map_err(Error::Resource)?;
     let budget = ScratchBudget::new(&caller);
-    let creator_before = creator.usage();
     check(
         root.metadata("right/new", true, &budget)?.attributes.kind() == NodeKind::File,
         "small caller quota supports metadata",

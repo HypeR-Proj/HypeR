@@ -1382,11 +1382,7 @@ impl Process {
                 Ok(ProcessRetirementStep::Complete)
             }
             Err(failure) => {
-                let (error, address_space) = failure.into_parts();
-                crate::pr_warn!(
-                    "HypeR: Process {:?} address-space retirement deferred: {error:?}; retaining resources and retrying",
-                    self.id()
-                );
+                let (_, address_space) = failure.into_parts();
                 Ok(ProcessRetirementStep::Retry(AddressSpaceRetirement {
                     process: self.clone(),
                     address_space: Some(address_space),
@@ -1661,6 +1657,10 @@ pub(crate) struct AddressSpaceRetirement {
 }
 
 impl AddressSpaceRetirement {
+    // Brief transport contention is expected during teardown. Report only
+    // persistent failure, once, and pair its warning with eventual recovery.
+    const WARNING_THRESHOLD: u32 = 3;
+
     pub(crate) fn retry(mut self) -> Result<(), (Self, MachineError)> {
         if let Some(retention) = self.process.inner.retention.get()
             && retention.released()
@@ -1680,17 +1680,26 @@ impl AddressSpaceRetirement {
                 if !self.process.retention_holds() {
                     self.process.finish_retirement();
                 }
-                crate::pr_info!(
-                    "HypeR: Process {:?} address-space retirement completed after {} failed attempts",
-                    self.process.id(),
-                    self.failed_attempts
-                );
+                if self.failed_attempts >= Self::WARNING_THRESHOLD {
+                    crate::pr_info!(
+                        "HypeR: Process {:?} address-space retirement completed after {} failed attempts",
+                        self.process.id(),
+                        self.failed_attempts
+                    );
+                }
                 Ok(())
             }
             Err(failure) => {
                 let (error, address_space) = failure.into_parts();
                 self.address_space = Some(address_space);
                 self.failed_attempts = self.failed_attempts.saturating_add(1);
+                if self.failed_attempts == Self::WARNING_THRESHOLD {
+                    crate::pr_warn!(
+                        "HypeR: Process {:?} address-space retirement deferred after {} failed attempts: {error:?}; retaining resources and retrying",
+                        self.process.id(),
+                        self.failed_attempts
+                    );
+                }
                 Err((self, error))
             }
         }
