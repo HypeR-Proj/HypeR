@@ -264,7 +264,11 @@ pub(crate) fn capability_channel_receive(
     // The persistent registration now owns its vector's accounting. Retain
     // the decode charge until here so preemption cannot leave it uncharged.
     drop(decode_charge);
-    let target = CapabilityReceiveTarget::prepare(process, byte_output, slot_records, slot_count)?;
+    let mut target = CapabilityReceiveTarget::new(process);
+    if let Err(error) = target.prepare(byte_output, slot_records, slot_count) {
+        target.abort();
+        return Err(error);
+    }
     Ok(prepared.attach_target(target).wait(
         &process.resource_domain(),
         deadline_nanoseconds,
@@ -451,20 +455,35 @@ impl PreparedCapabilitySend {
 }
 
 impl CapabilityReceiveTarget {
+    fn new(process: &Process) -> Self {
+        Self {
+            process: process.clone(),
+            byte_output: None,
+            slot_output: None,
+            handles: None,
+            slot_bytes: Vec::new(),
+            _slot_charge: None,
+        }
+    }
+
+    // Fill the single caller-owned target in place. Returning another full
+    // target keeps duplicate output plans live below COW and scheduler frames.
+    // The unpublished caller must abort this target on every preparation error.
+    #[inline(never)]
     fn prepare(
-        process: &Process,
+        &mut self,
         byte_output: Option<UserSlice>,
         slot_output: Option<UserSlice>,
         slot_count: usize,
-    ) -> Result<Self, CapabilityChannelServiceError> {
+    ) -> Result<(), CapabilityChannelServiceError> {
         let record_bytes = slot_count
             .checked_mul(CAPABILITY_RECORD_BYTES)
             .ok_or(CapabilityChannelServiceError::InvalidInput)?;
-        let charge = if record_bytes == 0 {
+        self._slot_charge = if record_bytes == 0 {
             None
         } else {
             Some(
-                process
+                self.process
                     .resource_domain()
                     .reserve(
                         ResourceAmount::ZERO
@@ -474,21 +493,17 @@ impl CapabilityReceiveTarget {
                     .commit(),
             )
         };
-        let slot_bytes = try_zeroed_bytes(record_bytes)?;
-        let [byte_output, slot_output] = process.reserve_user_writes([byte_output, slot_output])?;
-        let handles = if slot_count == 0 {
+        self.slot_bytes = try_zeroed_bytes(record_bytes)?;
+        self.process.reserve_user_writes_into(
+            [byte_output, slot_output],
+            [&mut self.byte_output, &mut self.slot_output],
+        )?;
+        self.handles = if slot_count == 0 {
             None
         } else {
-            Some(process.reserve_handle_batch(slot_count)?)
+            Some(self.process.reserve_handle_batch(slot_count)?)
         };
-        Ok(Self {
-            process: process.clone(),
-            byte_output,
-            slot_output,
-            handles,
-            slot_bytes,
-            _slot_charge: charge,
-        })
+        Ok(())
     }
 
     fn narrow_handles(&mut self, count: usize) {

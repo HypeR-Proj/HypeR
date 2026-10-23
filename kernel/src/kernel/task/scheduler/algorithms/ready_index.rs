@@ -174,7 +174,7 @@ fn balance<N: Nodes>(nodes: &mut N, id: N::Id) -> Result<N::Id, N::Error> {
 }
 
 /// Only entries below len are live. Initializing with an existing identity
-/// avoids Option<Id>'s extra discriminant in the fixed stack scratch.
+/// avoids `Option<Id>`'s extra discriminant in the fixed stack scratch.
 struct Ancestors<I> {
     ids: [I; MAX_PATH],
     right: u32,

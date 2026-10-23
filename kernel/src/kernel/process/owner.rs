@@ -1240,13 +1240,18 @@ impl Process {
         })
     }
 
+    /// Replaces a caller-owned batch without returning copies of its plans.
     /// Materializes every destination before pinning any output. A competing
     /// remap may still win; then the whole local reservation batch is dropped
     /// before retry, so one output cannot prevent another output's COW commit.
-    pub(crate) fn reserve_user_writes<const N: usize>(
+    pub(crate) fn reserve_user_writes_into<const N: usize>(
         &self,
         destinations: [Option<UserSlice>; N],
-    ) -> Result<[Option<UserWriteReservation>; N], ProcessError> {
+        mut writes: [&mut Option<UserWriteReservation>; N],
+    ) -> Result<(), ProcessError> {
+        for write in &mut writes {
+            drop(write.take());
+        }
         self.retry_user_memory(|address_space| {
             for destination in destinations
                 .iter()
@@ -1255,16 +1260,23 @@ impl Process {
             {
                 address_space.resolve_private_write(*destination)?;
             }
-            let mut writes = [const { None }; N];
             for (slot, destination) in writes.iter_mut().zip(destinations) {
                 if let Some(destination) = destination.filter(|range| range.length() != 0) {
-                    *slot = Some(NativeAddressSpace::reserve_user_write(
-                        address_space.clone(),
-                        destination,
-                    )?);
+                    match NativeAddressSpace::reserve_user_write(address_space.clone(), destination)
+                    {
+                        Ok(write) => **slot = Some(write),
+                        Err(error) => {
+                            // Nothing may remain pinned across a retry, even
+                            // when only the last destination lost admission.
+                            for write in &mut writes {
+                                drop(write.take());
+                            }
+                            return Err(error);
+                        }
+                    }
                 }
             }
-            Ok(writes)
+            Ok(())
         })
     }
 
