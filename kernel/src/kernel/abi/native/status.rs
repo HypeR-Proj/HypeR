@@ -133,7 +133,7 @@ pub(super) const fn status_from_scheduler_error(
 
     match error {
         Error::Allocation => HYPER_NATIVE_STATUS_NO_MEMORY,
-        Error::ThreadLimit | Error::IdentifierExhausted | Error::WaitGenerationExhausted => {
+        Error::IdentifierExhausted | Error::WaitGenerationExhausted => {
             HYPER_NATIVE_STATUS_RESOURCE_LIMIT
         }
         Error::EmptyCpuAffinity
@@ -141,7 +141,10 @@ pub(super) const fn status_from_scheduler_error(
         | Error::InvalidCpuIndex
         | Error::CpuNotAllowed => HYPER_NATIVE_STATUS_INVALID_ARGUMENT,
         Error::InvalidThreadState => HYPER_NATIVE_STATUS_BAD_STATE,
-        Error::NotInitialized
+        Error::SchedulingPermission(_) => HYPER_NATIVE_STATUS_ACCESS_DENIED,
+        Error::InvalidSchedulingParameters => HYPER_NATIVE_STATUS_INVALID_ARGUMENT,
+        Error::ThreadTableGrowth
+        | Error::NotInitialized
         | Error::AlreadyInitialized
         | Error::CurrentThreadMissing
         | Error::ThreadNotFound
@@ -317,6 +320,7 @@ pub(super) fn status_from_process_builder_start_error(
         ProcessBuilderError::ExecutableFile(error) => status_from_vfs_error(error),
         ProcessBuilderError::DuplicateStartupPurpose
         | ProcessBuilderError::InvalidAffinity
+        | ProcessBuilderError::InvalidScheduling
         | ProcessBuilderError::InvalidStartupPurpose
         | ProcessBuilderError::InvalidString => HYPER_NATIVE_STATUS_INVALID_ARGUMENT,
         ProcessBuilderError::Image(error) => status_from_loader_error(error),
@@ -346,6 +350,7 @@ pub(super) fn status_from_process_builder_error(
         ProcessBuilderError::ExecutableFile(error) => status_from_vfs_error(error),
         ProcessBuilderError::DuplicateStartupPurpose
         | ProcessBuilderError::InvalidAffinity
+        | ProcessBuilderError::InvalidScheduling
         | ProcessBuilderError::InvalidStartupPurpose
         | ProcessBuilderError::InvalidString => HYPER_NATIVE_STATUS_INVALID_ARGUMENT,
         ProcessBuilderError::Image(error) => status_from_loader_error(error),

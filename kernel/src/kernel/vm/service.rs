@@ -153,21 +153,25 @@ const fn classify_scheduler_error(error: crate::kernel::task::scheduler::Error) 
 
     match error {
         SchedulerError::Allocation => Error::NoMemory,
-        SchedulerError::ThreadLimit
-        | SchedulerError::IdentifierExhausted
-        | SchedulerError::WaitGenerationExhausted => Error::ResourceLimit,
+        SchedulerError::IdentifierExhausted | SchedulerError::WaitGenerationExhausted => {
+            Error::ResourceLimit
+        }
         SchedulerError::EmptyCpuAffinity
         | SchedulerError::NoRegisteredCpuInAffinity
         | SchedulerError::InvalidCpuIndex
         | SchedulerError::CpuNotAllowed => Error::InvalidArgument,
-        SchedulerError::CpuNotRegistered => Error::InvalidArgument,
+        SchedulerError::CpuNotRegistered | SchedulerError::InvalidSchedulingParameters => {
+            Error::InvalidArgument
+        }
+        SchedulerError::SchedulingPermission(_) => Error::AccessDenied,
         SchedulerError::ThreadNotFound | SchedulerError::TerminatedThread => Error::BadState,
         SchedulerError::MigrationUnsupported => Error::NotSupported,
         SchedulerError::MigrationInProgress
         | SchedulerError::ThreadTransitionInProgress
         | SchedulerError::MigrationBlockedByCpuLocalWait => Error::Busy,
         SchedulerError::Thread(error) => classify_thread_error(error),
-        SchedulerError::NotInitialized
+        SchedulerError::ThreadTableGrowth
+        | SchedulerError::NotInitialized
         | SchedulerError::AlreadyInitialized
         | SchedulerError::CurrentThreadMissing
         | SchedulerError::ThreadBlocked
@@ -423,7 +427,14 @@ pub(crate) fn derive_creation_lease(
     let lease = authority.object().derive(domain.object().domain())?;
     Ok(process.create_object(
         lease,
-        <VirtualMachineCreationLease as KernelObject>::SUPPORTED_RIGHTS,
+        Rights::TRANSFER
+            .union(Rights::INSPECT)
+            .union(Rights::CREATE_VIRTUAL_MACHINE)
+            .union(
+                authority
+                    .rights()
+                    .intersection(crate::kernel::task::scheduling_authority::SCHEDULING_RIGHTS),
+            ),
     )?)
 }
 
@@ -464,7 +475,16 @@ pub(crate) fn create_pending(
     };
     let prepared = match prepare_handle(
         pending,
-        <PendingVirtualMachine as KernelObject>::SUPPORTED_RIGHTS,
+        Rights::TRANSFER
+            .union(Rights::INSPECT)
+            .union(Rights::WRITE)
+            .union(Rights::START)
+            .union(Rights::REQUEST_STOP)
+            .union(
+                lease_object
+                    .rights()
+                    .intersection(crate::kernel::task::scheduling_authority::SCHEDULING_RIGHTS),
+            ),
     ) {
         Ok(prepared) => prepared,
         Err(error) => {
@@ -624,7 +644,19 @@ pub(crate) fn install(
             return Err(error.into());
         }
     };
-    let vm_handle = match prepare_handle(vm_object, VirtualMachineObject::SUPPORTED_RIGHTS) {
+    let vm_handle = match prepare_handle(
+        vm_object,
+        Rights::TRANSFER
+            .union(Rights::INSPECT)
+            .union(Rights::WRITE)
+            .union(Rights::WAIT)
+            .union(Rights::REQUEST_STOP)
+            .union(
+                pending
+                    .rights()
+                    .intersection(crate::kernel::task::scheduling_authority::SCHEDULING_RIGHTS),
+            ),
+    ) {
         Ok(handle) => handle,
         Err(error) => {
             consumption.rollback();
@@ -641,7 +673,20 @@ pub(crate) fn install(
             return Err(error.into());
         }
     };
-    let vcpu_handle = match prepare_handle(vcpu_object, VirtualCpuObject::SUPPORTED_RIGHTS) {
+    let vcpu_handle = match prepare_handle(
+        vcpu_object,
+        Rights::TRANSFER
+            .union(Rights::INSPECT)
+            .union(Rights::WRITE)
+            .union(Rights::WAIT)
+            .union(Rights::START)
+            .union(Rights::SCHED_LOWER)
+            .union(
+                pending
+                    .rights()
+                    .intersection(crate::kernel::task::scheduling_authority::SCHEDULING_RIGHTS),
+            ),
+    ) {
         Ok(handle) => handle,
         Err(error) => {
             drop(vm_handle);
@@ -757,7 +802,20 @@ pub(crate) fn open_vcpu(
         .map_err(crate::kernel::process::ProcessError::from)?;
     let object =
         VirtualCpuObject::try_new(machine.object().owner(), id, &process.resource_domain())?;
-    let prepared = prepare_handle(object, VirtualCpuObject::SUPPORTED_RIGHTS)?;
+    let prepared = prepare_handle(
+        object,
+        Rights::TRANSFER
+            .union(Rights::INSPECT)
+            .union(Rights::WRITE)
+            .union(Rights::WAIT)
+            .union(Rights::START)
+            .union(Rights::SCHED_LOWER)
+            .union(
+                machine
+                    .rights()
+                    .intersection(crate::kernel::task::scheduling_authority::SCHEDULING_RIGHTS),
+            ),
+    )?;
     let reservation = process.reserve_handles::<1>()?;
     process
         .publish_handles(reservation, [prepared])

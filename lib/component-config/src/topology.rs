@@ -415,6 +415,11 @@ fn validate(c: &Component) -> Result<(), String> {
             return Err(format!("{}: invalid capability {}", c.name, cap.name));
         }
     }
+    if let Some(parameters) = c.program.as_ref().and_then(|p| p.scheduling.as_ref()) {
+        parameters
+            .validate()
+            .map_err(|e| format!("{}: {e}", c.name))?;
+    }
     if let Some(p) = &c.program
         && (!absolute_path(&p.image)
             || p.arguments.len() > 16

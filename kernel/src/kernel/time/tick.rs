@@ -1,22 +1,13 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Kernel tick registration and interrupt handling.
+//! Architectural one-shot clock-event registration and interrupt handling.
 
-use hyper::cpu::{CpuIndex, PerCpu};
+use hyper::cpu::CpuIndex;
 use hyper::hal::interrupt::{InterruptId, InterruptPriority, InterruptTrigger};
 use hyper::platform::{PlatformInterruptTrigger, TimerInfo};
-use hyper::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::kernel::irq::interrupt::{HandlerResult, IrqDomainId, VirtualInterrupt};
-
-const TICKS_PER_SECOND: u32 = hyper::config::TIMER_HZ as u32;
-
-static TICK_COUNT: PerCpu<AtomicU64> =
-    PerCpu::new([const { AtomicU64::new(0) }; hyper::cpu::MAX_CPUS]);
-static RECURRING_IRQ_OBSERVED: PerCpu<AtomicBool> =
-    PerCpu::new([const { AtomicBool::new(false) }; hyper::cpu::MAX_CPUS]);
-static ACTIVE_REPORT_PRINTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Error {
@@ -25,7 +16,6 @@ pub enum Error {
     Timer(crate::hal::time::Error),
     Time(crate::kernel::time::Error),
     InvalidCpuIndex,
-    InvalidTickInterval,
     InconsistentCounterFrequency,
 }
 
@@ -77,7 +67,7 @@ pub(super) fn initialize(
             return Err(error.into());
         }
     };
-    if let Err(error) = start_local_tick(counter_frequency_hz) {
+    if let Err(error) = start_local_clock_event(counter_frequency_hz) {
         rollback_registered_mapping(registration, virtual_interrupt);
         return Err(error);
     }
@@ -87,7 +77,6 @@ pub(super) fn initialize(
     // fallible initialization step has completed.
     registration.retain_permanently();
     Ok(super::Capabilities {
-        ticks_per_second: TICKS_PER_SECOND,
         counter_frequency_hz,
         hardware_interrupt,
         virtual_interrupt,
@@ -123,7 +112,7 @@ fn retain_failed_registration(failure: crate::kernel::irq::interrupt::Unregister
 /// Starts the already-mapped architectural PPI on a secondary CPU.
 pub(super) fn initialize_local_cpu() -> Result<(), Error> {
     current_cpu()?;
-    start_local_tick(crate::kernel::time::counter_frequency_hz()?)
+    start_local_clock_event(crate::kernel::time::counter_frequency_hz()?)
 }
 
 fn handle_host_timer(
@@ -137,69 +126,71 @@ fn handle_host_timer(
     HandlerResult::Handled
 }
 
-fn start_local_tick(counter_frequency_hz: u64) -> Result<(), Error> {
+fn start_local_clock_event(counter_frequency_hz: u64) -> Result<(), Error> {
     if crate::hal::time::counter_frequency_hz()? != counter_frequency_hz {
         return Err(Error::InconsistentCounterFrequency);
     }
-    let interval = counter_frequency_hz / u64::from(TICKS_PER_SECOND);
-    if interval == 0 {
-        return Err(Error::InvalidTickInterval);
-    }
     crate::kernel::time::initialize_local_timer_queue()?;
-    let first_deadline = crate::kernel::time::monotonic_ticks().wrapping_add(interval);
-    let _ = crate::kernel::time::schedule_irq_periodic(
-        first_deadline,
-        interval,
-        handle_periodic_tick,
-        0,
-    )?;
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
+    validation::arm(1)?;
     Ok(())
-}
-
-fn handle_periodic_tick(event: crate::kernel::time::TimerEvent, _context: usize) {
-    let cpu = match current_cpu() {
-        Ok(cpu) => cpu,
-        Err(error) => crate::kernel::irq::exception::fatal_timer(error),
-    };
-    let periods = event.overruns.saturating_add(1);
-    let previous = TICK_COUNT[cpu].fetch_add(periods, Ordering::Relaxed);
-    if let Err(error) = crate::kernel::task::scheduler::account_tick(periods) {
-        crate::kernel::crash::fatal(format_args!(
-            "HypeR: scheduler tick accounting failed: {error:?}"
-        ));
-    }
-    if previous.saturating_add(periods) >= 3 {
-        if previous < 3 {
-            RECURRING_IRQ_OBSERVED[cpu].store(true, Ordering::Release);
-        }
-        // CPU participation is published only after every secondary reports
-        // online. Retry during that bounded startup window so a CPU which
-        // reached its third tick earlier cannot permanently lose the report.
-        // The relaxed fast check avoids scanning per-CPU state after success.
-        if !ACTIVE_REPORT_PRINTED.load(Ordering::Relaxed) {
-            report_timer_health_once();
-        }
-    }
-}
-
-fn report_timer_health_once() {
-    let Some(participating) = crate::kernel::cpu::participating_cpu_count() else {
-        return;
-    };
-    if participating == 0
-        || !RECURRING_IRQ_OBSERVED
-            .iter()
-            .take(participating)
-            .all(|observed| observed.load(Ordering::Acquire))
-        || ACTIVE_REPORT_PRINTED
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-    {
-        return;
-    }
-    crate::pr_info!("HypeR: periodic timer IRQs active on {participating} CPUs");
 }
 
 fn current_cpu() -> Result<CpuIndex, Error> {
     crate::kernel::cpu::current_index().ok_or(Error::InvalidCpuIndex)
+}
+
+/// Three independent comparator expiries prove local interrupt delivery and
+/// rearming. Ordinary images have no probe; test images stop after this finite
+/// sequence, so timer validation cannot conceal a missing scheduler deadline.
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
+pub(super) mod validation {
+    use hyper::cpu::PerCpu;
+    use hyper::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    const PROBE_DELAY_NS: u64 = 1_000_000;
+    const PROBE_COUNT: u64 = 3;
+    static COMPLETE: PerCpu<AtomicBool> =
+        PerCpu::new([const { AtomicBool::new(false) }; hyper::cpu::MAX_CPUS]);
+    static EXPECTED_CPUS: AtomicUsize = AtomicUsize::new(0);
+    static REPORTED: AtomicBool = AtomicBool::new(false);
+
+    pub(super) fn arm(generation: u64) -> Result<(), crate::kernel::time::Error> {
+        let deadline = crate::kernel::time::deadline_after(PROBE_DELAY_NS)?;
+        super::super::timers::publish_health_probe(generation, deadline)
+    }
+
+    pub(in crate::kernel::time) fn observe(
+        generation: u64,
+    ) -> Result<(), crate::kernel::time::Error> {
+        if generation < PROBE_COUNT {
+            return arm(generation + 1);
+        }
+        let cpu = crate::kernel::cpu::current_index()
+            .ok_or(crate::kernel::time::Error::InvalidCpuIndex)?;
+        COMPLETE[cpu].store(true, Ordering::SeqCst);
+        report();
+        Ok(())
+    }
+
+    pub(in crate::kernel::time) fn expect_cpus(count: usize) {
+        // Together with COMPLETE's SeqCst operations, the admission thread
+        // and the last probe cannot both miss the other's publication.
+        EXPECTED_CPUS.store(count, Ordering::SeqCst);
+        report();
+    }
+
+    fn report() {
+        let count = EXPECTED_CPUS.load(Ordering::SeqCst);
+        if count == 0
+            || !COMPLETE
+                .iter()
+                .take(count)
+                .all(|done| done.load(Ordering::SeqCst))
+            || REPORTED.swap(true, Ordering::AcqRel)
+        {
+            return;
+        }
+        crate::pr_info!("HypeR: one-shot timer IRQs validated on {count} CPUs");
+    }
 }

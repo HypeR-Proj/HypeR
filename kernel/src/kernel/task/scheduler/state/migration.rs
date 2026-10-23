@@ -19,6 +19,19 @@ use crate::kernel::task::thread::{
 };
 
 impl Scheduler {
+    fn record_fair_origin(&mut self, id: ThreadId) -> Result<(), Error> {
+        if let Some(active) = self.active_domain {
+            // SAFETY: this source CPU domain is held by the migration transaction.
+            let floor = unsafe { active.local.as_ref() }.fair_floor;
+            self.thread_mut(id)?.apply_schedule(|schedule| {
+                if schedule.fair_origin.is_none() {
+                    schedule.fair_origin = Some(floor);
+                }
+            });
+        }
+        Ok(())
+    }
+
     pub fn migrate_thread(
         &mut self,
         id: ThreadId,
@@ -199,11 +212,13 @@ impl Scheduler {
         if next == current {
             return Err(Error::InvalidThreadState);
         }
+        self.record_fair_origin(current)?;
         self.thread_mut(current)?.set_state(ThreadState::Migrating);
         self.prepare_switch(cpu_slot, current, next)
     }
 
     fn move_blocked_thread(&mut self, id: ThreadId, plan: MigrationRequest) -> Result<(), Error> {
+        self.record_fair_origin(id)?;
         if let Some(source) = self.registry.with_thread(id, Thread::schedule_owner_cpu)?
             && !self
                 .registry
@@ -272,11 +287,10 @@ impl Scheduler {
                 {
                     return Err(Error::InvalidThreadState);
                 }
-                let should_preempt = self.enqueue_ready_or_defer(id, plan.target)?;
+                self.enqueue_ready_or_defer(id, plan.target)?;
                 Ok(Some(ReadyOutcome {
                     changed: true,
                     target_cpu: plan.target,
-                    should_preempt,
                 }))
             }
             // Exit won the race with a remote migration publication. The
@@ -292,6 +306,7 @@ impl Scheduler {
         id: ThreadId,
         plan: MigrationRequest,
     ) -> Result<ReadyOutcome, Error> {
+        self.record_fair_origin(id)?;
         let source = self.thread(id)?.cpu_index();
         let old_affinity = self.thread(id)?.affinity();
         let membership = self.thread(id)?.queue_links().membership;
@@ -316,11 +331,10 @@ impl Scheduler {
             self.restore_ready_migration(id, source, old_affinity);
             return Err(Error::InvalidThreadState);
         }
-        let should_preempt = self.enqueue_ready_or_defer(id, plan.target)?;
+        self.enqueue_ready_or_defer(id, plan.target)?;
         Ok(ReadyOutcome {
             changed: true,
             target_cpu: plan.target,
-            should_preempt,
         })
     }
 

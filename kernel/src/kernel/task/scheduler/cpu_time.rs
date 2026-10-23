@@ -3,7 +3,7 @@
 
 //! Scheduler-owned CPU-time accounting and immutable publication snapshots.
 //!
-//! Each periodic scheduler tick updates exactly one CPU-local category. Every
+//! Each closed execution interval updates one CPU-local category. Every
 //! category is an independent monotonic atomic value, so a reader cannot see a
 //! partially published multi-field transaction: no such write transaction
 //! exists. A system snapshot is intentionally weakly consistent across CPUs.
@@ -49,12 +49,12 @@ static CPU_TIME: PerCpu<CpuTime> = PerCpu::new([const { CpuTime::new() }; hyper:
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct CpuTimeSnapshot {
     pub(crate) captured_at_ns: u64,
-    pub(crate) ticks_per_second: u64,
+    pub(crate) reserved_clock: u64,
     pub(crate) online_cpus: u64,
-    pub(crate) idle_ticks: u64,
-    pub(crate) kernel_thread_ticks: u64,
-    pub(crate) user_thread_ticks: u64,
-    pub(crate) vcpu_ticks: u64,
+    pub(crate) idle_ns: u64,
+    pub(crate) kernel_thread_ns: u64,
+    pub(crate) user_thread_ns: u64,
+    pub(crate) vcpu_ns: u64,
 }
 
 pub(super) fn account_cpu_time(cpu: CpuIndex, role: ThreadRole, elapsed: u64) {
@@ -62,8 +62,10 @@ pub(super) fn account_cpu_time(cpu: CpuIndex, role: ThreadRole, elapsed: u64) {
 }
 
 pub(crate) fn snapshot() -> CpuTimeSnapshot {
+    // Include live intervals even when no tick or context switch occurs.
+    let _ = super::read_scheduler(|_scheduler| super::state::account_all_cpus());
     let mut snapshot = CpuTimeSnapshot {
-        ticks_per_second: hyper::config::TIMER_HZ as u64,
+        reserved_clock: 0,
         online_cpus: crate::kernel::cpu::online_cpu_count() as u64,
         ..CpuTimeSnapshot::default()
     };
@@ -71,17 +73,17 @@ pub(crate) fn snapshot() -> CpuTimeSnapshot {
         let Some(cpu) = CpuIndex::new(index) else {
             break;
         };
-        snapshot.idle_ticks = snapshot
-            .idle_ticks
+        snapshot.idle_ns = snapshot
+            .idle_ns
             .saturating_add(CPU_TIME[cpu].idle.load(Ordering::Relaxed));
-        snapshot.kernel_thread_ticks = snapshot
-            .kernel_thread_ticks
+        snapshot.kernel_thread_ns = snapshot
+            .kernel_thread_ns
             .saturating_add(CPU_TIME[cpu].kernel_thread.load(Ordering::Relaxed));
-        snapshot.user_thread_ticks = snapshot
-            .user_thread_ticks
+        snapshot.user_thread_ns = snapshot
+            .user_thread_ns
             .saturating_add(CPU_TIME[cpu].user_thread.load(Ordering::Relaxed));
-        snapshot.vcpu_ticks = snapshot
-            .vcpu_ticks
+        snapshot.vcpu_ns = snapshot
+            .vcpu_ns
             .saturating_add(CPU_TIME[cpu].vcpu.load(Ordering::Relaxed));
     }
     // Timestamp the completion of the weakly consistent scan. Consumers may

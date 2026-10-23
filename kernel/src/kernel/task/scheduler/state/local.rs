@@ -13,221 +13,61 @@ use super::super::registry::{
     CpuScheduleAuthorityToken, CpuThreadTableAuthority, ThreadTableCapability,
 };
 use super::super::switch_handoff::{SwitchDisposition, SwitchHandoff};
-use super::super::{
-    CrashTaskSnapshot, CurrentUser, CurrentVcpu, Error, FAIR_QUANTUM_TICKS, account_cpu_time,
-};
+use super::super::{CrashTaskSnapshot, CurrentUser, CurrentVcpu, Error};
 use super::{
     CPU_SCHEDULERS, CpuScheduler, LocalScheduleAttempt, LocalTailCompletion, PreparedContextSwitch,
     scheduler_invariant,
 };
-use crate::kernel::task::policy::SchedulingPolicy;
 use crate::kernel::task::preempt;
-use crate::kernel::task::thread::{DeferredFifoPlacement, ThreadId, ThreadState};
+use crate::kernel::task::thread::{ThreadId, ThreadState};
 
-/// Charges one CPU's running Fair entity without taking the transition lock.
-pub(in crate::kernel::task::scheduler) fn account_tick(
-    cpu: CpuIndex,
-    elapsed: u64,
-) -> Result<bool, Error> {
-    CPU_SCHEDULERS[cpu].with(|slot| {
-        let local = slot.as_mut().ok_or(Error::CpuNotRegistered)?;
-        let current = local.current;
-        let has_fair_ready = local.run_queue.has_fair_threads();
-        let mut threads = local.thread_authority();
-        threads.with_thread_mut(current, |thread, schedule| match schedule.state {
-            ThreadState::Idle => {
-                thread.account_runtime_ticks(elapsed);
-                account_cpu_time(cpu, thread.role(), elapsed);
-                Ok(false)
-            }
-            ThreadState::Running => {
-                thread.account_runtime_ticks(elapsed);
-                account_cpu_time(cpu, thread.role(), elapsed);
-                if !schedule.account_fair_ticks(elapsed, FAIR_QUANTUM_TICKS) {
-                    return Ok(false);
-                }
-                if has_fair_ready {
-                    Ok(true)
-                } else {
-                    schedule.replenish_fair_slice(FAIR_QUANTUM_TICKS);
-                    Ok(false)
-                }
-            }
-            _ => Err(Error::InvalidThreadState),
-        })?
-    })
-}
-
-/// Attempts a cooperative scheduling decision using only the current CPU lock.
+/// Both explicit yields and IRQ-tail preemption use the same policy decision.
 pub(in crate::kernel::task::scheduler) fn prepare_local_yield(
     cpu: CpuIndex,
 ) -> Result<LocalScheduleAttempt, Error> {
-    CPU_SCHEDULERS[cpu].with(|slot| {
-        let local = slot.as_mut().ok_or(Error::CpuNotRegistered)?;
-        if local.handoff.current().is_some() {
-            return Err(Error::ThreadTransitionInProgress);
-        }
-        let current = local.current;
-        let (state, policy, pending_migration) = {
-            let threads = local.thread_authority();
-            threads.with_thread(current, |_thread, schedule| {
-                (
-                    schedule.state,
-                    schedule.scheduling,
-                    schedule.pending_migration,
-                )
-            })?
-        };
-        if pending_migration.is_some() {
-            return Ok(LocalScheduleAttempt::NeedsCoordinator);
-        }
-        let _ = preempt::take_pending_locked(cpu)?;
-        let Some(candidate) = local.local_peek_ready()? else {
-            return Ok(LocalScheduleAttempt::Complete(None));
-        };
-        let enqueue_current = match state {
-            ThreadState::Running => {
-                let can_yield_to = match (policy, candidate.policy) {
-                    (SchedulingPolicy::Fair, _) => true,
-                    (
-                        SchedulingPolicy::Fifo { priority: current },
-                        SchedulingPolicy::Fifo { priority: ready },
-                    ) => ready <= current,
-                    (SchedulingPolicy::Fifo { .. }, SchedulingPolicy::Fair) => false,
-                    (SchedulingPolicy::Idle, _) | (_, SchedulingPolicy::Idle) => false,
-                };
-                if !can_yield_to {
-                    return Ok(LocalScheduleAttempt::Complete(None));
-                }
-                if policy == SchedulingPolicy::Fair {
-                    let mut threads = local.thread_authority();
-                    threads.with_thread_mut(current, |_thread, schedule| {
-                        schedule.replenish_fair_slice(FAIR_QUANTUM_TICKS)
-                    })?;
-                }
-                true
-            }
-            ThreadState::Idle => false,
-            _ => return Err(Error::InvalidThreadState),
-        };
-        if enqueue_current {
-            local.local_enqueue_ready(current, false)?;
-        }
-        let next = match local.local_dequeue_ready() {
-            Ok(Some(next)) => next,
-            Ok(None) => scheduler_invariant(Error::CurrentThreadMissing),
-            Err(error) => scheduler_invariant(error),
-        };
-        if next != candidate.id {
-            scheduler_invariant(Error::QueueCorrupted);
-        }
-        match local.prepare_local_switch(current, next) {
-            Ok(switch) => Ok(LocalScheduleAttempt::Complete(Some(switch))),
-            Err(error) => scheduler_invariant(error),
-        }
-    })
+    prepare_local_decision(cpu, true)
 }
 
-/// Attempts an IRQ-tail/conditional preemption using only the current CPU lock.
 pub(in crate::kernel::task::scheduler) fn prepare_local_preemption(
     cpu: CpuIndex,
 ) -> Result<LocalScheduleAttempt, Error> {
-    CPU_SCHEDULERS[cpu].with(|slot| {
-        let local = slot.as_mut().ok_or(Error::CpuNotRegistered)?;
+    prepare_local_decision(cpu, false)
+}
+
+fn prepare_local_decision(cpu: CpuIndex, yielding: bool) -> Result<LocalScheduleAttempt, Error> {
+    super::runtime::with_accounted_cpu(cpu, |local| {
         if local.handoff.current().is_some() {
             return Err(Error::ThreadTransitionInProgress);
         }
-        if !preempt::pending(cpu)? {
+        if !yielding && !preempt::pending(cpu)? {
             return Ok(LocalScheduleAttempt::Complete(None));
         }
         let current = local.current;
-        let (state, policy, fair_expired, deferred, pending_migration) = {
-            let threads = local.thread_authority();
-            threads.with_thread(current, |_thread, schedule| {
-                (
-                    schedule.state,
-                    schedule.scheduling,
-                    schedule.fair_slice_expired(),
-                    schedule.deferred_fifo_placement,
-                    schedule.pending_migration,
-                )
+        if local
+            .thread_authority()
+            .with_thread(current, |_thread, schedule| {
+                schedule.pending_migration.is_some()
             })?
-        };
-        if pending_migration.is_some() {
+        {
             return Ok(LocalScheduleAttempt::NeedsCoordinator);
         }
-        let Some(candidate) = local.local_peek_ready()? else {
-            let _ = preempt::take_pending_locked(cpu)?;
-            if state == ThreadState::Running {
-                let mut threads = local.thread_authority();
-                threads.with_thread_mut(current, |_thread, schedule| {
-                    if schedule.fair_slice_expired() {
-                        schedule.replenish_fair_slice(FAIR_QUANTUM_TICKS);
-                    }
-                    schedule.deferred_fifo_placement = None;
-                })?;
-            }
+        let _ = preempt::take_pending_locked(cpu)?;
+        let Some((next, front)) = local.choose_ready(yielding)? else {
             return Ok(LocalScheduleAttempt::Complete(None));
         };
-        let enqueue_front = match state {
-            ThreadState::Idle => None,
-            ThreadState::Running => {
-                let fair_rotation = policy == SchedulingPolicy::Fair
-                    && candidate.policy == SchedulingPolicy::Fair
-                    && fair_expired;
-                let fifo_deferred_rotation = matches!(
-                    (policy, candidate.policy, deferred),
-                    (
-                        SchedulingPolicy::Fifo { priority: current },
-                        SchedulingPolicy::Fifo { priority: ready },
-                        Some(DeferredFifoPlacement::Tail),
-                    ) if current == ready
-                );
-                if !policy.is_preempted_by(candidate.policy)
-                    && !fair_rotation
-                    && !fifo_deferred_rotation
-                {
-                    let _ = preempt::take_pending_locked(cpu)?;
-                    let mut threads = local.thread_authority();
-                    threads.with_thread_mut(current, |_thread, schedule| {
-                        schedule.deferred_fifo_placement = None
-                    })?;
-                    return Ok(LocalScheduleAttempt::Complete(None));
-                }
-                if fair_rotation {
-                    let mut threads = local.thread_authority();
-                    threads.with_thread_mut(current, |_thread, schedule| {
-                        schedule.replenish_fair_slice(FAIR_QUANTUM_TICKS)
-                    })?;
-                    Some(false)
-                } else {
-                    Some(deferred != Some(DeferredFifoPlacement::Tail))
-                }
-            }
-            _ => return Err(Error::InvalidThreadState),
-        };
-        if !preempt::take_pending_locked(cpu)? {
-            return Ok(LocalScheduleAttempt::Complete(None));
-        }
-        if let Some(front) = enqueue_front {
-            let mut threads = local.thread_authority();
-            threads.with_thread_mut(current, |_thread, schedule| {
-                schedule.deferred_fifo_placement = None
+        local.local_take_ready(next)?;
+        let running = local
+            .thread_authority()
+            .with_thread(current, |_thread, schedule| {
+                schedule.state == ThreadState::Running
             })?;
+        if running {
             local.local_enqueue_ready(current, front)?;
         }
-        let next = match local.local_dequeue_ready() {
-            Ok(Some(next)) => next,
-            Ok(None) => scheduler_invariant(Error::CurrentThreadMissing),
-            Err(error) => scheduler_invariant(error),
-        };
-        if next != candidate.id {
-            scheduler_invariant(Error::QueueCorrupted);
-        }
-        match local.prepare_local_switch(current, next) {
-            Ok(switch) => Ok(LocalScheduleAttempt::Complete(Some(switch))),
-            Err(error) => scheduler_invariant(error),
-        }
+        let switch = local
+            .prepare_local_switch(current, next)
+            .unwrap_or_else(|error| scheduler_invariant(error));
+        Ok(LocalScheduleAttempt::Complete(Some(switch)))
     })
 }
 
@@ -236,8 +76,7 @@ pub(in crate::kernel::task::scheduler) fn complete_local_switch_tail(
     cpu: CpuIndex,
     ticket: u64,
 ) -> Result<LocalTailCompletion, Error> {
-    CPU_SCHEDULERS[cpu].with(|slot| {
-        let local = slot.as_mut().ok_or(Error::CpuNotRegistered)?;
+    super::runtime::with_accounted_cpu(cpu, |local| {
         let switching = local
             .handoff
             .for_ticket(ticket)
@@ -373,10 +212,11 @@ pub(in crate::kernel::task::scheduler) fn local_current_user(
 }
 
 impl CpuScheduler {
-    pub(super) const fn new(
+    pub(super) fn new(
         index: CpuIndex,
         table: ThreadTableCapability,
         current: ThreadId,
+        scratch: queue::QueueScratch,
     ) -> Self {
         Self {
             index,
@@ -384,8 +224,16 @@ impl CpuScheduler {
             authority: CpuScheduleAuthorityToken::new(),
             current,
             idle: None,
-            run_queue: CpuRunQueue::new(),
+            run_queue: CpuRunQueue::new(scratch),
             handoff: SwitchHandoff::new(),
+            last_account_ns: crate::kernel::time::monotonic_nanoseconds().ok(),
+            window: super::super::algorithms::arbitration::CpuWindow::new(
+                super::super::configuration::arbitration(),
+            ),
+            dispatch_mode: super::super::algorithms::arbitration::DispatchMode::Ordinary,
+            deadline_generation: 0,
+            armed_deadline_ns: None,
+            fair_floor: 0,
         }
     }
 
@@ -393,16 +241,52 @@ impl CpuScheduler {
         self.table.cpu_authority(self.index, &mut self.authority)
     }
 
-    pub(super) fn local_peek_ready(&mut self) -> Result<Option<queue::ReadyThread>, Error> {
+    // Keep selector scratch out of callers that can run deep in a syscall or
+    // IRQ-tail chain. The emitted frame is bounded by the image stack audit.
+    #[inline(never)]
+    pub(super) fn local_selection(
+        &mut self,
+        current: Option<super::super::algorithms::arbitration::Candidate>,
+    ) -> Result<queue::Selection, Error> {
         let cpu = self.index;
-        let threads = queue::LocalReadyQueueAuthority::new(
+        let now = self.now();
+        let mut threads = queue::LocalReadyQueueAuthority::new(
             self.table.cpu_authority(cpu, &mut self.authority),
         );
-        self.run_queue.peek_next(&threads, cpu)
+        let selection =
+            self.run_queue
+                .peek_next(&mut threads, cpu, now, &mut self.window, current)?;
+        if let Some(floor) = selection.fair_min_pass {
+            self.fair_floor = self.fair_floor.max(floor);
+        }
+        Ok(selection)
+    }
+
+    pub(super) fn local_peek_ready(&mut self) -> Result<Option<queue::ReadyThread>, Error> {
+        self.local_selection(None).map(|selection| selection.ready)
+    }
+
+    pub(super) fn local_take_ready(&mut self, id: ThreadId) -> Result<(), Error> {
+        let cpu = self.index;
+        let membership = self
+            .thread_authority()
+            .with_thread(id, |_thread, schedule| {
+                schedule.ready_queue_links.membership
+            })?;
+        let mut threads = queue::LocalReadyQueueAuthority::new(
+            self.table.cpu_authority(cpu, &mut self.authority),
+        );
+        self.run_queue.remove(&mut threads, id, cpu, membership)
     }
 
     pub(super) fn local_enqueue_ready(&mut self, id: ThreadId, front: bool) -> Result<(), Error> {
         let cpu = self.index;
+        let floor = self.fair_floor;
+        let now = self.now();
+        self.thread_authority()
+            .with_thread_mut(id, |_thread, schedule| {
+                super::runtime::prepare_enqueue(schedule, floor, front, now);
+            })?;
         let mut threads = queue::LocalReadyQueueAuthority::new(
             self.table.cpu_authority(cpu, &mut self.authority),
         );
@@ -414,11 +298,11 @@ impl CpuScheduler {
     }
 
     pub(super) fn local_dequeue_ready(&mut self) -> Result<Option<ThreadId>, Error> {
-        let cpu = self.index;
-        let mut threads = queue::LocalReadyQueueAuthority::new(
-            self.table.cpu_authority(cpu, &mut self.authority),
-        );
-        self.run_queue.dequeue(&mut threads, cpu)
+        let Some(candidate) = self.local_peek_ready()? else {
+            return Ok(None);
+        };
+        self.local_take_ready(candidate.id)?;
+        Ok(Some(candidate.id))
     }
 
     pub(super) fn prepare_local_switch(
@@ -442,12 +326,13 @@ impl CpuScheduler {
                         };
                         schedule.placement = placement;
                         schedule.state = ThreadState::Running;
+                        schedule.auto_migrated = false;
                     }
-                    ThreadState::Idle => {}
+                    ThreadState::Idle => super::super::balance::request(),
                     _ => return Err(Error::InvalidThreadState),
                 }
                 if schedule.fair_slice_expired() {
-                    schedule.replenish_fair_slice(FAIR_QUANTUM_TICKS);
+                    schedule.replenish_fair_slice();
                 }
                 Ok::<_, Error>(thread.context_pointer().cast_const())
             })??;

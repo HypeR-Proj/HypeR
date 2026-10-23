@@ -23,6 +23,8 @@ pub(super) use retention::{
     sys_process_builder_retain, sys_process_retirement_open_view, sys_process_retirement_release,
     sys_retention_info,
 };
+mod scheduling;
+pub(super) use scheduling::{sys_get_scheduling, sys_set_scheduling};
 mod system;
 mod task;
 mod vfs;

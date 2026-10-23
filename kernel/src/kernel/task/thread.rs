@@ -19,8 +19,10 @@ const _: () =
 
 use crate::kernel::mm::stack::KernelStack;
 use crate::kernel::task::policy::{
-    CpuMask, SchedulingClass, SchedulingPolicy, ThreadPlacement, ThreadPriority,
+    BudgetParameters, CpuMask, SchedulingClass, SchedulingParameters, SchedulingPolicy,
+    ThreadPlacement, ThreadPriority,
 };
+use crate::kernel::task::scheduler::algorithms::{BudgetRuntime, FairRuntime, PolicyRuntime};
 use crate::kernel::task::thread_object::{ThreadObject, ThreadObjectSnapshot, ThreadRole};
 use crate::kernel::task::wait::WaitRecord;
 
@@ -188,7 +190,7 @@ pub(super) enum DeferredFifoPlacement {
 pub struct ThreadId(u64);
 
 impl ThreadId {
-    const SLOT_BITS: u32 = 24;
+    pub(super) const SLOT_BITS: u32 = 24;
     const SLOT_MASK: u64 = (1 << Self::SLOT_BITS) - 1;
     const IDENTITY_LIMIT: u64 = u64::MAX >> Self::SLOT_BITS;
 
@@ -340,8 +342,8 @@ pub struct Thread {
     control_queue_links: UnsafeCell<QueueLinks>,
     /// Stable wait resources; arbitration stays in the CPU-owned schedule.
     wait_context: super::ThreadWaitContext,
-    /// Monotonic scheduler ticks charged while this Thread is current.
-    runtime_ticks: AtomicU64,
+    /// Monotonic execution nanoseconds charged while this Thread is current.
+    runtime_ns: AtomicU64,
     resources: Box<ThreadResources>,
 }
 
@@ -359,6 +361,22 @@ struct ThreadIdentity {
     name: hyper::sync::InterruptSpinLock<ThreadNameSnapshot, crate::hal::irq::LocalMask>,
 }
 
+/// Intrusive ready-index links owned by the same scheduler transaction.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct ReadyTreeLinks {
+    pub(super) left: Option<ThreadId>,
+    pub(super) right: Option<ThreadId>,
+    pub(super) height: u8,
+}
+
+impl ReadyTreeLinks {
+    pub(super) const EMPTY: Self = Self {
+        left: None,
+        right: None,
+        height: 1,
+    };
+}
+
 /// State mutated only by scheduler transactions.
 ///
 /// Keeping queue topology, placement, policy, and wait/migration state in one
@@ -369,7 +387,14 @@ struct ThreadIdentity {
 pub(super) struct ThreadScheduleState {
     pub(super) placement: ThreadPlacement,
     pub(super) scheduling: SchedulingPolicy,
-    fair_runtime: FairRuntime,
+    pub(super) parameters: SchedulingParameters,
+    pub(super) runtime: PolicyRuntime,
+    pub(super) ready_turn: u64,
+    pub(super) ready_tree: ReadyTreeLinks,
+    pub(super) budget_history: Option<(BudgetRuntime, BudgetParameters)>,
+    pub(super) fair_history: Option<(FairRuntime, u64)>,
+    pub(super) fair_origin: Option<u128>,
+    pub(super) auto_migrated: bool,
     pub(super) deferred_fifo_placement: Option<DeferredFifoPlacement>,
     pub(super) state: ThreadState,
     pub(super) ready_queue_links: QueueLinks,
@@ -379,33 +404,65 @@ pub(super) struct ThreadScheduleState {
 
 impl ThreadScheduleState {
     pub(super) fn fair_slice_expired(&self) -> bool {
-        self.scheduling.class() == SchedulingClass::Fair && self.fair_runtime.slice_remaining == 0
+        matches!(self.runtime, PolicyRuntime::Fair(runtime) if runtime.remaining_ns() == 0)
     }
 
     pub(super) fn scheduling_class(&self) -> SchedulingClass {
         self.scheduling.class()
     }
 
-    pub(super) fn account_fair_ticks(&mut self, elapsed: u64, quantum: u64) -> bool {
-        if self.scheduling_class() != SchedulingClass::Fair {
-            return false;
+    pub(super) fn replenish_fair_slice(&mut self) {
+        if matches!(self.runtime, PolicyRuntime::Fair(_)) {
+            self.runtime.finish_turn(self.parameters);
         }
-        if self.fair_runtime.slice_remaining == 0 {
-            self.fair_runtime.slice_remaining = quantum;
-        }
-        self.fair_runtime.slice_remaining =
-            self.fair_runtime.slice_remaining.saturating_sub(elapsed);
-        self.fair_runtime.slice_remaining == 0
-    }
-
-    pub(super) fn replenish_fair_slice(&mut self, quantum: u64) {
-        self.fair_runtime.slice_remaining = quantum;
     }
 
     pub(super) fn expire_fair_slice(&mut self) {
-        if self.scheduling_class() == SchedulingClass::Fair {
-            self.fair_runtime.slice_remaining = 0;
+        if let PolicyRuntime::Fair(runtime) = &mut self.runtime {
+            runtime.expire_turn();
         }
+    }
+
+    /// Retain each algorithm's ledger even while another algorithm is active.
+    /// Parameter edits cannot mint a fresh turn or discard accounted execution.
+    pub(super) fn install_parameters(&mut self, parameters: SchedulingParameters) {
+        if self.parameters == parameters {
+            return;
+        }
+        match self.runtime {
+            PolicyRuntime::Budget(runtime) => {
+                if let Some(budget) = self.parameters.budget_parameters() {
+                    self.budget_history = Some((runtime, budget));
+                }
+            }
+            PolicyRuntime::Fair(runtime) => {
+                self.fair_history = Some((runtime, self.parameters.quantum_ns()));
+            }
+            _ => {}
+        }
+        self.runtime = match parameters.policy() {
+            SchedulingPolicy::Budget => match (self.budget_history, parameters.budget_parameters())
+            {
+                (Some((mut runtime, old)), Some(new)) => {
+                    if !runtime.reconfigure(old, new) {
+                        hyper::debug::invariant_failure("scheduler budget period changed");
+                    }
+                    PolicyRuntime::Budget(runtime)
+                }
+                _ => PolicyRuntime::new(parameters),
+            },
+            SchedulingPolicy::Fair => match self.fair_history {
+                Some((mut runtime, old_quantum)) => {
+                    runtime.reconfigure(old_quantum, parameters.quantum_ns());
+                    PolicyRuntime::Fair(runtime)
+                }
+                None => PolicyRuntime::new(parameters),
+            },
+            _ => PolicyRuntime::new(parameters),
+        };
+        self.scheduling = parameters.policy();
+        self.parameters = parameters;
+        self.deferred_fifo_placement = None;
     }
 }
 
@@ -469,28 +526,13 @@ impl ThreadResourceOwnership {
     }
 }
 
-/// Runtime owned by the replaceable Fair scheduling implementation.
-///
-/// A zero slice denotes a new or expired entity. Scheduler policy replenishes
-/// it only when the entity is selected or continues without a ready peer. A
-/// voluntary yield resets the slice; blocking and RT-class interruption retain
-/// it so neither event grants an unbounded succession of fresh quanta.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct FairRuntime {
-    slice_remaining: u64,
-}
-
-impl FairRuntime {
-    const NEW: Self = Self { slice_remaining: 0 };
-}
-
 impl Thread {
-    pub(super) fn account_runtime_ticks(&self, elapsed: u64) {
-        self.runtime_ticks.fetch_add(elapsed, Ordering::Relaxed);
+    pub(super) fn account_runtime_ns(&self, elapsed: u64) {
+        self.runtime_ns.fetch_add(elapsed, Ordering::Relaxed);
     }
 
-    pub(super) fn runtime_ticks(&self) -> u64 {
-        self.runtime_ticks.load(Ordering::Relaxed)
+    pub(super) fn runtime_ns(&self) -> u64 {
+        self.runtime_ns.load(Ordering::Relaxed)
     }
 
     pub(super) fn role(&self) -> ThreadRole {
@@ -565,7 +607,14 @@ impl Thread {
             schedule: UnsafeCell::new(ThreadScheduleState {
                 placement,
                 scheduling,
-                fair_runtime: FairRuntime::NEW,
+                parameters: super::scheduler::default_parameters(scheduling),
+                runtime: PolicyRuntime::new(super::scheduler::default_parameters(scheduling)),
+                ready_turn: 0,
+                ready_tree: ReadyTreeLinks::EMPTY,
+                budget_history: None,
+                fair_history: None,
+                fair_origin: None,
+                auto_migrated: false,
                 deferred_fifo_placement: None,
                 state,
                 ready_queue_links: QueueLinks::EMPTY,
@@ -574,7 +623,7 @@ impl Thread {
             }),
             control_queue_links: UnsafeCell::new(QueueLinks::EMPTY),
             wait_context: super::ThreadWaitContext::new(),
-            runtime_ticks: AtomicU64::new(0),
+            runtime_ns: AtomicU64::new(0),
             resources,
         }
     }
@@ -699,7 +748,7 @@ impl Thread {
                 ownership.take_object_charge(),
             )?,
             placement,
-            SchedulingPolicy::fair(),
+            SchedulingPolicy::Budget,
             ThreadState::Dormant,
             Self::allocate_resources(
                 scheduling_context,
@@ -749,7 +798,7 @@ impl Thread {
         self.object.user_thread()
     }
 
-    fn stored_schedule(&self) -> &ThreadScheduleState {
+    pub(super) fn stored_schedule(&self) -> &ThreadScheduleState {
         if self.schedule_owner != ScheduleOwner::Coordinator {
             hyper::debug::invariant_failure("task::thread::stored_schedule invariant");
         }
@@ -916,20 +965,13 @@ impl Thread {
             return false;
         }
         let schedule = self.stored_schedule_mut();
-        schedule.scheduling = policy;
-        schedule.fair_runtime = FairRuntime::NEW;
-        schedule.deferred_fifo_placement = None;
+        schedule.install_parameters(super::scheduler::default_parameters(policy));
         true
     }
 
     pub(super) fn fair_slice_expired(&self) -> bool {
         let schedule = self.stored_schedule();
-        schedule.scheduling.class() == SchedulingClass::Fair
-            && schedule.fair_runtime.slice_remaining == 0
-    }
-
-    pub(super) fn deferred_fifo_placement(&self) -> Option<DeferredFifoPlacement> {
-        self.stored_schedule().deferred_fifo_placement
+        schedule.fair_slice_expired()
     }
 
     pub(super) fn queue_links(&self) -> QueueLinks {

@@ -374,12 +374,24 @@ impl NativeAddressSpace {
     /// Prepares private backing before any kernel or userspace write can use it.
     /// The immutable old mapping set keeps shared pages alive through every
     /// active-root replacement and inactive-resident invalidation acknowledgement.
+    #[inline(never)]
     pub(crate) fn resolve_private_write(&self, destination: UserSlice) -> Result<(), Error> {
         self.populate_file_range(destination)?;
-        if let Some(prepared) = self.logical.prepare_private_write(destination)? {
+        if let Some(prepared) = self.prepare_private_write_change(destination)? {
             self.prepare_change(prepared)?.commit()?;
         }
         Ok(())
+    }
+
+    // Mapping traversal needs temporary stack space. Release that frame before
+    // constructing page tables or yielding to acquire the shootdown transaction.
+    // The returned logical owner retains every prepared backing resource.
+    #[inline(never)]
+    fn prepare_private_write_change(
+        &self,
+        destination: UserSlice,
+    ) -> Result<Option<LogicalPrepared<'_>>, Error> {
+        Ok(self.logical.prepare_private_write(destination)?)
     }
 
     /// Resolves only an admitted private mapping, including a stale fault after
@@ -399,11 +411,21 @@ impl NativeAddressSpace {
     }
 
     /// Only stable file identity and range metadata survive clean-page eviction.
+    #[inline(never)]
     pub(crate) fn populate_file_range(&self, range: UserSlice) -> Result<(), Error> {
-        if let Some(prepared) = self.logical.prepare_file_population(range)? {
+        if let Some(prepared) = self.prepare_file_population_change(range)? {
             self.prepare_change(prepared)?.commit()?;
         }
         Ok(())
+    }
+
+    // Keep file-population scratch out of the nested COW and commit callers.
+    #[inline(never)]
+    fn prepare_file_population_change(
+        &self,
+        range: UserSlice,
+    ) -> Result<Option<LogicalPrepared<'_>>, Error> {
+        Ok(self.logical.prepare_file_population(range)?)
     }
 
     pub(crate) fn resolve_file_fault(

@@ -235,6 +235,7 @@ fn configuration() -> Configuration {
         memory_bytes: 128 * 1024 * 1024,
         bootargs: "console=ttyAMA0".into(),
         affinity: Vec::new(),
+        scheduling: None,
     }
 }
 
@@ -298,7 +299,7 @@ fn runtime_arguments_preserve_policy_and_long_command_lines() {
     extra.push("unexpected".into());
     assert!(Configuration::from_runtime_arguments(extra).is_err());
     // No architecture is carried in the runtime's policy arguments.
-    assert_eq!(args.len(), 4);
+    assert_eq!(args.len(), 5);
 }
 
 #[test]
@@ -371,4 +372,32 @@ fn transport_defaults_to_mmio_and_pci_roundtrips_without_bootarg_policy() {
     );
     value["virtio-transport"] = serde_json::json!("legacy-pci");
     assert!(serde_json::from_value::<Configuration>(value).is_err());
+}
+
+#[test]
+fn scheduling_is_validated_and_preserved_across_runtime_arguments() {
+    for scheduling in [
+        serde_json::json!({"band":64,"role":"priority"}),
+        serde_json::json!({"band":128,"role":"ordinary","policy":{"kind":"budget","budget_ns":14_000_000,"period_ns":20_000_000,"burst_ns":10_000_000}}),
+        serde_json::json!({"band":128,"role":"protected","policy":{"kind":"fair","weight":16,"quantum_ns":1_000_000}}),
+    ] {
+        let mut config = configuration();
+        config.scheduling = Some(serde_json::from_value(scheduling).unwrap());
+        assert!(config.image_configuration().is_ok());
+        assert_eq!(
+            Configuration::from_runtime_arguments(config.runtime_arguments().unwrap()).unwrap(),
+            config
+        );
+    }
+    for scheduling in [
+        serde_json::json!(null),
+        serde_json::json!({"band":64,"role":"priority","policy":null}),
+        serde_json::json!({"band":64,"role":"priority","policy":{"kind":"budget","budget_ns":11,"period_ns":10,"burst_ns":1}}),
+        serde_json::json!({"band":64,"role":"priority","policy":{"kind":"fair","weight":0,"quantum_ns":1}}),
+    ] {
+        let mut source = serde_json::to_value(configuration()).unwrap();
+        source["scheduling"] = scheduling;
+        let parsed = serde_json::from_value::<Configuration>(source);
+        assert!(parsed.is_err() || parsed.unwrap().image_configuration().is_err());
+    }
 }

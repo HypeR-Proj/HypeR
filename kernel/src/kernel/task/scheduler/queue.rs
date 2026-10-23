@@ -1,22 +1,33 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Intrusive primitives and class-aware per-CPU ready queues.
+//! CPU-owned intrusive ready queues with allocation-free algorithm indices.
 //!
-//! Class ordering is resolved here, while each class owns its queue policy.
-//! The scheduler state machine never compares parameters from unrelated
-//! scheduling classes.
+//! Linked lists retain residence and control-queue invariants. AVL indices
+//! supply each algorithm/role candidate to the separate arbitration policy.
+
+use alloc::boxed::Box;
 
 use hyper::cpu::CpuIndex;
 
 use super::Error;
+use super::algorithms::PolicyRuntime;
+use super::algorithms::arbitration::{Candidate, CpuWindow, Demand, DispatchKey};
+use super::algorithms::ready_index::{Links, MutationScratch, Nodes, Tree};
 use super::registry::{CpuThreadTableAuthority, ThreadControlAuthority, ThreadTableWriteAuthority};
-use crate::kernel::task::policy::{PRIORITY_LEVELS, SchedulingPolicy, ThreadPriority};
-use crate::kernel::task::thread::{QueueLinks, QueueMembership, ThreadId};
+use crate::kernel::task::policy::{
+    FairBackend, PRIORITY_LEVELS, SchedulingParameters, SchedulingPolicy, SchedulingRole,
+};
+use crate::kernel::task::thread::{QueueLinks, QueueMembership, ReadyTreeLinks, ThreadId};
 use crate::kernel::task::wait::ThreadQueue;
 
-const PRIORITIES_PER_BITMAP_WORD: usize = u64::BITS as usize;
-const PRIORITY_BITMAP_WORDS: usize = PRIORITY_LEVELS.div_ceil(PRIORITIES_PER_BITMAP_WORD);
+pub(super) type QueueScratch = Box<MutationScratch<ThreadId>>;
+
+const ROLE_COUNT: usize = 3;
+const FAIR: usize = ROLE_COUNT;
+const BUDGET_READY: usize = ROLE_COUNT * 2;
+const BUDGET_EXHAUSTED: usize = ROLE_COUNT * 3;
+const INDEX_COUNT: usize = ROLE_COUNT * 4;
 
 /// Runnable classes owned by one CPU.
 ///
@@ -25,12 +36,26 @@ const PRIORITY_BITMAP_WORDS: usize = PRIORITY_LEVELS.div_ceil(PRIORITIES_PER_BIT
 pub(super) struct CpuRunQueue {
     realtime: FixedPriorityFifo,
     fair: FairQueue,
+    indices: [Tree<ThreadId>; INDEX_COUNT],
+    // All indices share one path: their mutations are synchronous and the
+    // CPU queue lock excludes both remote access and local IRQ reentry.
+    scratch: QueueScratch,
+    budget_epoch: Option<u64>,
+    budget_threads: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct ReadyThread {
     pub id: ThreadId,
     pub policy: SchedulingPolicy,
+    pub key: DispatchKey,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct Selection {
+    pub ready: Option<ReadyThread>,
+    pub demand: Demand,
+    pub fair_min_pass: Option<u128>,
 }
 
 /// Combined transition-lock and CPU-lock authority for one ready queue.
@@ -99,64 +124,113 @@ impl<'table, 'cpu> ReadyQueueAuthority<'table, 'cpu> {
             Some(_) => Err(Error::InvalidThreadState),
         }
     }
-
-    fn scheduling_policy(&self, id: ThreadId) -> Result<SchedulingPolicy, Error> {
-        let owner = self
-            .coordinator
-            .with_thread(id, |thread| thread.schedule_owner_cpu())?;
-        match owner {
-            None => self
-                .coordinator
-                .with_thread(id, |thread| thread.scheduling_policy()),
-            Some(cpu) if cpu == self.cpu.cpu() => self
-                .cpu
-                .with_thread(id, |_thread, schedule| schedule.scheduling),
-            Some(_) => Err(Error::InvalidThreadState),
-        }
-    }
 }
 
 impl CpuRunQueue {
-    pub const fn new() -> Self {
-        Self {
-            realtime: FixedPriorityFifo::new(),
-            fair: FairQueue::new(),
-        }
+    pub fn prepare_scratch() -> Result<QueueScratch, Error> {
+        hyper::mm::try_box(MutationScratch::new(ThreadId::BOOTSTRAP)).map_err(|_| Error::Allocation)
     }
 
+    pub fn new(scratch: QueueScratch) -> Self {
+        Self {
+            scratch,
+            realtime: FixedPriorityFifo::new(),
+            fair: FairQueue::new(),
+            indices: [Tree::new(); INDEX_COUNT],
+            budget_epoch: None,
+            budget_threads: 0,
+        }
+    }
     pub const fn len(&self) -> usize {
         self.realtime.len() + self.fair.len()
     }
-
-    pub const fn has_fair_threads(&self) -> bool {
-        self.fair.len() != 0
+    pub const fn budget_len(&self) -> usize {
+        self.budget_threads
     }
-
     pub const fn real_time_len(&self) -> usize {
         self.realtime.len()
     }
-
     pub const fn fair_len(&self) -> usize {
         self.fair.len()
     }
 
-    /// Validates and returns the next runnable thread in class order.
+    /// Selects one minimum from each algorithm/role group, then arbitrates.
+    /// There is no walk over all runnable Threads on the dispatch hot path.
+    /// Expired Budget nodes are reactivated lazily once per common period.
     pub fn peek_next(
-        &self,
-        threads: &impl ReadyQueueAccess,
+        &mut self,
+        threads: &mut impl ReadyQueueAccess,
         cpu: CpuIndex,
-    ) -> Result<Option<ReadyThread>, Error> {
-        if let Some((id, priority)) = self.realtime.peek_highest(threads, cpu)? {
-            return Ok(Some(ReadyThread {
-                id,
-                policy: SchedulingPolicy::fifo(priority),
-            }));
+        now: u64,
+        window: &mut CpuWindow,
+        current: Option<Candidate>,
+    ) -> Result<Selection, Error> {
+        let epoch = now / window.period_ns();
+        if self.budget_epoch != Some(epoch) {
+            for role in 0..ROLE_COUNT {
+                let exhausted = role + BUDGET_EXHAUSTED;
+                while let Some(id) = self.indices[exhausted].first(&mut IndexNodes(threads))? {
+                    self.indices[exhausted]
+                        .remove(&mut IndexNodes(threads), id, &mut self.scratch)
+                        .unwrap_or_else(|_| queue_invariant());
+                    threads.refresh_runtime(id, now)?;
+                    self.indices[role + BUDGET_READY]
+                        .insert(&mut IndexNodes(threads), id, &mut self.scratch)
+                        .unwrap_or_else(|_| queue_invariant());
+                }
+            }
+            self.budget_epoch = Some(epoch);
         }
-        self.fair.peek(threads, cpu).map(|candidate| {
-            candidate.map(|id| ReadyThread {
-                id,
-                policy: SchedulingPolicy::fair(),
-            })
+        // Keep only identities across the demand/selection passes. A complete
+        // Candidate contains policy and accounting values; retaining twelve
+        // copies (and an array iterator's copies) wastes scarce kernel stack.
+        let mut heads = [None; INDEX_COUNT];
+        let mut demand = Demand::default();
+        let mut fair_min_pass = current
+            .filter(|c| c.parameters.policy() == SchedulingPolicy::Fair)
+            .map(|c| c.fair_pass);
+        if let Some(candidate) = current {
+            add_demand(&mut demand, candidate);
+        }
+        for (index, tree) in self.indices.iter().enumerate() {
+            let Some(id) = tree.first(&mut IndexNodes(threads))? else {
+                continue;
+            };
+            let links = threads.queue_links(id)?;
+            if ready_cpu(links.membership) != Some(cpu) {
+                return Err(Error::QueueCorrupted);
+            }
+            threads.refresh_runtime(id, now)?;
+            let snapshot = threads.snapshot(id)?;
+            let candidate = snapshot.candidate();
+            add_demand(&mut demand, candidate);
+            if candidate.parameters.policy() == SchedulingPolicy::Fair {
+                fair_min_pass = Some(
+                    fair_min_pass.map_or(candidate.fair_pass, |old| old.min(candidate.fair_pass)),
+                );
+            }
+            heads[index] = Some(id);
+        }
+        let mut ready: Option<ReadyThread> = None;
+        for id in heads.iter().flatten().copied() {
+            // The same CPU lock owns both passes. No queue, runtime or policy
+            // can change while demand is assembled and these heads are read.
+            let candidate = threads.snapshot(id)?.candidate();
+            let Some((key, _)) = window.candidate_key(now, candidate, demand) else {
+                continue;
+            };
+            if ready.is_none_or(|old| (key, id.get()) < (old.key, old.id.get())) {
+                ready = Some(ReadyThread {
+                    id,
+                    policy: candidate.parameters.policy(),
+                    key,
+                });
+            }
+        }
+        Ok(Selection {
+            ready,
+            demand,
+            fair_min_pass,
         })
     }
 
@@ -166,42 +240,54 @@ impl CpuRunQueue {
         id: ThreadId,
         cpu: CpuIndex,
     ) -> Result<(), Error> {
-        match threads.scheduling_policy(id)? {
-            SchedulingPolicy::Fifo { priority } => {
-                self.realtime.enqueue(threads, id, cpu, priority.get())
-            }
-            SchedulingPolicy::Fair => self.fair.enqueue(threads, id, cpu),
-            SchedulingPolicy::Idle => Err(Error::InvalidThreadState),
-        }
+        self.insert(threads, id, cpu, false)
     }
-
     pub fn enqueue_front(
         &mut self,
         threads: &mut impl ReadyQueueAccess,
         id: ThreadId,
         cpu: CpuIndex,
     ) -> Result<(), Error> {
-        match threads.scheduling_policy(id)? {
-            SchedulingPolicy::Fifo { priority } => {
-                self.realtime
-                    .enqueue_front(threads, id, cpu, priority.get())
-            }
-            SchedulingPolicy::Fair => self.fair.enqueue_front(threads, id, cpu),
-            SchedulingPolicy::Idle => Err(Error::InvalidThreadState),
-        }
+        self.insert(threads, id, cpu, true)
     }
-
-    pub fn dequeue(
+    fn insert(
         &mut self,
         threads: &mut impl ReadyQueueAccess,
+        id: ThreadId,
         cpu: CpuIndex,
-    ) -> Result<Option<ThreadId>, Error> {
-        if let Some(id) = self.realtime.dequeue(threads, cpu)? {
-            return Ok(Some(id));
+        front: bool,
+    ) -> Result<(), Error> {
+        let snapshot = threads.snapshot(id)?;
+        let index = index_for(snapshot)?;
+        match snapshot.parameters.policy() {
+            SchedulingPolicy::Fifo { priority } => {
+                if front {
+                    self.realtime
+                        .enqueue_front(threads, id, cpu, priority.get())?;
+                } else {
+                    self.realtime.enqueue(threads, id, cpu, priority.get())?;
+                }
+            }
+            SchedulingPolicy::Fair | SchedulingPolicy::Budget => {
+                if front {
+                    self.fair.enqueue_front(threads, id, cpu)?;
+                } else {
+                    self.fair.enqueue(threads, id, cpu)?;
+                }
+            }
+            SchedulingPolicy::Idle => return Err(Error::InvalidThreadState),
         }
-        self.fair.dequeue(threads, cpu)
+        self.indices[index]
+            .insert(&mut IndexNodes(threads), id, &mut self.scratch)
+            .unwrap_or_else(|_| queue_invariant());
+        if snapshot.parameters.policy() == SchedulingPolicy::Budget {
+            self.budget_threads += 1;
+        }
+        Ok(())
     }
 
+    /// Removes the already selected identity; never reselect across a period
+    /// boundary between the scheduling decision and ownership transfer.
     pub fn remove(
         &mut self,
         threads: &mut impl ReadyQueueAccess,
@@ -209,24 +295,165 @@ impl CpuRunQueue {
         cpu: CpuIndex,
         membership: QueueMembership,
     ) -> Result<(), Error> {
+        let snapshot = threads.snapshot(id)?;
+        let mut index = index_for(snapshot)?;
+        if !self.indices[index].contains(&mut IndexNodes(threads), id)? {
+            if snapshot.parameters.policy() != SchedulingPolicy::Budget {
+                return Err(Error::QueueCorrupted);
+            }
+            index = if index < BUDGET_EXHAUSTED {
+                index + ROLE_COUNT
+            } else {
+                index - ROLE_COUNT
+            };
+            if !self.indices[index].contains(&mut IndexNodes(threads), id)? {
+                return Err(Error::QueueCorrupted);
+            }
+        }
         match membership {
             QueueMembership::ReadyRealTime {
                 cpu: member_cpu,
                 priority,
-            } if member_cpu == cpu => self.realtime.remove(threads, id, cpu, priority),
-            QueueMembership::ReadyFair { cpu: member_cpu } if member_cpu == cpu => {
-                self.fair.remove(threads, id, cpu)
+            } if member_cpu == cpu => {
+                self.realtime.remove(threads, id, cpu, priority)?;
             }
-            _ => Err(Error::QueueCorrupted),
+            QueueMembership::ReadyFair { cpu: member_cpu } if member_cpu == cpu => {
+                self.fair.remove(threads, id, cpu)?;
+            }
+            _ => return Err(Error::QueueCorrupted),
+        }
+        self.indices[index]
+            .remove(&mut IndexNodes(threads), id, &mut self.scratch)
+            .unwrap_or_else(|_| queue_invariant());
+        if snapshot.parameters.policy() == SchedulingPolicy::Budget {
+            self.budget_threads -= 1;
+        }
+        Ok(())
+    }
+}
+
+fn role_index(role: SchedulingRole) -> usize {
+    match role {
+        SchedulingRole::Ordinary => 0,
+        SchedulingRole::Priority => 1,
+        SchedulingRole::Protected => 2,
+    }
+}
+
+fn index_for(snapshot: ReadySnapshot) -> Result<usize, Error> {
+    let role = role_index(snapshot.parameters.role());
+    match snapshot.parameters.policy() {
+        SchedulingPolicy::Fifo { .. } => Ok(role),
+        SchedulingPolicy::Fair => Ok(FAIR + role),
+        SchedulingPolicy::Budget => Ok(if snapshot.budget_available() {
+            BUDGET_READY + role
+        } else {
+            BUDGET_EXHAUSTED + role
+        }),
+        SchedulingPolicy::Idle => Err(Error::InvalidThreadState),
+    }
+}
+
+fn add_demand(demand: &mut Demand, candidate: Candidate) {
+    match candidate.parameters.policy() {
+        SchedulingPolicy::Idle => return,
+        SchedulingPolicy::Budget => {
+            demand.any_budget = true;
+            demand.eligible_budget |= candidate.budget_available;
+        }
+        _ => demand.fair = true,
+    }
+    demand.window_sensitive |= candidate.parameters.role() == SchedulingRole::Priority
+        || candidate.parameters.policy() == SchedulingPolicy::Fair;
+    demand.protected |= candidate.parameters.role() == SchedulingRole::Protected
+        && (candidate.parameters.policy() != SchedulingPolicy::Budget
+            || candidate.budget_available);
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ReadySnapshot {
+    parameters: SchedulingParameters,
+    runtime: PolicyRuntime,
+    turn: u64,
+}
+impl ReadySnapshot {
+    fn budget_available(self) -> bool {
+        matches!(self.runtime, PolicyRuntime::Budget(runtime) if runtime.remaining_ns() != 0)
+    }
+    fn candidate(self) -> Candidate {
+        Candidate {
+            parameters: self.parameters,
+            fair_pass: self.runtime.candidate_key(self.parameters, self.turn).0,
+            turn: self.turn,
+            budget_available: self.budget_available(),
+        }
+    }
+    fn from_schedule(schedule: &crate::kernel::task::thread::ThreadScheduleState) -> Self {
+        Self {
+            parameters: schedule.parameters,
+            runtime: schedule.runtime,
+            turn: schedule.ready_turn,
         }
     }
 }
 
-/// Initial backend for the fair scheduling class.
-///
-/// This FIFO contains only ready threads. Running-thread slice accounting is
-/// owned by scheduler state, so replacing this backend does not affect generic
-/// intrusive queue or context-switch machinery.
+struct IndexNodes<'a, T>(&'a mut T);
+
+type ReadyIndexKey = (u128, u8, u64, u64);
+
+fn ready_index_key(
+    schedule: &crate::kernel::task::thread::ThreadScheduleState,
+    id: ThreadId,
+) -> ReadyIndexKey {
+    let algorithm = match schedule.parameters.policy() {
+        SchedulingPolicy::Fifo { priority } => u128::from(priority.get()),
+        SchedulingPolicy::Fair if schedule.parameters.fair_backend() == FairBackend::Stride => {
+            schedule
+                .runtime
+                .candidate_key(schedule.parameters, schedule.ready_turn)
+                .0
+        }
+        _ => u128::from(schedule.ready_turn),
+    };
+    (
+        algorithm,
+        schedule.parameters.band().get(),
+        schedule.ready_turn,
+        id.get(),
+    )
+}
+
+impl<T: ReadyQueueAccess> Nodes for IndexNodes<'_, T> {
+    type Id = ThreadId;
+    type Key = ReadyIndexKey;
+    type Error = Error;
+    fn key(&mut self, id: ThreadId) -> Result<Self::Key, Error> {
+        self.0.tree_key(id)
+    }
+    fn links(&mut self, id: ThreadId) -> Result<Links<ThreadId>, Error> {
+        let links = self.0.tree_links(id)?;
+        Ok(Links {
+            left: links.left,
+            right: links.right,
+            height: links.height,
+        })
+    }
+    fn set_links(&mut self, id: ThreadId, links: Links<ThreadId>) -> Result<(), Error> {
+        self.0.set_tree_links(
+            id,
+            ReadyTreeLinks {
+                left: links.left,
+                right: links.right,
+                height: links.height,
+            },
+        )
+    }
+    fn corrupt(&self) -> Error {
+        Error::QueueCorrupted
+    }
+}
+
+/// Residence list shared by Fair and Budget; dispatch ordering lives in indices.
 struct FairQueue {
     queue: ThreadQueue,
 }
@@ -240,25 +467,6 @@ impl FairQueue {
 
     const fn len(&self) -> usize {
         self.queue.len
-    }
-
-    fn peek(
-        &self,
-        threads: &impl ReadyQueueAccess,
-        cpu: CpuIndex,
-    ) -> Result<Option<ThreadId>, Error> {
-        let Some(id) = self.queue.head else {
-            if self.queue.len == 0 && self.queue.tail.is_none() {
-                return Ok(None);
-            }
-            return Err(Error::QueueCorrupted);
-        };
-        let links = queue_links(threads, id)?;
-        if self.queue.len == 0 || links.membership != (QueueMembership::ReadyFair { cpu }) {
-            return Err(Error::QueueCorrupted);
-        }
-        validate_neighbors(threads, &self.queue, links, id)?;
-        Ok(Some(id))
     }
 
     fn enqueue(
@@ -291,14 +499,6 @@ impl FairQueue {
         Ok(())
     }
 
-    fn dequeue(
-        &mut self,
-        threads: &mut impl ReadyQueueAccess,
-        cpu: CpuIndex,
-    ) -> Result<Option<ThreadId>, Error> {
-        pop(threads, &mut self.queue, QueueMembership::ReadyFair { cpu })
-    }
-
     fn remove(
         &mut self,
         threads: &mut impl ReadyQueueAccess,
@@ -316,7 +516,6 @@ impl FairQueue {
 
 struct FixedPriorityFifo {
     queues: [ThreadQueue; PRIORITY_LEVELS],
-    bitmap: [u64; PRIORITY_BITMAP_WORDS],
     len: usize,
 }
 
@@ -324,35 +523,12 @@ impl FixedPriorityFifo {
     pub const fn new() -> Self {
         Self {
             queues: [ThreadQueue::new(); PRIORITY_LEVELS],
-            bitmap: [0; PRIORITY_BITMAP_WORDS],
             len: 0,
         }
     }
 
     pub const fn len(&self) -> usize {
         self.len
-    }
-
-    fn peek_highest(
-        &self,
-        threads: &impl ReadyQueueAccess,
-        cpu: CpuIndex,
-    ) -> Result<Option<(ThreadId, ThreadPriority)>, Error> {
-        let Some(priority) = self.highest_ready_priority() else {
-            return Ok(None);
-        };
-        let queue = self.queues.get(priority).ok_or(Error::QueueCorrupted)?;
-        let id = queue.head.ok_or(Error::QueueCorrupted)?;
-        let links = queue_links(threads, id)?;
-        let membership = QueueMembership::ReadyRealTime {
-            cpu,
-            priority: priority as u8,
-        };
-        if links.membership != membership || queue.len == 0 {
-            return Err(Error::QueueCorrupted);
-        }
-        validate_neighbors(threads, queue, links, id)?;
-        Ok(Some((id, ThreadPriority::new(priority as u8))))
     }
 
     pub fn enqueue(
@@ -369,7 +545,6 @@ impl FixedPriorityFifo {
             .get_mut(usize::from(priority))
             .ok_or(Error::QueueCorrupted)?;
         push(threads, queue, id, membership)?;
-        self.mark_non_empty(priority);
         self.len = new_len;
         Ok(())
     }
@@ -388,31 +563,8 @@ impl FixedPriorityFifo {
             .get_mut(usize::from(priority))
             .ok_or(Error::QueueCorrupted)?;
         push_front(threads, queue, id, membership)?;
-        self.mark_non_empty(priority);
         self.len = new_len;
         Ok(())
-    }
-
-    pub fn dequeue(
-        &mut self,
-        threads: &mut impl ReadyQueueAccess,
-        cpu: CpuIndex,
-    ) -> Result<Option<ThreadId>, Error> {
-        let Some(priority) = self.highest_ready_priority() else {
-            return Ok(None);
-        };
-        let membership = QueueMembership::ReadyRealTime {
-            cpu,
-            priority: priority as u8,
-        };
-        let new_len = self.len.checked_sub(1).ok_or(Error::QueueCorrupted)?;
-        let queue = self.queues.get_mut(priority).ok_or(Error::QueueCorrupted)?;
-        let id = pop(threads, queue, membership)?.ok_or(Error::QueueCorrupted)?;
-        self.len = new_len;
-        if self.queues[priority].len == 0 {
-            self.mark_empty(priority as u8);
-        }
-        Ok(Some(id))
     }
 
     pub fn remove(
@@ -434,31 +586,7 @@ impl FixedPriorityFifo {
             QueueMembership::ReadyRealTime { cpu, priority },
         )?;
         self.len = new_len;
-        let queue_empty = queue.len == 0;
-        if queue_empty {
-            self.mark_empty(priority);
-        }
         Ok(())
-    }
-
-    fn mark_non_empty(&mut self, priority: u8) {
-        let priority = usize::from(priority);
-        let word = priority / PRIORITIES_PER_BITMAP_WORD;
-        let bit = priority % PRIORITIES_PER_BITMAP_WORD;
-        self.bitmap[word] |= 1u64 << bit;
-    }
-
-    fn mark_empty(&mut self, priority: u8) {
-        let priority = usize::from(priority);
-        let word = priority / PRIORITIES_PER_BITMAP_WORD;
-        let bit = priority % PRIORITIES_PER_BITMAP_WORD;
-        self.bitmap[word] &= !(1u64 << bit);
-    }
-
-    fn highest_ready_priority(&self) -> Option<usize> {
-        self.bitmap.iter().position(|word| *word != 0).map(|word| {
-            word * PRIORITIES_PER_BITMAP_WORD + self.bitmap[word].trailing_zeros() as usize
-        })
     }
 }
 
@@ -522,18 +650,6 @@ fn push(
     queue.tail = Some(id);
     queue.len = new_len;
     Ok(())
-}
-
-fn pop(
-    threads: &mut impl ThreadQueueAuthority,
-    queue: &mut ThreadQueue,
-    membership: QueueMembership,
-) -> Result<Option<ThreadId>, Error> {
-    let Some(id) = queue.head else {
-        return Ok(None);
-    };
-    remove(threads, queue, id, membership)?;
-    Ok(Some(id))
 }
 
 fn remove(
@@ -712,7 +828,11 @@ pub(super) trait ThreadQueueAuthority: ThreadReadAuthority {
 }
 
 pub(super) trait ReadyQueueAccess: ThreadQueueAuthority {
-    fn scheduling_policy(&self, id: ThreadId) -> Result<SchedulingPolicy, Error>;
+    fn snapshot(&mut self, id: ThreadId) -> Result<ReadySnapshot, Error>;
+    fn tree_key(&mut self, id: ThreadId) -> Result<ReadyIndexKey, Error>;
+    fn tree_links(&mut self, id: ThreadId) -> Result<ReadyTreeLinks, Error>;
+    fn set_tree_links(&mut self, id: ThreadId, links: ReadyTreeLinks) -> Result<(), Error>;
+    fn refresh_runtime(&mut self, id: ThreadId, now: u64) -> Result<(), Error>;
 }
 
 impl ThreadReadAuthority for ControlQueueAuthority<'_> {
@@ -914,8 +1034,22 @@ impl ThreadQueueAuthority for ReadyQueueAuthority<'_, '_> {
 }
 
 impl ReadyQueueAccess for ReadyQueueAuthority<'_, '_> {
-    fn scheduling_policy(&self, id: ThreadId) -> Result<SchedulingPolicy, Error> {
-        ReadyQueueAuthority::scheduling_policy(self, id)
+    fn snapshot(&mut self, id: ThreadId) -> Result<ReadySnapshot, Error> {
+        self.with_schedule_mut(id, |schedule| ReadySnapshot::from_schedule(schedule))
+    }
+    fn tree_key(&mut self, id: ThreadId) -> Result<ReadyIndexKey, Error> {
+        self.with_schedule_mut(id, |schedule| ready_index_key(schedule, id))
+    }
+    fn tree_links(&mut self, id: ThreadId) -> Result<ReadyTreeLinks, Error> {
+        self.with_schedule_mut(id, |schedule| schedule.ready_tree)
+    }
+    fn set_tree_links(&mut self, id: ThreadId, links: ReadyTreeLinks) -> Result<(), Error> {
+        self.with_schedule_mut(id, |schedule| schedule.ready_tree = links)
+    }
+    fn refresh_runtime(&mut self, id: ThreadId, now: u64) -> Result<(), Error> {
+        self.with_schedule_mut(id, |schedule| {
+            schedule.runtime.epoch_refresh(now, schedule.parameters)
+        })
     }
 }
 
@@ -993,9 +1127,27 @@ impl ThreadQueueAuthority for LocalReadyQueueAuthority<'_> {
 }
 
 impl ReadyQueueAccess for LocalReadyQueueAuthority<'_> {
-    fn scheduling_policy(&self, id: ThreadId) -> Result<SchedulingPolicy, Error> {
+    fn snapshot(&mut self, id: ThreadId) -> Result<ReadySnapshot, Error> {
+        self.cpu.with_thread(id, |_thread, schedule| {
+            ReadySnapshot::from_schedule(schedule)
+        })
+    }
+    fn tree_key(&mut self, id: ThreadId) -> Result<ReadyIndexKey, Error> {
         self.cpu
-            .with_thread(id, |_thread, schedule| schedule.scheduling)
+            .with_thread(id, |_thread, schedule| ready_index_key(schedule, id))
+    }
+    fn tree_links(&mut self, id: ThreadId) -> Result<ReadyTreeLinks, Error> {
+        self.cpu
+            .with_thread(id, |_thread, schedule| schedule.ready_tree)
+    }
+    fn set_tree_links(&mut self, id: ThreadId, links: ReadyTreeLinks) -> Result<(), Error> {
+        self.cpu
+            .with_thread_mut(id, |_thread, schedule| schedule.ready_tree = links)
+    }
+    fn refresh_runtime(&mut self, id: ThreadId, now: u64) -> Result<(), Error> {
+        self.cpu.with_thread_mut(id, |_thread, schedule| {
+            schedule.runtime.epoch_refresh(now, schedule.parameters)
+        })
     }
 }
 

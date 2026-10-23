@@ -152,7 +152,7 @@ fn capture_threads(tasks: &TaskInspector) -> hyper_os::Result<SampleSet> {
                 ThreadSample {
                     process_koid: thread.process_koid.map_or(0, |koid| koid.get()),
                     thread_koid: thread.koid.get(),
-                    runtime_ticks: thread.runtime_ticks,
+                    runtime_ns: thread.runtime_ns,
                 },
             );
         }
@@ -181,26 +181,22 @@ fn render(
         previous_threads,
         current_threads,
     } = interval;
-    let idle = current_cpu
-        .idle_ticks
-        .saturating_sub(previous_cpu.idle_ticks);
+    let idle = current_cpu.idle_ns.saturating_sub(previous_cpu.idle_ns);
     let kernel_thread = current_cpu
-        .kernel_thread_ticks
-        .saturating_sub(previous_cpu.kernel_thread_ticks);
+        .kernel_thread_ns
+        .saturating_sub(previous_cpu.kernel_thread_ns);
     let user_thread = current_cpu
-        .user_thread_ticks
-        .saturating_sub(previous_cpu.user_thread_ticks);
-    let vcpu = current_cpu
-        .vcpu_ticks
-        .saturating_sub(previous_cpu.vcpu_ticks);
+        .user_thread_ns
+        .saturating_sub(previous_cpu.user_thread_ns);
+    let vcpu = current_cpu.vcpu_ns.saturating_sub(previous_cpu.vcpu_ns);
     let total = idle
         .saturating_add(kernel_thread)
         .saturating_add(user_thread)
         .saturating_add(vcpu);
     write!(
         output,
-        "top - {} CPUs  ticks={} Hz\nCPU: user-thread ",
-        current_cpu.online_cpus, current_cpu.ticks_per_second
+        "top - {} CPUs\nCPU: user-thread ",
+        current_cpu.online_cpus
     )
     .and_then(|()| write_percent(output, user_thread, total))
     .and_then(|()| write!(output, " kthread "))
@@ -231,12 +227,12 @@ fn render(
                 .filter
                 .matches(process.koid.get(), process.name.as_str())
             {
-                let (ticks, threads) =
+                let (runtime_ns, threads) =
                     process_delta(process.koid.get(), previous_threads, current_threads);
                 rows.push(hyper_top::sampling::ProcessSample {
                     koid: process.koid.get(),
                     name: process.name.as_str().into(),
-                    ticks,
+                    runtime_ns,
                     threads,
                 });
             }
@@ -249,7 +245,7 @@ fn render(
     }
     for row in rows {
         write!(output, "0x{:016x} ", row.koid)?;
-        write_percent(output, row.ticks, total)?;
+        write_percent(output, row.runtime_ns, total)?;
         writeln!(output, "  {:<7}  {}", row.threads, row.name)?;
     }
     output.flush()?;

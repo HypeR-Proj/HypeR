@@ -877,6 +877,7 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
         }
         fn create_thread(
             &self,
+            _scheduling_rights: Rights,
             _: u64,
             _: u64,
             _: u64,

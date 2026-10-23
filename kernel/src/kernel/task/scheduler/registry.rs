@@ -1,17 +1,19 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Stable scheduler thread identities and fixed-capacity slot storage.
+//! Stable scheduler identities and demand-allocated, address-stable slot storage.
 //!
-//! Slot backing is allocated to its final length during scheduler startup and
-//! is never resized. The transition coordinator owns slot variants and control
-//! links, while locked per-CPU domains access only the schedule cells of
+//! Published slot segments never move. Growth is prepared outside scheduler
+//! locks and release-published without relocating existing cells. The transition
+//! coordinator owns slot variants and control links. Locked per-CPU domains
+//! access only the schedule cells of
 //! Threads whose linear residence names that CPU.
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::cell::UnsafeCell;
 use core::marker::PhantomData;
+use core::sync::atomic::{AtomicPtr, Ordering};
 use hyper::cpu::CpuIndex;
 
 use super::Error;
@@ -23,6 +25,7 @@ use crate::kernel::task::thread::{Thread, ThreadId, ThreadScheduleState};
 )]
 enum ThreadSlot {
     Vacant,
+    Free(Option<usize>),
     Reserved(ThreadId),
     Occupied(Box<Thread>),
     /// Identity remains unavailable until lock-external resource teardown ends.
@@ -33,12 +36,14 @@ enum ThreadSlot {
         // extending object lifetime. The detached Thread carries the actual
         // scheduler reference into the reaper until its resources are gone.
         object: crate::kernel::task::ThreadObjectSnapshot,
-        runtime_ticks: u64,
+        runtime_ns: u64,
         thread: Option<Box<Thread>>,
+        retirement: Option<super::ResourceRetirement>,
+        next: Option<ThreadId>,
     },
 }
 
-/// One address-stable cell in the scheduler's fixed thread table.
+/// One address-stable cell in the scheduler's segmented thread table.
 ///
 /// `UnsafeCell` is deliberately confined to this module. Slot mutation still
 /// requires the transition coordinator's private authority, while per-CPU
@@ -52,10 +57,63 @@ impl ThreadSlotCell {
     }
 }
 
-/// Fixed scheduler table whose cells and occupied Thread allocations never
-/// move while published.
+// Exponential segments give constant-time lookup without moving a directory
+// that another CPU may be reading. Only populated segments consume slot memory.
+const FIRST_SEGMENT: usize = 64;
+const SEGMENTS: usize = 19;
+// The ready AVL traversal bound and segment directory cover this ID namespace.
+const _: () = assert!(ThreadId::SLOT_BITS <= 24);
+
+fn segment_for(slot: usize) -> usize {
+    (usize::BITS - 1 - (slot / FIRST_SEGMENT + 1).leading_zeros()) as usize
+}
+
+fn segment_start(segment: usize) -> usize {
+    FIRST_SEGMENT * ((1usize << segment) - 1)
+}
+
+pub(super) struct TableGrowth {
+    segment: usize,
+    cells: Option<Box<[ThreadSlotCell]>>,
+}
+
+impl TableGrowth {
+    /// Allocation and initialization run before acquiring the coordinator.
+    pub(super) fn prepare(segment: usize) -> Result<Self, Error> {
+        if segment >= SEGMENTS {
+            return Err(Error::IdentifierExhausted);
+        }
+        let count = FIRST_SEGMENT << segment;
+        let mut cells = Vec::new();
+        cells
+            .try_reserve_exact(count)
+            .map_err(|_| Error::Allocation)?;
+        cells.resize_with(count, || ThreadSlotCell::new(ThreadSlot::Vacant));
+        Ok(Self {
+            segment,
+            cells: Some(cells.into_boxed_slice()),
+        })
+    }
+}
+
+/// Directory and published segments remain alive for every CPU capability.
 struct ThreadTable {
-    slots: Box<[ThreadSlotCell]>,
+    segments: [AtomicPtr<ThreadSlotCell>; SEGMENTS],
+}
+
+impl Drop for ThreadTable {
+    fn drop(&mut self) {
+        // Only unpublished construction can drop a table. Published tables are
+        // permanent; segment cells are recycled after resource retirement.
+        for (index, pointer) in self.segments.iter_mut().enumerate() {
+            let pointer = *pointer.get_mut();
+            if !pointer.is_null() {
+                let slice = core::ptr::slice_from_raw_parts_mut(pointer, FIRST_SEGMENT << index);
+                // SAFETY: this table uniquely owns each installed boxed slice.
+                drop(unsafe { Box::from_raw(slice) });
+            }
+        }
+    }
 }
 
 // SAFETY: `ThreadTable` is permanently allocated and its UnsafeCell contents
@@ -67,7 +125,7 @@ unsafe impl Sync for ThreadTable {}
 
 impl ThreadTable {
     fn slot(&self, index: usize) -> Option<&ThreadSlot> {
-        let cell = self.slots.get(index)?;
+        let cell = self.cell(index)?;
         // SAFETY: coordinator readers pin slot lifetime through a reader
         // lane; writers own every lane. CPU-only authorities reference only
         // owned current/ready/blocked IDs, whose retirement needs that CPU lock.
@@ -80,15 +138,34 @@ impl ThreadTable {
         index: usize,
         _authority: &'authority mut ThreadTableAuthorityToken,
     ) -> Option<&'authority mut ThreadSlot> {
-        let cell = self.slots.get(index)?;
+        let cell = self.cell(index)?;
         // SAFETY: callers must hold the unique private write-authority token.
         // The returned borrow is closure-bounded by that authority and cannot
         // escape into scheduler state.
         Some(unsafe { &mut *cell.0.get() })
     }
 
-    const fn len(&self) -> usize {
-        self.slots.len()
+    fn cell(&self, index: usize) -> Option<&ThreadSlotCell> {
+        let segment = segment_for(index);
+        let pointer = self.segments.get(segment)?.load(Ordering::Acquire);
+        if pointer.is_null() {
+            return None;
+        }
+        // SAFETY: publication transfers an initialized segment of this exact
+        // length. Its backing is permanent once CPU capabilities are published.
+        Some(unsafe { &*pointer.add(index - segment_start(segment)) })
+    }
+
+    fn install(&self, growth: &mut TableGrowth, _authority: &mut ThreadTableAuthorityToken) {
+        let destination = &self.segments[growth.segment];
+        if !destination.load(Ordering::Relaxed).is_null() {
+            return; // A racing creator already installed it; caller frees ours outside locks.
+        }
+        let cells = growth.cells.take().unwrap_or_else(|| registry_invariant());
+        destination.store(
+            Box::into_raw(cells).cast::<ThreadSlotCell>(),
+            Ordering::Release,
+        );
     }
 }
 
@@ -368,13 +445,11 @@ impl Drop for ThreadReservation {
     }
 }
 
-/// Fixed-capacity scheduler registry with never-reused public identities.
+/// Growable scheduler registry with never-reused public identities.
 pub(super) struct ThreadRegistry {
-    // Boxed slice makes the fixed-length, stable-backing contract structural:
-    // no registry method can accidentally resize or relocate the slot array.
     table: ThreadTableStorage,
     table_authority: ThreadTableAuthorityToken,
-    free_slots: Vec<usize>,
+    free_head: Option<usize>,
     high_water: usize,
     next_identity: u64,
 }
@@ -396,56 +471,54 @@ impl ThreadRegistry {
     }
 
     pub fn new(bootstrap: Box<Thread>, idle: Box<Thread>) -> Result<Self, Error> {
-        let mut slots = Vec::new();
-        slots
-            .try_reserve_exact(super::THREAD_CAPACITY)
-            .map_err(|_| Error::Allocation)?;
-        slots.resize_with(super::THREAD_CAPACITY, || {
-            ThreadSlotCell::new(ThreadSlot::Vacant)
-        });
-
-        let mut free_slots = Vec::new();
-        free_slots
-            .try_reserve_exact(super::THREAD_CAPACITY.saturating_sub(1))
-            .map_err(|_| Error::Allocation)?;
-
+        let mut growth = TableGrowth::prepare(0)?;
         if bootstrap.id() != ThreadId::BOOTSTRAP
             || bootstrap.id().scheduler_slot() != Some(0)
             || idle.id().scheduler_slot() != Some(1)
         {
             return Err(Error::InvalidThreadState);
         }
-        *slots[0].0.get_mut() = ThreadSlot::Occupied(bootstrap);
-        *slots[1].0.get_mut() = ThreadSlot::Occupied(idle);
+        let cells = growth
+            .cells
+            .as_mut()
+            .unwrap_or_else(|| registry_invariant());
+        *cells[0].0.get_mut() = ThreadSlot::Occupied(bootstrap);
+        *cells[1].0.get_mut() = ThreadSlot::Occupied(idle);
         let table = hyper::mm::try_box(ThreadTable {
-            slots: slots.into_boxed_slice(),
+            segments: [const { AtomicPtr::new(core::ptr::null_mut()) }; SEGMENTS],
         })
         .map_err(|_| Error::Allocation)?;
+        table.install(&mut growth, &mut ThreadTableAuthorityToken { _private: () });
         Ok(Self {
             table: ThreadTableStorage::Staged(table),
             table_authority: ThreadTableAuthorityToken { _private: () },
-            free_slots,
+            free_head: None,
             high_water: 2,
             next_identity: 2,
         })
     }
 
     pub fn reserve(&mut self, cpu: CpuIndex) -> Result<ThreadReservation, Error> {
-        let slot = match self.free_slots.pop() {
-            Some(slot) => slot,
-            None if self.high_water < self.table.access().table().len() => {
-                let slot = self.high_water;
-                self.high_water += 1;
-                slot
+        let slot = if let Some(slot) = self.free_head {
+            let Some(ThreadSlot::Free(next)) = self.table.access().table().slot(slot) else {
+                registry_invariant();
+            };
+            self.free_head = *next;
+            *self
+                .table_slot_mut(slot)
+                .unwrap_or_else(|| registry_invariant()) = ThreadSlot::Vacant;
+            slot
+        } else {
+            let slot = self.high_water;
+            if ThreadId::from_scheduler_parts(self.next_identity, slot).is_none() {
+                return Err(Error::IdentifierExhausted);
             }
-            None => return Err(Error::ThreadLimit),
+            if self.table.access().table().slot(slot).is_none() {
+                return Err(Error::ThreadTableGrowth);
+            }
+            self.high_water += 1;
+            slot
         };
-        if !matches!(
-            self.table.access().table().slot(slot),
-            Some(ThreadSlot::Vacant)
-        ) {
-            registry_invariant();
-        }
 
         let Some(id) = ThreadId::from_scheduler_parts(self.next_identity, slot) else {
             self.release_vacant(slot)?;
@@ -556,29 +629,56 @@ impl ThreadRegistry {
         };
         let object = thread.object_snapshot();
         let name = thread.name_snapshot();
-        let runtime_ticks = thread.runtime_ticks();
+        let runtime_ns = thread.runtime_ns();
         *slot_ref = ThreadSlot::Retiring {
             id,
             name,
             object,
-            runtime_ticks,
+            runtime_ns,
             thread: Some(thread),
+            retirement: Some(super::ResourceRetirement::begin()),
+            next: None,
         };
         Ok(())
     }
 
-    /// Transfers one detached allocation while preserving its Retiring marker.
-    pub fn take_retiring(&mut self, id: ThreadId) -> Result<Box<Thread>, Error> {
+    pub fn link_retirement(&mut self, tail: ThreadId, next_id: ThreadId) -> Result<(), Error> {
+        let slot = tail.scheduler_slot().ok_or(Error::ThreadNotFound)?;
+        match self.table_slot_mut(slot) {
+            Some(ThreadSlot::Retiring {
+                id,
+                next,
+                thread: Some(_),
+                ..
+            }) if *id == tail && next.is_none() => {
+                *next = Some(next_id);
+                Ok(())
+            }
+            _ => Err(Error::InvalidThreadState),
+        }
+    }
+
+    /// Transfers teardown ownership, retaining the slot until destruction ends.
+    pub fn take_retiring(
+        &mut self,
+        id: ThreadId,
+    ) -> Result<(super::state::RetiredThread, Option<ThreadId>), Error> {
         let slot = id.scheduler_slot().ok_or(Error::ThreadNotFound)?;
-        let slot_ref = self
-            .table_slot_mut(slot)
-            .unwrap_or_else(|| registry_invariant());
-        match slot_ref {
-            ThreadSlot::Retiring {
+        match self.table_slot_mut(slot) {
+            Some(ThreadSlot::Retiring {
                 id: retiring,
                 thread,
+                retirement,
+                next,
                 ..
-            } if *retiring == id => thread.take().ok_or(Error::InvalidThreadState),
+            }) if *retiring == id && thread.is_some() && retirement.is_some() => Ok((
+                super::state::RetiredThread {
+                    id,
+                    thread: thread.take().unwrap_or_else(|| registry_invariant()),
+                    retirement: retirement.take().unwrap_or_else(|| registry_invariant()),
+                },
+                next.take(),
+            )),
             _ => Err(Error::InvalidThreadState),
         }
     }
@@ -591,6 +691,8 @@ impl ThreadRegistry {
             Some(ThreadSlot::Retiring {
                 id: retiring,
                 thread: None,
+                retirement: None,
+                next: None,
                 ..
             }) if *retiring == id
         ) {
@@ -693,22 +795,24 @@ impl ThreadRegistry {
                     name: thread.name_snapshot(),
                     object: thread.object_snapshot(),
                     phase: ThreadObjectRegistryPhase::Resident,
-                    runtime_ticks: thread.runtime_ticks(),
+                    runtime_ns: thread.runtime_ns(),
                 }),
                 Some(ThreadSlot::Retiring {
                     id,
                     name,
                     object,
-                    runtime_ticks,
+                    runtime_ns,
                     ..
                 }) => Some(ThreadObjectObservation {
                     thread: *id,
                     name: *name,
                     object: *object,
                     phase: ThreadObjectRegistryPhase::Retiring,
-                    runtime_ticks: *runtime_ticks,
+                    runtime_ns: *runtime_ns,
                 }),
-                Some(ThreadSlot::Vacant | ThreadSlot::Reserved(_)) | None => None,
+                Some(ThreadSlot::Vacant | ThreadSlot::Free(_) | ThreadSlot::Reserved(_)) | None => {
+                    None
+                }
             };
             if let Some(observation) = observation {
                 output.entries[output.len] = Some(observation);
@@ -728,26 +832,17 @@ impl ThreadRegistry {
         }
     }
 
-    /// Visits one registry slot and advances a wrapping maintenance cursor.
+    /// Visits one slot from a coordinator-owned, finite balancing sweep.
     /// Only an identity escapes; exclusive coordination retains its lifetime.
-    pub(super) fn next_balance_candidate(&self, cursor: &mut usize) -> Option<ThreadId> {
-        if self.high_water == 0 {
-            return None;
-        }
-        let index = *cursor % self.high_water;
-        *cursor = (index + 1) % self.high_water;
+    pub(super) fn balance_candidate(&self, index: usize) -> Option<ThreadId> {
         match self.table.access().table().slot(index) {
             Some(ThreadSlot::Occupied(thread)) => Some(thread.id()),
             _ => None,
         }
     }
 
-    pub(super) const fn balance_scan_limit(&self, budget: usize) -> usize {
-        if self.high_water < budget {
-            self.high_water
-        } else {
-            budget
-        }
+    pub(super) const fn balance_slot_count(&self) -> usize {
+        self.high_water
     }
 
     /// Number of slots ever exposed by the monotonic backing high-water mark.
@@ -770,8 +865,11 @@ impl ThreadRegistry {
 
     fn preflight_release(&self, slot: usize) -> Result<(), Error> {
         if slot == 0
-            || self.free_slots.len() >= self.table.access().table().len().saturating_sub(1)
-            || self.free_slots.contains(&slot)
+            || slot >= self.high_water
+            || matches!(
+                self.table.access().table().slot(slot),
+                Some(ThreadSlot::Free(_))
+            )
         {
             return Err(Error::InvalidThreadState);
         }
@@ -779,7 +877,23 @@ impl ThreadRegistry {
     }
 
     fn commit_release(&mut self, slot: usize) {
-        self.free_slots.push(slot);
+        let next = self.free_head;
+        *self
+            .table_slot_mut(slot)
+            .unwrap_or_else(|| registry_invariant()) = ThreadSlot::Free(next);
+        self.free_head = Some(slot);
+    }
+
+    pub fn growth_needed(&self) -> Option<usize> {
+        (self.free_head.is_none() && self.table.access().table().slot(self.high_water).is_none())
+            .then(|| segment_for(self.high_water))
+    }
+
+    pub fn install_growth(&mut self, growth: &mut TableGrowth) {
+        self.table
+            .access()
+            .table()
+            .install(growth, &mut self.table_authority);
     }
 
     fn table_slot_mut(&mut self, slot: usize) -> Option<&mut ThreadSlot> {
@@ -787,7 +901,7 @@ impl ThreadRegistry {
         table.table().slot_mut(slot, &mut self.table_authority)
     }
 
-    /// Permanently publishes the fixed table after every fallible scheduler
+    /// Permanently publishes the stable directory after every fallible scheduler
     /// construction step has completed.
     pub fn publish_table(&mut self) {
         let storage = core::mem::replace(&mut self.table, ThreadTableStorage::Publishing);

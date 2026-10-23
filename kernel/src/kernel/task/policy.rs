@@ -1,13 +1,11 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Static scheduling classes and thread placement vocabulary.
+//! Validated scheduling inputs and thread placement vocabulary.
 //!
 //! This module describes policy inputs without owning runnable queues or
-//! performing context switches. The initial closed policy set contains a
-//! real-time FIFO, fair, and non-runnable idle classes. The fair class owns no
-//! algorithm-specific public parameters: its initial round-robin backend can be
-//! replaced without changing Thread construction or scheduler clients.
+//! performing context switches. Algorithms and arbitration parameters do not
+//! depend on whether a Thread executes kernel, Native, or guest code.
 //! Placement records current assignment separately from affinity and placement
 //! policy so the scheduler can move a stopped Thread without changing identity.
 
@@ -40,10 +38,12 @@ impl ThreadPriority {
 /// Closed set of scheduling classes supported by this kernel image.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SchedulingClass {
-    /// Fixed-priority real-time policies, ordered ahead of fair work.
+    /// FIFO policy; its cross-algorithm rank comes from the arbitration role.
     RealTime,
     /// Ordinary time-sharing work.
     Fair,
+    /// Fixed-window execution budgets with work-conserving idle borrowing.
+    Budget,
     /// Per-CPU fallback execution which is never inserted into a run queue.
     Idle,
 }
@@ -67,10 +67,11 @@ pub enum SchedulingPolicy {
     },
     /// Ordinary time-sharing scheduling.
     ///
-    /// The initial implementation is round-robin. No backend-specific
-    /// parameter is exposed through this policy so a future weighted fair
-    /// algorithm can preserve the public thread-creation contract.
+    /// The selected backend and weight are separate validated parameters;
+    /// changing the algorithm does not change execution or placement identity.
     Fair,
+    /// A bounded execution entitlement replenished at a common wall-clock period.
+    Budget,
     Idle,
 }
 
@@ -87,6 +88,7 @@ impl SchedulingPolicy {
         match self {
             Self::Fifo { .. } => SchedulingClass::RealTime,
             Self::Fair => SchedulingClass::Fair,
+            Self::Budget => SchedulingClass::Budget,
             Self::Idle => SchedulingClass::Idle,
         }
     }
@@ -94,25 +96,190 @@ impl SchedulingPolicy {
     pub const fn priority(self) -> Option<ThreadPriority> {
         match self {
             Self::Fifo { priority } => Some(priority),
-            Self::Fair | Self::Idle => None,
+            Self::Fair | Self::Budget | Self::Idle => None,
+        }
+    }
+}
+
+/// Arbitration privileges, independent of algorithm and execution payload.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SchedulingRole {
+    Ordinary,
+    /// May use the CPU's bounded priority-execution allowance.
+    Priority,
+    /// Participates in the CPU's protected minimum execution opportunity.
+    Protected,
+}
+
+/// Fair selection backends share accounting and queue ownership contracts.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FairBackend {
+    Stride,
+    RoundRobin,
+}
+
+/// A bounded, nonzero share within the Fair algorithm.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct ThreadWeight(u16);
+
+impl ThreadWeight {
+    pub const DEFAULT: Self = Self(16);
+    pub const MAX: u16 = 1024;
+
+    pub const fn new(value: u16) -> Option<Self> {
+        if value == 0 || value > Self::MAX {
+            None
+        } else {
+            Some(Self(value))
         }
     }
 
-    /// Decides whether a newly ready thread's class or RT priority outranks
-    /// `self`. Equal-class Fair rotation remains an implementation decision of
-    /// the Fair scheduler backend.
-    pub const fn is_preempted_by(self, candidate: Self) -> bool {
-        match (self, candidate) {
-            (Self::Idle, Self::Fifo { .. } | Self::Fair) => true,
-            (Self::Fair, Self::Fifo { .. }) => true,
-            (
-                Self::Fifo { priority: current },
-                Self::Fifo {
-                    priority: candidate,
-                },
-            ) => candidate.0 < current.0,
-            (_, Self::Fair | Self::Idle) => false,
+    pub const fn get(self) -> u16 {
+        self.0
+    }
+}
+
+/// Budget quantities are nanoseconds. A budget is not a reservation guarantee.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BudgetParameters {
+    budget_ns: u64,
+    period_ns: u64,
+    burst_ns: u64,
+}
+
+impl BudgetParameters {
+    pub const MAX_PERIOD_NS: u64 = 1_000_000_000;
+
+    pub const fn new(budget_ns: u64, period_ns: u64, burst_ns: u64) -> Option<Self> {
+        if period_ns == 0
+            || period_ns > Self::MAX_PERIOD_NS
+            || budget_ns == 0
+            || budget_ns > period_ns
+            || burst_ns == 0
+            || burst_ns > period_ns
+        {
+            None
+        } else {
+            Some(Self {
+                budget_ns,
+                period_ns,
+                burst_ns,
+            })
         }
+    }
+
+    pub const fn budget_ns(self) -> u64 {
+        self.budget_ns
+    }
+    pub const fn period_ns(self) -> u64 {
+        self.period_ns
+    }
+    pub const fn burst_ns(self) -> u64 {
+        self.burst_ns
+    }
+}
+
+/// Validated policy inputs. Rights and limits are checked before installation.
+///
+/// Unused fields have canonical values so equality does not hide changes in
+/// parameters which could become active after a later algorithm transition.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SchedulingParameters {
+    policy: SchedulingPolicy,
+    band: ThreadPriority,
+    role: SchedulingRole,
+    weight: ThreadWeight,
+    quantum_ns: u64,
+    fair_backend: FairBackend,
+    budget: Option<BudgetParameters>,
+}
+
+impl SchedulingParameters {
+    pub const fn fair(
+        weight: ThreadWeight,
+        quantum_ns: u64,
+        band: ThreadPriority,
+        role: SchedulingRole,
+        fair_backend: FairBackend,
+    ) -> Option<Self> {
+        if quantum_ns == 0 || quantum_ns > BudgetParameters::MAX_PERIOD_NS {
+            return None;
+        }
+        Some(Self {
+            policy: SchedulingPolicy::Fair,
+            band,
+            role,
+            weight,
+            quantum_ns,
+            fair_backend,
+            budget: None,
+        })
+    }
+
+    pub const fn budget(
+        budget: BudgetParameters,
+        band: ThreadPriority,
+        role: SchedulingRole,
+    ) -> Self {
+        Self {
+            policy: SchedulingPolicy::Budget,
+            band,
+            role,
+            weight: ThreadWeight::DEFAULT,
+            quantum_ns: 0,
+            fair_backend: FairBackend::Stride,
+            budget: Some(budget),
+        }
+    }
+
+    pub const fn fifo(
+        priority: ThreadPriority,
+        band: ThreadPriority,
+        role: SchedulingRole,
+    ) -> Self {
+        Self {
+            policy: SchedulingPolicy::Fifo { priority },
+            band,
+            role,
+            weight: ThreadWeight::DEFAULT,
+            quantum_ns: 0,
+            fair_backend: FairBackend::Stride,
+            budget: None,
+        }
+    }
+
+    pub const fn idle() -> Self {
+        Self {
+            policy: SchedulingPolicy::Idle,
+            band: ThreadPriority::LOWEST,
+            role: SchedulingRole::Ordinary,
+            weight: ThreadWeight::DEFAULT,
+            quantum_ns: 0,
+            fair_backend: FairBackend::Stride,
+            budget: None,
+        }
+    }
+
+    pub const fn policy(self) -> SchedulingPolicy {
+        self.policy
+    }
+    pub const fn band(self) -> ThreadPriority {
+        self.band
+    }
+    pub const fn role(self) -> SchedulingRole {
+        self.role
+    }
+    pub const fn weight(self) -> ThreadWeight {
+        self.weight
+    }
+    pub const fn quantum_ns(self) -> u64 {
+        self.quantum_ns
+    }
+    pub const fn fair_backend(self) -> FairBackend {
+        self.fair_backend
+    }
+    pub const fn budget_parameters(self) -> Option<BudgetParameters> {
+        self.budget
     }
 }
 

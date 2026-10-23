@@ -68,6 +68,19 @@ pub(super) fn dispatch_operation(
         ));
     }
     match operation {
+        abi::NativeOperation::ThreadGetCurrentScheduling
+        | abi::NativeOperation::ThreadGetScheduling
+        | abi::NativeOperation::VirtualCpuGetScheduling => {
+            NativeAction::Return(handlers::sys_get_scheduling(services, receiver, arguments))
+        }
+        abi::NativeOperation::ThreadSetCurrentScheduling
+        | abi::NativeOperation::ThreadSetScheduling
+        | abi::NativeOperation::VirtualCpuSetScheduling => NativeAction::Return(
+            handlers::sys_set_scheduling(services, receiver, arguments, false),
+        ),
+        abi::NativeOperation::ProcessBuilderSetScheduling => NativeAction::Return(
+            handlers::sys_set_scheduling(services, receiver, arguments, true),
+        ),
         abi::NativeOperation::AbiQuery => NativeAction::Return(handlers::sys_abi_query(arguments)),
         abi::NativeOperation::SystemConfig => {
             NativeAction::Return(handlers::sys_system_config(arguments))
@@ -130,7 +143,7 @@ pub(super) fn dispatch_operation(
             NativeAction::Return(handlers::sys_thread_set_current_name(services, arguments))
         }
         abi::NativeOperation::ThreadCreate => {
-            NativeAction::Return(handlers::sys_thread_create(services, arguments))
+            NativeAction::Return(handlers::sys_thread_create(services, receiver, arguments))
         }
         abi::NativeOperation::ThreadStart => {
             NativeAction::Return(handlers::sys_thread_start(services, receiver, arguments))

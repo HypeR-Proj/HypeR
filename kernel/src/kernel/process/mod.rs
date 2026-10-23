@@ -17,6 +17,7 @@ pub(crate) mod loader;
 mod objects;
 mod owner;
 pub(crate) mod retention;
+pub(crate) mod scheduling;
 mod task_group;
 mod user_thread;
 

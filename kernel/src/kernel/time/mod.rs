@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Host clocksource, timer queues, and architectural tick lifecycle.
+//! Host clocksource, timer queues, and one-shot architectural clock events.
 //!
-//! This subsystem owns time conversion and per-CPU tick policy. It consumes an
+//! This subsystem owns time conversion and per-CPU deadline multiplexing. It consumes an
 //! IRQ domain for physical delivery but does not own interrupt-controller
 //! discovery or routing policy.
 
 mod callout;
+mod deadline_slot;
 mod realtime;
 mod tick;
 mod timers;
@@ -35,11 +36,20 @@ use core::hint::spin_loop;
     reason = "owned timer guards serve the RISC-V guest timer"
 )]
 pub(crate) use timers::OwnedArmedIrqCallout;
+#[cfg(all(
+    target_arch = "aarch64",
+    feature = "kernel-test",
+    feature = "kernel-self-test"
+))]
+pub(crate) use timers::scheduler_deadline_for_test;
 pub(crate) use timers::{ArmedIrqCallout, IrqCallout};
 pub use timers::{
     QueueStats as TimerQueueStats, TimerCallback, TimerEvent, TimerHandle, TimerMode,
     cancel_irq_timer, local_statistics as timer_statistics, schedule_irq_after, schedule_irq_at,
     schedule_irq_periodic,
+};
+pub(crate) use timers::{
+    publish_guest_timer_recovery, publish_scheduler_deadline, service_scheduler_deadline,
 };
 
 use hyper::hal::interrupt::InterruptId;
@@ -99,7 +109,6 @@ pub(crate) struct GuestTimerSource {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Capabilities {
-    pub(crate) ticks_per_second: u32,
     pub(crate) counter_frequency_hz: u64,
     pub(crate) hardware_interrupt: InterruptId,
     pub(crate) virtual_interrupt: VirtualInterrupt,
@@ -114,7 +123,7 @@ fn initialize_clock() -> Result<u64, Error> {
     Ok(frequency)
 }
 
-/// Initializes the monotonic clock, architectural tick, and boot CPU queue.
+/// Initializes the monotonic clock, architectural comparator, and boot CPU queue.
 pub(crate) fn initialize(
     boot: &mut super::boot::Initialization,
 ) -> Result<(), InitializationError> {
@@ -134,10 +143,9 @@ pub(crate) fn initialize(
     let capabilities =
         tick::initialize(info, boot.interrupts().root_domain).map_err(InitializationError::Tick)?;
     crate::pr_info!(
-        "HypeR: architectural timer: host INTID {}, guest INTID {}, {} Hz tick from a {} Hz counter",
+        "HypeR: architectural timer: host INTID {}, guest INTID {}, one-shot from a {} Hz counter",
         capabilities.hardware_interrupt.get(),
         capabilities.guest_timer.interrupt.get(),
-        capabilities.ticks_per_second,
         capabilities.counter_frequency_hz
     );
     crate::pr_info!(

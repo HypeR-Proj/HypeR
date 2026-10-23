@@ -293,7 +293,8 @@ impl KernelObject for PendingVirtualMachine {
         .union(Rights::INSPECT)
         .union(Rights::WRITE)
         .union(Rights::START)
-        .union(Rights::REQUEST_STOP);
+        .union(Rights::REQUEST_STOP)
+        .union(crate::kernel::task::scheduling_authority::SCHEDULING_RIGHTS);
 }
 
 fn validate_configuration(configuration: VirtualMachineConfiguration) -> Result<(), Error> {

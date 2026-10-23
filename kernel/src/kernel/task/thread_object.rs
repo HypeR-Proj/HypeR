@@ -53,7 +53,7 @@ pub(crate) struct ThreadObjectObservation {
     pub(crate) name: super::thread::ThreadNameSnapshot,
     pub(crate) object: ThreadObjectSnapshot,
     pub(crate) phase: ThreadObjectRegistryPhase,
-    pub(crate) runtime_ticks: u64,
+    pub(crate) runtime_ns: u64,
 }
 
 /// Position in a bounded scheduler Thread-object scan.

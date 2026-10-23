@@ -11,7 +11,10 @@ use hyper::hal::interrupt::{
     HostInterruptBinding, InterruptId, InterruptPriority, InterruptTrigger,
 };
 use hyper::platform::{PlatformInterrupt, PlatformInterruptTrigger};
+use hyper::sync::InterruptSpinLock;
 use hyper::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
+use super::timer_recovery::{Recovery, Update};
 
 use crate::kernel::irq::interrupt::{
     HandlerResult, IrqDomainId, PreparedRegistration, VirtualInterrupt,
@@ -21,6 +24,9 @@ use crate::kernel::irq::interrupt::{
 pub enum Error {
     Interrupt(crate::kernel::irq::interrupt::Error),
     InvalidHandlerContext,
+    InvalidCpu,
+    RecoveryGenerationExhausted,
+    Time(crate::kernel::time::Error),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -37,11 +43,12 @@ const NO_HOST_TIMER: u32 = u32::MAX;
 static HOST_TIMER_INTERRUPT: AtomicU32 = AtomicU32::new(NO_HOST_TIMER);
 static TIMER_SOURCE_MASKED: PerCpu<AtomicBool> =
     PerCpu::new([const { AtomicBool::new(false) }; hyper::cpu::MAX_CPUS]);
+static RECOVERY: PerCpu<InterruptSpinLock<Recovery, crate::hal::irq::LocalMask>> =
+    PerCpu::new([const { InterruptSpinLock::new(Recovery::new()) }; hyper::cpu::MAX_CPUS]);
 
 pub(super) struct PreparedBinding {
     mapping: Option<PreparedRegistration>,
     maintenance: Option<PreparedRegistration>,
-    recovery: Option<crate::kernel::irq::interrupt::Registration>,
 }
 
 impl PreparedBinding {
@@ -61,20 +68,16 @@ impl PreparedBinding {
 
     pub(super) fn activate(self) -> Result<(), Error> {
         let host_timer = self.host_interrupt().map(HostInterruptBinding::get);
-        // Maintenance and recovery refer to the prepared timer VIRQ. Recovery
-        // is already attached to the active host tick, but its masked-source
-        // fast path remains false until guest execution can begin. Keep every
-        // capability until the complete group commits.
+        // Keep the timer-source and maintenance capabilities until their
+        // complete group commits; neither can outlive a failed activation.
         let PreparedBinding {
             mapping: prepared_mapping,
             maintenance: prepared_maintenance,
-            recovery,
         } = self;
         let mapping = match activate_one(prepared_mapping) {
             Ok(registration) => registration,
             Err(error) => {
                 rollback_mapping(prepared_maintenance);
-                rollback_active_handler(recovery);
                 return Err(error);
             }
         };
@@ -82,7 +85,6 @@ impl PreparedBinding {
             Ok(registration) => registration,
             Err(error) => {
                 rollback_active_mapping(mapping);
-                rollback_active_handler(recovery);
                 return Err(error);
             }
         };
@@ -92,15 +94,11 @@ impl PreparedBinding {
         if let Some(registration) = maintenance {
             registration.retain_permanently();
         }
-        if let Some(registration) = recovery {
-            registration.retain_permanently();
-        }
         HOST_TIMER_INTERRUPT.store(host_timer.unwrap_or(NO_HOST_TIMER), Ordering::Release);
         Ok(())
     }
 
     pub(super) fn rollback(self) {
-        rollback_active_handler(self.recovery);
         rollback_mapping(self.mapping);
         rollback_mapping(self.maintenance);
     }
@@ -149,21 +147,48 @@ fn rollback_active_mapping(registration: Option<crate::kernel::irq::interrupt::R
     }
 }
 
-fn rollback_active_handler(registration: Option<crate::kernel::irq::interrupt::Registration>) {
-    let Some(registration) = registration else {
-        return;
-    };
-    if let Err(failure) = crate::kernel::irq::interrupt::unregister(registration) {
-        let (error, registration) = failure.into_parts();
-        crate::pr_warn!("HypeR: retaining active IRQ handler after rollback failed: {error:?}");
-        registration.retain_permanently();
+/// Begins a new local hardware owner without inheriting its predecessor's retry.
+/// Activation precedes active-vCPU publication while local IRQs remain masked.
+pub(crate) fn activate_guest_timer_source(asserted: bool) -> Result<(), Error> {
+    if HOST_TIMER_INTERRUPT.load(Ordering::Acquire) == NO_HOST_TIMER {
+        return Ok(());
+    }
+    reset_recovery(true)?;
+    set_guest_timer_source_enabled(!asserted)
+}
+
+/// Invalidates any retry before the detached hardware owner can be replaced.
+pub(crate) fn deactivate_guest_timer_source() -> Result<(), Error> {
+    if HOST_TIMER_INTERRUPT.load(Ordering::Acquire) == NO_HOST_TIMER {
+        return Ok(());
+    }
+    reset_recovery(false)?;
+    set_guest_timer_source_enabled(false)
+}
+
+fn reset_recovery(active: bool) -> Result<(), Error> {
+    let cpu = crate::kernel::cpu::current_index().ok_or(Error::InvalidCpu)?;
+    let (pending, update) =
+        RECOVERY[cpu].with(|state| (state.is_pending(), state.change_owner(active)));
+    let update = update.ok_or(Error::RecoveryGenerationExhausted)?;
+    if pending {
+        publish_recovery(update)
+    } else {
+        Ok(())
     }
 }
 
-/// Controls the host PPI carrying the current guest's virtual-timer output.
-/// A detached vCPU leaves this source masked; only a new active owner or its
-/// maintenance/recovery callback may re-enable it.
-pub(crate) fn set_guest_timer_source_enabled(enabled: bool) -> Result<(), Error> {
+fn publish_recovery(update: Update) -> Result<(), Error> {
+    let deadline = update
+        .delay_ns
+        .map(crate::kernel::time::deadline_after)
+        .transpose()
+        .map_err(Error::Time)?;
+    crate::kernel::time::publish_guest_timer_recovery(update.generation, deadline)
+        .map_err(Error::Time)
+}
+
+fn set_guest_timer_source_enabled(enabled: bool) -> Result<(), Error> {
     let interrupt = HOST_TIMER_INTERRUPT.load(Ordering::Acquire);
     if interrupt == NO_HOST_TIMER {
         return Ok(());
@@ -241,7 +266,6 @@ fn rollback_mapping(mapping: Option<PreparedRegistration>) {
 
 pub(super) fn prepare(
     source: crate::kernel::time::GuestTimerSource,
-    host_tick_interrupt: VirtualInterrupt,
     domain: IrqDomainId,
     maintenance: Option<PlatformInterrupt>,
 ) -> Result<PreparedBinding, Error> {
@@ -276,21 +300,6 @@ pub(super) fn prepare(
             return Err(error);
         }
     };
-    let recovery = if mapping.is_some() {
-        match crate::kernel::irq::interrupt::register_shared(
-            host_tick_interrupt,
-            maintenance_context,
-            handle_source_recovery,
-        ) {
-            Ok(mapping) => Some(mapping),
-            Err(error) => {
-                rollback_mapping(mapping);
-                return Err(Error::Interrupt(error));
-            }
-        }
-    } else {
-        None
-    };
     let maintenance = match maintenance {
         Some(interrupt) => match domain.prepare_shared_mapping(
             InterruptId::new(interrupt.interrupt),
@@ -305,7 +314,6 @@ pub(super) fn prepare(
             Ok(mapping) => Some(mapping),
             Err(error) => {
                 rollback_mapping(mapping);
-                rollback_active_handler(recovery);
                 return Err(Error::Interrupt(error));
             }
         },
@@ -314,7 +322,6 @@ pub(super) fn prepare(
     Ok(PreparedBinding {
         mapping,
         maintenance,
-        recovery,
     })
 }
 
@@ -383,6 +390,18 @@ fn handle_maintenance_interrupt(
     if !crate::hal::vm::maintenance_interrupt_pending() {
         return HandlerResult::NotHandled;
     }
+    let timer_eoi = match super::active_vcpu::with(|execution| {
+        let (hardware, _, interrupts) = execution.interrupt_context();
+        crate::hal::vm::virtual_timer_eoi_pending(hardware, interrupts)
+    }) {
+        Ok(Some(timer_eoi)) => timer_eoi,
+        Ok(None) => false,
+        Err(error) => {
+            crate::hal::vm::quiesce_virtual_interrupt_delivery();
+            crate::pr_err!("HypeR: invalid active vCPU while observing timer EOI: {error:?}");
+            return HandlerResult::Handled;
+        }
+    };
     match update_active_interrupts(crate::hal::vm::handle_maintenance_interrupt) {
         Ok(Some(Ok(true))) => {
             let Some(raw) = context
@@ -393,10 +412,16 @@ fn handle_maintenance_interrupt(
                 crate::pr_err!("HypeR: invalid virtual-timer maintenance binding");
                 return HandlerResult::Handled;
             };
+            finish_recovery();
             set_local_source_masked(false);
             HandlerResult::HandledAndUnmaskLocal(VirtualInterrupt::from_raw(raw))
         }
-        Ok(Some(Ok(false))) => HandlerResult::Handled,
+        Ok(Some(Ok(false))) => {
+            if timer_eoi && local_source_masked() {
+                start_recovery();
+            }
+            HandlerResult::Handled
+        }
         Ok(None) => {
             crate::hal::vm::quiesce_virtual_interrupt_delivery();
             crate::pr_err!("HypeR: virtual-interrupt maintenance without an active vCPU");
@@ -415,57 +440,79 @@ fn handle_maintenance_interrupt(
     }
 }
 
-/// Rechecks a timer PPI retained masked across an early EOI-maintenance edge.
-///
-/// Linux may retire the virtual LR before its timer programming write has
-/// deasserted CNTV. Maintenance must keep the level source masked in that
-/// interval, but deassertion itself produces no later interrupt. The existing
-/// host tick is therefore used as an allocation-free recovery edge. Its normal
-/// path is one CPU-local relaxed load; vGIC reconciliation occurs only while
-/// this source is known to be masked.
-fn handle_source_recovery(
-    _interrupt: VirtualInterrupt,
-    context: usize,
-    _frame: &crate::hal::irq::InterruptFrame<'_>,
-) -> HandlerResult {
-    if !local_source_masked() {
-        return HandlerResult::NotHandled;
-    }
-    let Some(timer_interrupt) = decode_bound_interrupt(context) else {
-        crate::hal::vm::quiesce_virtual_interrupt_delivery();
-        crate::pr_err!("HypeR: invalid virtual-timer recovery binding");
-        return HandlerResult::Handled;
+fn start_recovery() {
+    let Some(cpu) = crate::kernel::cpu::current_index() else {
+        return;
     };
+    if let Some(update) = RECOVERY[cpu].with(Recovery::start) {
+        publish_recovery_or_fail(update);
+    }
+}
+
+fn finish_recovery() {
+    let Some(cpu) = crate::kernel::cpu::current_index() else {
+        return;
+    };
+    if let Some(update) = RECOVERY[cpu].with(Recovery::complete) {
+        publish_recovery_or_fail(update);
+    }
+}
+
+fn publish_recovery_or_fail(update: Update) {
+    if let Err(error) = publish_recovery(update) {
+        crate::kernel::crash::fatal(format_args!(
+            "HypeR: guest timer recovery deadline failed: {error:?}"
+        ));
+    }
+}
+
+/// Rechecks only an observed early timer EOI, outside the IRQ registry lock.
+///
+/// The timer deassertion has no interrupt edge of its own. One-shot retries
+/// back off to a bounded rate until it deasserts; unrelated CPUs and inactive
+/// guests have no recovery timer. Every hardware detach revokes this generation
+/// before another owner can occupy the local virtual timer bank.
+pub(crate) fn recover_source(generation: u64) {
+    let Some(cpu) = crate::kernel::cpu::current_index() else {
+        return;
+    };
+    if !RECOVERY[cpu].with(|state| state.accepts(generation)) {
+        return;
+    }
     let can_unmask = match update_active_interrupts(crate::hal::vm::handle_maintenance_interrupt) {
         Ok(Some(Ok(can_unmask))) => can_unmask,
         // The physical timer bank is detached. Keep its PPI masked until
         // activation installs an owner, even if a prior assertion is pending
         // at the interrupt controller after the timer was disabled.
-        Ok(None) => false,
+        Ok(None) => {
+            finish_recovery();
+            return;
+        }
         Ok(Some(Err(error))) => {
             crate::hal::vm::quiesce_virtual_interrupt_delivery();
             crate::pr_err!("HypeR: virtual-timer recovery failed: {error:?}");
-            false
+            finish_recovery();
+            return;
         }
         Err(error) => {
             crate::hal::vm::quiesce_virtual_interrupt_delivery();
             crate::pr_err!("HypeR: invalid active vCPU during timer recovery: {error:?}");
-            false
+            finish_recovery();
+            return;
         }
     };
     if can_unmask {
-        set_local_source_masked(false);
-        HandlerResult::HandledAndUnmaskLocal(timer_interrupt)
+        finish_recovery();
+        if let Err(error) = set_guest_timer_source_enabled(true) {
+            crate::kernel::crash::fatal(format_args!(
+                "HypeR: guest timer recovery cannot unmask its source: {error:?}"
+            ));
+        }
     } else {
-        HandlerResult::NotHandled
+        if let Some(update) = RECOVERY[cpu].with(|state| state.retry(generation)) {
+            publish_recovery_or_fail(update);
+        }
     }
-}
-
-fn decode_bound_interrupt(context: usize) -> Option<VirtualInterrupt> {
-    context
-        .checked_sub(1)
-        .and_then(|raw| u32::try_from(raw).ok())
-        .map(VirtualInterrupt::from_raw)
 }
 
 fn local_source_masked() -> bool {

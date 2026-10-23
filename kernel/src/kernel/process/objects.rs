@@ -241,7 +241,8 @@ impl KernelObject for TaskFactory {
         .union(Rights::CREATE_PROCESS)
         .union(Rights::CREATE_TASK_GROUP)
         .union(Rights::LOCK_MEMORY)
-        .union(Rights::RETAIN_PROCESS);
+        .union(Rights::RETAIN_PROCESS)
+        .union(crate::kernel::task::scheduling_authority::SCHEDULING_RIGHTS);
 }
 
 fn reserve_object_charge<T: KernelObject>(

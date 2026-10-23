@@ -247,6 +247,36 @@ Scheduler thread roles reported by inspection.
 | `thread_role_user` | `4` |  |
 | `thread_role_vcpu` | `5` |  |
 
+### `scheduling_policy` (enum)
+
+Scheduling algorithms; these do not identify the thread execution payload.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `scheduling_policy_fair` | `1` |  |
+| `scheduling_policy_budget` | `2` |  |
+| `scheduling_policy_fifo` | `3` |  |
+
+### `scheduling_role` (enum)
+
+Eligibility for CPU-local priority and minimum-progress allowances.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `scheduling_role_ordinary` | `0` |  |
+| `scheduling_role_priority` | `1` |  |
+| `scheduling_role_protected` | `2` |  |
+
+### `scheduling_fair_backend` (enum)
+
+Fair queue implementations supported by the selected kernel image.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `scheduling_fair_backend_stride` | `0` |  |
+| `scheduling_fair_backend_round_robin` | `1` |  |
+| `scheduling_fair_backend_default` | `2` |  |
+
 ### `thread_registry` (enum)
 
 Thread registry membership states.
@@ -750,6 +780,9 @@ RISC-V ISA extensions accepted in guest configuration.
 - Native invocations carry a process-local target handle in the selector register, a separate object-local operation, and six business argument registers. AArch64 uses x8/x6/x0..x5; RISC-V uses a7/a6/a0..a5. No global syscall number or implicit privileged target exists. Common handle operations use 0..5; object-specific operations start at 256 and may repeat across object kinds. Unknown target handles fail before operation dispatch; unknown operations return NOT_SUPPORTED. The receiver is not duplicated in the business arguments.
 - ExecutionContext and ObjectFactory are ordinary process-local, nontransferable capabilities bound to their creating Process. They never grant operations on another Process, Thread, address space or resource domain. ExecutionContext methods act on the invoking Thread or its Process; ObjectFactory charges every allocation to that Process's resource domain. SystemInfo grants public read-only ABI, configuration and clock observations. Closing or attenuating a capability does not implicitly recreate its authority.
 - device_dma_fault_info requires INSPECT and ASSIGN_DEVICE on the physical-device handle. It returns the first retained DMA containment report without consuming it; an all-zero record means no report. DMA_FAULT is a persistent level signal observed with WAIT. Claim and claim_matching grant WAIT. Fault evidence follows the device object across handle transfer; querying does not acknowledge or resume DMA. The kernel never selects a userspace process or stops a VM for this notification. The formal I/O runtime queries after adoption and journals each device's first report; bootstrap does not consume it. timestamp_ns is monotonic boot time. source 1 identifies SMMUv3. scope 1 means stream quarantine, with code holding the SMMUv3 event ID; scope 2 means controller containment, with code holding the captured GERROR bits (zero is possible for a software-detected failure). stream_id always identifies this handle's device. ADDRESS_VALID, READ and WRITE describe the address only for translation/access faults; controller reports disclose no other device's address. reserved is zero. A first stream report remains unchanged if the whole controller later fails. Quarantine and backing retention remain independent of observer presence or progress.
+- Scheduling reads require INSPECT on ExecutionContext, Thread or VirtualCpu. ExecutionContext targets only the invoking Thread; VirtualCpu targets its scheduler Thread. Configuration is a complete 64-byte record with canonical zero inactive/reserved fields. Fair weight is 1..1024 and quantum 1..1000000000 nanoseconds; Fair backend 2 requests the configured default, while reads return concrete backend 0 or 1. Budget Q, P and burst are positive, Q and burst do not exceed P, and P must equal the kernel arbitration period. Disabled policies or malformed parameters return INVALID_ARGUMENT before mutation.
+- Scheduling changes compare old and requested parameters atomically under scheduler ownership. SCHED_LOWER permits lowering band, Fair weight or FIFO priority; SCHED_PRIORITY permits raising those fields and changing quantum; SCHED_CLASS permits policy, arbitration role or Fair-backend changes; SCHED_BUDGET permits any budget change. A compound change may require multiple rights. WRITE, thread ownership, executable names and configuration text confer no elevation. Immutable target ceilings remain enforced after handle attenuation or transfer. Rejection preserves the old parameters.
+- ProcessBuilder scheduling configuration also declares the child's execution-context scheduling subset. It cannot delegate rights absent from the builder. Ordinary process creation uses the native App boundary and preserves ordinary demotion; in-process thread_create inherits its caller's current parameters and cannot restore a higher initial weight. All threads receive SCHED_LOWER for self demotion; child Thread handles receive only scheduling rights present in both the execution-context receiver and process grant. VM creation authorities propagate explicitly held scheduling rights through leases, pending machines, installed machines and vCPUs. Thread handles may transfer only through explicit capability rendezvous, with the receiver retaining an attenuated subset of the sender's rights. Creating, blocking, migrating or switching policy does not authorize resetting an existing Thread's budget accounting. Budget entitlement is per Thread, not an aggregate Process or VM cgroup quota; separately authorized construction creates independently accounted Threads.
 - thread_set_current_name changes only the calling Native Thread's diagnostic label. The caller must hold its ExecutionContext with WRITE; no other Thread or Process can be renamed. Input is 1..thread_name_max_bytes (64) bytes of UTF-8 without control characters, excluding any NUL terminator. Empty, oversized, invalid UTF-8, control-containing names and nonzero unused arguments return INVALID_ARGUMENT without changing the old name. Inspectors receive complete old or new snapshots; names confer no identity or authority. Process names remain unchanged.
 - memory_inspector_read_statistics requires MemoryInspector INSPECT; it is observational and never drains caches or initiates reclaim. Topic selects a typed extensible record: heap (index 0), buddy (orders 0..18), owner (0 kernel, 1 page tables, 2 guest, 3 user, 4 file cache), file_cache (index 0), or heap_class (0..8 kernel, 9..17 file-cache pool; eight slab sizes 16..2048 then large allocations). Unknown topic/index and a nonzero unused argument are INVALID_ARGUMENT. Heap-class records require CONFIG_HEAP_PROFILING, otherwise NOT_SUPPORTED. Other records are always available after allocator initialization.
 - Memory statistics are independently sampled, including fields sourced from atomic counters; they are not a transaction across topics, CPUs, or logical and physical accounting. Page counts use memory_observation.page_size. Heap-class reserved slots include live objects, magazine objects and in-flight transfers; large buckets report zero capacity/reserved/cached and object_size=0. File-cache metadata physical pages and reservations overlap other accounting and must not be added twice. Cumulative heap-class allocation/deallocation counters saturate and reset only on reboot. No address or allocation authority is exposed.
@@ -794,7 +827,7 @@ RISC-V ISA extensions accepted in guest configuration.
 - console_discard_input requires READ and atomically discards the currently accepted physical Console input prefix. It returns the byte count; input arriving later remains queued. An outstanding transactional read claim returns would_block without discarding any bytes. This operation has no terminal or character interpretation.
 - Every live TaskGroup handle participates in shared group-lifetime ownership regardless of its attenuated rights. Closing the last TaskGroup handle asynchronously requests stop for every member. Rights control operations available through a handle; they do not change this ownership effect.
 - Inspector scans require the exact published page capacity for their record type. Cursor zero starts a scan and a returned next_cursor of zero ends it. Pages and complete scans are weakly consistent with concurrent task, object, and handle-table mutation; generation-qualified handle values prevent slot reuse from aliasing an earlier observation.
-- Memory and CPU inspectors publish immutable point-in-time copies. Their handles grant observation only; they never expose writable accounting storage or allocator and scheduler synchronization to userspace. CPU categories are scheduler-tick observations and a multi-CPU snapshot is weakly consistent across CPUs.
+- Memory and CPU inspectors publish immutable point-in-time copies. Their handles grant observation only; they never expose writable accounting storage or allocator and scheduler synchronization to userspace. CPU categories and thread runtime_ns are elapsed monotonic nanoseconds, including a snapshot-time charge for executing Threads. reserved_clock is zero. A multi-CPU snapshot is weakly consistent across CPUs.
 - File and Directory information reports attribute snapshots plus filesystem, mount, and node identities for diagnostics and correlation. These identities do not grant authority, cannot be resolved back into handles, and do not define a pathname; directory entries, hard links, renames, mount namespaces, and unlinks make pathnames namespace-dependent observations rather than object identity.
 - Object wait-many borrows every input handle for the complete wait, canonicalizes duplicate object identities, and selects the lowest input index whose requested mask intersects the winning object's committed level snapshot. Source-handle close after resolution does not cancel the wait.
 - Process terminal detail fields are reason-specific: exit reasons encode the signed status as two's-complement in detail0; fault encodes class in detail0 and code in detail1; task-group stop encodes generation in detail0; unused details are zero.
@@ -1282,7 +1315,7 @@ Object-local method `process_builder_create`.
 | Feature | `Core` |
 | Arguments | `group: handle`, `domain: handle`, `executable: handle`, `loader: handle` |
 | Results | `builder: handle` |
-| Capability effects | `factory: Borrow, kind=task_factory, rights=0x100000`, `group: Borrow, kind=task_group, rights=0x4000000`, `domain: Borrow, kind=resource_domain, rights=0x8000000`, `executable: Borrow, kind=file, rights=0x800000093`, `loader: Borrow, kind=file, rights=0x90`, `builder: produce, kind=process_builder, fixed=0xc2a, inherited-from(factory), mask=0x3000000000` |
+| Capability effects | `factory: Borrow, kind=task_factory, rights=0x100000`, `group: Borrow, kind=task_group, rights=0x4000000`, `domain: Borrow, kind=resource_domain, rights=0x8000000`, `executable: Borrow, kind=file, rights=0x800000093`, `loader: Borrow, kind=file, rights=0x90`, `builder: produce, kind=process_builder, fixed=0x10000000c2a, inherited-from(factory), mask=0xe3000000000` |
 | User memory | — |
 | Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Task` |
@@ -2042,7 +2075,7 @@ Object-local method `virtual_machine_creation_lease_create`.
 | Feature | `Core` |
 | Arguments | `resource_domain: handle` |
 | Results | `lease: handle` |
-| Capability effects | `authority: Borrow, kind=virtual_machine_creation_authority, rights=0x30000000`, `resource_domain: Borrow, kind=resource_domain, rights=0x8000000`, `lease: produce, kind=virtual_machine_creation_lease, fixed=0x2000000a` |
+| Capability effects | `authority: Borrow, kind=virtual_machine_creation_authority, rights=0x30000000`, `resource_domain: Borrow, kind=resource_domain, rights=0x8000000`, `lease: produce, kind=virtual_machine_creation_lease, fixed=0x2000000a, inherited-from(authority), mask=0xf0000000000` |
 | User memory | — |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Capability` |
@@ -2062,7 +2095,7 @@ Object-local method `virtual_machine_create`.
 | Feature | `Core` |
 | Arguments | `configuration: user_address`, `configuration_size: byte_count` |
 | Results | `pending_virtual_machine: handle` |
-| Capability effects | `lease: ConsumeOnCommit, kind=virtual_machine_creation_lease, rights=0x20000000`, `pending_virtual_machine: produce, kind=pending_virtual_machine, fixed=0xc2a` |
+| Capability effects | `lease: ConsumeOnCommit, kind=virtual_machine_creation_lease, rights=0x20000000`, `pending_virtual_machine: produce, kind=pending_virtual_machine, fixed=0xc2a, inherited-from(lease), mask=0xf0000000000` |
 | User memory | `configuration: Read, len=configuration_size bytes, max-bytes=4096, record=virtual_machine_configuration; order=0` |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Capability` |
@@ -2142,7 +2175,7 @@ Object-local method `pending_virtual_machine_install`.
 | Feature | `Core` |
 | Arguments | — |
 | Results | `virtual_machine: handle`, `boot_virtual_cpu: handle` |
-| Capability effects | `pending_virtual_machine: ConsumeOnCommit, kind=pending_virtual_machine, rights=0x400`, `virtual_machine: produce, kind=virtual_machine, fixed=0x82e`, `boot_virtual_cpu: produce, kind=virtual_cpu, fixed=0x42e` |
+| Capability effects | `pending_virtual_machine: ConsumeOnCommit, kind=pending_virtual_machine, rights=0x400`, `virtual_machine: produce, kind=virtual_machine, fixed=0x82e, inherited-from(pending_virtual_machine), mask=0xf0000000000`, `boot_virtual_cpu: produce, kind=virtual_cpu, fixed=0x1000000042e, inherited-from(pending_virtual_machine), mask=0xe0000000000` |
 | User memory | — |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Capability` |
@@ -2402,7 +2435,7 @@ Object-local method `thread_create`.
 | Feature | `Core` |
 | Arguments | `entry: u64`, `stack: u64`, `tls: u64`, `argument: u64`, `affinity_words: user_address`, `word_count: element_count` |
 | Results | `thread: handle` |
-| Capability effects | `receiver: Borrow, kind=execution_context, rights=0x200000`, `thread: produce, kind=thread, fixed=0xc0d` |
+| Capability effects | `receiver: Borrow, kind=execution_context, rights=0x200000`, `thread: produce, kind=thread, fixed=0x10000000c0f, inherited-from(receiver), mask=0xe0000000000` |
 | User memory | `affinity_words: Read, len=word_count elements, max-elements=4, element-size=8; order=0` |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Task` |
@@ -3222,7 +3255,7 @@ Object-local method `virtual_machine_open_vcpu`.
 | Feature | `Core` |
 | Arguments | `vcpu_id: u32` |
 | Results | `virtual_cpu: handle` |
-| Capability effects | `virtual_machine: Borrow, kind=virtual_machine, rights=0x20`, `virtual_cpu: produce, kind=virtual_cpu, fixed=0x42e` |
+| Capability effects | `virtual_machine: Borrow, kind=virtual_machine, rights=0x20`, `virtual_cpu: produce, kind=virtual_cpu, fixed=0x1000000042e, inherited-from(virtual_machine), mask=0xe0000000000` |
 | User memory | — |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Capability` |
@@ -4511,7 +4544,165 @@ Arguments and auxiliary results follow the listed register order; neither list i
 
 Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
 
+### `thread_get_current_scheduling`
+
+Object-local method `thread_get_current_scheduling`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=execution_context, rights=0x8` |
+| Operation | 266 |
+| Feature | `Core` |
+| Arguments | `configuration: user_address` |
+| Results | — |
+| Capability effects | `receiver: Borrow, kind=execution_context, rights=0x8` |
+| User memory | `configuration: Write, fixed-bytes=64, record=scheduling_parameters; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `thread_set_current_scheduling`
+
+Object-local method `thread_set_current_scheduling`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=execution_context, rights=0x0` |
+| Operation | 267 |
+| Feature | `Core` |
+| Arguments | `configuration: user_address` |
+| Results | — |
+| Capability effects | `receiver: Borrow, kind=execution_context, rights=0x0` |
+| User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `thread_get_scheduling`
+
+Object-local method `thread_get_scheduling`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=thread, rights=0x8` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | `configuration: user_address` |
+| Results | — |
+| Capability effects | `receiver: Borrow, kind=thread, rights=0x8` |
+| User memory | `configuration: Write, fixed-bytes=64, record=scheduling_parameters; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `thread_set_scheduling`
+
+Object-local method `thread_set_scheduling`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=thread, rights=0x0` |
+| Operation | 259 |
+| Feature | `Core` |
+| Arguments | `configuration: user_address` |
+| Results | — |
+| Capability effects | `receiver: Borrow, kind=thread, rights=0x0` |
+| User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `virtual_cpu_get_scheduling`
+
+Object-local method `virtual_cpu_get_scheduling`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=virtual_cpu, rights=0x8` |
+| Operation | 261 |
+| Feature | `Core` |
+| Arguments | `configuration: user_address` |
+| Results | — |
+| Capability effects | `receiver: Borrow, kind=virtual_cpu, rights=0x8` |
+| User memory | `configuration: Write, fixed-bytes=64, record=scheduling_parameters; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `virtual_cpu_set_scheduling`
+
+Object-local method `virtual_cpu_set_scheduling`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=virtual_cpu, rights=0x0` |
+| Operation | 262 |
+| Feature | `Core` |
+| Arguments | `configuration: user_address` |
+| Results | — |
+| Capability effects | `receiver: Borrow, kind=virtual_cpu, rights=0x0` |
+| User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `process_builder_set_scheduling`
+
+Object-local method `process_builder_set_scheduling`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=process_builder, rights=0x0` |
+| Operation | 265 |
+| Feature | `Core` |
+| Arguments | `configuration: user_address`, `delegated_rights: rights` |
+| Results | — |
+| Capability effects | `receiver: Borrow, kind=process_builder, rights=0x0` |
+| User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Audit | `Task` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
 ## Public records
+
+### `scheduling_parameters`
+
+Minimum prefix: 64 bytes; size: 64 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `policy` | `u32` |
+| 4 | `band` | `u32` |
+| 8 | `role` | `u32` |
+| 12 | `weight` | `u32` |
+| 16 | `fifo_priority` | `u32` |
+| 20 | `fair_backend` | `u32` |
+| 24 | `quantum_ns` | `u64` |
+| 32 | `budget_ns` | `u64` |
+| 40 | `period_ns` | `u64` |
+| 48 | `burst_ns` | `u64` |
+| 56 | `reserved` | `u64` |
 
 ### `cpu_profile_info`
 
@@ -5054,7 +5245,7 @@ Minimum prefix: 104 bytes; size: 104 bytes; alignment: 8 bytes.
 | 20 | `registry_phase` | `u32` |
 | 24 | `name_length` | `u32` |
 | 28 | `reserved` | `u32` |
-| 32 | `runtime_ticks` | `u64` |
+| 32 | `runtime_ns` | `u64` |
 | 40 | `name` | `bytes[64]` |
 
 ### `memory_observation`
@@ -5089,12 +5280,12 @@ Minimum prefix: 64 bytes; size: 64 bytes; alignment: 8 bytes.
 | Offset | Field | Type |
 | ---: | --- | --- |
 | 0 | `captured_at_ns` | `u64` |
-| 8 | `ticks_per_second` | `u64` |
+| 8 | `reserved_clock` | `u64` |
 | 16 | `online_cpus` | `u64` |
-| 24 | `idle_ticks` | `u64` |
-| 32 | `kernel_thread_ticks` | `u64` |
-| 40 | `user_thread_ticks` | `u64` |
-| 48 | `vcpu_ticks` | `u64` |
+| 24 | `idle_ns` | `u64` |
+| 32 | `kernel_thread_ns` | `u64` |
+| 40 | `user_thread_ns` | `u64` |
+| 48 | `vcpu_ns` | `u64` |
 | 56 | `reserved` | `u64` |
 
 ### `object_inspection`

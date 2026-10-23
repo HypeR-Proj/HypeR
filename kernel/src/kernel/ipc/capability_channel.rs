@@ -659,6 +659,9 @@ pub(crate) struct PreparedCapabilityReceive {
 }
 
 impl PreparedCapabilityReceive {
+    // Build registration state before the caller reserves user outputs. Its
+    // construction frame must not remain live across a COW commit and yield.
+    #[inline(never)]
     fn try_new(
         pair: FallibleArc<CapabilityPair>,
         side: Side,

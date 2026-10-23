@@ -221,6 +221,46 @@ impl InstalledMachine {
         })
     }
 
+    pub(super) fn vcpu_scheduling(
+        &self,
+        id: u32,
+    ) -> Result<crate::kernel::task::policy::SchedulingParameters, Error> {
+        self.state.with(|state| {
+            if !matches!(
+                state,
+                RuntimeState::Installed { .. } | RuntimeState::Running { .. }
+            ) {
+                return Err(Error::BadState);
+            }
+            let thread = self.endpoint(id)?.thread().ok_or(Error::BadState)?;
+            crate::kernel::task::scheduler::scheduling_snapshot(thread).map_err(Error::Scheduler)
+        })
+    }
+
+    pub(super) fn set_vcpu_scheduling(
+        &self,
+        id: u32,
+        parameters: crate::kernel::task::policy::SchedulingParameters,
+        authority: crate::kernel::task::scheduling_authority::SchedulingAuthority,
+    ) -> Result<(), Error> {
+        self.state.with(|state| {
+            if !matches!(
+                state,
+                RuntimeState::Installed { .. } | RuntimeState::Running { .. }
+            ) {
+                return Err(Error::BadState);
+            }
+            let thread = self.endpoint(id)?.thread().ok_or(Error::BadState)?;
+            crate::kernel::task::scheduler::configure_scheduling(
+                thread,
+                parameters,
+                authority,
+                crate::kernel::task::scheduling_authority::SchedulingLimits::SYSTEM,
+            )
+            .map_err(Error::Scheduler)
+        })
+    }
+
     fn take_stop_control(&self) -> Option<VmControl> {
         self.state.with(|state| match state {
             RuntimeState::Installed { id, control } | RuntimeState::Running { id, control } => {

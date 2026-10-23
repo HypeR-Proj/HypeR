@@ -1,57 +1,128 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Best-effort periodic balancing outside IRQ and scheduler hot paths.
+//! Bounded placement repair at scheduling events; no periodic maintenance wake.
 
-use hyper::sync::PublishedOnce;
+mod retry;
+mod work;
 
-use super::{SCHEDULER, current_thread_id, publish_committed_ready, scheduler_invariant};
-use crate::kernel::time::{Callout, CalloutRef, Error, TimerEvent};
+use super::{
+    SCHEDULER, current_cpu, current_thread_id, publish_committed_ready, scheduler_invariant,
+};
+use hyper::cpu::{CpuIndex, PerCpu};
+use hyper::sync::atomic::{AtomicBool, Ordering};
 
-const INTERVAL_NS: u64 = 20_000_000;
-static CALLOUT: PublishedOnce<Callout<()>> = PublishedOnce::new();
+static ENABLED: AtomicBool = AtomicBool::new(false);
+static WORK: work::Work = work::Work::new();
+static RETRY: retry::ReleaseRetry = retry::ReleaseRetry::new();
+static PROMPTS: PerCpu<AtomicBool> =
+    PerCpu::new([const { AtomicBool::new(false) }; hyper::cpu::MAX_CPUS]);
 
-/// Reuses the boot CPU's timer worker after the complete CPU set is admitted.
-/// No balancer Thread or per-tick remote queue scanning is required.
-pub(crate) fn initialize() -> Result<(), Error> {
-    let count = crate::kernel::cpu::participating_cpu_count().ok_or(Error::NotInitialized)?;
-    if count <= 1 {
-        return Ok(());
+pub(crate) fn initialize() -> Result<(), crate::kernel::time::Error> {
+    ENABLED.store(true, Ordering::Release);
+    request();
+    if let Ok(cpu) = current_cpu() {
+        prompt(cpu);
     }
-    let callout = Callout::try_new((), balance)?;
-    CALLOUT
-        .publish(callout)
-        .map_err(|_| Error::AlreadyInitialized)?;
-    CALLOUT
-        .get()
-        .ok_or(Error::NotInitialized)?
-        .arm_after(INTERVAL_NS)
+    Ok(())
 }
 
-fn balance(_context: &(), callout: CalloutRef<'_>, _event: TimerEvent) {
-    let current = match current_thread_id() {
-        Ok(current) => current,
-        Err(error) => scheduler_invariant("load balancing current Thread", error),
+fn work_pending() -> bool {
+    WORK.pending()
+}
+
+/// An active pass always retains CONTINUE until its atomic completion, so this
+/// single observation also excludes an owner between scan and publication.
+#[cfg(all(
+    target_arch = "aarch64",
+    feature = "kernel-test",
+    feature = "kernel-self-test"
+))]
+pub(crate) fn idle_for_test() -> bool {
+    !WORK.pending()
+}
+
+fn prompt(cpu: CpuIndex) {
+    if !PROMPTS[cpu].swap(true, Ordering::AcqRel) {
+        crate::kernel::irq::reschedule::notify(cpu);
+    }
+}
+
+pub(super) fn request() {
+    if WORK.request()
+        && ENABLED.load(Ordering::Acquire)
+        && let Ok(cpu) = current_cpu()
+    {
+        prompt(cpu);
+    }
+}
+
+/// The lock invokes this only for a failed try's subscribed lane, after release.
+/// No scheduler state is accessed from a reader/writer's teardown path.
+pub(super) fn coordinator_released() {
+    if let Some(cpu) = RETRY.released().and_then(CpuIndex::new) {
+        prompt(cpu);
+    }
+}
+
+/// Deferred IRQ service preserves a continuation past the scheduling decision
+/// that queued its IPI. It does not take scheduler locks or scan the registry.
+pub(crate) fn service_irq_prompt() {
+    let Ok(cpu) = current_cpu() else { return };
+    if !PROMPTS[cpu].load(Ordering::Relaxed) {
+        return;
+    }
+    if PROMPTS[cpu].swap(false, Ordering::AcqRel)
+        && ENABLED.load(Ordering::Acquire)
+        && work_pending()
+        && let Err(error) = crate::kernel::task::preempt::request(cpu)
+    {
+        scheduler_invariant("load balance prompt", error.into());
+    }
+}
+
+/// One serialized pass visits at most 64 slots and moves at most four Threads.
+/// Contention subscribes to the actual blocking lane's next release; it never
+/// retries with an immediate self-IPI while a registry reader is still active.
+pub(super) fn service() {
+    if !ENABLED.load(Ordering::Acquire) || !work_pending() {
+        return;
+    }
+    // SAFETY: no scheduling occurs inside the bounded pass. Pinning the owner
+    // also prevents its release notification from running before ACTIVE clears.
+    let _mask = unsafe { super::TransitionMask::acquire() };
+    let Ok(cpu) = current_cpu() else { return };
+    let Ok(current) = current_thread_id() else {
+        return;
     };
-    // Maintenance must not wait for a remote registry reader: its release may
-    // depend on a runnable continuation on this very CPU. A contended pass is
-    // skipped, and the owned callout provides the next independent attempt.
-    if let Some(result) = SCHEDULER.try_with(|slot| {
+    if !WORK.begin() {
+        return;
+    }
+    // New events stay dirty while an existing sweep advances to its captured
+    // high-water mark. They request a later sweep rather than resetting it.
+    RETRY.register(cpu.get());
+    let result = SCHEDULER.try_with(|slot| {
+        RETRY.acquired();
         slot.as_mut()
             .ok_or(super::Error::NotInitialized)?
             .balance_ready(current)
-    }) {
-        let outcomes = match result {
-            Ok(outcomes) => outcomes,
-            Err(error) => scheduler_invariant("load balancing", error),
+    });
+    if let Some(result) = result {
+        let more = match result {
+            Ok(pass) => {
+                for outcome in pass.outcomes.into_iter().flatten() {
+                    publish_committed_ready(outcome);
+                }
+                pass.more
+            }
+            Err(error) => scheduler_invariant("event load balancing", error),
         };
-        for outcome in outcomes.into_iter().flatten() {
-            publish_committed_ready(outcome);
+        if WORK.complete(more) {
+            prompt(cpu);
         }
-    }
-    if let Err(error) = callout.arm_after(INTERVAL_NS) {
-        crate::kernel::crash::fatal(format_args!(
-            "HypeR: load balancing callout rearm failed: {error:?}"
-        ));
+    } else {
+        // The subscribed release will prompt this still-pinned CPU. In-flight
+        // callbacks may have already set PROMPTS, but its IRQ cannot run yet.
+        WORK.blocked();
     }
 }

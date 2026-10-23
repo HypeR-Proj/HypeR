@@ -166,6 +166,7 @@ pub(in crate::kernel::abi::native) fn sys_process_get_info(
 #[inline(never)]
 pub(in crate::kernel::abi::native) fn sys_thread_create(
     services: &impl TaskServices,
+    receiver: &InvocationReceiver,
     arguments: &Arguments,
 ) -> NativeResult {
     let affinity = if arguments[4] == 0 && arguments[5] == 0 {
@@ -176,6 +177,7 @@ pub(in crate::kernel::abi::native) fn sys_thread_create(
     handle_result(affinity.and_then(|(words, count)| {
         services
             .create_thread(
+                receiver.info().rights,
                 arguments[0],
                 arguments[1],
                 arguments[2],

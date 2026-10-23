@@ -22,6 +22,12 @@
  *
  * - device_dma_fault_info requires INSPECT and ASSIGN_DEVICE on the physical-device handle. It returns the first retained DMA containment report without consuming it; an all-zero record means no report. DMA_FAULT is a persistent level signal observed with WAIT. Claim and claim_matching grant WAIT. Fault evidence follows the device object across handle transfer; querying does not acknowledge or resume DMA. The kernel never selects a userspace process or stops a VM for this notification. The formal I/O runtime queries after adoption and journals each device's first report; bootstrap does not consume it. timestamp_ns is monotonic boot time. source 1 identifies SMMUv3. scope 1 means stream quarantine, with code holding the SMMUv3 event ID; scope 2 means controller containment, with code holding the captured GERROR bits (zero is possible for a software-detected failure). stream_id always identifies this handle's device. ADDRESS_VALID, READ and WRITE describe the address only for translation/access faults; controller reports disclose no other device's address. reserved is zero. A first stream report remains unchanged if the whole controller later fails. Quarantine and backing retention remain independent of observer presence or progress.
  *
+ * - Scheduling reads require INSPECT on ExecutionContext, Thread or VirtualCpu. ExecutionContext targets only the invoking Thread; VirtualCpu targets its scheduler Thread. Configuration is a complete 64-byte record with canonical zero inactive/reserved fields. Fair weight is 1..1024 and quantum 1..1000000000 nanoseconds; Fair backend 2 requests the configured default, while reads return concrete backend 0 or 1. Budget Q, P and burst are positive, Q and burst do not exceed P, and P must equal the kernel arbitration period. Disabled policies or malformed parameters return INVALID_ARGUMENT before mutation.
+ *
+ * - Scheduling changes compare old and requested parameters atomically under scheduler ownership. SCHED_LOWER permits lowering band, Fair weight or FIFO priority; SCHED_PRIORITY permits raising those fields and changing quantum; SCHED_CLASS permits policy, arbitration role or Fair-backend changes; SCHED_BUDGET permits any budget change. A compound change may require multiple rights. WRITE, thread ownership, executable names and configuration text confer no elevation. Immutable target ceilings remain enforced after handle attenuation or transfer. Rejection preserves the old parameters.
+ *
+ * - ProcessBuilder scheduling configuration also declares the child's execution-context scheduling subset. It cannot delegate rights absent from the builder. Ordinary process creation uses the native App boundary and preserves ordinary demotion; in-process thread_create inherits its caller's current parameters and cannot restore a higher initial weight. All threads receive SCHED_LOWER for self demotion; child Thread handles receive only scheduling rights present in both the execution-context receiver and process grant. VM creation authorities propagate explicitly held scheduling rights through leases, pending machines, installed machines and vCPUs. Thread handles may transfer only through explicit capability rendezvous, with the receiver retaining an attenuated subset of the sender's rights. Creating, blocking, migrating or switching policy does not authorize resetting an existing Thread's budget accounting. Budget entitlement is per Thread, not an aggregate Process or VM cgroup quota; separately authorized construction creates independently accounted Threads.
+ *
  * - thread_set_current_name changes only the calling Native Thread's diagnostic label. The caller must hold its ExecutionContext with WRITE; no other Thread or Process can be renamed. Input is 1..thread_name_max_bytes (64) bytes of UTF-8 without control characters, excluding any NUL terminator. Empty, oversized, invalid UTF-8, control-containing names and nonzero unused arguments return INVALID_ARGUMENT without changing the old name. Inspectors receive complete old or new snapshots; names confer no identity or authority. Process names remain unchanged.
  *
  * - memory_inspector_read_statistics requires MemoryInspector INSPECT; it is observational and never drains caches or initiates reclaim. Topic selects a typed extensible record: heap (index 0), buddy (orders 0..18), owner (0 kernel, 1 page tables, 2 guest, 3 user, 4 file cache), file_cache (index 0), or heap_class (0..8 kernel, 9..17 file-cache pool; eight slab sizes 16..2048 then large allocations). Unknown topic/index and a nonzero unused argument are INVALID_ARGUMENT. Heap-class records require CONFIG_HEAP_PROFILING, otherwise NOT_SUPPORTED. Other records are always available after allocator initialization.
@@ -110,7 +116,7 @@
  *
  * - Inspector scans require the exact published page capacity for their record type. Cursor zero starts a scan and a returned next_cursor of zero ends it. Pages and complete scans are weakly consistent with concurrent task, object, and handle-table mutation; generation-qualified handle values prevent slot reuse from aliasing an earlier observation.
  *
- * - Memory and CPU inspectors publish immutable point-in-time copies. Their handles grant observation only; they never expose writable accounting storage or allocator and scheduler synchronization to userspace. CPU categories are scheduler-tick observations and a multi-CPU snapshot is weakly consistent across CPUs.
+ * - Memory and CPU inspectors publish immutable point-in-time copies. Their handles grant observation only; they never expose writable accounting storage or allocator and scheduler synchronization to userspace. CPU categories and thread runtime_ns are elapsed monotonic nanoseconds, including a snapshot-time charge for executing Threads. reserved_clock is zero. A multi-CPU snapshot is weakly consistent across CPUs.
  *
  * - File and Directory information reports attribute snapshots plus filesystem, mount, and node identities for diagnostics and correlation. These identities do not grant authority, cannot be resolved back into handles, and do not define a pathname; directory entries, hard links, renames, mount namespaces, and unlinks make pathnames namespace-dependent observations rather than object identity.
  *
@@ -720,11 +726,27 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * Capability right; the receiving object's method determines the required rights: `create_object`.
  */
 #define HYPER_NATIVE_RIGHT_CREATE_OBJECT (UINT64_C(1) << 39)
+/**
+ * Capability right; the receiving object's method determines the required rights: `sched_lower`.
+ */
+#define HYPER_NATIVE_RIGHT_SCHED_LOWER (UINT64_C(1) << 40)
+/**
+ * Capability right; the receiving object's method determines the required rights: `sched_priority`.
+ */
+#define HYPER_NATIVE_RIGHT_SCHED_PRIORITY (UINT64_C(1) << 41)
+/**
+ * Capability right; the receiving object's method determines the required rights: `sched_class`.
+ */
+#define HYPER_NATIVE_RIGHT_SCHED_CLASS (UINT64_C(1) << 42)
+/**
+ * Capability right; the receiving object's method determines the required rights: `sched_budget`.
+ */
+#define HYPER_NATIVE_RIGHT_SCHED_BUDGET (UINT64_C(1) << 43)
 
 /**
  * All declared right bits; this mask does not grant authority to a handle.
  */
-#define HYPER_NATIVE_RIGHTS_MASK UINT64_C(0xffffffffff)
+#define HYPER_NATIVE_RIGHTS_MASK UINT64_C(0xfffffffffff)
 
 /**
  * Wait signal `ready` for `process_retirement` objects; bit positions are object-local.
@@ -1315,6 +1337,93 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * Select one value; this is not a bit mask.
  */
 #define HYPER_NATIVE_THREAD_ROLE_VCPU UINT64_C(5)
+/** @} */
+
+/**
+ * @defgroup hyper_native_scheduling_policy scheduling_policy (enum)
+ * @ingroup hyper_native
+ * Scheduling algorithms; these do not identify the thread execution payload.
+ * @{
+ */
+/**
+ * `scheduling_policy_fair` in the `scheduling_policy` enum domain.
+ *
+ * Scheduling algorithms; these do not identify the thread execution payload.
+ * Select one value; this is not a bit mask.
+ */
+#define HYPER_NATIVE_SCHEDULING_POLICY_FAIR UINT64_C(1)
+/**
+ * `scheduling_policy_budget` in the `scheduling_policy` enum domain.
+ *
+ * Scheduling algorithms; these do not identify the thread execution payload.
+ * Select one value; this is not a bit mask.
+ */
+#define HYPER_NATIVE_SCHEDULING_POLICY_BUDGET UINT64_C(2)
+/**
+ * `scheduling_policy_fifo` in the `scheduling_policy` enum domain.
+ *
+ * Scheduling algorithms; these do not identify the thread execution payload.
+ * Select one value; this is not a bit mask.
+ */
+#define HYPER_NATIVE_SCHEDULING_POLICY_FIFO UINT64_C(3)
+/** @} */
+
+/**
+ * @defgroup hyper_native_scheduling_role scheduling_role (enum)
+ * @ingroup hyper_native
+ * Eligibility for CPU-local priority and minimum-progress allowances.
+ * @{
+ */
+/**
+ * `scheduling_role_ordinary` in the `scheduling_role` enum domain.
+ *
+ * Eligibility for CPU-local priority and minimum-progress allowances.
+ * Select one value; this is not a bit mask.
+ */
+#define HYPER_NATIVE_SCHEDULING_ROLE_ORDINARY UINT64_C(0)
+/**
+ * `scheduling_role_priority` in the `scheduling_role` enum domain.
+ *
+ * Eligibility for CPU-local priority and minimum-progress allowances.
+ * Select one value; this is not a bit mask.
+ */
+#define HYPER_NATIVE_SCHEDULING_ROLE_PRIORITY UINT64_C(1)
+/**
+ * `scheduling_role_protected` in the `scheduling_role` enum domain.
+ *
+ * Eligibility for CPU-local priority and minimum-progress allowances.
+ * Select one value; this is not a bit mask.
+ */
+#define HYPER_NATIVE_SCHEDULING_ROLE_PROTECTED UINT64_C(2)
+/** @} */
+
+/**
+ * @defgroup hyper_native_scheduling_fair_backend scheduling_fair_backend (enum)
+ * @ingroup hyper_native
+ * Fair queue implementations supported by the selected kernel image.
+ * @{
+ */
+/**
+ * `scheduling_fair_backend_stride` in the `scheduling_fair_backend` enum domain.
+ *
+ * Fair queue implementations supported by the selected kernel image.
+ * Select one value; this is not a bit mask.
+ */
+#define HYPER_NATIVE_SCHEDULING_FAIR_BACKEND_STRIDE UINT64_C(0)
+/**
+ * `scheduling_fair_backend_round_robin` in the `scheduling_fair_backend` enum domain.
+ *
+ * Fair queue implementations supported by the selected kernel image.
+ * Select one value; this is not a bit mask.
+ */
+#define HYPER_NATIVE_SCHEDULING_FAIR_BACKEND_ROUND_ROBIN UINT64_C(1)
+/**
+ * `scheduling_fair_backend_default` in the `scheduling_fair_backend` enum domain.
+ *
+ * Fair queue implementations supported by the selected kernel image.
+ * Select one value; this is not a bit mask.
+ */
+#define HYPER_NATIVE_SCHEDULING_FAIR_BACKEND_DEFAULT UINT64_C(2)
 /** @} */
 
 /**
@@ -3498,7 +3607,7 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Feature | `Core` |
  * | Arguments | `group: handle`, `domain: handle`, `executable: handle`, `loader: handle` |
  * | Results | `builder: handle` |
- * | Capability effects | `factory: Borrow, kind=task_factory, rights=0x100000`, `group: Borrow, kind=task_group, rights=0x4000000`, `domain: Borrow, kind=resource_domain, rights=0x8000000`, `executable: Borrow, kind=file, rights=0x800000093`, `loader: Borrow, kind=file, rights=0x90`, `builder: produce, kind=process_builder, fixed=0xc2a, inherited-from(factory), mask=0x3000000000` |
+ * | Capability effects | `factory: Borrow, kind=task_factory, rights=0x100000`, `group: Borrow, kind=task_group, rights=0x4000000`, `domain: Borrow, kind=resource_domain, rights=0x8000000`, `executable: Borrow, kind=file, rights=0x800000093`, `loader: Borrow, kind=file, rights=0x90`, `builder: produce, kind=process_builder, fixed=0x10000000c2a, inherited-from(factory), mask=0xe3000000000` |
  * | User memory | — |
  * | Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Task` |
@@ -4296,7 +4405,7 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Feature | `Core` |
  * | Arguments | `resource_domain: handle` |
  * | Results | `lease: handle` |
- * | Capability effects | `authority: Borrow, kind=virtual_machine_creation_authority, rights=0x30000000`, `resource_domain: Borrow, kind=resource_domain, rights=0x8000000`, `lease: produce, kind=virtual_machine_creation_lease, fixed=0x2000000a` |
+ * | Capability effects | `authority: Borrow, kind=virtual_machine_creation_authority, rights=0x30000000`, `resource_domain: Borrow, kind=resource_domain, rights=0x8000000`, `lease: produce, kind=virtual_machine_creation_lease, fixed=0x2000000a, inherited-from(authority), mask=0xf0000000000` |
  * | User memory | — |
  * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Capability` |
@@ -4317,7 +4426,7 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Feature | `Core` |
  * | Arguments | `configuration: user_address`, `configuration_size: byte_count` |
  * | Results | `pending_virtual_machine: handle` |
- * | Capability effects | `lease: ConsumeOnCommit, kind=virtual_machine_creation_lease, rights=0x20000000`, `pending_virtual_machine: produce, kind=pending_virtual_machine, fixed=0xc2a` |
+ * | Capability effects | `lease: ConsumeOnCommit, kind=virtual_machine_creation_lease, rights=0x20000000`, `pending_virtual_machine: produce, kind=pending_virtual_machine, fixed=0xc2a, inherited-from(lease), mask=0xf0000000000` |
  * | User memory | `configuration: Read, len=configuration_size bytes, max-bytes=4096, record=virtual_machine_configuration; order=0` |
  * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Capability` |
@@ -4401,7 +4510,7 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Feature | `Core` |
  * | Arguments | — |
  * | Results | `virtual_machine: handle`, `boot_virtual_cpu: handle` |
- * | Capability effects | `pending_virtual_machine: ConsumeOnCommit, kind=pending_virtual_machine, rights=0x400`, `virtual_machine: produce, kind=virtual_machine, fixed=0x82e`, `boot_virtual_cpu: produce, kind=virtual_cpu, fixed=0x42e` |
+ * | Capability effects | `pending_virtual_machine: ConsumeOnCommit, kind=pending_virtual_machine, rights=0x400`, `virtual_machine: produce, kind=virtual_machine, fixed=0x82e, inherited-from(pending_virtual_machine), mask=0xf0000000000`, `boot_virtual_cpu: produce, kind=virtual_cpu, fixed=0x1000000042e, inherited-from(pending_virtual_machine), mask=0xe0000000000` |
  * | User memory | — |
  * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Capability` |
@@ -4674,7 +4783,7 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Feature | `Core` |
  * | Arguments | `entry: u64`, `stack: u64`, `tls: u64`, `argument: u64`, `affinity_words: user_address`, `word_count: element_count` |
  * | Results | `thread: handle` |
- * | Capability effects | `receiver: Borrow, kind=execution_context, rights=0x200000`, `thread: produce, kind=thread, fixed=0xc0d` |
+ * | Capability effects | `receiver: Borrow, kind=execution_context, rights=0x200000`, `thread: produce, kind=thread, fixed=0x10000000c0f, inherited-from(receiver), mask=0xe0000000000` |
  * | User memory | `affinity_words: Read, len=word_count elements, max-elements=4, element-size=8; order=0` |
  * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Task` |
@@ -5535,7 +5644,7 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Feature | `Core` |
  * | Arguments | `vcpu_id: u32` |
  * | Results | `virtual_cpu: handle` |
- * | Capability effects | `virtual_machine: Borrow, kind=virtual_machine, rights=0x20`, `virtual_cpu: produce, kind=virtual_cpu, fixed=0x42e` |
+ * | Capability effects | `virtual_machine: Borrow, kind=virtual_machine, rights=0x20`, `virtual_cpu: produce, kind=virtual_cpu, fixed=0x1000000042e, inherited-from(virtual_machine), mask=0xe0000000000` |
  * | User memory | — |
  * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Capability` |
@@ -6891,6 +7000,153 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
 #define HYPER_NATIVE_OP_NATIVE_BLOCK_TRANSFER UINT64_C(257)
 
 /**
+ * Object-local method `thread_get_current_scheduling`.
+ *
+ * | Property | Contract |
+ * | --- | --- |
+ * | Receiver | `receiver: Borrow, kind=execution_context, rights=0x8` |
+ * | Operation | 266 |
+ * | Feature | `Core` |
+ * | Arguments | `configuration: user_address` |
+ * | Results | — |
+ * | Capability effects | `receiver: Borrow, kind=execution_context, rights=0x8` |
+ * | User memory | `configuration: Write, fixed-bytes=64, record=scheduling_parameters; order=0` |
+ * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+ * | Audit | `Task` |
+ *
+ * Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+ *
+ * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+ */
+#define HYPER_NATIVE_OP_THREAD_GET_CURRENT_SCHEDULING UINT64_C(266)
+
+/**
+ * Object-local method `thread_set_current_scheduling`.
+ *
+ * | Property | Contract |
+ * | --- | --- |
+ * | Receiver | `receiver: Borrow, kind=execution_context, rights=0x0` |
+ * | Operation | 267 |
+ * | Feature | `Core` |
+ * | Arguments | `configuration: user_address` |
+ * | Results | — |
+ * | Capability effects | `receiver: Borrow, kind=execution_context, rights=0x0` |
+ * | User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+ * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+ * | Audit | `Task` |
+ *
+ * Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+ *
+ * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+ */
+#define HYPER_NATIVE_OP_THREAD_SET_CURRENT_SCHEDULING UINT64_C(267)
+
+/**
+ * Object-local method `thread_get_scheduling`.
+ *
+ * | Property | Contract |
+ * | --- | --- |
+ * | Receiver | `receiver: Borrow, kind=thread, rights=0x8` |
+ * | Operation | 258 |
+ * | Feature | `Core` |
+ * | Arguments | `configuration: user_address` |
+ * | Results | — |
+ * | Capability effects | `receiver: Borrow, kind=thread, rights=0x8` |
+ * | User memory | `configuration: Write, fixed-bytes=64, record=scheduling_parameters; order=0` |
+ * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+ * | Audit | `Task` |
+ *
+ * Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+ *
+ * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+ */
+#define HYPER_NATIVE_OP_THREAD_GET_SCHEDULING UINT64_C(258)
+
+/**
+ * Object-local method `thread_set_scheduling`.
+ *
+ * | Property | Contract |
+ * | --- | --- |
+ * | Receiver | `receiver: Borrow, kind=thread, rights=0x0` |
+ * | Operation | 259 |
+ * | Feature | `Core` |
+ * | Arguments | `configuration: user_address` |
+ * | Results | — |
+ * | Capability effects | `receiver: Borrow, kind=thread, rights=0x0` |
+ * | User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+ * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+ * | Audit | `Task` |
+ *
+ * Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+ *
+ * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+ */
+#define HYPER_NATIVE_OP_THREAD_SET_SCHEDULING UINT64_C(259)
+
+/**
+ * Object-local method `virtual_cpu_get_scheduling`.
+ *
+ * | Property | Contract |
+ * | --- | --- |
+ * | Receiver | `receiver: Borrow, kind=virtual_cpu, rights=0x8` |
+ * | Operation | 261 |
+ * | Feature | `Core` |
+ * | Arguments | `configuration: user_address` |
+ * | Results | — |
+ * | Capability effects | `receiver: Borrow, kind=virtual_cpu, rights=0x8` |
+ * | User memory | `configuration: Write, fixed-bytes=64, record=scheduling_parameters; order=0` |
+ * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+ * | Audit | `Task` |
+ *
+ * Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+ *
+ * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+ */
+#define HYPER_NATIVE_OP_VIRTUAL_CPU_GET_SCHEDULING UINT64_C(261)
+
+/**
+ * Object-local method `virtual_cpu_set_scheduling`.
+ *
+ * | Property | Contract |
+ * | --- | --- |
+ * | Receiver | `receiver: Borrow, kind=virtual_cpu, rights=0x0` |
+ * | Operation | 262 |
+ * | Feature | `Core` |
+ * | Arguments | `configuration: user_address` |
+ * | Results | — |
+ * | Capability effects | `receiver: Borrow, kind=virtual_cpu, rights=0x0` |
+ * | User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+ * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+ * | Audit | `Task` |
+ *
+ * Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+ *
+ * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+ */
+#define HYPER_NATIVE_OP_VIRTUAL_CPU_SET_SCHEDULING UINT64_C(262)
+
+/**
+ * Object-local method `process_builder_set_scheduling`.
+ *
+ * | Property | Contract |
+ * | --- | --- |
+ * | Receiver | `receiver: Borrow, kind=process_builder, rights=0x0` |
+ * | Operation | 265 |
+ * | Feature | `Core` |
+ * | Arguments | `configuration: user_address`, `delegated_rights: rights` |
+ * | Results | — |
+ * | Capability effects | `receiver: Borrow, kind=process_builder, rights=0x0` |
+ * | User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+ * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+ * | Audit | `Task` |
+ *
+ * Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+ *
+ * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+ */
+#define HYPER_NATIVE_OP_PROCESS_BUILDER_SET_SCHEDULING UINT64_C(265)
+
+/**
  * Return the auxiliary-result registers defined on a failure status.
  * Bit N denotes auxiliary result N, excluding the separate signed status register.
  * Zero means no defined failure results (also returned for unknown methods and OK).
@@ -6921,6 +7177,80 @@ static inline uint64_t hyper_native_failure_result_mask(
     }
     return UINT64_C(0);
 }
+
+/**
+ * Minimum supported prefix of `scheduling_parameters`, in bytes; individual calls define their buffer lengths.
+ */
+#define HYPER_NATIVE_SCHEDULING_PARAMETERS_MIN_SIZE UINT64_C(64)
+/**
+ * Wire layout for `scheduling_parameters`.
+ *
+ * Size: 64 bytes; alignment: 8 bytes; supported minimum prefix: 64 bytes.
+ * Scalar widths and member offsets are fixed across supported architectures.
+ * The minimum prefix describes extensibility, not permission to truncate every call's buffer;
+ * the consuming operation defines its accepted length.
+ *
+ * Used by: `thread_get_current_scheduling`, `thread_set_current_scheduling`, `thread_get_scheduling`, `thread_set_scheduling`, `virtual_cpu_get_scheduling`, `virtual_cpu_set_scheduling`, `process_builder_set_scheduling`.
+ */
+typedef struct hyper_native_scheduling_parameters_t {
+    /**
+     * Wire offset 0 bytes; width 4 bytes.
+     */
+    uint32_t policy;
+    /**
+     * Wire offset 4 bytes; width 4 bytes.
+     */
+    uint32_t band;
+    /**
+     * Wire offset 8 bytes; width 4 bytes.
+     */
+    uint32_t role;
+    /**
+     * Wire offset 12 bytes; width 4 bytes.
+     */
+    uint32_t weight;
+    /**
+     * Wire offset 16 bytes; width 4 bytes.
+     */
+    uint32_t fifo_priority;
+    /**
+     * Wire offset 20 bytes; width 4 bytes.
+     */
+    uint32_t fair_backend;
+    /**
+     * Wire offset 24 bytes; width 8 bytes.
+     */
+    uint64_t quantum_ns;
+    /**
+     * Wire offset 32 bytes; width 8 bytes.
+     */
+    uint64_t budget_ns;
+    /**
+     * Wire offset 40 bytes; width 8 bytes.
+     */
+    uint64_t period_ns;
+    /**
+     * Wire offset 48 bytes; width 8 bytes.
+     */
+    uint64_t burst_ns;
+    /**
+     * Wire offset 56 bytes; width 8 bytes.
+     */
+    uint64_t reserved;
+} hyper_native_scheduling_parameters_t;
+HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_scheduling_parameters_t) == 64, "scheduling_parameters size");
+HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_scheduling_parameters_t) == 8, "scheduling_parameters alignment");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_scheduling_parameters_t, policy) == 0, "scheduling_parameters.policy offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_scheduling_parameters_t, band) == 4, "scheduling_parameters.band offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_scheduling_parameters_t, role) == 8, "scheduling_parameters.role offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_scheduling_parameters_t, weight) == 12, "scheduling_parameters.weight offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_scheduling_parameters_t, fifo_priority) == 16, "scheduling_parameters.fifo_priority offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_scheduling_parameters_t, fair_backend) == 20, "scheduling_parameters.fair_backend offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_scheduling_parameters_t, quantum_ns) == 24, "scheduling_parameters.quantum_ns offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_scheduling_parameters_t, budget_ns) == 32, "scheduling_parameters.budget_ns offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_scheduling_parameters_t, period_ns) == 40, "scheduling_parameters.period_ns offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_scheduling_parameters_t, burst_ns) == 48, "scheduling_parameters.burst_ns offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_scheduling_parameters_t, reserved) == 56, "scheduling_parameters.reserved offset");
 
 /**
  * Minimum supported prefix of `cpu_profile_info`, in bytes; individual calls define their buffer lengths.
@@ -8995,7 +9325,7 @@ typedef struct hyper_native_task_thread_t {
     /**
      * Wire offset 32 bytes; width 8 bytes.
      */
-    uint64_t runtime_ticks;
+    uint64_t runtime_ns;
     /**
      * Wire offset 40 bytes; width 64 bytes.
      */
@@ -9009,7 +9339,7 @@ HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_task_thread_t, role) == 16, "task_
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_task_thread_t, registry_phase) == 20, "task_thread.registry_phase offset");
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_task_thread_t, name_length) == 24, "task_thread.name_length offset");
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_task_thread_t, reserved) == 28, "task_thread.reserved offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_task_thread_t, runtime_ticks) == 32, "task_thread.runtime_ticks offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_task_thread_t, runtime_ns) == 32, "task_thread.runtime_ns offset");
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_task_thread_t, name) == 40, "task_thread.name offset");
 
 /**
@@ -9143,7 +9473,7 @@ typedef struct hyper_native_cpu_observation_t {
     /**
      * Wire offset 8 bytes; width 8 bytes.
      */
-    uint64_t ticks_per_second;
+    uint64_t reserved_clock;
     /**
      * Wire offset 16 bytes; width 8 bytes.
      */
@@ -9151,19 +9481,19 @@ typedef struct hyper_native_cpu_observation_t {
     /**
      * Wire offset 24 bytes; width 8 bytes.
      */
-    uint64_t idle_ticks;
+    uint64_t idle_ns;
     /**
      * Wire offset 32 bytes; width 8 bytes.
      */
-    uint64_t kernel_thread_ticks;
+    uint64_t kernel_thread_ns;
     /**
      * Wire offset 40 bytes; width 8 bytes.
      */
-    uint64_t user_thread_ticks;
+    uint64_t user_thread_ns;
     /**
      * Wire offset 48 bytes; width 8 bytes.
      */
-    uint64_t vcpu_ticks;
+    uint64_t vcpu_ns;
     /**
      * Wire offset 56 bytes; width 8 bytes.
      */
@@ -9172,12 +9502,12 @@ typedef struct hyper_native_cpu_observation_t {
 HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_cpu_observation_t) == 64, "cpu_observation size");
 HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_cpu_observation_t) == 8, "cpu_observation alignment");
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_observation_t, captured_at_ns) == 0, "cpu_observation.captured_at_ns offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_observation_t, ticks_per_second) == 8, "cpu_observation.ticks_per_second offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_observation_t, reserved_clock) == 8, "cpu_observation.reserved_clock offset");
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_observation_t, online_cpus) == 16, "cpu_observation.online_cpus offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_observation_t, idle_ticks) == 24, "cpu_observation.idle_ticks offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_observation_t, kernel_thread_ticks) == 32, "cpu_observation.kernel_thread_ticks offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_observation_t, user_thread_ticks) == 40, "cpu_observation.user_thread_ticks offset");
-HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_observation_t, vcpu_ticks) == 48, "cpu_observation.vcpu_ticks offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_observation_t, idle_ns) == 24, "cpu_observation.idle_ns offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_observation_t, kernel_thread_ns) == 32, "cpu_observation.kernel_thread_ns offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_observation_t, user_thread_ns) == 40, "cpu_observation.user_thread_ns offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_observation_t, vcpu_ns) == 48, "cpu_observation.vcpu_ns offset");
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_cpu_observation_t, reserved) == 56, "cpu_observation.reserved offset");
 
 /**

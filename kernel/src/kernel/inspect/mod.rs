@@ -151,7 +151,7 @@ pub(crate) struct TaskThreadSnapshot {
     pub(crate) name: crate::kernel::task::scheduler::ThreadNameSnapshot,
     pub(crate) role: ThreadRole,
     pub(crate) registry_phase: ThreadObjectRegistryPhase,
-    pub(crate) runtime_ticks: u64,
+    pub(crate) runtime_ns: u64,
 }
 
 pub(crate) struct Page<T: Copy, const N: usize> {
@@ -318,7 +318,7 @@ impl TaskInspector {
                     name: thread.name,
                     role: thread.object.role,
                     registry_phase: thread.phase,
-                    runtime_ticks: thread.runtime_ticks,
+                    runtime_ns: thread.runtime_ns,
                 });
             }
         }

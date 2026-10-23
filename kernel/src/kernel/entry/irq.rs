@@ -13,6 +13,7 @@ use hyper::hal::interrupt::{EntryAction as Action, InterruptId, InterruptOrigin}
 pub(crate) fn dispatch_kernel_rpc() {
     crate::kernel::irq::cross_call::service();
     crate::kernel::time::service_irq_prompt();
+    crate::kernel::task::scheduler::service_balance_irq_prompt();
     crate::kernel::reaper::service_irq_prompt();
     crate::kernel::log::service_irq_prompt();
     crate::kernel::io_cache::worker::service_irq_prompt();
@@ -58,6 +59,7 @@ pub(crate) fn dispatch(
     } else {
         crate::kernel::irq::interrupt::dispatch(interrupt, frame);
         crate::kernel::time::service_irq_prompt();
+        crate::kernel::task::scheduler::service_balance_irq_prompt();
         crate::kernel::reaper::service_irq_prompt();
         crate::kernel::log::service_irq_prompt();
         crate::kernel::io_cache::worker::service_irq_prompt();

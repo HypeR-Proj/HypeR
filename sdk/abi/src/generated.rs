@@ -304,9 +304,17 @@ pub const HYPER_NATIVE_RIGHT_RETAIN_PROCESS: u64 = 1_u64 << 37;
 pub const HYPER_NATIVE_RIGHT_RETIRE: u64 = 1_u64 << 38;
 /// Capability right; the receiving object's method determines the required rights: `create_object`.
 pub const HYPER_NATIVE_RIGHT_CREATE_OBJECT: u64 = 1_u64 << 39;
+/// Capability right; the receiving object's method determines the required rights: `sched_lower`.
+pub const HYPER_NATIVE_RIGHT_SCHED_LOWER: u64 = 1_u64 << 40;
+/// Capability right; the receiving object's method determines the required rights: `sched_priority`.
+pub const HYPER_NATIVE_RIGHT_SCHED_PRIORITY: u64 = 1_u64 << 41;
+/// Capability right; the receiving object's method determines the required rights: `sched_class`.
+pub const HYPER_NATIVE_RIGHT_SCHED_CLASS: u64 = 1_u64 << 42;
+/// Capability right; the receiving object's method determines the required rights: `sched_budget`.
+pub const HYPER_NATIVE_RIGHT_SCHED_BUDGET: u64 = 1_u64 << 43;
 
 /// All declared right bits; this mask does not grant authority to a handle.
-pub const HYPER_NATIVE_RIGHTS_MASK: u64 = 0xffffffffff;
+pub const HYPER_NATIVE_RIGHTS_MASK: u64 = 0xfffffffffff;
 
 /// Wait signal `ready` for `process_retirement` objects; bit positions are object-local.
 pub const HYPER_NATIVE_SIGNAL_PROCESS_RETIREMENT_READY: u64 = 1_u64 << 0;
@@ -669,6 +677,54 @@ pub const HYPER_NATIVE_THREAD_ROLE_USER: u64 = 4;
 /// Scheduler thread roles reported by inspection.
 /// Select one value; this is not a bit mask.
 pub const HYPER_NATIVE_THREAD_ROLE_VCPU: u64 = 5;
+
+/// `scheduling_policy_fair` in the `scheduling_policy` enum domain.
+///
+/// Scheduling algorithms; these do not identify the thread execution payload.
+/// Select one value; this is not a bit mask.
+pub const HYPER_NATIVE_SCHEDULING_POLICY_FAIR: u64 = 1;
+/// `scheduling_policy_budget` in the `scheduling_policy` enum domain.
+///
+/// Scheduling algorithms; these do not identify the thread execution payload.
+/// Select one value; this is not a bit mask.
+pub const HYPER_NATIVE_SCHEDULING_POLICY_BUDGET: u64 = 2;
+/// `scheduling_policy_fifo` in the `scheduling_policy` enum domain.
+///
+/// Scheduling algorithms; these do not identify the thread execution payload.
+/// Select one value; this is not a bit mask.
+pub const HYPER_NATIVE_SCHEDULING_POLICY_FIFO: u64 = 3;
+
+/// `scheduling_role_ordinary` in the `scheduling_role` enum domain.
+///
+/// Eligibility for CPU-local priority and minimum-progress allowances.
+/// Select one value; this is not a bit mask.
+pub const HYPER_NATIVE_SCHEDULING_ROLE_ORDINARY: u64 = 0;
+/// `scheduling_role_priority` in the `scheduling_role` enum domain.
+///
+/// Eligibility for CPU-local priority and minimum-progress allowances.
+/// Select one value; this is not a bit mask.
+pub const HYPER_NATIVE_SCHEDULING_ROLE_PRIORITY: u64 = 1;
+/// `scheduling_role_protected` in the `scheduling_role` enum domain.
+///
+/// Eligibility for CPU-local priority and minimum-progress allowances.
+/// Select one value; this is not a bit mask.
+pub const HYPER_NATIVE_SCHEDULING_ROLE_PROTECTED: u64 = 2;
+
+/// `scheduling_fair_backend_stride` in the `scheduling_fair_backend` enum domain.
+///
+/// Fair queue implementations supported by the selected kernel image.
+/// Select one value; this is not a bit mask.
+pub const HYPER_NATIVE_SCHEDULING_FAIR_BACKEND_STRIDE: u64 = 0;
+/// `scheduling_fair_backend_round_robin` in the `scheduling_fair_backend` enum domain.
+///
+/// Fair queue implementations supported by the selected kernel image.
+/// Select one value; this is not a bit mask.
+pub const HYPER_NATIVE_SCHEDULING_FAIR_BACKEND_ROUND_ROBIN: u64 = 1;
+/// `scheduling_fair_backend_default` in the `scheduling_fair_backend` enum domain.
+///
+/// Fair queue implementations supported by the selected kernel image.
+/// Select one value; this is not a bit mask.
+pub const HYPER_NATIVE_SCHEDULING_FAIR_BACKEND_DEFAULT: u64 = 2;
 
 /// `thread_registry_resident` in the `thread_registry` enum domain.
 ///
@@ -2118,7 +2174,7 @@ pub const HYPER_NATIVE_OP_CAPABILITY_CHANNEL_RECEIVE: u64 = 257;
 /// | Feature | `Core` |
 /// | Arguments | `group: handle`, `domain: handle`, `executable: handle`, `loader: handle` |
 /// | Results | `builder: handle` |
-/// | Capability effects | `factory: Borrow, kind=task_factory, rights=0x100000`, `group: Borrow, kind=task_group, rights=0x4000000`, `domain: Borrow, kind=resource_domain, rights=0x8000000`, `executable: Borrow, kind=file, rights=0x800000093`, `loader: Borrow, kind=file, rights=0x90`, `builder: produce, kind=process_builder, fixed=0xc2a, inherited-from(factory), mask=0x3000000000` |
+/// | Capability effects | `factory: Borrow, kind=task_factory, rights=0x100000`, `group: Borrow, kind=task_group, rights=0x4000000`, `domain: Borrow, kind=resource_domain, rights=0x8000000`, `executable: Borrow, kind=file, rights=0x800000093`, `loader: Borrow, kind=file, rights=0x90`, `builder: produce, kind=process_builder, fixed=0x10000000c2a, inherited-from(factory), mask=0xe3000000000` |
 /// | User memory | — |
 /// | Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Task` |
@@ -2840,7 +2896,7 @@ pub const HYPER_NATIVE_OP_DIRECTORY_GET_INFO: u64 = 258;
 /// | Feature | `Core` |
 /// | Arguments | `resource_domain: handle` |
 /// | Results | `lease: handle` |
-/// | Capability effects | `authority: Borrow, kind=virtual_machine_creation_authority, rights=0x30000000`, `resource_domain: Borrow, kind=resource_domain, rights=0x8000000`, `lease: produce, kind=virtual_machine_creation_lease, fixed=0x2000000a` |
+/// | Capability effects | `authority: Borrow, kind=virtual_machine_creation_authority, rights=0x30000000`, `resource_domain: Borrow, kind=resource_domain, rights=0x8000000`, `lease: produce, kind=virtual_machine_creation_lease, fixed=0x2000000a, inherited-from(authority), mask=0xf0000000000` |
 /// | User memory | — |
 /// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Capability` |
@@ -2859,7 +2915,7 @@ pub const HYPER_NATIVE_OP_VIRTUAL_MACHINE_CREATION_LEASE_CREATE: u64 = 256;
 /// | Feature | `Core` |
 /// | Arguments | `configuration: user_address`, `configuration_size: byte_count` |
 /// | Results | `pending_virtual_machine: handle` |
-/// | Capability effects | `lease: ConsumeOnCommit, kind=virtual_machine_creation_lease, rights=0x20000000`, `pending_virtual_machine: produce, kind=pending_virtual_machine, fixed=0xc2a` |
+/// | Capability effects | `lease: ConsumeOnCommit, kind=virtual_machine_creation_lease, rights=0x20000000`, `pending_virtual_machine: produce, kind=pending_virtual_machine, fixed=0xc2a, inherited-from(lease), mask=0xf0000000000` |
 /// | User memory | `configuration: Read, len=configuration_size bytes, max-bytes=4096, record=virtual_machine_configuration; order=0` |
 /// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Capability` |
@@ -2935,7 +2991,7 @@ pub const HYPER_NATIVE_OP_PENDING_VIRTUAL_MACHINE_SEAL: u64 = 258;
 /// | Feature | `Core` |
 /// | Arguments | — |
 /// | Results | `virtual_machine: handle`, `boot_virtual_cpu: handle` |
-/// | Capability effects | `pending_virtual_machine: ConsumeOnCommit, kind=pending_virtual_machine, rights=0x400`, `virtual_machine: produce, kind=virtual_machine, fixed=0x82e`, `boot_virtual_cpu: produce, kind=virtual_cpu, fixed=0x42e` |
+/// | Capability effects | `pending_virtual_machine: ConsumeOnCommit, kind=pending_virtual_machine, rights=0x400`, `virtual_machine: produce, kind=virtual_machine, fixed=0x82e, inherited-from(pending_virtual_machine), mask=0xf0000000000`, `boot_virtual_cpu: produce, kind=virtual_cpu, fixed=0x1000000042e, inherited-from(pending_virtual_machine), mask=0xe0000000000` |
 /// | User memory | — |
 /// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Capability` |
@@ -3182,7 +3238,7 @@ pub const HYPER_NATIVE_OP_VIRTUAL_SERIAL_WRITE: u64 = 257;
 /// | Feature | `Core` |
 /// | Arguments | `entry: u64`, `stack: u64`, `tls: u64`, `argument: u64`, `affinity_words: user_address`, `word_count: element_count` |
 /// | Results | `thread: handle` |
-/// | Capability effects | `receiver: Borrow, kind=execution_context, rights=0x200000`, `thread: produce, kind=thread, fixed=0xc0d` |
+/// | Capability effects | `receiver: Borrow, kind=execution_context, rights=0x200000`, `thread: produce, kind=thread, fixed=0x10000000c0f, inherited-from(receiver), mask=0xe0000000000` |
 /// | User memory | `affinity_words: Read, len=word_count elements, max-elements=4, element-size=8; order=0` |
 /// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Task` |
@@ -3961,7 +4017,7 @@ pub const HYPER_NATIVE_OP_VIRTUAL_MACHINE_COMPLETE_POWER_REQUEST: u64 = 259;
 /// | Feature | `Core` |
 /// | Arguments | `vcpu_id: u32` |
 /// | Results | `virtual_cpu: handle` |
-/// | Capability effects | `virtual_machine: Borrow, kind=virtual_machine, rights=0x20`, `virtual_cpu: produce, kind=virtual_cpu, fixed=0x42e` |
+/// | Capability effects | `virtual_machine: Borrow, kind=virtual_machine, rights=0x20`, `virtual_cpu: produce, kind=virtual_cpu, fixed=0x1000000042e, inherited-from(virtual_machine), mask=0xe0000000000` |
 /// | User memory | — |
 /// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Capability` |
@@ -5187,6 +5243,139 @@ pub const HYPER_NATIVE_OP_DEVICE_DMA_FAULT_INFO: u64 = 262;
 /// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
 pub const HYPER_NATIVE_OP_NATIVE_BLOCK_TRANSFER: u64 = 257;
 
+/// Object-local method `thread_get_current_scheduling`.
+///
+/// | Property | Contract |
+/// | --- | --- |
+/// | Receiver | `receiver: Borrow, kind=execution_context, rights=0x8` |
+/// | Operation | 266 |
+/// | Feature | `Core` |
+/// | Arguments | `configuration: user_address` |
+/// | Results | — |
+/// | Capability effects | `receiver: Borrow, kind=execution_context, rights=0x8` |
+/// | User memory | `configuration: Write, fixed-bytes=64, record=scheduling_parameters; order=0` |
+/// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+/// | Audit | `Task` |
+///
+/// Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+///
+/// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+pub const HYPER_NATIVE_OP_THREAD_GET_CURRENT_SCHEDULING: u64 = 266;
+
+/// Object-local method `thread_set_current_scheduling`.
+///
+/// | Property | Contract |
+/// | --- | --- |
+/// | Receiver | `receiver: Borrow, kind=execution_context, rights=0x0` |
+/// | Operation | 267 |
+/// | Feature | `Core` |
+/// | Arguments | `configuration: user_address` |
+/// | Results | — |
+/// | Capability effects | `receiver: Borrow, kind=execution_context, rights=0x0` |
+/// | User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+/// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+/// | Audit | `Task` |
+///
+/// Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+///
+/// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+pub const HYPER_NATIVE_OP_THREAD_SET_CURRENT_SCHEDULING: u64 = 267;
+
+/// Object-local method `thread_get_scheduling`.
+///
+/// | Property | Contract |
+/// | --- | --- |
+/// | Receiver | `receiver: Borrow, kind=thread, rights=0x8` |
+/// | Operation | 258 |
+/// | Feature | `Core` |
+/// | Arguments | `configuration: user_address` |
+/// | Results | — |
+/// | Capability effects | `receiver: Borrow, kind=thread, rights=0x8` |
+/// | User memory | `configuration: Write, fixed-bytes=64, record=scheduling_parameters; order=0` |
+/// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+/// | Audit | `Task` |
+///
+/// Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+///
+/// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+pub const HYPER_NATIVE_OP_THREAD_GET_SCHEDULING: u64 = 258;
+
+/// Object-local method `thread_set_scheduling`.
+///
+/// | Property | Contract |
+/// | --- | --- |
+/// | Receiver | `receiver: Borrow, kind=thread, rights=0x0` |
+/// | Operation | 259 |
+/// | Feature | `Core` |
+/// | Arguments | `configuration: user_address` |
+/// | Results | — |
+/// | Capability effects | `receiver: Borrow, kind=thread, rights=0x0` |
+/// | User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+/// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+/// | Audit | `Task` |
+///
+/// Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+///
+/// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+pub const HYPER_NATIVE_OP_THREAD_SET_SCHEDULING: u64 = 259;
+
+/// Object-local method `virtual_cpu_get_scheduling`.
+///
+/// | Property | Contract |
+/// | --- | --- |
+/// | Receiver | `receiver: Borrow, kind=virtual_cpu, rights=0x8` |
+/// | Operation | 261 |
+/// | Feature | `Core` |
+/// | Arguments | `configuration: user_address` |
+/// | Results | — |
+/// | Capability effects | `receiver: Borrow, kind=virtual_cpu, rights=0x8` |
+/// | User memory | `configuration: Write, fixed-bytes=64, record=scheduling_parameters; order=0` |
+/// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+/// | Audit | `Task` |
+///
+/// Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+///
+/// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+pub const HYPER_NATIVE_OP_VIRTUAL_CPU_GET_SCHEDULING: u64 = 261;
+
+/// Object-local method `virtual_cpu_set_scheduling`.
+///
+/// | Property | Contract |
+/// | --- | --- |
+/// | Receiver | `receiver: Borrow, kind=virtual_cpu, rights=0x0` |
+/// | Operation | 262 |
+/// | Feature | `Core` |
+/// | Arguments | `configuration: user_address` |
+/// | Results | — |
+/// | Capability effects | `receiver: Borrow, kind=virtual_cpu, rights=0x0` |
+/// | User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+/// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+/// | Audit | `Task` |
+///
+/// Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+///
+/// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+pub const HYPER_NATIVE_OP_VIRTUAL_CPU_SET_SCHEDULING: u64 = 262;
+
+/// Object-local method `process_builder_set_scheduling`.
+///
+/// | Property | Contract |
+/// | --- | --- |
+/// | Receiver | `receiver: Borrow, kind=process_builder, rights=0x0` |
+/// | Operation | 265 |
+/// | Feature | `Core` |
+/// | Arguments | `configuration: user_address`, `delegated_rights: rights` |
+/// | Results | — |
+/// | Capability effects | `receiver: Borrow, kind=process_builder, rights=0x0` |
+/// | User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+/// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+/// | Audit | `Task` |
+///
+/// Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+///
+/// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+pub const HYPER_NATIVE_OP_PROCESS_BUILDER_SET_SCHEDULING: u64 = 265;
+
 /// A decoded object method; enum discriminants are not a machine ABI.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeOperation {
@@ -5558,6 +5747,20 @@ pub enum NativeOperation {
     DeviceDmaFaultInfo,
     /// Decoded method; see [`HYPER_NATIVE_OP_NATIVE_BLOCK_TRANSFER`] for its contract.
     NativeBlockTransfer,
+    /// Decoded method; see [`HYPER_NATIVE_OP_THREAD_GET_CURRENT_SCHEDULING`] for its contract.
+    ThreadGetCurrentScheduling,
+    /// Decoded method; see [`HYPER_NATIVE_OP_THREAD_SET_CURRENT_SCHEDULING`] for its contract.
+    ThreadSetCurrentScheduling,
+    /// Decoded method; see [`HYPER_NATIVE_OP_THREAD_GET_SCHEDULING`] for its contract.
+    ThreadGetScheduling,
+    /// Decoded method; see [`HYPER_NATIVE_OP_THREAD_SET_SCHEDULING`] for its contract.
+    ThreadSetScheduling,
+    /// Decoded method; see [`HYPER_NATIVE_OP_VIRTUAL_CPU_GET_SCHEDULING`] for its contract.
+    VirtualCpuGetScheduling,
+    /// Decoded method; see [`HYPER_NATIVE_OP_VIRTUAL_CPU_SET_SCHEDULING`] for its contract.
+    VirtualCpuSetScheduling,
+    /// Decoded method; see [`HYPER_NATIVE_OP_PROCESS_BUILDER_SET_SCHEDULING`] for its contract.
+    ProcessBuilderSetScheduling,
 }
 
 #[rustfmt::skip]
@@ -5796,6 +5999,13 @@ impl NativeOperation {
             (HYPER_NATIVE_OBJECT_EXECUTION_CONTEXT, HYPER_NATIVE_OP_THREAD_SET_CURRENT_NAME) => Some(Self::ThreadSetCurrentName),
             (HYPER_NATIVE_OBJECT_PHYSICAL_DEVICE, HYPER_NATIVE_OP_DEVICE_DMA_FAULT_INFO) => Some(Self::DeviceDmaFaultInfo),
             (HYPER_NATIVE_OBJECT_NATIVE_BLOCK, HYPER_NATIVE_OP_NATIVE_BLOCK_TRANSFER) => Some(Self::NativeBlockTransfer),
+            (HYPER_NATIVE_OBJECT_EXECUTION_CONTEXT, HYPER_NATIVE_OP_THREAD_GET_CURRENT_SCHEDULING) => Some(Self::ThreadGetCurrentScheduling),
+            (HYPER_NATIVE_OBJECT_EXECUTION_CONTEXT, HYPER_NATIVE_OP_THREAD_SET_CURRENT_SCHEDULING) => Some(Self::ThreadSetCurrentScheduling),
+            (HYPER_NATIVE_OBJECT_THREAD, HYPER_NATIVE_OP_THREAD_GET_SCHEDULING) => Some(Self::ThreadGetScheduling),
+            (HYPER_NATIVE_OBJECT_THREAD, HYPER_NATIVE_OP_THREAD_SET_SCHEDULING) => Some(Self::ThreadSetScheduling),
+            (HYPER_NATIVE_OBJECT_VIRTUAL_CPU, HYPER_NATIVE_OP_VIRTUAL_CPU_GET_SCHEDULING) => Some(Self::VirtualCpuGetScheduling),
+            (HYPER_NATIVE_OBJECT_VIRTUAL_CPU, HYPER_NATIVE_OP_VIRTUAL_CPU_SET_SCHEDULING) => Some(Self::VirtualCpuSetScheduling),
+            (HYPER_NATIVE_OBJECT_PROCESS_BUILDER, HYPER_NATIVE_OP_PROCESS_BUILDER_SET_SCHEDULING) => Some(Self::ProcessBuilderSetScheduling),
             _ => None,
         }
     }
@@ -5987,6 +6197,13 @@ impl NativeOperation {
             Self::ThreadSetCurrentName => HYPER_NATIVE_OP_THREAD_SET_CURRENT_NAME,
             Self::DeviceDmaFaultInfo => HYPER_NATIVE_OP_DEVICE_DMA_FAULT_INFO,
             Self::NativeBlockTransfer => HYPER_NATIVE_OP_NATIVE_BLOCK_TRANSFER,
+            Self::ThreadGetCurrentScheduling => HYPER_NATIVE_OP_THREAD_GET_CURRENT_SCHEDULING,
+            Self::ThreadSetCurrentScheduling => HYPER_NATIVE_OP_THREAD_SET_CURRENT_SCHEDULING,
+            Self::ThreadGetScheduling => HYPER_NATIVE_OP_THREAD_GET_SCHEDULING,
+            Self::ThreadSetScheduling => HYPER_NATIVE_OP_THREAD_SET_SCHEDULING,
+            Self::VirtualCpuGetScheduling => HYPER_NATIVE_OP_VIRTUAL_CPU_GET_SCHEDULING,
+            Self::VirtualCpuSetScheduling => HYPER_NATIVE_OP_VIRTUAL_CPU_SET_SCHEDULING,
+            Self::ProcessBuilderSetScheduling => HYPER_NATIVE_OP_PROCESS_BUILDER_SET_SCHEDULING,
         }
     }
 
@@ -6177,6 +6394,13 @@ impl NativeOperation {
             Self::ThreadSetCurrentName => Some(HYPER_NATIVE_OBJECT_EXECUTION_CONTEXT),
             Self::DeviceDmaFaultInfo => Some(HYPER_NATIVE_OBJECT_PHYSICAL_DEVICE),
             Self::NativeBlockTransfer => Some(HYPER_NATIVE_OBJECT_NATIVE_BLOCK),
+            Self::ThreadGetCurrentScheduling => Some(HYPER_NATIVE_OBJECT_EXECUTION_CONTEXT),
+            Self::ThreadSetCurrentScheduling => Some(HYPER_NATIVE_OBJECT_EXECUTION_CONTEXT),
+            Self::ThreadGetScheduling => Some(HYPER_NATIVE_OBJECT_THREAD),
+            Self::ThreadSetScheduling => Some(HYPER_NATIVE_OBJECT_THREAD),
+            Self::VirtualCpuGetScheduling => Some(HYPER_NATIVE_OBJECT_VIRTUAL_CPU),
+            Self::VirtualCpuSetScheduling => Some(HYPER_NATIVE_OBJECT_VIRTUAL_CPU),
+            Self::ProcessBuilderSetScheduling => Some(HYPER_NATIVE_OBJECT_PROCESS_BUILDER),
         }
     }
 
@@ -6367,6 +6591,13 @@ impl NativeOperation {
             Self::ThreadSetCurrentName => 2,
             Self::DeviceDmaFaultInfo => 2,
             Self::NativeBlockTransfer => 4,
+            Self::ThreadGetCurrentScheduling => 1,
+            Self::ThreadSetCurrentScheduling => 1,
+            Self::ThreadGetScheduling => 1,
+            Self::ThreadSetScheduling => 1,
+            Self::VirtualCpuGetScheduling => 1,
+            Self::VirtualCpuSetScheduling => 1,
+            Self::ProcessBuilderSetScheduling => 2,
         }
     }
 
@@ -6557,6 +6788,13 @@ impl NativeOperation {
             Self::ThreadSetCurrentName => 32,
             Self::DeviceDmaFaultInfo => 32776,
             Self::NativeBlockTransfer => 0,
+            Self::ThreadGetCurrentScheduling => 8,
+            Self::ThreadSetCurrentScheduling => 0,
+            Self::ThreadGetScheduling => 8,
+            Self::ThreadSetScheduling => 0,
+            Self::VirtualCpuGetScheduling => 8,
+            Self::VirtualCpuSetScheduling => 0,
+            Self::ProcessBuilderSetScheduling => 0,
         }
     }
 
@@ -6589,6 +6827,56 @@ pub const fn hyper_native_failure_result_mask(
         None => 0,
     }
 }
+
+/// Minimum supported prefix of `scheduling_parameters`, in bytes; individual calls define their buffer lengths.
+pub const HYPER_NATIVE_SCHEDULING_PARAMETERS_MIN_SIZE: usize = 64;
+/// Wire layout for `scheduling_parameters`.
+///
+/// Size: 64 bytes; alignment: 8 bytes; supported minimum prefix: 64 bytes.
+/// Scalar widths and member offsets are fixed across supported architectures.
+/// The minimum prefix describes extensibility, not permission to truncate every call's buffer;
+/// the consuming operation defines its accepted length.
+///
+/// Used by: `thread_get_current_scheduling`, `thread_set_current_scheduling`, `thread_get_scheduling`, `thread_set_scheduling`, `virtual_cpu_get_scheduling`, `virtual_cpu_set_scheduling`, `process_builder_set_scheduling`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HyperNativeSchedulingParameters {
+    /// Wire offset 0 bytes; width 4 bytes.
+    pub policy: u32,
+    /// Wire offset 4 bytes; width 4 bytes.
+    pub band: u32,
+    /// Wire offset 8 bytes; width 4 bytes.
+    pub role: u32,
+    /// Wire offset 12 bytes; width 4 bytes.
+    pub weight: u32,
+    /// Wire offset 16 bytes; width 4 bytes.
+    pub fifo_priority: u32,
+    /// Wire offset 20 bytes; width 4 bytes.
+    pub fair_backend: u32,
+    /// Wire offset 24 bytes; width 8 bytes.
+    pub quantum_ns: u64,
+    /// Wire offset 32 bytes; width 8 bytes.
+    pub budget_ns: u64,
+    /// Wire offset 40 bytes; width 8 bytes.
+    pub period_ns: u64,
+    /// Wire offset 48 bytes; width 8 bytes.
+    pub burst_ns: u64,
+    /// Wire offset 56 bytes; width 8 bytes.
+    pub reserved: u64,
+}
+const _: () = assert!(core::mem::size_of::<HyperNativeSchedulingParameters>() == 64);
+const _: () = assert!(core::mem::align_of::<HyperNativeSchedulingParameters>() == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeSchedulingParameters, policy) == 0);
+const _: () = assert!(core::mem::offset_of!(HyperNativeSchedulingParameters, band) == 4);
+const _: () = assert!(core::mem::offset_of!(HyperNativeSchedulingParameters, role) == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeSchedulingParameters, weight) == 12);
+const _: () = assert!(core::mem::offset_of!(HyperNativeSchedulingParameters, fifo_priority) == 16);
+const _: () = assert!(core::mem::offset_of!(HyperNativeSchedulingParameters, fair_backend) == 20);
+const _: () = assert!(core::mem::offset_of!(HyperNativeSchedulingParameters, quantum_ns) == 24);
+const _: () = assert!(core::mem::offset_of!(HyperNativeSchedulingParameters, budget_ns) == 32);
+const _: () = assert!(core::mem::offset_of!(HyperNativeSchedulingParameters, period_ns) == 40);
+const _: () = assert!(core::mem::offset_of!(HyperNativeSchedulingParameters, burst_ns) == 48);
+const _: () = assert!(core::mem::offset_of!(HyperNativeSchedulingParameters, reserved) == 56);
 
 /// Minimum supported prefix of `cpu_profile_info`, in bytes; individual calls define their buffer lengths.
 pub const HYPER_NATIVE_CPU_PROFILE_INFO_MIN_SIZE: usize = 144;
@@ -8081,7 +8369,7 @@ pub struct HyperNativeTaskThread {
     /// Wire offset 28 bytes; width 4 bytes.
     pub reserved: u32,
     /// Wire offset 32 bytes; width 8 bytes.
-    pub runtime_ticks: u64,
+    pub runtime_ns: u64,
     /// Wire offset 40 bytes; width 64 bytes.
     pub name: [u8; 64],
 }
@@ -8093,7 +8381,7 @@ const _: () = assert!(core::mem::offset_of!(HyperNativeTaskThread, role) == 16);
 const _: () = assert!(core::mem::offset_of!(HyperNativeTaskThread, registry_phase) == 20);
 const _: () = assert!(core::mem::offset_of!(HyperNativeTaskThread, name_length) == 24);
 const _: () = assert!(core::mem::offset_of!(HyperNativeTaskThread, reserved) == 28);
-const _: () = assert!(core::mem::offset_of!(HyperNativeTaskThread, runtime_ticks) == 32);
+const _: () = assert!(core::mem::offset_of!(HyperNativeTaskThread, runtime_ns) == 32);
 const _: () = assert!(core::mem::offset_of!(HyperNativeTaskThread, name) == 40);
 
 /// Minimum supported prefix of `memory_observation`, in bytes; individual calls define their buffer lengths.
@@ -8191,29 +8479,29 @@ pub struct HyperNativeCpuObservation {
     /// Wire offset 0 bytes; width 8 bytes.
     pub captured_at_ns: u64,
     /// Wire offset 8 bytes; width 8 bytes.
-    pub ticks_per_second: u64,
+    pub reserved_clock: u64,
     /// Wire offset 16 bytes; width 8 bytes.
     pub online_cpus: u64,
     /// Wire offset 24 bytes; width 8 bytes.
-    pub idle_ticks: u64,
+    pub idle_ns: u64,
     /// Wire offset 32 bytes; width 8 bytes.
-    pub kernel_thread_ticks: u64,
+    pub kernel_thread_ns: u64,
     /// Wire offset 40 bytes; width 8 bytes.
-    pub user_thread_ticks: u64,
+    pub user_thread_ns: u64,
     /// Wire offset 48 bytes; width 8 bytes.
-    pub vcpu_ticks: u64,
+    pub vcpu_ns: u64,
     /// Wire offset 56 bytes; width 8 bytes.
     pub reserved: u64,
 }
 const _: () = assert!(core::mem::size_of::<HyperNativeCpuObservation>() == 64);
 const _: () = assert!(core::mem::align_of::<HyperNativeCpuObservation>() == 8);
 const _: () = assert!(core::mem::offset_of!(HyperNativeCpuObservation, captured_at_ns) == 0);
-const _: () = assert!(core::mem::offset_of!(HyperNativeCpuObservation, ticks_per_second) == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuObservation, reserved_clock) == 8);
 const _: () = assert!(core::mem::offset_of!(HyperNativeCpuObservation, online_cpus) == 16);
-const _: () = assert!(core::mem::offset_of!(HyperNativeCpuObservation, idle_ticks) == 24);
-const _: () = assert!(core::mem::offset_of!(HyperNativeCpuObservation, kernel_thread_ticks) == 32);
-const _: () = assert!(core::mem::offset_of!(HyperNativeCpuObservation, user_thread_ticks) == 40);
-const _: () = assert!(core::mem::offset_of!(HyperNativeCpuObservation, vcpu_ticks) == 48);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuObservation, idle_ns) == 24);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuObservation, kernel_thread_ns) == 32);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuObservation, user_thread_ns) == 40);
+const _: () = assert!(core::mem::offset_of!(HyperNativeCpuObservation, vcpu_ns) == 48);
 const _: () = assert!(core::mem::offset_of!(HyperNativeCpuObservation, reserved) == 56);
 
 /// Minimum supported prefix of `object_inspection`, in bytes; individual calls define their buffer lengths.

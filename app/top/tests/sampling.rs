@@ -8,15 +8,15 @@ fn counter_deltas_do_not_inherit_recycled_thread_time() {
     let old = ThreadSample {
         process_koid: 1,
         thread_koid: 0x100000001,
-        runtime_ticks: 100,
+        runtime_ns: 100,
     };
     let current = ThreadSample {
-        runtime_ticks: 160,
+        runtime_ns: 160,
         ..old
     };
     let recycled = ThreadSample {
         thread_koid: 0x200000001,
-        runtime_ticks: 999,
+        runtime_ns: 999,
         ..old
     };
     let previous = BTreeMap::from([(old.thread_koid, old)]);
@@ -34,19 +34,19 @@ fn busiest_first_with_stable_ties_and_name_sort() {
         ProcessSample {
             koid: 3,
             name: "a".into(),
-            ticks: 5,
+            runtime_ns: 5,
             threads: 1,
         },
         ProcessSample {
             koid: 2,
             name: "z".into(),
-            ticks: 50,
+            runtime_ns: 50,
             threads: 1,
         },
         ProcessSample {
             koid: 1,
             name: "b".into(),
-            ticks: 50,
+            runtime_ns: 50,
             threads: 1,
         },
     ];

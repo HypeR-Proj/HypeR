@@ -244,7 +244,7 @@ const TASK_THREAD_FIELDS: &[Field] = &[
         offset: 28,
     },
     Field {
-        name: "runtime_ticks",
+        name: "runtime_ns",
         kind: FieldKind::U64,
         offset: 32,
     },
@@ -351,7 +351,7 @@ const MEMORY_OBSERVATION_FIELDS: &[Field] = &[
 ];
 
 /// Aggregate CPU runtime counters; rate calculations require two timestamped
-/// observations and the reported tick frequency/online CPU count.
+/// observations and the online CPU count. All runtime counters are nanoseconds.
 const CPU_OBSERVATION_FIELDS: &[Field] = &[
     Field {
         name: "captured_at_ns",
@@ -359,7 +359,7 @@ const CPU_OBSERVATION_FIELDS: &[Field] = &[
         offset: 0,
     },
     Field {
-        name: "ticks_per_second",
+        name: "reserved_clock",
         kind: FieldKind::U64,
         offset: 8,
     },
@@ -369,22 +369,22 @@ const CPU_OBSERVATION_FIELDS: &[Field] = &[
         offset: 16,
     },
     Field {
-        name: "idle_ticks",
+        name: "idle_ns",
         kind: FieldKind::U64,
         offset: 24,
     },
     Field {
-        name: "kernel_thread_ticks",
+        name: "kernel_thread_ns",
         kind: FieldKind::U64,
         offset: 32,
     },
     Field {
-        name: "user_thread_ticks",
+        name: "user_thread_ns",
         kind: FieldKind::U64,
         offset: 40,
     },
     Field {
-        name: "vcpu_ticks",
+        name: "vcpu_ns",
         kind: FieldKind::U64,
         offset: 48,
     },
@@ -982,7 +982,73 @@ const RESOURCE_LIMITS_FIELDS: &[Field] = &[
 
 /// Complete public record catalog. Named field arrays above factor reusable
 /// layouts; inline fields obey the same offset/alignment validation.
+/// Atomic scheduling configuration. Algorithm-inapplicable fields must be zero.
+const SCHEDULING_PARAMETERS_FIELDS: &[Field] = &[
+    Field {
+        name: "policy",
+        kind: FieldKind::U32,
+        offset: 0,
+    },
+    Field {
+        name: "band",
+        kind: FieldKind::U32,
+        offset: 4,
+    },
+    Field {
+        name: "role",
+        kind: FieldKind::U32,
+        offset: 8,
+    },
+    Field {
+        name: "weight",
+        kind: FieldKind::U32,
+        offset: 12,
+    },
+    Field {
+        name: "fifo_priority",
+        kind: FieldKind::U32,
+        offset: 16,
+    },
+    Field {
+        name: "fair_backend",
+        kind: FieldKind::U32,
+        offset: 20,
+    },
+    Field {
+        name: "quantum_ns",
+        kind: FieldKind::U64,
+        offset: 24,
+    },
+    Field {
+        name: "budget_ns",
+        kind: FieldKind::U64,
+        offset: 32,
+    },
+    Field {
+        name: "period_ns",
+        kind: FieldKind::U64,
+        offset: 40,
+    },
+    Field {
+        name: "burst_ns",
+        kind: FieldKind::U64,
+        offset: 48,
+    },
+    Field {
+        name: "reserved",
+        kind: FieldKind::U64,
+        offset: 56,
+    },
+];
+
 pub const RECORDS: &[Record] = &[
+    Record {
+        name: "scheduling_parameters",
+        fields: SCHEDULING_PARAMETERS_FIELDS,
+        minimum_size: 64,
+        size: 64,
+        alignment: 8,
+    },
     // Capture identity and buffer geometry; period is a PMU event-count period,
     // while deadline_ns is absolute monotonic time. Generations detect reuse.
     Record {

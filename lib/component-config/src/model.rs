@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::Scheduling;
 use serde::{Deserialize, Serialize};
 
 /// A reusable declaration; identity belongs to its instantiated path, not file.
@@ -63,6 +64,9 @@ pub struct Program {
     /// transaction. The manager never reconstructs consumed migration grants.
     #[serde(default)]
     pub prepared: bool,
+    /// Supervisor-selected scheduling, applied before the initial thread starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scheduling: Option<Scheduling>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]

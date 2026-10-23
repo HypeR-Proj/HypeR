@@ -57,7 +57,11 @@
     "configuration": {
       "memory-bytes": 67108864,
       "vcpus": 1,
-      "bootargs": "console=ttyAMA0 earlycon rdinit=/init loglevel=4 hyper.role=io hyper.mode=standby"
+      "bootargs": "console=ttyAMA0 earlycon rdinit=/init loglevel=4 hyper.role=io hyper.mode=standby",
+      "scheduling": {
+        "band": 64,
+        "role": "priority"
+      }
     },
     "io-device": {
       "profile": "pci-function",

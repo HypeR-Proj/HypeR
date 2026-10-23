@@ -306,6 +306,24 @@ pub fn handle_maintenance_interrupt(
     Ok(!asserted)
 }
 
+/// Identifies timer EOI maintenance before synchronizing the hardware LR bank.
+/// An unrelated maintenance interrupt must not start a timer-source poll.
+pub fn virtual_timer_eoi_pending(
+    context: &VcpuContext,
+    interrupts: &VmInterruptController,
+) -> bool {
+    let eoi = super::vgic_maintenance_state().eoi_list_registers;
+    context
+        .vgic
+        .slots()
+        .iter()
+        .enumerate()
+        .any(|(index, entry)| {
+            eoi & (1u64 << index) != 0
+                && entry.is_some_and(|entry| entry.interrupt == interrupts.timer_interrupt())
+        })
+}
+
 pub fn maintenance_interrupt_pending() -> bool {
     super::vgic_maintenance_state().status != 0
 }

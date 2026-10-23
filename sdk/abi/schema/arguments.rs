@@ -1217,7 +1217,9 @@ pub(super) const PROCESS_BUILDER_CREATE_RESULTS: &[ResultValue] = &[ResultValue 
         rights: ProducedRights::FixedAndInherited {
             fixed_rights: PROCESS_BUILDER_RIGHTS,
             authority_source: "factory",
-            inherited_rights: RIGHT_LOCK_MEMORY | RIGHT_RETAIN_PROCESS,
+            inherited_rights: RIGHT_LOCK_MEMORY
+                | RIGHT_RETAIN_PROCESS
+                | SCHEDULING_ELEVATION_RIGHTS,
         },
     }),
 }];
@@ -1949,7 +1951,11 @@ pub(super) const VIRTUAL_MACHINE_CREATION_LEASE_CREATE_RESULTS: &[ResultValue] =
     kind: ValueKind::Handle,
     handle: Some(ProducedHandle {
         object: ProducedObject::Kind("virtual_machine_creation_lease"),
-        rights: ProducedRights::Fixed(VIRTUAL_MACHINE_CREATION_LEASE_RIGHTS),
+        rights: ProducedRights::FixedAndInherited {
+            fixed_rights: VIRTUAL_MACHINE_CREATION_LEASE_RIGHTS,
+            authority_source: "authority",
+            inherited_rights: SCHEDULING_RIGHTS,
+        },
     }),
 }];
 
@@ -2073,7 +2079,11 @@ pub(super) const VIRTUAL_MACHINE_CREATE_RESULTS: &[ResultValue] = &[ResultValue 
     kind: ValueKind::Handle,
     handle: Some(ProducedHandle {
         object: ProducedObject::Kind("pending_virtual_machine"),
-        rights: ProducedRights::Fixed(PENDING_VIRTUAL_MACHINE_RIGHTS),
+        rights: ProducedRights::FixedAndInherited {
+            fixed_rights: PENDING_VIRTUAL_MACHINE_RIGHTS,
+            authority_source: "lease",
+            inherited_rights: SCHEDULING_RIGHTS,
+        },
     }),
 }];
 
@@ -2256,7 +2266,11 @@ pub(super) const PENDING_VIRTUAL_MACHINE_INSTALL_RESULTS: &[ResultValue] = &[
         kind: ValueKind::Handle,
         handle: Some(ProducedHandle {
             object: ProducedObject::Kind("virtual_machine"),
-            rights: ProducedRights::Fixed(VIRTUAL_MACHINE_RIGHTS),
+            rights: ProducedRights::FixedAndInherited {
+                fixed_rights: VIRTUAL_MACHINE_RIGHTS,
+                authority_source: "pending_virtual_machine",
+                inherited_rights: SCHEDULING_RIGHTS,
+            },
         }),
     },
     ResultValue {
@@ -2264,7 +2278,11 @@ pub(super) const PENDING_VIRTUAL_MACHINE_INSTALL_RESULTS: &[ResultValue] = &[
         kind: ValueKind::Handle,
         handle: Some(ProducedHandle {
             object: ProducedObject::Kind("virtual_cpu"),
-            rights: ProducedRights::Fixed(VIRTUAL_CPU_RIGHTS),
+            rights: ProducedRights::FixedAndInherited {
+                fixed_rights: VIRTUAL_CPU_RIGHTS,
+                authority_source: "pending_virtual_machine",
+                inherited_rights: SCHEDULING_ELEVATION_RIGHTS,
+            },
         }),
     },
 ];
@@ -2364,9 +2382,17 @@ pub(super) const THREAD_CREATE_RESULTS: &[ResultValue] = &[ResultValue {
     kind: ValueKind::Handle,
     handle: Some(ProducedHandle {
         object: ProducedObject::Kind("thread"),
-        rights: ProducedRights::Fixed(
-            RIGHT_DUPLICATE | RIGHT_WAIT | RIGHT_INSPECT | RIGHT_START | RIGHT_REQUEST_STOP,
-        ),
+        rights: ProducedRights::FixedAndInherited {
+            fixed_rights: RIGHT_DUPLICATE
+                | RIGHT_TRANSFER
+                | RIGHT_WAIT
+                | RIGHT_INSPECT
+                | RIGHT_START
+                | RIGHT_REQUEST_STOP
+                | RIGHT_SCHED_LOWER,
+            authority_source: "receiver",
+            inherited_rights: SCHEDULING_ELEVATION_RIGHTS,
+        },
     }),
 }];
 pub(super) const fn thread_argument(rights: u64) -> Argument {
@@ -2425,3 +2451,28 @@ pub(super) const fn crash_output_argument(record: &'static str) -> Argument {
         }),
     }
 }
+
+/// Scheduling setters inspect each changed field against the receiver rights.
+/// A zero static receiver mask never grants permission to change configuration.
+const fn scheduling_record(direction: MemoryDirection) -> Argument {
+    Argument {
+        name: "configuration",
+        kind: ValueKind::UserAddress,
+        handle: None,
+        memory: Some(UserMemory {
+            direction,
+            length: MemoryLength::FixedBytes { bytes: 64 },
+            record: Some("scheduling_parameters"),
+            handles: None,
+            validation_order: 0,
+        }),
+    }
+}
+pub(super) const SCHEDULING_INPUT_ARGUMENTS: &[Argument] =
+    &[scheduling_record(MemoryDirection::Read)];
+pub(super) const SCHEDULING_OUTPUT_ARGUMENTS: &[Argument] =
+    &[scheduling_record(MemoryDirection::Write)];
+pub(super) const SCHEDULING_BUILDER_ARGUMENTS: &[Argument] = &[
+    scheduling_record(MemoryDirection::Read),
+    scalar_argument("delegated_rights", ValueKind::Rights),
+];

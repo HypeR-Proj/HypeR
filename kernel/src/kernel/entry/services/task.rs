@@ -15,6 +15,91 @@ use crate::kernel::process::{
 };
 
 impl TaskServices for ProcessServices<'_> {
+    fn get_scheduling(
+        &self,
+        receiver: &InvocationReceiver,
+    ) -> Result<crate::kernel::task::policy::SchedulingParameters, ObjectServiceError> {
+        use crate::kernel::object::ObjectKind;
+        receiver
+            .require(Rights::INSPECT)
+            .map_err(ProcessError::from)?;
+        if receiver.kind() == ObjectKind::VIRTUAL_CPU {
+            return receiver
+                .resolve::<crate::kernel::vm::objects::VirtualCpuObject>(Rights::INSPECT)
+                .map_err(ProcessError::from)?
+                .object()
+                .scheduling()
+                .map_err(scheduling_vm_error);
+        }
+        let thread = if receiver.kind() == ObjectKind::EXECUTION_CONTEXT {
+            self.thread.clone()
+        } else {
+            UserThread::resolve_receiver(receiver, Rights::INSPECT).map_err(ProcessError::from)?
+        };
+        let id = thread
+            .scheduler_id()
+            .ok_or(ObjectServiceError::InvalidInput)?;
+        crate::kernel::task::scheduler::scheduling_snapshot(id)
+            .map_err(ProcessError::from)
+            .map_err(Into::into)
+    }
+
+    fn set_scheduling(
+        &self,
+        receiver: &InvocationReceiver,
+        parameters: crate::kernel::task::policy::SchedulingParameters,
+        delegated: Option<Rights>,
+    ) -> Result<(), ObjectServiceError> {
+        use crate::kernel::object::ObjectKind;
+        use crate::kernel::task::scheduling_authority::SchedulingAuthority;
+        let authority = SchedulingAuthority::new(receiver.info().rights);
+        match receiver.kind() {
+            ObjectKind::PROCESS_BUILDER => {
+                let builder = receiver
+                    .resolve::<crate::kernel::process::ProcessBuilder>(Rights::NONE)
+                    .map_err(ProcessError::from)?;
+                builder
+                    .object()
+                    .set_scheduling(
+                        parameters,
+                        authority,
+                        delegated.ok_or(ObjectServiceError::InvalidInput)?,
+                    )
+                    .map_err(|error| match error {
+                        crate::kernel::process::ProcessBuilderError::Process(error) => {
+                            ObjectServiceError::Process(error)
+                        }
+                        _ => ObjectServiceError::InvalidInput,
+                    })
+            }
+            ObjectKind::VIRTUAL_CPU => receiver
+                .resolve::<crate::kernel::vm::objects::VirtualCpuObject>(Rights::NONE)
+                .map_err(ProcessError::from)?
+                .object()
+                .set_scheduling(parameters, authority)
+                .map_err(scheduling_vm_error),
+            _ => {
+                let thread = if receiver.kind() == ObjectKind::EXECUTION_CONTEXT {
+                    self.thread.clone()
+                } else {
+                    UserThread::resolve_receiver(receiver, Rights::NONE)
+                        .map_err(ProcessError::from)?
+                };
+                let id = thread
+                    .scheduler_id()
+                    .ok_or(ObjectServiceError::InvalidInput)?;
+                let limits = thread
+                    .scheduling_limits()
+                    .ok_or(ObjectServiceError::InvalidInput)?;
+                crate::kernel::task::scheduler::configure_scheduling(
+                    id, parameters, authority, limits,
+                )
+                .map_err(ProcessError::from)
+                .map_err(Into::into)
+            }
+        }
+    }
+
     fn set_current_thread_name(&self, name: &str) -> Result<(), ProcessError> {
         let id = self.thread.scheduler_id().ok_or(ProcessError::Scheduler(
             crate::kernel::task::scheduler::Error::ThreadNotFound,
@@ -23,6 +108,7 @@ impl TaskServices for ProcessServices<'_> {
     }
     fn create_thread(
         &self,
+        scheduling_rights: Rights,
         entry: u64,
         stack: u64,
         tls: u64,
@@ -57,12 +143,26 @@ impl TaskServices for ProcessServices<'_> {
             affinity
         };
         let process = self.process;
-        let thread = process.create_user_thread("native-worker", start, affinity)?;
+        let caller = self
+            .thread
+            .scheduler_id()
+            .ok_or(ObjectServiceError::InvalidInput)?;
+        let scheduling = crate::kernel::task::scheduler::scheduling_snapshot(caller)
+            .map_err(ProcessError::from)?;
+        let thread = process.create_user_thread_with_scheduling(
+            "native-worker",
+            start,
+            affinity,
+            scheduling,
+        )?;
         let rights = Rights::DUPLICATE
             .union(Rights::WAIT)
             .union(Rights::INSPECT)
             .union(Rights::START)
-            .union(Rights::REQUEST_STOP);
+            .union(Rights::REQUEST_STOP)
+            .union(Rights::TRANSFER)
+            .union(Rights::SCHED_LOWER)
+            .union(scheduling_rights.intersection(process.scheduling().delegated));
         match process.publish_thread_handle(&thread, rights) {
             Ok(handle) => Ok(handle),
             Err(error) => {
@@ -163,5 +263,17 @@ fn atomic_wait_error(error: crate::kernel::process::atomic_wait::Error) -> Objec
         Error::Process(error) => ObjectServiceError::Process(error),
         Error::Wait(error) => ObjectServiceError::Wait(error),
         Error::InvalidInput => ObjectServiceError::InvalidInput,
+    }
+}
+
+fn scheduling_vm_error(error: crate::kernel::vm::objects::Error) -> ObjectServiceError {
+    match error {
+        crate::kernel::vm::objects::Error::Scheduler(error) => {
+            ObjectServiceError::Process(ProcessError::Scheduler(error))
+        }
+        crate::kernel::vm::objects::Error::BadState => ObjectServiceError::Process(
+            ProcessError::Scheduler(crate::kernel::task::scheduler::Error::InvalidThreadState),
+        ),
+        _ => ObjectServiceError::InvalidInput,
     }
 }

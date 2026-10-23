@@ -81,6 +81,11 @@ impl Rights {
     pub(crate) const LOCK_MEMORY: Self = Self(native::HYPER_NATIVE_RIGHT_LOCK_MEMORY);
     pub(crate) const RETAIN_PROCESS: Self = Self(native::HYPER_NATIVE_RIGHT_RETAIN_PROCESS);
     pub(crate) const RETIRE: Self = Self(native::HYPER_NATIVE_RIGHT_RETIRE);
+    pub(crate) const SCHED_LOWER: Self = Self(native::HYPER_NATIVE_RIGHT_SCHED_LOWER);
+    pub(crate) const SCHED_PRIORITY: Self = Self(native::HYPER_NATIVE_RIGHT_SCHED_PRIORITY);
+    pub(crate) const SCHED_CLASS: Self = Self(native::HYPER_NATIVE_RIGHT_SCHED_CLASS);
+    pub(crate) const SCHED_BUDGET: Self = Self(native::HYPER_NATIVE_RIGHT_SCHED_BUDGET);
+
     pub(crate) const KNOWN: Self = Self(native::HYPER_NATIVE_RIGHTS_MASK);
     const PROPAGATION_MASK: u64 = Self::DUPLICATE.0 | Self::TRANSFER.0;
 

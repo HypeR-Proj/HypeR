@@ -35,6 +35,12 @@ pub struct Configuration {
     pub bootargs: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub affinity: Vec<Affinity>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::scheduling::present"
+    )]
+    pub scheduling: Option<crate::scheduling::Scheduling>,
 }
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -52,6 +58,9 @@ impl Configuration {
             return Err("VM requires 1..=8 vCPUs".into());
         }
         crate::affinity::masks(&self.affinity, self.vcpus)?;
+        if let Some(scheduling) = self.scheduling {
+            scheduling.validate()?;
+        }
         if self.memory_bytes < 64 * 1024 * 1024 || !self.memory_bytes.is_power_of_two() {
             return Err("VM memory-bytes must be a power of two of at least 64 MiB".into());
         }
@@ -77,6 +86,7 @@ impl Configuration {
             }
             .to_string(),
         ];
+        args.push(serde_json::to_string(&self.scheduling).map_err(|error| error.to_string())?);
         // One bounded argument per vCPU stays below the 4096-byte argument limit,
         // even when every supported host CPU is listed explicitly.
         for entry in &self.affinity {
@@ -100,6 +110,7 @@ impl Configuration {
                 "pci" => VirtioTransport::Pci,
                 _ => return Err("invalid virtio transport".into()),
             },
+            scheduling: serde_json::from_str(&next()?).map_err(|error| error.to_string())?,
             affinity: args
                 .map(|value| serde_json::from_str(&value))
                 .collect::<Result<_, _>>()

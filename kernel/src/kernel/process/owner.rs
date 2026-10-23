@@ -262,6 +262,7 @@ pub(super) struct ProcessInner {
     group_id: super::TaskGroupId,
     domain_id: crate::kernel::accounting::ResourceDomainId,
     image_generation: u64,
+    pub(super) scheduling: PublishedOnce<super::scheduling::ProcessScheduling>,
     name: PublishedOnce<ProcessNameSnapshot>,
     image: ProcessImage,
     domain: ResourceDomain,
@@ -481,6 +482,7 @@ impl PreparedProcess {
             group_id: group.id(),
             domain_id: domain.id(),
             image_generation: 1,
+            scheduling: PublishedOnce::new(),
             name: PublishedOnce::new(),
             image,
             domain,
@@ -832,27 +834,31 @@ impl Process {
         start: UserThreadStart,
         affinity: CpuMask,
     ) -> Result<UserThread, ProcessError> {
+        self.create_user_thread_with_scheduling(name, start, affinity, self.scheduling().initial)
+    }
+
+    pub(crate) fn create_user_thread_with_scheduling(
+        &self,
+        name: &str,
+        start: UserThreadStart,
+        affinity: CpuMask,
+        scheduling: crate::kernel::task::policy::SchedulingParameters,
+    ) -> Result<UserThread, ProcessError> {
         if !machine_matches_host(self.image().machine()) {
             return Err(ProcessError::UserEntry(
                 crate::hal::user::UserEntryError::Unsupported,
             ));
         }
         let prepared = self.prepare_user_thread()?;
-        let mut context = crate::hal::user::prepare_context(
-            start.entry().get(),
-            start.stack().get(),
-            start.tls().get(),
-        )
-        .map_err(ProcessError::UserEntry)?;
-        context.set_entry_argument(start.argument());
-        let execution = UserExecution::try_new(prepared.address_space.clone(), context)
-            .map_err(|()| ProcessError::Allocation)?;
-        let dormant = scheduler::prepare_user_thread(
+        let execution =
+            Self::prepare_user_execution(prepared.address_space.clone(), start, start.argument())?;
+        let dormant = scheduler::prepare_user_thread_with_scheduling(
             name,
             prepared.thread.clone(),
             execution,
             crate::kernel::entry::user::thread_entry,
             affinity,
+            scheduling,
         )?;
         let id = dormant.id();
         let thread = prepared.thread.clone();
@@ -908,14 +914,18 @@ impl Process {
                 return Err(error);
             }
         };
-        let execution =
-            self.prepare_initial_user_execution(prepared.address_space.clone(), argument)?;
-        let dormant = scheduler::prepare_user_thread(
+        let execution = Self::prepare_user_execution(
+            prepared.address_space.clone(),
+            self.image().initial_thread(),
+            argument,
+        )?;
+        let dormant = scheduler::prepare_user_thread_with_scheduling(
             name,
             prepared.thread.clone(),
             execution,
             crate::kernel::entry::user::thread_entry,
             affinity,
+            self.scheduling().initial,
         )?;
         Ok(PreparedInitialUserThread {
             thread: prepared.thread.clone(),
@@ -928,12 +938,11 @@ impl Process {
     // entering scheduler preparation. Keeping this frame separate leaves
     // room for IRQ entry, preemption and switch-tail retirement on this stack.
     #[inline(never)]
-    fn prepare_initial_user_execution(
-        &self,
+    fn prepare_user_execution(
         address_space: FallibleArc<NativeAddressSpace>,
+        start: UserThreadStart,
         argument: u64,
     ) -> Result<alloc::boxed::Box<core::cell::UnsafeCell<UserExecution>>, ProcessError> {
-        let start = self.image().initial_thread();
         // Match the architectural Result directly: mapping its error before
         // extracting the context creates extra full-register-image temporaries
         // in the kernel build profile.
@@ -1226,13 +1235,18 @@ impl Process {
         })
     }
 
+    /// Replaces a caller-owned batch without returning copies of its plans.
     /// Materializes every destination before pinning any output. A competing
     /// remap may still win; then the whole local reservation batch is dropped
     /// before retry, so one output cannot prevent another output's COW commit.
-    pub(crate) fn reserve_user_writes<const N: usize>(
+    pub(crate) fn reserve_user_writes_into<const N: usize>(
         &self,
         destinations: [Option<UserSlice>; N],
-    ) -> Result<[Option<UserWriteReservation>; N], ProcessError> {
+        mut writes: [&mut Option<UserWriteReservation>; N],
+    ) -> Result<(), ProcessError> {
+        for write in &mut writes {
+            drop(write.take());
+        }
         self.retry_user_memory(|address_space| {
             for destination in destinations
                 .iter()
@@ -1241,16 +1255,23 @@ impl Process {
             {
                 address_space.resolve_private_write(*destination)?;
             }
-            let mut writes = [const { None }; N];
             for (slot, destination) in writes.iter_mut().zip(destinations) {
                 if let Some(destination) = destination.filter(|range| range.length() != 0) {
-                    *slot = Some(NativeAddressSpace::reserve_user_write(
-                        address_space.clone(),
-                        destination,
-                    )?);
+                    match NativeAddressSpace::reserve_user_write(address_space.clone(), destination)
+                    {
+                        Ok(write) => **slot = Some(write),
+                        Err(error) => {
+                            // Nothing may remain pinned across a retry, even
+                            // when only the last destination lost admission.
+                            for write in &mut writes {
+                                drop(write.take());
+                            }
+                            return Err(error);
+                        }
+                    }
                 }
             }
-            Ok(writes)
+            Ok(())
         })
     }
 
