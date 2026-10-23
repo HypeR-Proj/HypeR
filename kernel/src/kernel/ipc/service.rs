@@ -13,6 +13,7 @@ use crate::kernel::accounting::{CommittedCharge, ResourceAmount, ResourceKind};
 use crate::kernel::authority::Rights;
 use crate::kernel::capability::{
     HandleError, HandleTransferOperation, HandleTransferRequest, HandleTransferRoute, HandleValue,
+    ResolvedObject,
 };
 use crate::kernel::mm::user_space::{UserSlice, UserWriteReservation};
 use crate::kernel::object::{KernelObject, ObjectKind, ObjectWaitError};
@@ -136,6 +137,18 @@ pub(crate) fn capability_channel_try_send(
         .resolve::<CapabilityChannel>(Rights::WRITE)
         .map_err(crate::kernel::process::ProcessError::from)?;
     let mut prepared = PreparedCapabilitySend::copy_from_user(process, bytes, disposition_records)?;
+    send_prepared_capabilities(process, &endpoint, &mut prepared)
+}
+
+// Receiver matching/publication retains large rollback owners. Keep this frame
+// out of sender input admission and its usercopy/COW/allocator call chain. The
+// wrapper retains the authorized endpoint and copied input throughout delivery.
+#[inline(never)]
+fn send_prepared_capabilities(
+    process: &Process,
+    endpoint: &ResolvedObject<CapabilityChannel>,
+    prepared: &mut PreparedCapabilitySend,
+) -> Result<(), CapabilityChannelServiceError> {
     let claim = endpoint
         .object()
         .try_match(prepared.bytes.len(), prepared.dispositions.len())?;
@@ -369,6 +382,9 @@ fn reserve_exact_output(
 }
 
 impl PreparedCapabilitySend {
+    // Input decoding and user-memory admission have their own stack scratch.
+    // Release it before matching/committing the receiver and waking Threads.
+    #[inline(never)]
     fn copy_from_user(
         process: &Process,
         bytes: Option<UserSlice>,

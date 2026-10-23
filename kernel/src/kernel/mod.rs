@@ -33,6 +33,7 @@ pub(crate) mod reaper;
 pub mod sync;
 pub mod task;
 pub mod time;
+pub mod trace;
 pub(crate) mod vfs;
 pub mod vm;
 
