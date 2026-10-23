@@ -77,7 +77,9 @@ def main():
             raise AssertionError('trace control recursively generated syscall events')
         args.logfile.with_suffix('.json').write_text(json.dumps(payload) + '\n')
         shell.run('perf trace dump -o /tmp/trace.json').require('overwrite requires opt-in', failed=True)
-        shell.check('perf trace record --duration-ms 1000 --categories syscall --max-events 4096 --format jsonl -o /tmp/command.jsonl -- /bin/echo TRACE_COMMAND_OK')
+        # This checks exit semantics, not command latency. Leave room for slow
+        # TCG runners; command completion still stops the recording immediately.
+        shell.check('perf trace record --duration-ms 30000 --categories syscall --max-events 16384 --format jsonl -o /tmp/command.jsonl -- /bin/echo TRACE_COMMAND_OK')
         command_rows = [json.loads(line) for line in shell.check('cat /tmp/command.jsonl', timeout=120).splitlines() if line.strip()]
         exits = [row['args'] for row in command_rows[1:-1]
                  if row['event'] == 'syscall_exit' and row['args']['returned'] == 0]
