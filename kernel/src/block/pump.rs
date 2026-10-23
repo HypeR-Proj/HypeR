@@ -24,7 +24,7 @@ use {
 struct Active {
     queue: FallibleArc<Queue>,
     request: FallibleArc<Request>,
-    data: Vec<u8>,
+    data: super::payload::Payload,
     cursor: Cursor,
     pieces: usize,
     flush_submitted: bool,
@@ -240,12 +240,11 @@ impl Pump {
                     .and_then(Option::as_mut)
                     .ok_or(Error::Corrupt)?;
                 if result.is_ok() && command.operation == Operation::Read {
-                    self.device.read(
+                    active.data.read_from_device(
+                        &self.device,
                         wire::DATA + (flight.data.first * wire::DATA_BYTES + data_offset) as u64,
-                        active
-                            .data
-                            .get_mut(piece.offset..piece.offset + piece.length)
-                            .ok_or(Error::Corrupt)?,
+                        piece.offset,
+                        piece.length,
                     )?;
                 }
                 data_offset += piece.length;
@@ -413,12 +412,11 @@ impl Pump {
                     break;
                 }
                 if operation == Operation::Write {
-                    self.device.write(
+                    active.data.write_to_device(
+                        &self.device,
+                        offset,
                         wire::DATA + (span.first * wire::DATA_BYTES + length) as u64,
-                        active
-                            .data
-                            .get(offset..offset + range.bytes)
-                            .ok_or(Error::Corrupt)?,
+                        range.bytes,
                     )?;
                 }
                 let active = self.active[index].as_mut().ok_or(Error::Corrupt)?;

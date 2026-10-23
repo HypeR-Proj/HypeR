@@ -417,6 +417,25 @@ pub(crate) trait GuestIoServices: UserMemoryServices {
             hyper::abi::native::HYPER_NATIVE_STATUS_NOT_SUPPORTED,
         ))
     }
+    fn create_block_queue_window(
+        &self,
+        _receiver: &InvocationReceiver,
+    ) -> Result<HandleValue, crate::block::service::TransferError> {
+        Err(crate::block::service::TransferError::Status(
+            hyper::abi::native::HYPER_NATIVE_STATUS_NOT_SUPPORTED,
+        ))
+    }
+    fn submit_block_queue_window(
+        &self,
+        _receiver: &InvocationReceiver,
+        _token: u64,
+        _count: u32,
+        _frame: UserSlice,
+    ) -> Result<u64, crate::block::service::TransferError> {
+        Err(crate::block::service::TransferError::Status(
+            hyper::abi::native::HYPER_NATIVE_STATUS_NOT_SUPPORTED,
+        ))
+    }
     fn wait_block_queue(
         &self,
         _receiver: &InvocationReceiver,
@@ -459,6 +478,7 @@ pub(crate) trait GuestIoServices: UserMemoryServices {
         &self,
         _channel: HandleValue,
         _buffer: HandleValue,
+        _queue: Option<HandleValue>,
         _directory: &InvocationReceiver,
         _path: UserSlice,
         _read_only: bool,

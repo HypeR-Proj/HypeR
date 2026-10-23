@@ -27,6 +27,7 @@ use {
     crate::object::prepare_timed_wait, crate::object::private, crate::object::wait_one,
 };
 
+use super::payload::Payload;
 use super::plan::Operation;
 pub(crate) use super::plan::Range;
 use super::{Device, Lock, NativeBlock, plan, wire};
@@ -112,7 +113,7 @@ pub(super) struct Request {
 }
 
 pub(super) struct RequestState {
-    pub(super) data: Option<Vec<u8>>,
+    pub(super) data: Option<Payload>,
     pub(super) result: Option<Result<(), Error>>,
     pub(super) reaping: bool,
 }
@@ -160,6 +161,7 @@ pub(super) struct Queue {
     pub(super) closed: AtomicBool,
     pub(super) state: Lock<QueueState>,
     pub(super) signals: SignalState,
+    pub(super) window: Lock<Option<FallibleArc<super::window::IoWindow>>>,
     _charge: CommittedCharge,
 }
 
@@ -205,7 +207,8 @@ impl Queue {
         }
     }
 
-    pub(super) fn finish(&self, request: &Request, data: Vec<u8>, result: Result<(), Error>) {
+    pub(super) fn finish(&self, request: &Request, mut data: Payload, result: Result<(), Error>) {
+        data.finish();
         self.state.with(|state| {
             request.state.with(|request| {
                 request.data = Some(data);
@@ -245,7 +248,8 @@ impl KernelObject for BlockQueue {
         .union(Rights::WRITE)
         .union(Rights::WAIT)
         .union(Rights::INSPECT)
-        .union(Rights::TRANSFER);
+        .union(Rights::TRANSFER)
+        .union(Rights::DUPLICATE);
     fn signal_source(&self) -> Option<SignalSource<'_>> {
         Some(SignalSource::new(
             &self.queue.signals,
@@ -355,6 +359,7 @@ impl Device {
                 peak_inflight: 0,
             }),
             signals: SignalState::new(),
+            window: Lock::new(None),
             _charge: charge,
         })
         .map_err(|_| QueueError::NoMemory)?;
@@ -409,6 +414,15 @@ impl BlockQueue {
         operation: u32,
         ranges: Vec<Range>,
     ) -> Result<PreparedSubmission<'_>, QueueError> {
+        self.prepare_payload(operation, ranges, None)
+    }
+
+    pub(super) fn prepare_payload(
+        &self,
+        operation: u32,
+        ranges: Vec<Range>,
+        payload: Option<Payload>,
+    ) -> Result<PreparedSubmission<'_>, QueueError> {
         let operation = Operation::decode(operation).ok_or(QueueError::Invalid)?;
         let length = ranges
             .iter()
@@ -461,7 +475,7 @@ impl BlockQueue {
             owner: self,
             operation,
             ranges: Some(ranges),
-            payload: Vec::new(),
+            payload: Payload::default(),
             charge: None,
             index,
             ticket,
@@ -474,14 +488,24 @@ impl BlockQueue {
         });
         let bytes = FallibleArc::<Request>::allocation_size()
             .checked_add(metadata)
-            .and_then(|bytes| bytes.checked_add(length))
+            .and_then(|bytes| {
+                bytes.checked_add(match payload.as_ref() {
+                    None => length,
+                    Some(payload) => payload.allocation_bytes()?,
+                })
+            })
             .ok_or(QueueError::NoMemory)?;
         prepared.charge = Some(charge(&self.queue.domain, bytes)?);
-        prepared
-            .payload
-            .try_reserve_exact(length)
-            .map_err(|_| QueueError::NoMemory)?;
-        prepared.payload.resize(length, 0);
+        prepared.payload = if let Some(payload) = payload {
+            payload
+        } else {
+            let mut bytes = Vec::new();
+            bytes
+                .try_reserve_exact(length)
+                .map_err(|_| QueueError::NoMemory)?;
+            bytes.resize(length, 0);
+            Payload::Owned(bytes)
+        };
         Ok(prepared)
     }
 
@@ -633,7 +657,7 @@ impl BlockQueue {
         }
     }
 
-    fn find(&self, ticket: u64) -> Result<FallibleArc<Request>, QueueError> {
+    pub(super) fn find(&self, ticket: u64) -> Result<FallibleArc<Request>, QueueError> {
         let index = (ticket & 255).checked_sub(1).ok_or(QueueError::NotFound)? as usize;
         self.queue.state.with(|state| {
             let slot = state.slots.get(index).ok_or(QueueError::NotFound)?;
@@ -701,7 +725,7 @@ pub(crate) struct PreparedSubmission<'a> {
     owner: &'a BlockQueue,
     operation: Operation,
     ranges: Option<Vec<Range>>,
-    payload: Vec<u8>,
+    payload: Payload,
     charge: Option<CommittedCharge>,
     index: usize,
     ticket: u64,
@@ -710,7 +734,7 @@ pub(crate) struct PreparedSubmission<'a> {
 }
 impl PreparedSubmission<'_> {
     pub(crate) fn bytes_mut(&mut self) -> &mut [u8] {
-        &mut self.payload
+        self.payload.owned_mut()
     }
     pub(crate) fn commit(mut self) -> Result<u64, QueueError> {
         let request = FallibleArc::try_new(Request {
@@ -801,7 +825,7 @@ impl Drop for PreparedSubmission<'_> {
 pub(crate) struct ReapGuard<'a> {
     owner: &'a BlockQueue,
     request: FallibleArc<Request>,
-    data: Option<Vec<u8>>,
+    data: Option<Payload>,
     result: Result<(), Error>,
     committed: bool,
 }
@@ -820,7 +844,7 @@ impl ReapGuard<'_> {
     }
     pub(crate) fn bytes(&self) -> &[u8] {
         if self.request.operation == Operation::Read && self.result.is_ok() {
-            self.data.as_deref().unwrap_or(&[])
+            self.data.as_ref().map_or(&[], Payload::owned)
         } else {
             &[]
         }
