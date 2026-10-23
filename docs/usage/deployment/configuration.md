@@ -453,6 +453,15 @@ thread capacity plus two exception stacks per configured CPU, excluding the
 bootstrap Thread, which has its own boot stack. IRQ/emergency stacks therefore
 do not consume the configured scheduler capacity.
 
+The scheduler menu also selects the Fair algorithm (`CONFIG_SCHED_FAIR_STRIDE`
+or `CONFIG_SCHED_FAIR_RR`), the common Budget period and vCPU defaults, the shared
+priority allowance and protected execution floor, and the guest/native preference.
+These are kernel policy defaults; per-component and per-VM settings stay in their
+existing deployment declarations and require scheduling capabilities to apply.
+See [scheduling policy and tickless execution](../../../kernel/docs/design/scheduling.md),
+[component scheduling authority](../../design/services/components.md#scheduling-authority),
+and [VM scheduling configuration](../applications/vmm.md#scheduling).
+
 The old independent `CONFIG_MAX_KERNEL_STACKS` setting has been removed.
 After migration, `CONFIG_SCHED_MAX_THREADS` defaults to 1024; set it explicitly
 if a different thread budget is needed. Removing this budget entirely would

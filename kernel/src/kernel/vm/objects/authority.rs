@@ -42,7 +42,8 @@ impl KernelObject for VirtualMachineCreationAuthority {
         .union(Rights::TRANSFER)
         .union(Rights::INSPECT)
         .union(Rights::DERIVE)
-        .union(Rights::CREATE_VIRTUAL_MACHINE);
+        .union(Rights::CREATE_VIRTUAL_MACHINE)
+        .union(crate::kernel::task::scheduling_authority::SCHEDULING_RIGHTS);
 }
 
 /// One-shot authority to construct a VM charged to one resource domain.
@@ -72,5 +73,6 @@ impl KernelObject for VirtualMachineCreationLease {
     const TRANSFER_CLASS: TransferClass = TransferClass::RendezvousOnly;
     const SUPPORTED_RIGHTS: Rights = Rights::TRANSFER
         .union(Rights::INSPECT)
-        .union(Rights::CREATE_VIRTUAL_MACHINE);
+        .union(Rights::CREATE_VIRTUAL_MACHINE)
+        .union(crate::kernel::task::scheduling_authority::SCHEDULING_RIGHTS);
 }

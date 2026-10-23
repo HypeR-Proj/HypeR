@@ -343,3 +343,47 @@ Run the executable printed by Cargo with `retention_throughput --ignored --nocap
 It measures appends with one or sixteen producers and interleaved queries, excluding
 IPC, scheduling and serial I/O. This is not an end-to-end logging throughput claim
 or a CI performance threshold.
+
+## Scheduling authority
+
+A component may select initial scheduling through `program.scheduling`:
+
+```json
+{
+  "policy": {"kind": "fair", "weight": 16, "quantum_ns": 5000000},
+  "band": 64,
+  "role": "priority"
+}
+```
+
+The generated service deployment uses this bounded Priority/Fair profile. A
+formal source service can override it with its `scheduling` field; composition
+copies that field into the component declaration. `backend` is optional for
+Fair: omission selects the kernel's configured implementation, so switching
+between stride and round-robin does not require editing service manifests.
+Budget and FIFO are alternate `policy.kind` values. Budget fields are
+`budget_ns`, `period_ns`, and `burst_ns`; its period must match kernel policy.
+FIFO has `priority` (0 is highest). `role` accepts `ordinary`, `priority`, and
+`protected`; the role controls arbitration independently of the algorithm.
+
+The manager validates the declaration before activation and configures the
+ProcessBuilder before sealing it. A declaration requests policy; it grants no
+kernel authority. Changes require distinct `sched-priority`, `sched-class`, or
+`sched-budget` rights on the builder. Children receive only `sched-lower` on
+their ExecutionContext by default. Ordinary WRITE never authorizes elevation.
+Ordinary new processes enter the App scheduling boundary; new threads inside a
+process inherit their creator's current parameters. The filesystem manager
+explicitly applies its own parameters to its provider workers, using its
+separately delegated construction rights. This does not give workers the right
+to elevate themselves.
+
+`hyper_os::scheduling` exposes current-thread, Thread-handle, and vCPU-handle
+queries and changes. INSPECT authorizes queries; lowering treatment does not
+imply the right to restore it later. Configuration changes validate every
+requested field and the object's immutable ceiling before committing. Failed
+changes leave the previous configuration intact.
+
+Weights and Budget accounting are per Thread (per vCPU for virtual machines).
+They do not impose an aggregate process or VM CPU quota: creating additional
+threads creates additional runnable entities. Deployment must bound thread and
+vCPU counts separately when it needs an aggregate resource limit.

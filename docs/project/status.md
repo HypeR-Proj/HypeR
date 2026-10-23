@@ -51,10 +51,11 @@ The current foundation includes:
   buddy allocation, slab allocation, and a bounded per-CPU fast path behind
   Rust's global allocator interface;
 - SMP startup with a scheduler-owned idle thread on every admitted CPU;
-- class-aware, intrusive ready queues with RT FIFO and a replaceable Fair
-  class whose initial backend is time-sliced round-robin;
-- load-aware initial Native/kernel Fair placement and bounded periodic
-  balancing of Ready Fair threads, including vCPUs, within their CPU affinity;
+- intrusive indexed ready queues with FIFO, weighted-stride Fair (or a
+  configured round-robin backend), and per-vCPU Budget scheduling; arbitration
+  and scheduling authority are described in the [scheduler design](../../kernel/docs/design/scheduling.md);
+- tickless scheduler deadlines, load-aware initial placement and bounded
+  event-driven balancing of Ready Fair/Budget threads within their CPU affinity;
 - explicit affinity-controlled kernel-Thread migration with source-context
   completion before target publication, including blocked waiters and affinity-driven vCPU migration;
 - generation-tagged, allocation-free wait arbitration across notification,

@@ -33,7 +33,7 @@ enum ThreadSlot {
         // extending object lifetime. The detached Thread carries the actual
         // scheduler reference into the reaper until its resources are gone.
         object: crate::kernel::task::ThreadObjectSnapshot,
-        runtime_ticks: u64,
+        runtime_ns: u64,
         thread: Option<Box<Thread>>,
     },
 }
@@ -556,12 +556,12 @@ impl ThreadRegistry {
         };
         let object = thread.object_snapshot();
         let name = thread.name_snapshot();
-        let runtime_ticks = thread.runtime_ticks();
+        let runtime_ns = thread.runtime_ns();
         *slot_ref = ThreadSlot::Retiring {
             id,
             name,
             object,
-            runtime_ticks,
+            runtime_ns,
             thread: Some(thread),
         };
         Ok(())
@@ -693,20 +693,20 @@ impl ThreadRegistry {
                     name: thread.name_snapshot(),
                     object: thread.object_snapshot(),
                     phase: ThreadObjectRegistryPhase::Resident,
-                    runtime_ticks: thread.runtime_ticks(),
+                    runtime_ns: thread.runtime_ns(),
                 }),
                 Some(ThreadSlot::Retiring {
                     id,
                     name,
                     object,
-                    runtime_ticks,
+                    runtime_ns,
                     ..
                 }) => Some(ThreadObjectObservation {
                     thread: *id,
                     name: *name,
                     object: *object,
                     phase: ThreadObjectRegistryPhase::Retiring,
-                    runtime_ticks: *runtime_ticks,
+                    runtime_ns: *runtime_ns,
                 }),
                 Some(ThreadSlot::Vacant | ThreadSlot::Reserved(_)) | None => None,
             };
@@ -728,26 +728,17 @@ impl ThreadRegistry {
         }
     }
 
-    /// Visits one registry slot and advances a wrapping maintenance cursor.
+    /// Visits one slot from a coordinator-owned, finite balancing sweep.
     /// Only an identity escapes; exclusive coordination retains its lifetime.
-    pub(super) fn next_balance_candidate(&self, cursor: &mut usize) -> Option<ThreadId> {
-        if self.high_water == 0 {
-            return None;
-        }
-        let index = *cursor % self.high_water;
-        *cursor = (index + 1) % self.high_water;
+    pub(super) fn balance_candidate(&self, index: usize) -> Option<ThreadId> {
         match self.table.access().table().slot(index) {
             Some(ThreadSlot::Occupied(thread)) => Some(thread.id()),
             _ => None,
         }
     }
 
-    pub(super) const fn balance_scan_limit(&self, budget: usize) -> usize {
-        if self.high_water < budget {
-            self.high_water
-        } else {
-            budget
-        }
+    pub(super) const fn balance_slot_count(&self) -> usize {
+        self.high_water
     }
 
     /// Number of slots ever exposed by the monotonic backing high-water mark.

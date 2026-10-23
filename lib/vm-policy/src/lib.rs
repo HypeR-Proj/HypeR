@@ -6,6 +6,7 @@
 pub mod affinity;
 pub mod fleet;
 pub mod image;
+pub mod scheduling;
 
 use hyper_os::task::ResourceLimits;
 

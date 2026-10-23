@@ -17,3 +17,7 @@ to descending CPU usage; `--sort name` or `--sort koid` changes the order.
 `-p KOID[,KOID...]` and `--name TEXT` filter rows, and `--limit 10` bounds the
 number displayed. CPU percentages use the total runtime across all host CPUs;
 the summary remains system-wide even when process rows are filtered.
+
+Runtime counters use elapsed monotonic nanoseconds, including execution since
+the last scheduler boundary. They do not depend on periodic tick frequency, so
+CPU percentages remain meaningful when a CPU has no scheduling tick armed.

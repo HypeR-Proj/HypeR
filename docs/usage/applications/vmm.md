@@ -151,6 +151,92 @@ builds preserve an existing disk, including `/data/vms.json`; see
 [updating existing deployments](../deployment/board-storage.md#updating-existing-deployments)
 to apply a changed configuration.
 
+### Scheduling
+
+Optional `configuration.scheduling` selects the host scheduling parameters for
+every vCPU in that VM. The runtime applies them before starting any vCPU; an
+invalid or unauthorized request fails startup. Omitting the whole field keeps
+the kernel's vCPU defaults: Ordinary/Budget, band 128, with Q=14 ms per P=20 ms
+and a maximum continuous competing turn B=10 ms in the default kernel config.
+Changing these defaults in kernel Kconfig does not require copying them into
+each VM definition.
+
+To change only arbitration, omit `policy`. For example, the board I/O VM uses:
+
+```json
+"scheduling": {"band": 64, "role": "priority"}
+```
+
+This retains the kernel-selected Budget parameters. The role is explicit
+deployment policy; naming a VM `io` confers no scheduling authority. Board
+definitions place this field in `io-vm.configuration` or the business VM's
+`configuration`, alongside `vcpus`, `memory-bytes` and `affinity`.
+
+For an explicit Budget configuration:
+
+```json
+"scheduling": {
+  "band": 128,
+  "role": "ordinary",
+  "policy": {
+    "kind": "budget",
+    "budget_ns": 14000000,
+    "period_ns": 20000000,
+    "burst_ns": 10000000
+  }
+}
+```
+
+`budget_ns` (Q), `period_ns` (P) and `burst_ns` (B) are positive nanoseconds;
+Q and B must not exceed P. All Budget threads share the period configured by
+`CONFIG_SCHED_PERIOD_MS`; a different `period_ns` is rejected by the running
+kernel. `CONFIG_SCHED_VCPU_BUDGET_MS` and `CONFIG_SCHED_VCPU_BURST_MS` supply the
+defaults. Q is a per-vCPU entitlement under contention, not a hard utilization
+cap: a vCPU may borrow idle CPU time. B bounds its uninterrupted turn when
+competing with other Budget threads; a sole runnable vCPU needs no periodic
+scheduling interrupt. This is neither a guaranteed real-time reservation nor
+an aggregate VM CPU quota. A two-vCPU VM receives two independently accounted
+budgets, subject to runnable work, affinity and available physical CPUs.
+When competing budgets exceed a CPU's capacity, those Q values do not guarantee
+proportional shares or full delivery each period; eligible peers rotate by turn
+order with B limiting a continuous turn.
+
+`band` ranges from 0 to 255, with smaller values preferred when the algorithm's
+ordering keys tie. `role` is independent of the algorithm:
+
+- `ordinary` uses normal policy entitlement.
+- `priority` uses the CPU's bounded shared priority allowance before falling
+  back to normal arbitration. More vCPUs do not enlarge that shared allowance.
+- `protected` participates in the CPU's shared execution floor; it is not a
+  minimum share guaranteed to each vCPU.
+
+Alternate policies are `{"kind":"fair","weight":16,"quantum_ns":5000000}`
+and `{"kind":"fifo","priority":128}`. Fair weight is 1..1024: larger weights
+receive proportionally more execution under stride within the same arbitration
+tier. Optional `backend` accepts `default`, `stride`, or `round-robin`; omission
+selects the kernel's compiled Fair backend. Changing the Fair backend currently
+requires a kernel Kconfig rebuild: mixing stride and round-robin threads is not
+supported, and explicitly requesting the other backend is rejected. Round-robin
+does not provide weighted stride shares. FIFO priority ranges from 0 (highest)
+to 255 and can starve other work, so it is intended only for trusted bounded tasks.
+
+Configuration does not create capabilities. VM creation authority must delegate
+`SCHED_CLASS`, `SCHED_PRIORITY` and/or `SCHED_BUDGET` for the requested changes;
+ordinary VM `WRITE` is insufficient. `SCHED_LOWER` permits demotion, not restoration
+of an earlier higher priority. The live kernel validates rights, enabled policy
+and parameter limits together. Editing a definition does not alter a running
+VM; recreate it from the updated definition as described above. `vmm affinity`
+changes CPU placement only, not this scheduling profile.
+
+I/O binding transfers only VM lifecycle and device-control rights to the I/O
+broker. The runtime retains its already-opened vCPU handles and their scheduling
+rights. The returned VM handle has no scheduling elevation rights; reopening a
+vCPU through it cannot recover those rights.
+
+See [scheduling policy and tickless execution](../../../kernel/docs/design/scheduling.md)
+for arbitration, tickless deadlines, balancing and platform limitations, and
+[product configuration](../deployment/configuration.md) for kernel menu settings.
+
 Migration: rebuild old ITBs with the current packer and add `configuration` to
 existing JSON definitions. The v2 ITB contract rejects v1 bundles and embedded
 runtime policy; it never falls back to values from an image.
@@ -215,7 +301,7 @@ For a running managed VM, `vmm affinity alpine 0 1,3` sets the allowed host
 CPUs for guest vCPU 0. If its current CPU remains allowed, placement is unchanged;
 otherwise the scheduler chooses an eligible CPU and performs the safe handoff.
 CPU lists accept comma-separated IDs and inclusive ranges, such as `0,2-3`.
-This changes affinity, not guest CPU topology. The kernel's automatic Fair
+This changes affinity, not guest CPU topology. The kernel's automatic Fair/Budget
 balancer may subsequently move a Ready vCPU within the allowed set; select one
 CPU to prevent that movement. Affinity persists across guest CPU off/on cycles.
 

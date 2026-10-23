@@ -10,6 +10,7 @@ pub(crate) mod policy;
 pub(crate) mod preempt;
 mod reschedule;
 pub mod scheduler;
+pub(crate) mod scheduling_authority;
 mod sleep;
 #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 mod test_progress;

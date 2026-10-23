@@ -135,7 +135,7 @@ fn interactive_choice_changes_architecture_and_preserves_common_tuning() {
     let fixture = Fixture::new();
     require(fs::write(
         fixture.0.join("input"),
-        "CONFIG_ARCH_AARCH64=y\nCONFIG_ARM64_PA_BITS=40\nCONFIG_TIMER_HZ=250\n",
+        "CONFIG_ARCH_AARCH64=y\nCONFIG_ARM64_PA_BITS=40\nCONFIG_LOG_LINE_MAX=1024\n",
     ));
     let output = fixture.run("config", &format!("2\n{}", "\n".repeat(32)));
     assert!(
@@ -145,7 +145,7 @@ fn interactive_choice_changes_architecture_and_preserves_common_tuning() {
     );
     let text = require(fs::read_to_string(fixture.0.join("output")));
     assert!(text.contains("CONFIG_ARCH_RISCV64=y"));
-    assert!(text.contains("CONFIG_TIMER_HZ=250"));
+    assert!(text.contains("CONFIG_LOG_LINE_MAX=1024"));
     assert!(!text.contains("CONFIG_ARCH_AARCH64"));
     assert!(!text.contains("CONFIG_ARM64_"));
     let prompts = String::from_utf8_lossy(&output.stdout);

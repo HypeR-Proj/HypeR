@@ -28,6 +28,8 @@ mod retirement_observation;
 mod run_admission;
 pub(crate) mod service;
 mod timer;
+mod timer_recovery;
+pub(crate) use timer::recover_source as recover_timer_source;
 pub(crate) mod vcpu;
 pub(crate) mod virtual_serial;
 
@@ -71,7 +73,6 @@ pub(crate) fn initialize(boot: &super::boot::Initialization) -> Result<(), Initi
     let guest_timer = boot.timer().guest_timer;
     let binding = timer::prepare(
         guest_timer,
-        boot.timer().virtual_interrupt,
         interrupts.root_domain,
         interrupts.maintenance_interrupt,
     )

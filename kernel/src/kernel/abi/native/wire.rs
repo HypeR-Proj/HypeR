@@ -1118,8 +1118,8 @@ pub(super) fn encode_task_thread(
     );
     write_u64(
         &mut record,
-        core::mem::offset_of!(Record, runtime_ticks),
-        snapshot.runtime_ticks,
+        core::mem::offset_of!(Record, runtime_ns),
+        snapshot.runtime_ns,
     );
     let name_offset = core::mem::offset_of!(Record, name);
     record[name_offset..name_offset + name.len()].copy_from_slice(name);
@@ -1176,12 +1176,12 @@ pub(super) fn encode_cpu_observation(
         };
     }
     field!(captured_at_ns);
-    field!(ticks_per_second);
+    field!(reserved_clock);
     field!(online_cpus);
-    field!(idle_ticks);
-    field!(kernel_thread_ticks);
-    field!(user_thread_ticks);
-    field!(vcpu_ticks);
+    field!(idle_ns);
+    field!(kernel_thread_ns);
+    field!(user_thread_ns);
+    field!(vcpu_ns);
     write_u64(&mut record, core::mem::offset_of!(Record, reserved), 0);
     record
 }

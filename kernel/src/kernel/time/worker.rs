@@ -35,7 +35,7 @@ impl Worker {
 
 static WORKERS: PerCpu<Worker> = PerCpu::new([const { Worker::new() }; hyper::cpu::MAX_CPUS]);
 
-/// Starts one fair worker per admitted CPU after local timer initialization.
+/// Starts one critical FIFO worker per admitted CPU after timer initialization.
 ///
 /// Workers retain their source CPU affinity for their entire lifetime. CPU
 /// hotplug must introduce an explicit queue-drain phase before removing one.
@@ -49,6 +49,10 @@ pub(crate) fn initialize() -> Result<(), scheduler::Error> {
             return Err(scheduler::Error::AlreadyInitialized);
         }
         let thread = scheduler::kthread_create_per_cpu("ktimer", cpu, worker_entry, cpu.get())?;
+        scheduler::set_thread_fifo_policy(
+            thread,
+            crate::kernel::task::policy::ThreadPriority::new(32),
+        )?;
         if !worker.work.claim_initial_worker() || worker.thread.publish(thread).is_err() {
             return Err(scheduler::Error::AlreadyInitialized);
         }
@@ -59,6 +63,8 @@ pub(crate) fn initialize() -> Result<(), scheduler::Error> {
             return Err(scheduler::Error::InvalidThreadState);
         }
     }
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
+    super::tick::validation::expect_cpus(count);
     Ok(())
 }
 
@@ -85,6 +91,12 @@ pub(super) fn is_current_worker() -> Result<bool, scheduler::Error> {
 
 /// Services comparator and worker prompts outside the interrupt registry lock.
 pub(crate) fn service_irq_prompt() {
+    if let Err(error) = super::timers::service_scheduler_deadline() {
+        crate::kernel::irq::exception::fatal_timer(error);
+    }
+    if let Err(error) = super::timers::service_fixed_deadlines() {
+        crate::kernel::irq::exception::fatal_timer(error);
+    }
     if let Err(error) = super::timers::service_reprogram_prompt() {
         crate::kernel::irq::exception::fatal_timer(error);
     }

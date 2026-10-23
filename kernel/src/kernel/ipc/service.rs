@@ -569,6 +569,7 @@ impl Drop for CapabilityReceiveTarget {
     }
 }
 
+#[inline(never)]
 fn copy_receive_contract(
     process: &Process,
     byte_capacity: usize,

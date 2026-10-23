@@ -162,7 +162,7 @@ impl IrqCallout {
                 )),
             });
             if timers.queue.next_deadline() != previous
-                && let Err(error) = program_next(&timers.queue)
+                && let Err(error) = program_next(timers)
             {
                 let node = match timers.queue.cancel_reserved(handle) {
                     Ok(node) => node,
@@ -269,7 +269,7 @@ impl IrqCallout {
                     // InterruptSpinLock masks local IRQs, so IRQ-tail
                     // migration cannot intervene before comparator update.
                     if owner == current_cpu()? && timers.queue.next_deadline() != previous {
-                        program_next(&timers.queue)?;
+                        program_next(timers)?;
                     }
                     Ok::<bool, Error>(true)
                 }

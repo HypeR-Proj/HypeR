@@ -3,8 +3,10 @@
 
 //! Public scheduler operations and architecture context-switch boundary.
 
+pub(super) mod algorithms;
 mod balance;
 mod balance_policy;
+mod configuration;
 #[cfg(not(test))]
 mod cpu_time;
 mod queue;
@@ -39,29 +41,27 @@ use super::thread::{
     ThreadState,
 };
 
+use super::policy;
 pub use super::policy::{CpuMask, ThreadPriority};
-use super::policy::{SchedulingPolicy, ThreadPlacement};
+use super::policy::{SchedulingParameters, SchedulingPolicy, ThreadPlacement};
 use super::wait::{WaitMobility, WaitOutcome, WaitQueue, WaitTicket};
+pub(crate) use configuration::default_parameters;
 
 use crate::pr_debug;
 
+#[cfg(all(
+    target_arch = "aarch64",
+    feature = "kernel-test",
+    feature = "kernel-self-test"
+))]
+pub(crate) use balance::idle_for_test as balance_idle_for_test;
 pub(crate) use balance::initialize as initialize_load_balancing;
+pub(crate) use balance::service_irq_prompt as service_balance_irq_prompt;
 
 /// Maximum scheduler-owned Thread population, including the bootstrap Thread.
 pub(crate) const THREAD_CAPACITY: usize = hyper::config::SCHED_MAX_THREADS as usize;
 const _: () = assert!(THREAD_CAPACITY > hyper::cpu::MAX_CPUS);
-
-/// Scheduler ticks granted by the initial Fair round-robin backend.
-///
-/// Milliseconds are rounded up so every configured nonzero quantum spans at
-/// least one periodic scheduler tick. Kconfig bounds make the product exact.
-const CONFIGURED_FAIR_QUANTUM_TICKS: u64 =
-    (hyper::config::SCHED_FAIR_QUANTUM_MS as u64 * hyper::config::TIMER_HZ as u64).div_ceil(1_000);
-const FAIR_QUANTUM_TICKS: u64 = if CONFIGURED_FAIR_QUANTUM_TICKS == 0 {
-    1
-} else {
-    CONFIGURED_FAIR_QUANTUM_TICKS
-};
+const _: () = assert!(THREAD_CAPACITY <= algorithms::ready_index::MAX_NODES);
 
 type CoordinatorLock =
     InterruptShardedLock<Option<Scheduler>, crate::hal::irq::LocalMask, { hyper::cpu::MAX_CPUS }>;
@@ -69,7 +69,8 @@ type TransitionMask = InterruptMaskGuard<crate::hal::irq::LocalMask>;
 type TransitionMaskState =
     <crate::hal::irq::LocalMask as hyper::hal::interrupt::InterruptMask>::State;
 
-static SCHEDULER: CoordinatorLock = InterruptShardedLock::new(None);
+static SCHEDULER: CoordinatorLock =
+    InterruptShardedLock::new_notifying(None, balance::coordinator_released);
 
 /// Accesses Thread-owned wait resources without exposing registry pointers.
 /// The callback must not re-enter the scheduler or acquire a condition bucket.
@@ -274,6 +275,8 @@ impl Drop for DormantVcpuThread {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Error {
+    InvalidSchedulingParameters,
+    SchedulingPermission(super::scheduling_authority::SchedulingPermissionError),
     AlreadyInitialized,
     NotInitialized,
     Allocation,
@@ -362,6 +365,7 @@ pub struct Statistics {
     pub threads: usize,
     pub real_time_class_threads: usize,
     pub fair_class_threads: usize,
+    pub budget_class_threads: usize,
     pub idle_class_threads: usize,
     pub ready: usize,
     pub running: usize,
@@ -492,6 +496,9 @@ impl PreparedTransition {
         // outgoing Native CPU ownership before assembly can publish its saved
         // continuation to another CPU; scheduler `current` already names the
         // incoming Thread, so the entry hook uses its own CPU-local owner.
+        if let Err(error) = service_deadline_publication() {
+            scheduler_invariant("scheduler deadline publication", error);
+        }
         crate::kernel::entry::user::suspend_current();
         // SAFETY: The architecture switch stores this exact state into the
         // outgoing ThreadContext before changing stacks. Its incoming tail
@@ -760,6 +767,11 @@ fn finish_kernel_thread(
         drop(thread);
         return Err(Error::InvalidThreadState);
     }
+    if policy == SchedulingPolicy::Fair {
+        thread.with_coordinator_schedule_mut(|schedule| {
+            schedule.install_parameters(configuration::deferred_parameters())
+        });
+    }
     publish_thread(reservation, thread)?;
     Ok(id)
 }
@@ -772,6 +784,50 @@ pub(crate) fn thread_placement(id: ThreadId) -> Result<(CpuIndex, CpuMask), Erro
     })
 }
 
+/// Validates image-wide constraints without changing an entity or its budget.
+pub(crate) fn validate_scheduling_parameters(
+    parameters: SchedulingParameters,
+) -> Result<(), Error> {
+    if !configuration::arbitration().admits(
+        parameters,
+        default_parameters(SchedulingPolicy::Fair).fair_backend(),
+    ) {
+        return Err(Error::InvalidSchedulingParameters);
+    }
+    Ok(())
+}
+
+pub(crate) fn scheduling_snapshot(id: ThreadId) -> Result<SchedulingParameters, Error> {
+    SCHEDULER.with(|slot| {
+        slot.as_mut()
+            .ok_or(Error::NotInitialized)?
+            .scheduling_snapshot(id)
+    })
+}
+
+/// Capability validation and ready-queue reindexing form one transaction.
+pub(crate) fn configure_scheduling(
+    id: ThreadId,
+    parameters: SchedulingParameters,
+    authority: super::scheduling_authority::SchedulingAuthority,
+    limits: super::scheduling_authority::SchedulingLimits,
+) -> Result<(), Error> {
+    validate_scheduling_parameters(parameters)?;
+    let target = SCHEDULER.with(|slot| {
+        slot.as_mut()
+            .ok_or(Error::NotInitialized)?
+            .configure_scheduling(id, parameters, authority, limits)
+    })?;
+    if let Some(cpu) = target
+        && let Err(error) = request_reschedule(cpu)
+    {
+        // The parameters and ready-queue placement are already committed.
+        // Returning a normal rejection here would misrepresent that state.
+        scheduler_invariant("committed scheduling notification", error);
+    }
+    Ok(())
+}
+
 /// Observes assignment and the accepted, not-yet-committed migration target.
 /// Assignment is not a claim that the Thread is currently executing.
 pub(crate) fn thread_migration_state(id: ThreadId) -> Result<(CpuIndex, Option<CpuIndex>), Error> {
@@ -780,6 +836,15 @@ pub(crate) fn thread_migration_state(id: ThreadId) -> Result<(CpuIndex, Option<C
             .ok_or(Error::NotInitialized)?
             .thread_migration_state(id)
     })
+}
+
+#[cfg(all(
+    target_arch = "aarch64",
+    feature = "kernel-test",
+    feature = "kernel-self-test"
+))]
+pub(crate) fn thread_registry_slot_for_test(id: ThreadId) -> Option<usize> {
+    id.scheduler_slot()
 }
 
 #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
@@ -834,19 +899,21 @@ pub(in crate::kernel) fn vcpu_create(
     })
 }
 
-pub(in crate::kernel) fn prepare_user_thread(
+pub(in crate::kernel) fn prepare_user_thread_with_scheduling(
     name: &str,
     object: crate::kernel::process::UserThread,
     execution: alloc::boxed::Box<core::cell::UnsafeCell<crate::kernel::process::UserExecution>>,
     entry: KernelThreadEntry,
     affinity: CpuMask,
+    parameters: SchedulingParameters,
 ) -> Result<DormantUserThread, Error> {
+    validate_scheduling_parameters(parameters)?;
     let cpu = current_cpu()?;
     let reservation = reserve_thread(|scheduler| {
-        scheduler.reserve_kernel_thread(cpu, affinity, SchedulingPolicy::fair())
+        scheduler.reserve_kernel_thread(cpu, affinity, parameters.policy())
     })?;
     let id = reservation.id();
-    let thread = match prepare_boxed_thread(Thread::user(
+    let mut thread = match prepare_boxed_thread(Thread::user(
         id,
         reservation.cpu(),
         affinity,
@@ -861,6 +928,7 @@ pub(in crate::kernel) fn prepare_user_thread(
             return Err(error);
         }
     };
+    thread.with_coordinator_schedule_mut(|schedule| schedule.install_parameters(parameters));
     publish_thread(reservation, thread)?;
     Ok(DormantUserThread {
         thread: id,
@@ -1123,7 +1191,7 @@ fn update_thread_fifo_policy(
     })
 }
 
-/// Applies FIFO policy and reports whether the transition requested a switch.
+/// Applies FIFO policy and reports whether the transition prompted arbitration.
 #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn set_thread_fifo_policy_for_test(
     id: ThreadId,
@@ -1138,9 +1206,9 @@ pub(crate) fn set_thread_fifo_policy_for_test(
 
 /// Assigns a thread to the ordinary Fair scheduling class.
 ///
-/// Ready threads are moved atomically between class queues. Lowering a running
-/// RT FIFO thread to Fair publishes a deferred preemption request when RT work
-/// is already ready; the caller never switches inside this operation.
+/// Ready threads move atomically between algorithm queues. Every changed ready
+/// or running policy prompts arbitration; the caller never switches inside this
+/// operation or decides eligibility using a static ordering of classes.
 pub fn set_thread_fair_policy(id: ThreadId) -> Result<(), Error> {
     let target = SCHEDULER.with(|slot| {
         slot.as_mut()
@@ -1153,24 +1221,21 @@ pub fn set_thread_fair_policy(id: ThreadId) -> Result<(), Error> {
     Ok(())
 }
 
-/// Charges periodic scheduler ticks and publishes a deferred Fair preemption.
-///
-/// This function is allocation-free and may run in IRQ context. It never
-/// switches directly; the architecture IRQ-tail continuation consumes the
-/// coalesced request after completing interrupt accounting.
-pub(crate) fn account_tick(elapsed_ticks: u64) -> Result<(), Error> {
-    // SAFETY: IRQ callers already hold the mask. Direct accounting callers
-    // must also keep CPU identification and the charged Thread consistent.
-    let _mask = unsafe { TransitionMask::acquire() };
+/// A one-shot deadline only requests a safe scheduling point. A cancelled or
+/// replaced deadline cannot preempt a later generation of CPU scheduling.
+pub(crate) fn deadline_expired(generation: u64) -> Result<(), Error> {
     let cpu = current_cpu()?;
-    let should_reschedule = state::account_tick(cpu, elapsed_ticks)?;
-    if should_reschedule {
-        // The real timer path is already inside IRQ accounting, so the common
-        // request helper suppresses a redundant self-IPI. Keeping the generic
-        // path also makes direct accounting calls prompt a scheduling point.
+    if state::deadline_is_current(cpu, generation) {
         request_reschedule(cpu)?;
     }
     Ok(())
+}
+
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
+pub(crate) fn expire_current_turn_for_test() -> Result<(), Error> {
+    let cpu = current_cpu()?;
+    state::expire_current_turn(cpu)?;
+    request_reschedule(cpu)
 }
 
 pub fn yield_now() -> Result<(), Error> {
@@ -1218,9 +1283,12 @@ pub(crate) fn cond_resched_from_irq_tail(
 fn cond_resched_inner() -> Result<bool, Error> {
     // SAFETY: This continuation transfers the exact prior interrupt state into
     // its saved ThreadContext at the final machine-switch boundary. Acquire
-    // before CPU identification so an IRQ cannot migrate that observation.
+    // before balancing so its continuation prompt cannot reenter scheduling
+    // between the placement pass and this CPU's selection.
     let interrupt_mask = unsafe { TransitionMask::acquire() };
+    balance::service();
     let cpu = current_cpu()?;
+    service_deadline_publication()?;
     if !super::preempt::pending(cpu)? || !super::preempt::can_reschedule(cpu)? {
         return Ok(false);
     }
@@ -1231,6 +1299,7 @@ fn cond_resched_inner() -> Result<bool, Error> {
             scheduler.prepare_preemption(cpu)
         })?,
     };
+    service_deadline_publication()?;
     let Some(pair) = pair else {
         return Ok(false);
     };
@@ -1316,11 +1385,13 @@ fn run_idle_loop_inner(mut publish_secondary_online: bool) -> ! {
 
 /// Closes the idle queue-check-to-sleep window under one interrupt mask.
 fn idle_wait_or_schedule(publish_secondary_online: &mut bool) -> Result<(), Error> {
-    let cpu = current_cpu()?;
     // SAFETY: The guard remains on this CPU. It is either consumed directly
     // into an outgoing context or dropped after the architecture returns from
-    // its masked idle wait.
+    // its masked idle wait. Balance prompts and CPU observation share this
+    // same outer mask with ready-queue selection.
     let interrupt_mask = unsafe { TransitionMask::acquire() };
+    balance::service();
+    let cpu = current_cpu()?;
     let switch = match state::prepare_local_yield(cpu)? {
         state::LocalScheduleAttempt::Complete(switch) => switch,
         state::LocalScheduleAttempt::NeedsCoordinator => SCHEDULER.with(|slot| {
@@ -1336,6 +1407,7 @@ fn idle_wait_or_schedule(publish_secondary_online: &mut bool) -> Result<(), Erro
         crate::kernel::cpu::publish_current_online_from_idle_observation();
         *publish_secondary_online = false;
     }
+    service_deadline_publication()?;
     if let Some(switch) = switch {
         PreparedTransition {
             switch,
@@ -1476,7 +1548,7 @@ pub(crate) fn wake_all(wait_queue: &WaitQueue) -> Result<usize, Error> {
             let Some((_, outcome)) = scheduler.notify_one_shared(wait_queue, |_| {})? else {
                 break;
             };
-            if outcome.should_preempt {
+            if outcome.changed {
                 targets[outcome.target_cpu.get()] = true;
             }
             count += 1;
@@ -1645,10 +1717,9 @@ pub(crate) fn ensure_sleepable() -> Result<(), Error> {
 }
 
 fn publish_ready_outcome(outcome: state::ReadyOutcome) -> Result<(), Error> {
-    if outcome.should_preempt {
+    if outcome.changed {
+        balance::request();
         request_reschedule(outcome.target_cpu)?;
-    } else if outcome.changed {
-        crate::hal::cpu::send_event();
     }
     Ok(())
 }
@@ -1690,9 +1761,11 @@ fn request_reschedule(cpu: CpuIndex) -> Result<(), Error> {
 
 fn prepare_schedule() -> Result<Option<PreparedTransition>, Error> {
     // SAFETY: This continuation transfers the exact prior interrupt state into
-    // its saved ThreadContext at the final machine-switch boundary. CPU
-    // identification must follow masking because this Thread may migrate.
+    // its saved ThreadContext at the final machine-switch boundary. Balancing
+    // and CPU identification must follow masking to avoid a nested selection
+    // or migration before this decision commits.
     let interrupt_mask = unsafe { TransitionMask::acquire() };
+    balance::service();
     let cpu = current_cpu()?;
     let switch = match state::prepare_local_yield(cpu)? {
         state::LocalScheduleAttempt::Complete(switch) => switch,
@@ -1701,6 +1774,7 @@ fn prepare_schedule() -> Result<Option<PreparedTransition>, Error> {
             scheduler.prepare_yield(cpu)
         })?,
     };
+    service_deadline_publication()?;
     Ok(switch.map(|switch| PreparedTransition {
         switch,
         interrupt_mask,
@@ -1850,4 +1924,8 @@ extern "C" fn finish_context_switch_tail(ticket: usize) {
             "HypeR: incoming context-switch completion failed: {error:?}"
         )),
     }
+}
+
+fn service_deadline_publication() -> Result<(), Error> {
+    crate::kernel::time::service_scheduler_deadline().map_err(|_| Error::PreemptionInvariant)
 }

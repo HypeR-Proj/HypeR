@@ -14,10 +14,49 @@ use crate::kernel::task::thread::{ExecutionKind, Thread, ThreadId, ThreadState};
 const SCAN_BUDGET: usize = 64;
 const MOVE_BUDGET: usize = 4;
 
+/// One event visits the registry extent captured at the start exactly once.
+/// Additional requests do not reset an unfinished pass to its first slot.
+pub(super) struct BalanceCursor {
+    next: usize,
+    end: usize,
+}
+
+impl BalanceCursor {
+    pub(super) const fn new() -> Self {
+        Self { next: 0, end: 0 }
+    }
+
+    fn begin_if_idle(&mut self, extent: usize) {
+        if !self.has_more() {
+            self.next = 0;
+            self.end = extent;
+        }
+    }
+
+    fn take(&mut self) -> Option<usize> {
+        if !self.has_more() {
+            return None;
+        }
+        let next = self.next;
+        self.next += 1;
+        Some(next)
+    }
+
+    const fn has_more(&self) -> bool {
+        self.next < self.end
+    }
+}
+
+pub(in crate::kernel::task::scheduler) struct BalancePass {
+    pub(in crate::kernel::task::scheduler) outcomes: [Option<ReadyOutcome>; MOVE_BUDGET],
+    pub(in crate::kernel::task::scheduler) more: bool,
+}
+
 #[derive(Clone, Copy, Default)]
 struct CpuLoad {
     runnable: u32,
     realtime: u32,
+    budget: u32,
 }
 
 impl Scheduler {
@@ -31,7 +70,7 @@ impl Scheduler {
         if affinity.is_empty() {
             return Err(Error::EmptyCpuAffinity);
         }
-        let loads = self.balance_loads(None)?;
+        let loads = self.balance_loads()?;
         let candidates = || {
             (0..hyper::cpu::MAX_CPUS)
                 .filter_map(CpuIndex::new)
@@ -42,7 +81,15 @@ impl Scheduler {
             preferred.get(),
             candidates()
                 .filter(|cpu| !avoid_realtime || loads[cpu.get()].realtime == 0)
-                .map(|cpu| (cpu.get(), loads[cpu.get()].runnable)),
+                .map(|cpu| {
+                    (
+                        cpu.get(),
+                        loads[cpu.get()]
+                            .runnable
+                            .saturating_mul(4)
+                            .saturating_add(loads[cpu.get()].budget.saturating_mul(2)),
+                    )
+                }),
         )
         .and_then(CpuIndex::new)
         .ok_or(Error::NoRegisteredCpuInAffinity)
@@ -51,10 +98,7 @@ impl Scheduler {
     /// Takes only one CPU lock at a time. Exclusive coordination excludes
     /// enqueue, wake, park and retirement; local switches conserve runnable
     /// counts, so the resulting loads remain valid throughout this pass.
-    fn balance_loads(
-        &self,
-        excluded: Option<ThreadId>,
-    ) -> Result<[CpuLoad; hyper::cpu::MAX_CPUS], Error> {
+    fn balance_loads(&self) -> Result<[CpuLoad; hyper::cpu::MAX_CPUS], Error> {
         if self.active_domain.is_some() {
             return Err(Error::InvalidThreadState);
         }
@@ -66,21 +110,23 @@ impl Scheduler {
             loads[cpu.get()] = CPU_SCHEDULERS[cpu].with(|slot| {
                 let local = slot.as_mut().ok_or(Error::CpuNotRegistered)?;
                 let current = local.current;
-                let (running, realtime) =
+                let (running, realtime, budget) =
                     local
                         .thread_authority()
                         .with_thread(current, |_thread, schedule| match schedule.state {
                             ThreadState::Running => Ok((
-                                excluded != Some(current),
+                                true,
                                 matches!(schedule.scheduling, SchedulingPolicy::Fifo { .. }),
+                                schedule.scheduling == SchedulingPolicy::Budget,
                             )),
-                            ThreadState::Idle => Ok((false, false)),
+                            ThreadState::Idle => Ok((false, false, false)),
                             _ => Err(Error::InvalidThreadState),
                         })??;
                 Ok::<_, Error>(CpuLoad {
                     runnable: u32::try_from(local.run_queue.len())
                         .map_err(|_| Error::QueueCorrupted)?
                         + u32::from(running),
+                    budget: local.run_queue.budget_len() as u32 + u32::from(running && budget),
                     realtime: u32::try_from(local.run_queue.real_time_len())
                         .map_err(|_| Error::QueueCorrupted)?
                         + u32::from(running && realtime),
@@ -93,16 +139,19 @@ impl Scheduler {
     pub(in crate::kernel::task::scheduler) fn balance_ready(
         &mut self,
         excluded: ThreadId,
-    ) -> Result<[Option<ReadyOutcome>; MOVE_BUDGET], Error> {
+    ) -> Result<BalancePass, Error> {
         let mut outcomes = [None; MOVE_BUDGET];
-        let mut loads = self.balance_loads(Some(excluded))?;
+        // Balancing executes in an arbitrary caller, not a dedicated worker.
+        // Its current vCPU/Native execution is real load on the source CPU.
+        let mut loads = self.balance_loads()?;
         let mut moved = 0;
-        let limit = self.registry.balance_scan_limit(SCAN_BUDGET);
-        for _ in 0..limit {
-            let Some(id) = self
-                .registry
-                .next_balance_candidate(&mut self.balance_cursor)
-            else {
+        self.balance_cursor
+            .begin_if_idle(self.registry.balance_slot_count());
+        for _ in 0..SCAN_BUDGET {
+            let Some(slot) = self.balance_cursor.take() else {
+                break;
+            };
+            let Some(id) = self.registry.balance_candidate(slot) else {
                 continue;
             };
             let Some(source) = self.registry.with_thread(id, Thread::schedule_owner_cpu)? else {
@@ -112,7 +161,13 @@ impl Scheduler {
                 let thread = scheduler.thread(id)?;
                 if id == excluded
                     || thread.state() != ThreadState::Ready
-                    || thread.scheduling_policy() != SchedulingPolicy::Fair
+                    || !matches!(
+                        thread.scheduling_policy(),
+                        SchedulingPolicy::Fair | SchedulingPolicy::Budget
+                    )
+                    || scheduler
+                        .thread_mut(id)?
+                        .apply_schedule(|schedule| schedule.auto_migrated)
                     || thread.placement_policy() != PlacementPolicy::Movable
                     || thread.pending_migration().is_some()
                     || !matches!(
@@ -140,7 +195,15 @@ impl Scheduler {
                                     loads[cpu.get()].runnable,
                                 )
                         })
-                        .map(|cpu| (cpu.get(), loads[cpu.get()].runnable)),
+                        .map(|cpu| {
+                            (
+                                cpu.get(),
+                                loads[cpu.get()]
+                                    .runnable
+                                    .saturating_mul(4)
+                                    .saturating_add(loads[cpu.get()].budget.saturating_mul(2)),
+                            )
+                        }),
                 )
                 .and_then(CpuIndex::new);
                 let Some(target) = target else {
@@ -149,6 +212,9 @@ impl Scheduler {
                 // Keep this source lock from the Ready/context-save checks
                 // through removal. Existing migration defers target enqueue
                 // until this lock is released; two CPU locks never nest.
+                scheduler
+                    .thread_mut(id)?
+                    .apply_schedule(|schedule| schedule.auto_migrated = true);
                 let migration = scheduler.migrate_thread(id, target)?;
                 if migration.status != MigrationStatus::Completed
                     || migration.source_reschedule.is_some()
@@ -158,11 +224,20 @@ impl Scheduler {
                 migration
                     .target_ready
                     .ok_or(Error::InvalidThreadState)
-                    .map(Some)
+                    .map(|ready| {
+                        Some((
+                            ready,
+                            thread.scheduling_policy() == SchedulingPolicy::Budget,
+                        ))
+                    })
             })?;
-            if let Some(outcome) = outcome {
+            if let Some((outcome, budget)) = outcome {
                 loads[source.get()].runnable -= 1;
                 loads[outcome.target_cpu.get()].runnable += 1;
+                if budget {
+                    loads[source.get()].budget -= 1;
+                    loads[outcome.target_cpu.get()].budget += 1;
+                }
                 outcomes[moved] = Some(outcome);
                 moved += 1;
                 if moved == MOVE_BUDGET {
@@ -170,6 +245,9 @@ impl Scheduler {
                 }
             }
         }
-        Ok(outcomes)
+        Ok(BalancePass {
+            outcomes,
+            more: self.balance_cursor.has_more(),
+        })
     }
 }

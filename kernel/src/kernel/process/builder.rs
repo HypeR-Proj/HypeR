@@ -57,6 +57,7 @@ pub(crate) enum ProcessBuilderError<E> {
     DuplicateStartupPurpose,
     Image(LoaderError),
     InvalidAffinity,
+    InvalidScheduling,
     InvalidStartupPurpose,
     InvalidString,
     MissingName,
@@ -126,6 +127,7 @@ struct BuilderPlan {
     thread_name: Option<String>,
     affinity: CpuMask,
     memory_lock_allowed: bool,
+    scheduling: super::scheduling::ProcessScheduling,
     retention: Option<hyper::mm::FallibleArc<super::retention::Retention>>,
     startup: Vec<StoredStartupCapability>,
 }
@@ -319,6 +321,7 @@ pub(crate) struct ProcessBuilder {
 
 impl ProcessBuilder {
     const BASE_RIGHTS: Rights = Rights::TRANSFER
+        .union(Rights::SCHED_LOWER)
         .union(Rights::INSPECT)
         .union(Rights::WRITE)
         .union(Rights::START)
@@ -352,6 +355,7 @@ impl ProcessBuilder {
                 thread_name: None,
                 affinity: CpuMask::ALL,
                 memory_lock_allowed: false,
+                scheduling: super::scheduling::ProcessScheduling::default_native(),
                 retention: None,
                 startup,
             }))),
@@ -463,6 +467,57 @@ impl ProcessBuilder {
             return self.finish_open_operation(plan, Err(ProcessBuilderError::InvalidAffinity));
         }
         plan.affinity = affinity;
+        self.finish_open_operation(plan, Ok(()))
+    }
+
+    /// Validates all scheduling fields and child authority before committing either.
+    pub(crate) fn set_scheduling(
+        &self,
+        parameters: crate::kernel::task::policy::SchedulingParameters,
+        authority: crate::kernel::task::scheduling_authority::SchedulingAuthority,
+        delegated: Rights,
+    ) -> Result<(), ProcessBuilderError<()>> {
+        let mut plan = self.take_open_plan()?;
+        let valid = authority
+            .validate_delegation(plan.scheduling.delegated, delegated)
+            .is_ok()
+            && authority
+                .validate_change(plan.scheduling.initial, parameters, plan.scheduling.limits)
+                .is_ok();
+        if !valid {
+            return self.finish_open_operation(
+                plan,
+                Err(ProcessBuilderError::Process(
+                    crate::kernel::capability::HandleError::AccessDenied.into(),
+                )),
+            );
+        }
+        if crate::kernel::task::scheduler::validate_scheduling_parameters(parameters).is_err() {
+            return self.finish_open_operation(plan, Err(ProcessBuilderError::InvalidScheduling));
+        }
+        plan.scheduling.initial = parameters;
+        plan.scheduling.delegated = delegated.union(Rights::SCHED_LOWER);
+        self.finish_open_operation(plan, Ok(()))
+    }
+
+    fn inherit_scheduling(
+        &self,
+        parameters: crate::kernel::task::policy::SchedulingParameters,
+        rights: Rights,
+    ) -> Result<(), ProcessBuilderError<()>> {
+        use crate::kernel::task::scheduling_authority::{SCHEDULING_RIGHTS, SchedulingLimits};
+        let mut plan = self.take_open_plan()?;
+        let elevated =
+            rights.intersection(SCHEDULING_RIGHTS).bits() & !Rights::SCHED_LOWER.bits() != 0;
+        plan.scheduling = super::scheduling::ProcessScheduling {
+            initial: parameters,
+            limits: if elevated {
+                SchedulingLimits::SYSTEM
+            } else {
+                SchedulingLimits::inherited(parameters)
+            },
+            delegated: Rights::SCHED_LOWER,
+        };
         self.finish_open_operation(plan, Ok(()))
     }
 
@@ -781,6 +836,7 @@ fn copy_executable_for_child(
 /// Creates and publishes one builder from independently checked authorities.
 pub(crate) fn create_process_builder(
     caller: &Process,
+    inherited_scheduling: crate::kernel::task::policy::SchedulingParameters,
     factory: &InvocationReceiver,
     group: HandleValue,
     domain: HandleValue,
@@ -825,12 +881,21 @@ pub(crate) fn create_process_builder(
             return Err(error);
         }
     };
+    if let Err(error) = publication.object().inherit_scheduling(
+        super::scheduling::ProcessScheduling::child_initial(inherited_scheduling),
+        factory.rights(),
+    ) {
+        caller.abort_handles(reservation);
+        return Err(error);
+    }
     let prepared = match PreparedHandle::try_from_new_object(
         publication,
         ProcessBuilder::BASE_RIGHTS.union(
-            factory
-                .rights()
-                .intersection(Rights::LOCK_MEMORY.union(Rights::RETAIN_PROCESS)),
+            factory.rights().intersection(
+                Rights::LOCK_MEMORY
+                    .union(Rights::RETAIN_PROCESS)
+                    .union(crate::kernel::task::scheduling_authority::SCHEDULING_RIGHTS),
+            ),
         ),
         HandleFlags::NONE,
     ) {
@@ -907,7 +972,8 @@ impl KernelObject for ProcessBuilder {
     const KIND: ObjectKind = ObjectKind::PROCESS_BUILDER;
     const SUPPORTED_RIGHTS: Rights = Self::BASE_RIGHTS
         .union(Rights::LOCK_MEMORY)
-        .union(Rights::RETAIN_PROCESS);
+        .union(Rights::RETAIN_PROCESS)
+        .union(crate::kernel::task::scheduling_authority::SCHEDULING_RIGHTS);
     const TRANSFER_CLASS: TransferClass = TransferClass::RendezvousOnly;
 
     fn on_zero_active_handles(&self, _retirement: &mut crate::kernel::object::ObjectRetirement) {
@@ -962,6 +1028,7 @@ fn prepare_sealed_process(plan: &BuilderPlan) -> Result<PreparedProcess, Process
             return Err(ProcessBuilderError::Process(error));
         }
     };
+    prepared.process().set_initial_scheduling(plan.scheduling);
     if let Some(retention) = &plan.retention {
         prepared.process().install_retention(retention.clone());
     }

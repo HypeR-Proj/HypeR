@@ -56,6 +56,10 @@ fn generated_bit_constants_preserve_schema_bit_positions() {
         ("LOCK_MEMORY", 36),
         ("RETAIN_PROCESS", 37),
         ("RETIRE", 38),
+        ("SCHED_LOWER", 40),
+        ("SCHED_PRIORITY", 41),
+        ("SCHED_CLASS", 42),
+        ("SCHED_BUDGET", 43),
     ] {
         assert!(
             generated
@@ -71,7 +75,7 @@ fn generated_bit_constants_preserve_schema_bit_positions() {
     assert!(
         generated
             .rust
-            .contains("HYPER_NATIVE_RIGHTS_MASK: u64 = 0xffffffffff;")
+            .contains("HYPER_NATIVE_RIGHTS_MASK: u64 = 0xfffffffffff;")
     );
     assert!(
         generated
@@ -86,7 +90,7 @@ fn generated_bit_constants_preserve_schema_bit_positions() {
     assert!(
         generated
             .c
-            .contains("HYPER_NATIVE_RIGHTS_MASK UINT64_C(0xffffffffff)")
+            .contains("HYPER_NATIVE_RIGHTS_MASK UINT64_C(0xfffffffffff)")
     );
 }
 
@@ -770,6 +774,7 @@ fn process_builder_is_linear_and_uses_staged_invocations() {
             (262, "process_builder_abort"),
             (263, "process_builder_set_memory_lock"),
             (264, "process_builder_retain"),
+            (265, "process_builder_set_scheduling"),
         ]
     );
     for name in ["process_builder_start", "process_builder_abort"] {
@@ -1165,7 +1170,9 @@ fn residency_authority_is_inherited_without_becoming_a_default_grant() {
         (
             "process_builder_create",
             "factory",
-            schema::RIGHT_LOCK_MEMORY | schema::RIGHT_RETAIN_PROCESS,
+            schema::RIGHT_LOCK_MEMORY
+                | schema::RIGHT_RETAIN_PROCESS
+                | schema::SCHEDULING_ELEVATION_RIGHTS,
         ),
         ("vmar_allocate", "vmar", schema::RIGHT_LOCK_MEMORY),
     ] {

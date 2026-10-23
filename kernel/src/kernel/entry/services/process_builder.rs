@@ -75,8 +75,15 @@ impl ProcessBuilderServices for ProcessServices<'_> {
         executable: HandleValue,
         loader: HandleValue,
     ) -> Result<HandleValue, ProcessBuilderServiceError> {
+        let current = self
+            .thread
+            .scheduler_id()
+            .ok_or(ProcessBuilderServiceError::InvalidInput)?;
+        let scheduling = crate::kernel::task::scheduler::scheduling_snapshot(current)
+            .map_err(ProcessError::from)?;
         crate::kernel::process::create_process_builder(
             self.process,
+            scheduling,
             factory,
             group,
             domain,

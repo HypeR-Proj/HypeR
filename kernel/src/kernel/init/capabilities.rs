@@ -110,7 +110,8 @@ fn prepare_handles(
             .union(Rights::CREATE_PROCESS)
             .union(Rights::CREATE_TASK_GROUP)
             .union(Rights::RETAIN_PROCESS)
-            .union(Rights::LOCK_MEMORY),
+            .union(Rights::LOCK_MEMORY)
+            .union(crate::kernel::task::scheduling_authority::SCHEDULING_RIGHTS),
     )?);
     let root = crate::kernel::vfs::root_directory(domain).map_err(Error::RootDirectory)?;
     handles[3] = Some(prepare_handle(

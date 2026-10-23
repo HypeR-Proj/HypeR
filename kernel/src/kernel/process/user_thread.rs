@@ -82,10 +82,11 @@ impl KernelObject for UserThreadObject {
 
     const KIND: ObjectKind = ObjectKind::THREAD;
     const TRANSFER_CLASS: TransferClass = TransferClass::RendezvousOnly;
-    // Cross-Process transfer remains outside the initial Channel policy. It
-    // can be admitted later through an explicit typed publication policy
-    // without changing the handle ABI.
+    // Thread capabilities transfer only by explicit rendezvous; scheduling
+    // operations remain independently attenuable on the received handle.
     const SUPPORTED_RIGHTS: Rights = Rights::DUPLICATE
+        .union(Rights::TRANSFER)
+        .union(crate::kernel::task::scheduling_authority::SCHEDULING_RIGHTS)
         .union(Rights::WAIT)
         .union(Rights::INSPECT)
         .union(Rights::START)
@@ -199,6 +200,16 @@ impl UserThread {
                 hyper::debug::invariant_failure("process::user_thread::publication invariant")
             }
         }
+    }
+
+    /// Reads the immutable grant while briefly retaining the owning process.
+    pub(crate) fn scheduling_limits(
+        &self,
+    ) -> Option<crate::kernel::task::scheduling_authority::SchedulingLimits> {
+        self.inner()
+            .process
+            .upgrade()
+            .map(|inner| super::owner::Process { inner }.scheduling().limits)
     }
 
     /// Uses captured invocation authority without repeating handle-table lookup.

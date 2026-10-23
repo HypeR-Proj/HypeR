@@ -58,7 +58,8 @@ impl KernelObject for VirtualMachineObject {
         .union(Rights::WRITE)
         .union(Rights::WAIT)
         .union(Rights::INSPECT)
-        .union(Rights::REQUEST_STOP);
+        .union(Rights::REQUEST_STOP)
+        .union(crate::kernel::task::scheduling_authority::SCHEDULING_RIGHTS);
 
     fn signal_source(&self) -> Option<SignalSource<'_>> {
         Some(SignalSource::new(
@@ -122,6 +123,21 @@ impl VirtualCpuObject {
             .map_err(Into::into)
     }
 
+    pub(crate) fn scheduling(
+        &self,
+    ) -> Result<crate::kernel::task::policy::SchedulingParameters, Error> {
+        self.owner.vcpu_scheduling(self.id).map_err(Into::into)
+    }
+    pub(crate) fn set_scheduling(
+        &self,
+        parameters: crate::kernel::task::policy::SchedulingParameters,
+        authority: crate::kernel::task::scheduling_authority::SchedulingAuthority,
+    ) -> Result<(), Error> {
+        self.owner
+            .set_vcpu_scheduling(self.id, parameters, authority)
+            .map_err(Into::into)
+    }
+
     /// Commits this installed vCPU from dormant to scheduler-runnable.
     pub(crate) fn start(&self) -> Result<(), Error> {
         self.owner.start_vcpu(self.id)?;
@@ -139,7 +155,8 @@ impl KernelObject for VirtualCpuObject {
         .union(Rights::WRITE)
         .union(Rights::WAIT)
         .union(Rights::INSPECT)
-        .union(Rights::START);
+        .union(Rights::START)
+        .union(crate::kernel::task::scheduling_authority::SCHEDULING_RIGHTS);
 
     fn signal_source(&self) -> Option<SignalSource<'_>> {
         let signals = match self.owner.vcpu_signal_state(self.id) {

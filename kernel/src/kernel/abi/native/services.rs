@@ -1013,9 +1013,28 @@ pub(in crate::kernel) trait ProcessBuilderServices {
 }
 
 pub(in crate::kernel) trait TaskServices: UserMemoryServices {
+    fn get_scheduling(
+        &self,
+        _receiver: &InvocationReceiver,
+    ) -> Result<crate::kernel::task::policy::SchedulingParameters, ObjectServiceError> {
+        Err(ObjectServiceError::InvalidInput)
+    }
+    fn set_scheduling(
+        &self,
+        _receiver: &InvocationReceiver,
+        _parameters: crate::kernel::task::policy::SchedulingParameters,
+        _delegated: Option<Rights>,
+    ) -> Result<(), ObjectServiceError> {
+        Err(ObjectServiceError::InvalidInput)
+    }
     fn set_current_thread_name(&self, name: &str) -> Result<(), ProcessError>;
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "validated Native entry registers plus captured scheduling authority"
+    )]
     fn create_thread(
         &self,
+        scheduling_rights: Rights,
         entry: u64,
         stack: u64,
         tls: u64,

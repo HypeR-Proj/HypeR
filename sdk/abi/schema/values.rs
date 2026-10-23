@@ -170,6 +170,27 @@ constant_groups! {
         thread_role_vcpu = 5,
     }
 
+    /// Scheduling algorithms; these do not identify the thread execution payload.
+    enum scheduling_policy {
+        scheduling_policy_fair = 1,
+        scheduling_policy_budget = 2,
+        scheduling_policy_fifo = 3,
+    }
+
+    /// Eligibility for CPU-local priority and minimum-progress allowances.
+    enum scheduling_role {
+        scheduling_role_ordinary = 0,
+        scheduling_role_priority = 1,
+        scheduling_role_protected = 2,
+    }
+
+    /// Fair queue implementations supported by the selected kernel image.
+    enum scheduling_fair_backend {
+        scheduling_fair_backend_stride = 0,
+        scheduling_fair_backend_round_robin = 1,
+        scheduling_fair_backend_default = 2,
+    }
+
     /// Thread registry membership states.
     enum thread_registry {
         thread_registry_resident = 1,

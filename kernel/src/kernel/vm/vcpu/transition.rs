@@ -90,7 +90,7 @@ pub(crate) unsafe fn activate(
                 });
             }
         };
-        if let Err(timer) = super::timer::set_guest_timer_source_enabled(!timer_asserted) {
+        if let Err(timer) = super::timer::activate_guest_timer_source(timer_asserted) {
             // SAFETY: Publication has not occurred, hardware is active, and
             // the caller still owns this stopped execution with IRQs masked.
             let rollback = unsafe {
@@ -139,7 +139,7 @@ pub(crate) unsafe fn activate(
             )
         };
         return match rollback {
-            Ok(()) => match super::timer::set_guest_timer_source_enabled(false) {
+            Ok(()) => match super::timer::deactivate_guest_timer_source() {
                 Ok(()) => {
                     restore_reconcile_if_claimed(execution, consumed_reconcile);
                     release_execution_or_fail(execution, execution_claim);
@@ -197,7 +197,7 @@ pub(crate) unsafe fn deactivate(
     }
     // Local IRQs remain masked until the now-ownerless PPI is disabled. Timer
     // register deactivation alone does not retire controller-side delivery.
-    if let Err(error) = super::timer::set_guest_timer_source_enabled(false) {
+    if let Err(error) = super::timer::deactivate_guest_timer_source() {
         crate::kernel::crash::fatal(format_args!(
             "HypeR: active vCPU detach could not mask guest timer source: {error:?}"
         ));
@@ -294,7 +294,7 @@ impl DetachedVcpuExecution {
                 "HypeR: detached vCPU migrated before claim release"
             ));
         }
-        if let Err(error) = super::timer::set_guest_timer_source_enabled(false) {
+        if let Err(error) = super::timer::deactivate_guest_timer_source() {
             crate::kernel::crash::fatal(format_args!(
                 "HypeR: stopped vCPU detach could not mask guest timer source: {error:?}"
             ));

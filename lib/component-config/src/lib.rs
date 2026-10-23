@@ -5,6 +5,8 @@
 //! kernel bindings: image composition and runtime admission use the same rules.
 
 mod model;
+mod scheduling;
+pub use scheduling::{FairBackend, Scheduling, SchedulingPolicy, SchedulingRole};
 mod topology;
 
 pub use model::*;

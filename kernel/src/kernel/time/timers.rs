@@ -8,6 +8,7 @@ use hyper::sync::InterruptSpinLock;
 use hyper::sync::atomic::{AtomicBool, Ordering};
 use hyper::time::{OwnedDeadlineQueue, PendingTimer, TimerQueueError};
 
+use super::deadline_slot::{DeadlineMailbox, DeadlineSlot, earlier};
 use crate::kernel::task::scheduler;
 
 mod irq_callout;
@@ -25,11 +26,21 @@ static TIMERS: PerCpu<TimerLock> =
 
 static REPROGRAM: PerCpu<AtomicBool> =
     PerCpu::new([const { AtomicBool::new(false) }; hyper::cpu::MAX_CPUS]);
+static FIXED_READY: PerCpu<AtomicBool> =
+    PerCpu::new([const { AtomicBool::new(false) }; hyper::cpu::MAX_CPUS]);
+static SCHEDULER_MAILBOX: PerCpu<DeadlineMailbox> =
+    PerCpu::new([const { DeadlineMailbox::new() }; hyper::cpu::MAX_CPUS]);
 
 struct ProcessorTimers {
     initialized: bool,
     queue: OwnedDeadlineQueue,
     ready: super::callout::ReadyQueue,
+    scheduler: DeadlineSlot,
+    guest_recovery: DeadlineSlot,
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
+    health_probe: DeadlineSlot,
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
+    scheduler_expiries: u64,
 }
 
 impl ProcessorTimers {
@@ -38,8 +49,127 @@ impl ProcessorTimers {
             initialized: false,
             queue: OwnedDeadlineQueue::new(),
             ready: super::callout::ReadyQueue::new(),
+            scheduler: DeadlineSlot::new(),
+            guest_recovery: DeadlineSlot::new(),
+            #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
+            health_probe: DeadlineSlot::new(),
+            #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
+            scheduler_expiries: 0,
         }
     }
+
+    fn next_deadline(&self) -> Option<u64> {
+        let deadline = earlier(
+            self.queue.next_programming_deadline(),
+            earlier(self.scheduler.deadline(), self.guest_recovery.deadline()),
+        );
+        #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
+        let deadline = earlier(deadline, self.health_probe.deadline());
+        deadline
+    }
+}
+
+/// Publishes a scheduling decision while holding the target CPU scheduler lock.
+///
+/// `generation` must increase for every change, including cancellation. A
+/// publisher never takes the timer lock: callout waits already nest that lock
+/// outside scheduler state. IRQ-tail or the final resume boundary consumes the
+/// mailbox after releasing scheduler locks. Publication before local timer
+/// initialization is retained and installed during initialization.
+/// Every first pending publication prompts its target, including the local
+/// CPU: a kernel Thread can continue running without a nearby resume boundary.
+/// Deadlines use the architectural counter and must be within half a counter
+/// period of the current time, like ordinary software timers.
+pub(crate) fn publish_scheduler_deadline(
+    cpu: CpuIndex,
+    generation: u64,
+    deadline: Option<u64>,
+) -> Result<(), super::Error> {
+    if SCHEDULER_MAILBOX[cpu].publish(generation, deadline) {
+        crate::kernel::irq::reschedule::notify(cpu);
+    }
+    Ok(())
+}
+
+/// Installs a pending policy decision before the local CPU resumes execution.
+///
+/// The caller must have released scheduler and IRQ registry locks. Pinning
+/// keeps the selected mailbox and architectural comparator on the same CPU.
+pub(crate) fn service_scheduler_deadline() -> Result<(), super::Error> {
+    let (cpu_pin, cpu) = pin_current_timer_cpu()?;
+    let result = if let Some((generation, deadline)) = SCHEDULER_MAILBOX[cpu].take() {
+        TIMERS[cpu].with(|timers| {
+            if timers.scheduler.publish(generation, deadline) && timers.initialized {
+                program_next(timers)?;
+            }
+            Ok(())
+        })
+    } else {
+        Ok(())
+    };
+    release_timer_cpu_pin(cpu_pin);
+    result
+}
+
+/// Observes the installed slot without publishing work, charging runtime, or
+/// sending an IPI. Use outside scheduler locks, like other timer operations.
+#[cfg(all(
+    target_arch = "aarch64",
+    feature = "kernel-test",
+    feature = "kernel-self-test"
+))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct SchedulerDeadlineObservation {
+    pub(crate) generation: u64,
+    pub(crate) deadline: Option<u64>,
+    pub(crate) expiries: u64,
+}
+
+#[cfg(all(
+    target_arch = "aarch64",
+    feature = "kernel-test",
+    feature = "kernel-self-test"
+))]
+pub(crate) fn scheduler_deadline_for_test(cpu: CpuIndex) -> SchedulerDeadlineObservation {
+    TIMERS[cpu].with(|timers| SchedulerDeadlineObservation {
+        generation: timers.scheduler.generation(),
+        deadline: timers.scheduler.deadline(),
+        expiries: timers.scheduler_expiries,
+    })
+}
+
+/// Updates the active local guest timer's exceptional deassertion retry.
+/// This slot is never used as an unconditional guest or host polling tick.
+pub(crate) fn publish_guest_timer_recovery(
+    generation: u64,
+    deadline: Option<u64>,
+) -> Result<(), super::Error> {
+    let (cpu_pin, cpu) = pin_current_timer_cpu()?;
+    let result = TIMERS[cpu].with(|timers| {
+        let before = timers.next_deadline();
+        if !timers.guest_recovery.publish(generation, deadline)
+            || !timers.initialized
+            || timers.next_deadline() == before
+        {
+            return Ok(());
+        }
+        program_next(timers)
+    });
+    release_timer_cpu_pin(cpu_pin);
+    result
+}
+
+/// Allocation-free startup probes are absent from ordinary builds and stop
+/// after their bounded validation sequence; they are not a replacement tick.
+#[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
+pub(super) fn publish_health_probe(generation: u64, deadline: u64) -> Result<(), super::Error> {
+    let cpu = current_cpu()?;
+    TIMERS[cpu].with(|timers| {
+        if timers.health_probe.publish(generation, Some(deadline)) {
+            program_next(timers)?;
+        }
+        Ok(())
+    })
 }
 
 pub(super) fn initialize_local() -> Result<(), super::Error> {
@@ -50,8 +180,14 @@ pub(super) fn initialize_local() -> Result<(), super::Error> {
         }
         crate::hal::time::disable_local_timer();
         timers.queue.initialize_id(cpu.get())?;
+        // A scheduler decision may precede comparator setup, including on a
+        // secondary CPU before it can receive cross-calls. Consume its durable
+        // mailbox while local IRQs are masked; no scheduler lock is acquired.
+        if let Some((generation, deadline)) = SCHEDULER_MAILBOX[cpu].take() {
+            timers.scheduler.publish(generation, deadline);
+        }
         timers.initialized = true;
-        Ok(())
+        program_next(timers)
     })
 }
 
@@ -73,7 +209,7 @@ pub fn schedule_irq_at(
         let previous = timers.queue.next_deadline();
         let handle = timers.queue.insert(pending, super::monotonic_ticks());
         if timers.queue.next_deadline() != previous
-            && let Err(error) = program_next(&timers.queue)
+            && let Err(error) = program_next(timers)
         {
             let retired = match timers.queue.cancel(handle) {
                 Ok(retired) => Some(retired),
@@ -140,7 +276,7 @@ pub fn cancel_irq_timer(handle: TimerHandle) -> Result<(), super::Error> {
         let previous = timers.queue.next_deadline();
         let retired = timers.queue.cancel(handle)?;
         let result = if owner == current && timers.queue.next_deadline() != previous {
-            program_next(&timers.queue)
+            program_next(timers)
         } else {
             Ok(())
         };
@@ -176,7 +312,20 @@ pub(super) fn handle_interrupt() -> Result<usize, super::Error> {
     }
     TIMERS[cpu].with(|timers| {
         ensure_initialized(timers)?;
-        program_next(&timers.queue)
+        let now = super::monotonic_ticks();
+        let scheduler_ready = timers.scheduler.expire(now);
+        #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
+        if scheduler_ready {
+            timers.scheduler_expiries = timers.scheduler_expiries.saturating_add(1);
+        }
+        let recovery_ready = timers.guest_recovery.expire(now);
+        let ready = scheduler_ready || recovery_ready;
+        #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
+        let ready = timers.health_probe.expire(now) || ready;
+        if ready {
+            FIXED_READY[cpu].store(true, Ordering::Release);
+        }
+        program_next(timers)
     })?;
     Ok(callbacks)
 }
@@ -214,8 +363,8 @@ fn ensure_initialized(timers: &ProcessorTimers) -> Result<(), super::Error> {
     }
 }
 
-fn program_next(queue: &OwnedDeadlineQueue) -> Result<(), super::Error> {
-    match queue.next_programming_deadline() {
+fn program_next(timers: &ProcessorTimers) -> Result<(), super::Error> {
+    match timers.next_deadline() {
         Some(deadline) => crate::hal::time::program_deadline(deadline)?,
         None => crate::hal::time::disable_local_timer(),
     }
@@ -236,7 +385,7 @@ pub(super) fn with_callout_queue<R>(
         let result = update(&mut timers.queue, &mut timers.ready);
         let prompt = if timers.queue.next_deadline() != before {
             if current == cpu {
-                if let Err(error) = program_next(&timers.queue) {
+                if let Err(error) = program_next(timers) {
                     crate::kernel::crash::fatal(format_args!(
                         "HypeR: committed callout comparator update failed: {error:?}"
                     ));
@@ -278,8 +427,36 @@ pub(super) fn service_reprogram_prompt() -> Result<(), super::Error> {
     if REPROGRAM[cpu].swap(false, Ordering::AcqRel) {
         TIMERS[cpu].with(|timers| {
             ensure_initialized(timers)?;
-            program_next(&timers.queue)
+            program_next(timers)
         })?;
+    }
+    Ok(())
+}
+
+/// Delivers fixed-owner expiries after IRQ dispatch released its registry lock.
+///
+/// Callbacks may publish another deadline or change a local IRQ source. Neither
+/// the deadline lock nor the IRQ registry lock may cross those operations.
+pub(super) fn service_fixed_deadlines() -> Result<(), super::Error> {
+    let cpu = current_cpu()?;
+    if !FIXED_READY[cpu].swap(false, Ordering::AcqRel) {
+        return Ok(());
+    }
+    let (scheduler, guest_recovery) = TIMERS[cpu].with(|timers| {
+        (
+            timers.scheduler.take_ready(),
+            timers.guest_recovery.take_ready(),
+        )
+    });
+    #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
+    if let Some(generation) = TIMERS[cpu].with(|timers| timers.health_probe.take_ready()) {
+        super::tick::validation::observe(generation)?;
+    }
+    if let Some(generation) = scheduler {
+        scheduler::deadline_expired(generation).map_err(super::Error::Preemption)?;
+    }
+    if let Some(generation) = guest_recovery {
+        crate::kernel::vm::recover_timer_source(generation);
     }
     Ok(())
 }

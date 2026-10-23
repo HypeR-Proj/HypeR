@@ -38,7 +38,8 @@ impl KernelObject for ExecutionContext {
         .union(Rights::READ)
         .union(Rights::WRITE)
         .union(Rights::REQUEST_STOP)
-        .union(Rights::CREATE_THREAD);
+        .union(Rights::CREATE_THREAD)
+        .union(crate::kernel::task::scheduling_authority::SCHEDULING_RIGHTS);
 }
 
 /// Constructs local objects charged to the invoking process's resource domain.
@@ -135,10 +136,20 @@ impl Process {
     pub(crate) fn prepare_invocation_handles(&self) -> Result<[PreparedHandle; 3], ProcessError> {
         let domain = self.resource_domain();
         Ok([
-            prepare(ExecutionContext {
-                process_id: self.id(),
-                _charge: reserve_object_charge::<ExecutionContext>(&domain)?,
-            })?,
+            PreparedHandle::try_from_new_object(
+                ObjectPublication::try_new(ExecutionContext {
+                    process_id: self.id(),
+                    _charge: reserve_object_charge::<ExecutionContext>(&domain)?,
+                })?,
+                Rights::DUPLICATE
+                    .union(Rights::INSPECT)
+                    .union(Rights::READ)
+                    .union(Rights::WRITE)
+                    .union(Rights::REQUEST_STOP)
+                    .union(Rights::CREATE_THREAD)
+                    .union(self.scheduling().delegated),
+                HandleFlags::NONE,
+            )?,
             prepare(ObjectFactory {
                 process_id: self.id(),
                 _charge: reserve_object_charge::<ObjectFactory>(&domain)?,

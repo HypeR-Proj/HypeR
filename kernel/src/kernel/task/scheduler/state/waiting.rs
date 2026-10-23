@@ -36,8 +36,7 @@ impl Scheduler {
         cpu: CpuIndex,
         mobility: WaitMobility,
     ) -> Result<WaitTicket, Error> {
-        CPU_SCHEDULERS[cpu].with(|slot| {
-            let local = slot.as_mut().ok_or(Error::CpuNotRegistered)?;
+        super::runtime::with_accounted_cpu(cpu, |local| {
             let current = local.current;
             local
                 .thread_authority()
@@ -65,8 +64,7 @@ impl Scheduler {
         ticket: WaitTicket,
         completed: bool,
     ) -> Result<Option<WaitOutcome>, Error> {
-        CPU_SCHEDULERS[cpu].with(|slot| {
-            let local = slot.as_mut().ok_or(Error::CpuNotRegistered)?;
+        super::runtime::with_accounted_cpu(cpu, |local| {
             if local.current != ticket.thread() {
                 return Err(Error::InvalidWaitRegistration);
             }
@@ -97,8 +95,7 @@ impl Scheduler {
         wait_queue: &WaitQueue,
         ticket: WaitTicket,
     ) -> Result<PreparedWait, Error> {
-        CPU_SCHEDULERS[cpu].with(|slot| {
-            let local = slot.as_mut().ok_or(Error::CpuNotRegistered)?;
+        super::runtime::with_accounted_cpu(cpu, |local| {
             let current = local.current;
             if current != ticket.thread() {
                 return Err(Error::InvalidWaitRegistration);
@@ -196,8 +193,7 @@ impl Scheduler {
         let Some(cpu) = self.wait_owner(ticket.thread())? else {
             return Ok(lost());
         };
-        CPU_SCHEDULERS[cpu].with(|slot| {
-            let local = slot.as_mut().ok_or(Error::CpuNotRegistered)?;
+        super::runtime::with_accounted_cpu(cpu, |local| {
             self.resolve_on_cpu(local, ticket, outcome, preemption, on_commit)
         })
     }
@@ -298,8 +294,7 @@ impl Scheduler {
                 }
                 continue;
             };
-            let result = CPU_SCHEDULERS[cpu].with(|slot| {
-                let local = slot.as_mut().ok_or(Error::CpuNotRegistered)?;
+            let result = super::runtime::with_accounted_cpu(cpu, |local| {
                 let won = self.with_wait_queue(wait_queue, |queue| {
                     if queue.head != Some(id) {
                         return Ok(false);
@@ -337,8 +332,7 @@ impl Scheduler {
         let Some(cpu) = self.wait_owner(id)? else {
             return Ok(lost());
         };
-        CPU_SCHEDULERS[cpu].with(|slot| {
-            let local = slot.as_mut().ok_or(Error::CpuNotRegistered)?;
+        super::runtime::with_accounted_cpu(cpu, |local| {
             let ticket = local
                 .thread_authority()
                 .with_thread(id, |_thread, schedule| {
@@ -398,26 +392,20 @@ fn ready_waiter(
         .with_thread(id, |_thread, schedule| schedule.scheduling)
         .unwrap_or_else(|error| scheduler_invariant(error));
     let current = local.current;
-    let should_preempt = local
+    local
         .thread_authority()
         .with_thread_mut(current, |_thread, schedule| {
-            if schedule.scheduling.is_preempted_by(candidate) {
-                return true;
-            }
             if preemption == WakePreemption::FairBoundary
                 && candidate == SchedulingPolicy::Fair
                 && schedule.state == ThreadState::Running
                 && schedule.scheduling == SchedulingPolicy::Fair
             {
                 schedule.expire_fair_slice();
-                return true;
             }
-            false
         })
         .unwrap_or_else(|error| scheduler_invariant(error));
     ReadyOutcome {
         changed: true,
         target_cpu: local.index,
-        should_preempt,
     }
 }

@@ -262,6 +262,7 @@ pub(super) struct ProcessInner {
     group_id: super::TaskGroupId,
     domain_id: crate::kernel::accounting::ResourceDomainId,
     image_generation: u64,
+    pub(super) scheduling: PublishedOnce<super::scheduling::ProcessScheduling>,
     name: PublishedOnce<ProcessNameSnapshot>,
     image: ProcessImage,
     domain: ResourceDomain,
@@ -481,6 +482,7 @@ impl PreparedProcess {
             group_id: group.id(),
             domain_id: domain.id(),
             image_generation: 1,
+            scheduling: PublishedOnce::new(),
             name: PublishedOnce::new(),
             image,
             domain,
@@ -832,6 +834,16 @@ impl Process {
         start: UserThreadStart,
         affinity: CpuMask,
     ) -> Result<UserThread, ProcessError> {
+        self.create_user_thread_with_scheduling(name, start, affinity, self.scheduling().initial)
+    }
+
+    pub(crate) fn create_user_thread_with_scheduling(
+        &self,
+        name: &str,
+        start: UserThreadStart,
+        affinity: CpuMask,
+        scheduling: crate::kernel::task::policy::SchedulingParameters,
+    ) -> Result<UserThread, ProcessError> {
         if !machine_matches_host(self.image().machine()) {
             return Err(ProcessError::UserEntry(
                 crate::hal::user::UserEntryError::Unsupported,
@@ -847,12 +859,13 @@ impl Process {
         context.set_entry_argument(start.argument());
         let execution = UserExecution::try_new(prepared.address_space.clone(), context)
             .map_err(|()| ProcessError::Allocation)?;
-        let dormant = scheduler::prepare_user_thread(
+        let dormant = scheduler::prepare_user_thread_with_scheduling(
             name,
             prepared.thread.clone(),
             execution,
             crate::kernel::entry::user::thread_entry,
             affinity,
+            scheduling,
         )?;
         let id = dormant.id();
         let thread = prepared.thread.clone();
@@ -910,12 +923,13 @@ impl Process {
         };
         let execution =
             self.prepare_initial_user_execution(prepared.address_space.clone(), argument)?;
-        let dormant = scheduler::prepare_user_thread(
+        let dormant = scheduler::prepare_user_thread_with_scheduling(
             name,
             prepared.thread.clone(),
             execution,
             crate::kernel::entry::user::thread_entry,
             affinity,
+            self.scheduling().initial,
         )?;
         Ok(PreparedInitialUserThread {
             thread: prepared.thread.clone(),

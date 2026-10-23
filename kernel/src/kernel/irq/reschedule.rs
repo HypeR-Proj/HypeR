@@ -49,9 +49,7 @@ pub(crate) fn initialize(root_domain: IrqDomainId) -> Result<(), Error> {
         if bootstrap_pending {
             notify(CpuIndex::BOOT);
         }
-        crate::pr_notice!(
-            "HypeR: IRQ-tail reschedule cross-calls are unavailable; using architecture-cooperative wake policy"
-        );
+        crate::pr_notice!("HypeR: reschedule prompts use architecture-private wake delivery");
         return Ok(());
     };
     let (_, registration) = root_domain
@@ -82,9 +80,10 @@ pub(crate) fn initialize(root_domain: IrqDomainId) -> Result<(), Error> {
 /// Scheduler callers publish their pending request before this call. Other
 /// deferred services publish an independent durable condition which IRQ entry
 /// translates before scheduling. Architecture routing is validated before a
-/// CPU becomes scheduler-visible; the event fallback wakes an idle CPU while
-/// the next timer IRQ remains the progress guarantee on backends without a
-/// targeted interrupt.
+/// CPU becomes scheduler-visible. The event fallback can wake an idle CPU;
+/// backends without a targeted interrupt remain cooperative for a busy CPU
+/// and cannot claim bounded remote preemption or deadline reprogramming.
+/// There is no periodic scheduler tick to provide an implicit retry.
 pub(crate) fn notify(cpu: CpuIndex) {
     if !READY.load(Ordering::Acquire) || !crate::hal::irq::notify_reschedule(cpu) {
         crate::hal::cpu::send_event();

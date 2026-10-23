@@ -207,7 +207,8 @@ pub fn descriptors(request: &Request) -> Result<Vec<(u32, Rights)>> {
                     .union(Rights::WRITE)
                     .union(Rights::START)
                     .union(Rights::REQUEST_STOP)
-                    .union(Rights::RETAIN_PROCESS),
+                    .union(Rights::RETAIN_PROCESS)
+                    .union(hyper_os::scheduling::RIGHTS),
             ),
             (
                 TaskGroupObject::KIND.as_raw(),
