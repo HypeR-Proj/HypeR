@@ -22,4 +22,5 @@ pub mod platform;
 pub mod random;
 pub mod sync;
 pub mod time;
+pub mod trace;
 pub mod vm;
