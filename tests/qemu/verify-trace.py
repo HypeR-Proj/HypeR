@@ -32,14 +32,16 @@ def main():
         shell.run('perf trace start --cpus 255').require('offline CPU', failed=True)
         shell.check('perf trace start --duration-ms 1000 --categories scheduler')
         shell.check('perf trace stop')
-        shell.check('perf trace start --duration-ms 10000 --categories scheduler')
+        shell.check('perf trace start --duration-ms 60000 --categories scheduler')
         session.pump(1.2)
         if b'running=true' not in shell.check('perf trace status'):
             raise AssertionError('cancelled deadline stopped the replacement capture')
+        # Check exclusion while a long-lived capture is active. A separate
+        # command can take longer than the short expiry test on a TCG runner.
+        shell.run('perf trace start').require('concurrent capture', failed=True)
         shell.check('perf trace stop')
         # Use a tiny ring and CPU filter: this intentionally exercises overwrite.
         shell.check('perf trace start --duration-ms 1200 --buffer-records 64 --cpus 0 --categories scheduler,syscall,irq')
-        shell.run('perf trace start').require('concurrent capture', failed=True)
         deadline = time.monotonic() + 20
         while b'running=false' not in shell.check('perf trace status'):
             if time.monotonic() > deadline:
