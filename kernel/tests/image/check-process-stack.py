@@ -69,6 +69,10 @@ def check(disassembly, *, self_test=False):
         'ready_index7rebuild.*24LocalReadyQueueAuthority': 256,
         'ready_index7balance.*19ReadyQueueAuthority': 256,
         'ready_index7balance.*24LocalReadyQueueAuthority': 256,
+        # A per-CPU heap path replaces the old 336-byte local ancestor array.
+        # Both migration and local scheduling must keep that storage off-stack.
+        'ready_index.*4Tree.*6remove.*19ReadyQueueAuthority': 256,
+        'ready_index.*4Tree.*6remove.*24LocalReadyQueueAuthority': 256,
         # These wrappers may nest under user-buffer admission. Preparation
         # scratch must return before commit waits for a shootdown transaction
         # and schedules on the same kernel stack.

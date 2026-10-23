@@ -543,7 +543,7 @@ mod ready_index_fixture {
 
 #[test]
 fn ready_index_stays_balanced_and_ordered_through_insert_remove_and_rekey() {
-    use algorithms::ready_index::{Links, Tree};
+    use algorithms::ready_index::{Links, MutationScratch, Tree};
     use ready_index_fixture::{Registry, verify};
     use std::collections::BTreeSet;
     let mut registry = Registry {
@@ -552,17 +552,18 @@ fn ready_index_stays_balanced_and_ordered_through_insert_remove_and_rekey() {
             .collect(),
     };
     let mut tree = Tree::new();
+    let mut scratch = Box::new(MutationScratch::new(0));
     let mut active = BTreeSet::new();
     for step in 0..257 {
         let id = step * 97 % 257;
-        crate::require_ok(tree.insert(&mut registry, id));
+        crate::require_ok(tree.insert(&mut registry, id, &mut scratch));
         active.insert((registry.nodes[id].0, id));
         verify(&registry, &active);
     }
     for step in 0..257 {
         let id = step * 73 % 257;
         assert!(crate::require_ok(tree.contains(&mut registry, id)));
-        crate::require_ok(tree.remove(&mut registry, id));
+        crate::require_ok(tree.remove(&mut registry, id, &mut scratch));
         active.remove(&(registry.nodes[id].0, id));
         verify(&registry, &active);
         assert_eq!(
@@ -571,13 +572,13 @@ fn ready_index_stays_balanced_and_ordered_through_insert_remove_and_rekey() {
         );
         if step % 5 == 0 {
             registry.nodes[id].0 = 1000 + step as u64;
-            crate::require_ok(tree.insert(&mut registry, id));
+            crate::require_ok(tree.insert(&mut registry, id, &mut scratch));
             active.insert((registry.nodes[id].0, id));
             verify(&registry, &active);
         }
     }
     while let Some(id) = crate::require_ok(tree.first(&mut registry)) {
-        crate::require_ok(tree.remove(&mut registry, id));
+        crate::require_ok(tree.remove(&mut registry, id, &mut scratch));
         active.remove(&(registry.nodes[id].0, id));
         verify(&registry, &active);
     }
@@ -587,7 +588,7 @@ fn ready_index_stays_balanced_and_ordered_through_insert_remove_and_rekey() {
 
 #[test]
 fn ready_index_mixed_random_changes_preserve_links_and_order() {
-    use algorithms::ready_index::{Links, Tree};
+    use algorithms::ready_index::{Links, MutationScratch, Tree};
     use ready_index_fixture::{Registry, verify};
     use std::collections::BTreeSet;
     let mut registry = Registry {
@@ -595,6 +596,7 @@ fn ready_index_mixed_random_changes_preserve_links_and_order() {
     };
     let mut active = BTreeSet::new();
     let mut tree = Tree::new();
+    let mut scratch = Box::new(MutationScratch::new(0));
     let mut random = 0x8c51_e0ab_1932_f6d7_u64;
     for _ in 0..4096 {
         random ^= random << 13;
@@ -602,10 +604,10 @@ fn ready_index_mixed_random_changes_preserve_links_and_order() {
         random ^= random << 17;
         let id = random as usize % registry.nodes.len();
         if active.remove(&(registry.nodes[id].0, id)) {
-            crate::require_ok(tree.remove(&mut registry, id));
+            crate::require_ok(tree.remove(&mut registry, id, &mut scratch));
         } else {
             registry.nodes[id].0 = random % 128;
-            crate::require_ok(tree.insert(&mut registry, id));
+            crate::require_ok(tree.insert(&mut registry, id, &mut scratch));
             active.insert((registry.nodes[id].0, id));
         }
         verify(&registry, &active);
@@ -618,36 +620,37 @@ fn ready_index_mixed_random_changes_preserve_links_and_order() {
 
 #[test]
 fn ready_index_two_child_removal_keeps_the_successors_right_subtree() {
-    use algorithms::ready_index::{Links, Tree};
+    use algorithms::ready_index::{Links, MutationScratch, Tree};
     use ready_index_fixture::{Registry, verify};
     use std::collections::BTreeSet;
     let mut registry = Registry {
         nodes: (0..12).map(|id| (id as u64, Links::EMPTY)).collect(),
     };
     let mut tree = Tree::new();
+    let mut scratch = Box::new(MutationScratch::new(0));
     let mut active = BTreeSet::new();
     for id in [4, 2, 8, 1, 3, 5, 10, 6, 9, 11] {
-        crate::require_ok(tree.insert(&mut registry, id));
+        crate::require_ok(tree.insert(&mut registry, id, &mut scratch));
         active.insert((id as u64, id));
     }
     assert_eq!(registry.nodes[4].1.left, Some(2));
     assert_eq!(registry.nodes[4].1.right, Some(8));
     assert_eq!(registry.nodes[8].1.left, Some(5));
     assert_eq!(registry.nodes[5].1.right, Some(6));
-    crate::require_ok(tree.remove(&mut registry, 4));
+    crate::require_ok(tree.remove(&mut registry, 4, &mut scratch));
     active.remove(&(4, 4));
     verify(&registry, &active);
     assert!(crate::require_ok(tree.contains(&mut registry, 6)));
     // Also cover a successor that is the immediate right child, with an
     // original ancestor still waiting below the path boundary.
-    crate::require_ok(tree.remove(&mut registry, 2));
+    crate::require_ok(tree.remove(&mut registry, 2, &mut scratch));
     active.remove(&(2, 2));
     verify(&registry, &active);
 }
 
 #[test]
 fn ready_index_handles_large_populations_without_recursive_mutation() {
-    use algorithms::ready_index::{Links, Tree};
+    use algorithms::ready_index::{Links, MutationScratch, Tree};
     const MAX_NODES: usize = 32_768;
     use ready_index_fixture::{Registry, verify};
     use std::collections::BTreeSet;
@@ -657,9 +660,10 @@ fn ready_index_handles_large_populations_without_recursive_mutation() {
         };
         let mut active = BTreeSet::new();
         let mut tree = Tree::new();
+        let mut scratch = Box::new(MutationScratch::new(0));
         for step in 0..MAX_NODES {
             let id = if reverse { MAX_NODES - step - 1 } else { step };
-            crate::require_ok(tree.insert(&mut registry, id));
+            crate::require_ok(tree.insert(&mut registry, id, &mut scratch));
             active.insert((id as u64, id));
         }
         verify(&registry, &active);
@@ -667,7 +671,7 @@ fn ready_index_handles_large_populations_without_recursive_mutation() {
         for step in 0..MAX_NODES {
             // Odd stride visits every slot of the power-of-two registry.
             let id = step * 8191 % MAX_NODES;
-            crate::require_ok(tree.remove(&mut registry, id));
+            crate::require_ok(tree.remove(&mut registry, id, &mut scratch));
             active.remove(&(id as u64, id));
             if step.is_multiple_of(257) {
                 verify(&registry, &active);
@@ -684,17 +688,18 @@ fn ready_index_handles_large_populations_without_recursive_mutation() {
 
 #[test]
 fn ready_index_rejects_duplicate_and_overlong_paths_before_mutation() {
-    use algorithms::ready_index::{Links, Tree};
+    use algorithms::ready_index::{Links, MutationScratch, Tree};
     use ready_index_fixture::{Registry, verify};
     use std::collections::BTreeSet;
     let mut registry = Registry {
         nodes: (0..65).map(|id| (id as u64, Links::EMPTY)).collect(),
     };
     let mut tree = Tree::new();
+    let mut scratch = Box::new(MutationScratch::new(0));
     for id in 0..3 {
-        crate::require_ok(tree.insert(&mut registry, id));
+        crate::require_ok(tree.insert(&mut registry, id, &mut scratch));
     }
-    assert!(tree.insert(&mut registry, 1).is_err());
+    assert!(tree.insert(&mut registry, 1, &mut scratch).is_err());
     verify(
         &registry,
         &(0..3).map(|id| (id as u64, id)).collect::<BTreeSet<_>>(),
@@ -717,11 +722,29 @@ fn ready_index_rejects_duplicate_and_overlong_paths_before_mutation() {
     };
     let before = links(&registry);
     assert!(tree.contains(&mut registry, 64).is_err());
-    assert!(tree.insert(&mut registry, 64).is_err());
-    assert!(tree.remove(&mut registry, 64).is_err());
+    assert!(tree.insert(&mut registry, 64, &mut scratch).is_err());
+    assert!(tree.remove(&mut registry, 64, &mut scratch).is_err());
     assert_eq!(links(&registry), before);
     registry.nodes[1].1.left = Some(1);
     assert!(tree.first(&mut registry).is_err());
+
+    // A failed traversal leaves a nonempty scratch path. Another index must
+    // reset it before reuse, without touching nodes from the previous tree.
+    let mut clean = Registry {
+        nodes: (0..9).map(|id| (id as u64, Links::EMPTY)).collect(),
+    };
+    let mut other = Tree::new();
+    for id in [4, 2, 6, 1, 3, 5, 7] {
+        crate::require_ok(other.insert(&mut clean, id, &mut scratch));
+    }
+    crate::require_ok(other.remove(&mut clean, 4, &mut scratch));
+    verify(
+        &clean,
+        &[1, 2, 3, 5, 6, 7]
+            .into_iter()
+            .map(|id| (id as u64, id))
+            .collect(),
+    );
 }
 
 #[test]

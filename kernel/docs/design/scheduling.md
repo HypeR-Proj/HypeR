@@ -8,8 +8,11 @@ Threads retain the same lifecycle, affinity, wait and context-save machinery.
 `task/policy.rs` defines validated parameters; `scheduler/algorithms` owns pure
 accounting and ordering; the CPU scheduler owns Thread membership and dispatch.
 Ready indices use intrusive AVL nodes; updates keep a bounded ancestor path
-instead of stacking recursive frames. The path bound covers the entire 24-bit registry slot namespace; it does not
-impose a configurable Thread-count limit. Candidate selection retains only
+instead of stacking recursive frames. Each CPU queue owns one heap-allocated
+mutation path, prepared before the queue is published and reused by all its
+indices under the CPU lock. The path bound covers the entire 24-bit registry
+slot namespace; it does not impose a configurable Thread-count limit.
+Candidate selection retains only
 queue-head identities, keeping transient kernel-stack use independent of the
 number of runnable Threads.
 
@@ -124,6 +127,16 @@ subscribes to that blocking lane's release. The real unlock supplies the next
 prompt. There is no periodic balancing timer, migration Thread or IPI retry
 loop polling an occupied lock. Event publication and pass ownership share one
 atomic state so a request racing pass completion cannot lose its continuation.
+
+Load snapshots and placement results use one heap workspace allocated during
+scheduler construction. The coordinator grants its exclusive lease; a nested
+placement cannot borrow it again, and recoverable errors return the lease.
+Queue mutation uses each CPU queue's separate scratch, so migration never
+borrows another placement workspace or allocates memory. Balancing remains in
+normal Thread continuations (including the qualified IRQ tail), with local
+interrupts masked until the pass returns. IRQ dispatch only publishes a prompt.
+The workspace does not replace the Thread stack: call frames and the bounded
+completion notification result still require stack headroom.
 
 Strict FIFO can delay dispatch and balancing. The policy does not guarantee
 NUMA placement, gang scheduling, per-VM aggregate shares or IPC priority

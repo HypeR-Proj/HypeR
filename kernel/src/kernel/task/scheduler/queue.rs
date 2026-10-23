@@ -6,18 +6,22 @@
 //! Linked lists retain residence and control-queue invariants. AVL indices
 //! supply each algorithm/role candidate to the separate arbitration policy.
 
+use alloc::boxed::Box;
+
 use hyper::cpu::CpuIndex;
 
 use super::Error;
 use super::algorithms::PolicyRuntime;
 use super::algorithms::arbitration::{Candidate, CpuWindow, Demand, DispatchKey};
-use super::algorithms::ready_index::{Links, Nodes, Tree};
+use super::algorithms::ready_index::{Links, MutationScratch, Nodes, Tree};
 use super::registry::{CpuThreadTableAuthority, ThreadControlAuthority, ThreadTableWriteAuthority};
 use crate::kernel::task::policy::{
     FairBackend, PRIORITY_LEVELS, SchedulingParameters, SchedulingPolicy, SchedulingRole,
 };
 use crate::kernel::task::thread::{QueueLinks, QueueMembership, ReadyTreeLinks, ThreadId};
 use crate::kernel::task::wait::ThreadQueue;
+
+pub(super) type QueueScratch = Box<MutationScratch<ThreadId>>;
 
 const ROLE_COUNT: usize = 3;
 const FAIR: usize = ROLE_COUNT;
@@ -33,6 +37,9 @@ pub(super) struct CpuRunQueue {
     realtime: FixedPriorityFifo,
     fair: FairQueue,
     indices: [Tree<ThreadId>; INDEX_COUNT],
+    // All indices share one path: their mutations are synchronous and the
+    // CPU queue lock excludes both remote access and local IRQ reentry.
+    scratch: QueueScratch,
     budget_epoch: Option<u64>,
     budget_threads: usize,
 }
@@ -120,8 +127,13 @@ impl<'table, 'cpu> ReadyQueueAuthority<'table, 'cpu> {
 }
 
 impl CpuRunQueue {
-    pub const fn new() -> Self {
+    pub fn prepare_scratch() -> Result<QueueScratch, Error> {
+        hyper::mm::try_box(MutationScratch::new(ThreadId::BOOTSTRAP)).map_err(|_| Error::Allocation)
+    }
+
+    pub fn new(scratch: QueueScratch) -> Self {
         Self {
+            scratch,
             realtime: FixedPriorityFifo::new(),
             fair: FairQueue::new(),
             indices: [Tree::new(); INDEX_COUNT],
@@ -159,11 +171,11 @@ impl CpuRunQueue {
                 let exhausted = role + BUDGET_EXHAUSTED;
                 while let Some(id) = self.indices[exhausted].first(&mut IndexNodes(threads))? {
                     self.indices[exhausted]
-                        .remove(&mut IndexNodes(threads), id)
+                        .remove(&mut IndexNodes(threads), id, &mut self.scratch)
                         .unwrap_or_else(|_| queue_invariant());
                     threads.refresh_runtime(id, now)?;
                     self.indices[role + BUDGET_READY]
-                        .insert(&mut IndexNodes(threads), id)
+                        .insert(&mut IndexNodes(threads), id, &mut self.scratch)
                         .unwrap_or_else(|_| queue_invariant());
                 }
             }
@@ -266,7 +278,7 @@ impl CpuRunQueue {
             SchedulingPolicy::Idle => return Err(Error::InvalidThreadState),
         }
         self.indices[index]
-            .insert(&mut IndexNodes(threads), id)
+            .insert(&mut IndexNodes(threads), id, &mut self.scratch)
             .unwrap_or_else(|_| queue_invariant());
         if snapshot.parameters.policy() == SchedulingPolicy::Budget {
             self.budget_threads += 1;
@@ -311,7 +323,7 @@ impl CpuRunQueue {
             _ => return Err(Error::QueueCorrupted),
         }
         self.indices[index]
-            .remove(&mut IndexNodes(threads), id)
+            .remove(&mut IndexNodes(threads), id, &mut self.scratch)
             .unwrap_or_else(|_| queue_invariant());
         if snapshot.parameters.policy() == SchedulingPolicy::Budget {
             self.budget_threads -= 1;

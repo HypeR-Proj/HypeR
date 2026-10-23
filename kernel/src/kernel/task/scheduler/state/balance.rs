@@ -59,18 +59,62 @@ struct CpuLoad {
     budget: u32,
 }
 
+/// Fixed-size placement scratch allocated before scheduler publication.
+/// It is leased only under the coordinator; no reference survives a pass.
+pub(super) struct BalanceWorkspace {
+    loads: [CpuLoad; hyper::cpu::MAX_CPUS],
+    outcomes: [Option<ReadyOutcome>; MOVE_BUDGET],
+}
+
+impl BalanceWorkspace {
+    pub(super) fn new() -> Self {
+        Self {
+            loads: [CpuLoad::default(); hyper::cpu::MAX_CPUS],
+            outcomes: [None; MOVE_BUDGET],
+        }
+    }
+}
+
 impl Scheduler {
+    /// Taking the owner prevents nested placement from reusing live scratch.
+    /// The coordinator excludes other CPUs, and this callback cannot sleep or
+    /// switch Threads. Restore the owner on both success and recoverable error;
+    /// kernel panics abort instead of unwinding through an unfinished lease.
+    fn with_balance_workspace<R>(
+        &mut self,
+        operation: impl FnOnce(&mut Self, &mut BalanceWorkspace) -> Result<R, Error>,
+    ) -> Result<R, Error> {
+        let mut workspace = self
+            .balance_workspace
+            .take()
+            .ok_or(Error::InvalidThreadState)?;
+        let result = operation(self, &mut workspace);
+        self.balance_workspace = Some(workspace);
+        result
+    }
+
     /// Initial placement is separate from affinity validation: the latter may
     /// already own a source CPU lock and must never acquire remote CPU locks.
     pub(super) fn select_initial_cpu(
-        &self,
+        &mut self,
         preferred: CpuIndex,
         affinity: CpuMask,
     ) -> Result<CpuIndex, Error> {
         if affinity.is_empty() {
             return Err(Error::EmptyCpuAffinity);
         }
-        let loads = self.balance_loads()?;
+        self.with_balance_workspace(|scheduler, workspace| {
+            scheduler.balance_loads(&mut workspace.loads)?;
+            scheduler.select_cpu_from_loads(preferred, affinity, &workspace.loads)
+        })
+    }
+
+    fn select_cpu_from_loads(
+        &self,
+        preferred: CpuIndex,
+        affinity: CpuMask,
+        loads: &[CpuLoad; hyper::cpu::MAX_CPUS],
+    ) -> Result<CpuIndex, Error> {
         let candidates = || {
             (0..hyper::cpu::MAX_CPUS)
                 .filter_map(CpuIndex::new)
@@ -98,11 +142,11 @@ impl Scheduler {
     /// Takes only one CPU lock at a time. Exclusive coordination excludes
     /// enqueue, wake, park and retirement; local switches conserve runnable
     /// counts, so the resulting loads remain valid throughout this pass.
-    fn balance_loads(&self) -> Result<[CpuLoad; hyper::cpu::MAX_CPUS], Error> {
+    fn balance_loads(&self, loads: &mut [CpuLoad; hyper::cpu::MAX_CPUS]) -> Result<(), Error> {
         if self.active_domain.is_some() {
             return Err(Error::InvalidThreadState);
         }
-        let mut loads = [CpuLoad::default(); hyper::cpu::MAX_CPUS];
+        loads.fill(CpuLoad::default());
         for cpu in (0..hyper::cpu::MAX_CPUS).filter_map(CpuIndex::new) {
             if !self.cpu_is_schedulable(cpu) {
                 continue;
@@ -133,17 +177,28 @@ impl Scheduler {
                 })
             })?;
         }
-        Ok(loads)
+        Ok(())
     }
 
     pub(in crate::kernel::task::scheduler) fn balance_ready(
         &mut self,
         excluded: ThreadId,
     ) -> Result<BalancePass, Error> {
-        let mut outcomes = [None; MOVE_BUDGET];
+        self.with_balance_workspace(|scheduler, workspace| {
+            scheduler.balance_ready_in(excluded, workspace)
+        })
+    }
+
+    fn balance_ready_in(
+        &mut self,
+        excluded: ThreadId,
+        workspace: &mut BalanceWorkspace,
+    ) -> Result<BalancePass, Error> {
+        let BalanceWorkspace { loads, outcomes } = workspace;
+        outcomes.fill(None);
         // Balancing executes in an arbitrary caller, not a dedicated worker.
         // Its current vCPU/Native execution is real load on the source CPU.
-        let mut loads = self.balance_loads()?;
+        self.balance_loads(loads)?;
         let mut moved = 0;
         self.balance_cursor
             .begin_if_idle(self.registry.balance_slot_count());
@@ -246,7 +301,7 @@ impl Scheduler {
             }
         }
         Ok(BalancePass {
-            outcomes,
+            outcomes: *outcomes,
             more: self.balance_cursor.has_more(),
         })
     }

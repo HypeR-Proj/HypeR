@@ -33,6 +33,8 @@ SYMBOLS = (
     'ready_index7rebuild24LocalReadyQueueAuthority',
     'ready_index7balance19ReadyQueueAuthority',
     'ready_index7balance24LocalReadyQueueAuthority',
+    'ready_index4Tree6remove19ReadyQueueAuthority',
+    'ready_index4Tree6remove24LocalReadyQueueAuthority',
     '18NativeAddressSpace21resolve_private_write',
     '18NativeAddressSpace19populate_file_range',
     '30sys_capability_channel_receive15ProcessServices',
@@ -140,6 +142,16 @@ class ProcessStackTests(unittest.TestCase):
                     symbol, f'sub sp, sp, #{size}\nbl 0x20000\nret')
                 with self.assertRaisesRegex(ValueError,
                                             f'entry frame {size} exceeds'):
+                    self.check()
+                self.functions[symbol] = original
+
+    def test_queue_mutation_cannot_restore_stack_allocated_ancestor_paths(self):
+        for authority in ('19ReadyQueueAuthority', '24LocalReadyQueueAuthority'):
+            symbol = 'ready_index4Tree6remove' + authority
+            with self.subTest(authority=authority):
+                original = self.functions[symbol]
+                self.functions[symbol] = function(symbol, 'sub sp, sp, #560\nret')
+                with self.assertRaisesRegex(ValueError, 'entry frame 560 exceeds'):
                     self.check()
                 self.functions[symbol] = original
 

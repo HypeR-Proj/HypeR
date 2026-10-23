@@ -510,12 +510,13 @@ pub fn initialize() -> Result<Capabilities, Error> {
         return Err(Error::AlreadyInitialized);
     }
     let mut scheduler = Scheduler::new(cpu)?;
+    let mut scratch = Some(queue::CpuRunQueue::prepare_scratch()?);
     let preemption = super::preempt::prepare_cpu(cpu)?;
     let capabilities = SCHEDULER.with(|slot| {
         if slot.is_some() {
             return Err(Error::AlreadyInitialized);
         }
-        scheduler.activate_boot_cpu(cpu)?;
+        scheduler.activate_boot_cpu(cpu, &mut scratch)?;
         *slot = Some(scheduler);
         Ok(Capabilities {
             bootstrap_thread: ThreadId::BOOTSTRAP,
@@ -607,6 +608,7 @@ pub(crate) fn crash_snapshot(cpu: usize) -> Option<CrashTaskSnapshot> {
 }
 
 pub fn register_secondary_cpu(cpu: CpuIndex) -> Result<SecondaryStack, Error> {
+    let scratch = queue::CpuRunQueue::prepare_scratch()?;
     let preemption = super::preempt::prepare_cpu(cpu)?;
     let reservation = reserve_thread(|scheduler| scheduler.reserve_secondary(cpu))?;
     let thread = match prepare_boxed_thread(Thread::secondary_bootstrap(reservation.id(), cpu)) {
@@ -616,7 +618,7 @@ pub fn register_secondary_cpu(cpu: CpuIndex) -> Result<SecondaryStack, Error> {
             return Err(error);
         }
     };
-    let stack = publish_secondary(reservation, thread)?;
+    let stack = publish_secondary(reservation, thread, scratch)?;
     preemption.commit();
     Ok(stack)
 }
@@ -1015,10 +1017,13 @@ fn publish_thread(mut reservation: ThreadReservation, thread: Box<Thread>) -> Re
 fn publish_secondary(
     mut reservation: ThreadReservation,
     thread: Box<Thread>,
+    scratch: queue::QueueScratch,
 ) -> Result<SecondaryStack, Error> {
+    // Unpublished queue storage is released outside the coordinator on error.
+    let mut scratch = Some(scratch);
     let (result, retired) = SCHEDULER.with(|slot| match slot.as_mut() {
         Some(scheduler) => {
-            let result = match scheduler.publish_secondary(&reservation, thread) {
+            let result = match scheduler.publish_secondary(&reservation, thread, &mut scratch) {
                 Ok(stack) => Ok(stack),
                 Err((error, thread)) => match scheduler.abandon_reservation(&reservation) {
                     Ok(()) => Err((error, thread)),

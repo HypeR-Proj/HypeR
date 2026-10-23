@@ -212,14 +212,19 @@ pub(in crate::kernel::task::scheduler) fn local_current_user(
 }
 
 impl CpuScheduler {
-    pub(super) fn new(index: CpuIndex, table: ThreadTableCapability, current: ThreadId) -> Self {
+    pub(super) fn new(
+        index: CpuIndex,
+        table: ThreadTableCapability,
+        current: ThreadId,
+        scratch: queue::QueueScratch,
+    ) -> Self {
         Self {
             index,
             table,
             authority: CpuScheduleAuthorityToken::new(),
             current,
             idle: None,
-            run_queue: CpuRunQueue::new(),
+            run_queue: CpuRunQueue::new(scratch),
             handoff: SwitchHandoff::new(),
             last_account_ns: crate::kernel::time::monotonic_nanoseconds().ok(),
             window: super::super::algorithms::arbitration::CpuWindow::new(

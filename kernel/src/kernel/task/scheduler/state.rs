@@ -362,6 +362,8 @@ pub(super) struct Scheduler {
     /// Bounded maintenance resumes here even when a prefix contains only
     /// pinned, blocked or otherwise ineligible Threads.
     balance_cursor: balance::BalanceCursor,
+    /// Exclusively borrowed by coordinator-owned placement operations.
+    balance_workspace: Option<Box<balance::BalanceWorkspace>>,
     terminated: ThreadQueue,
     retirement_head: Option<ThreadId>,
     retirement_tail: Option<ThreadId>,
@@ -484,6 +486,8 @@ impl Scheduler {
     }
 
     pub fn new(boot_cpu: CpuIndex) -> Result<Self, Error> {
+        let balance_workspace =
+            hyper::mm::try_box(balance::BalanceWorkspace::new()).map_err(|_| Error::Allocation)?;
         let bootstrap =
             hyper::mm::try_box(Thread::bootstrap(boot_cpu)?).map_err(|_| Error::Allocation)?;
         let boot_idle_id = match ThreadId::from_scheduler_parts(1, 1) {
@@ -501,6 +505,7 @@ impl Scheduler {
             deferred_ready_handoff: None,
             deferred_blocked_handoff: None,
             balance_cursor: balance::BalanceCursor::new(),
+            balance_workspace: Some(balance_workspace),
             terminated: ThreadQueue::new(),
             retirement_head: None,
             retirement_tail: None,
@@ -508,7 +513,14 @@ impl Scheduler {
     }
 
     /// Publishes the boot CPU's linear running token during global commit.
-    pub fn activate_boot_cpu(&mut self, cpu: CpuIndex) -> Result<(), Error> {
+    pub fn activate_boot_cpu(
+        &mut self,
+        cpu: CpuIndex,
+        scratch: &mut Option<queue::QueueScratch>,
+    ) -> Result<(), Error> {
+        if scratch.is_none() {
+            return Err(Error::InvalidThreadState);
+        }
         if !CPU_SCHEDULERS[cpu].with(|slot| slot.is_none()) {
             return Err(Error::AlreadyInitialized);
         }
@@ -531,7 +543,10 @@ impl Scheduler {
             if slot.is_some() {
                 return false;
             }
-            let mut scheduler = CpuScheduler::new(cpu, table, ThreadId::BOOTSTRAP);
+            let scratch = scratch
+                .take()
+                .unwrap_or_else(|| scheduler_invariant(Error::InvalidThreadState));
+            let mut scheduler = CpuScheduler::new(cpu, table, ThreadId::BOOTSTRAP, scratch);
             scheduler.idle = Some(boot_idle);
             *slot = Some(scheduler);
             true
@@ -649,8 +664,10 @@ impl Scheduler {
         &mut self,
         reservation: &ThreadReservation,
         thread: Box<Thread>,
+        scratch: &mut Option<queue::QueueScratch>,
     ) -> Result<SecondaryStack, (Error, Box<Thread>)> {
-        if !self.cpu_reservations[reservation.cpu()]
+        if scratch.is_none()
+            || !self.cpu_reservations[reservation.cpu()]
             || CPU_SCHEDULERS[reservation.cpu()].with(|slot| slot.is_some())
         {
             return Err((Error::InvalidThreadState, thread));
@@ -683,6 +700,9 @@ impl Scheduler {
                 reservation.cpu(),
                 table,
                 reservation.id(),
+                scratch
+                    .take()
+                    .unwrap_or_else(|| scheduler_invariant(Error::InvalidThreadState)),
             ));
             true
         });

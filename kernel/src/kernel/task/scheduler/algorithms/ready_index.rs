@@ -89,19 +89,25 @@ impl<I: Copy + Eq> Tree<I> {
         &mut self,
         nodes: &mut N,
         id: I,
+        scratch: &mut MutationScratch<I>,
     ) -> Result<(), N::Error> {
+        scratch.reset();
         let key = nodes.key(id)?;
-        self.root = Some(insert_at(nodes, self.root, id, &key)?);
+        self.root = Some(insert_at(nodes, self.root, id, &key, scratch)?);
         Ok(())
     }
 
+    // Keep the emitted stack budget auditable for both queue authorities.
+    #[inline(never)]
     pub(crate) fn remove<N: Nodes<Id = I>>(
         &mut self,
         nodes: &mut N,
         id: I,
+        scratch: &mut MutationScratch<I>,
     ) -> Result<(), N::Error> {
+        scratch.reset();
         let key = nodes.key(id)?;
-        self.root = remove_at(nodes, self.root, id, &key)?;
+        self.root = remove_at(nodes, self.root, id, &key, scratch)?;
         nodes.set_links(id, Links::EMPTY)?;
         Ok(())
     }
@@ -170,21 +176,29 @@ fn balance<N: Nodes>(nodes: &mut N, id: N::Id) -> Result<N::Id, N::Error> {
     }
 }
 
-/// Only entries below len are live. Initializing with an existing identity
-/// avoids `Option<Id>`'s extra discriminant in the fixed stack scratch.
-struct Ancestors<I> {
+/// Reusable mutation path, exclusively borrowed under the owning queue lock.
+///
+/// The caller owns its storage; kernel queues allocate it before publication.
+/// Only entries below `len` are live, so a seed identity avoids an extra
+/// `Option<Id>` discriminant without any uninitialized reads.
+pub(crate) struct MutationScratch<I> {
     ids: [I; MAX_PATH],
     right: u64,
     len: usize,
 }
 
-impl<I: Copy> Ancestors<I> {
-    fn new(seed: I) -> Self {
+impl<I: Copy> MutationScratch<I> {
+    pub(crate) const fn new(seed: I) -> Self {
         Self {
             ids: [seed; MAX_PATH],
             right: 0,
             len: 0,
         }
+    }
+
+    fn reset(&mut self) {
+        self.len = 0;
+        self.right = 0;
     }
 
     fn push<N: Nodes<Id = I>>(&mut self, nodes: &N, id: I, right: bool) -> Result<(), N::Error> {
@@ -208,7 +222,7 @@ impl<I: Copy> Ancestors<I> {
 #[inline(never)] // Preserve the image stack audit boundary below mutation.
 fn rebuild<N: Nodes>(
     nodes: &mut N,
-    path: &mut Ancestors<N::Id>,
+    path: &mut MutationScratch<N::Id>,
     mut subtree: Option<N::Id>,
     stop: usize,
 ) -> Result<Option<N::Id>, N::Error> {
@@ -231,8 +245,8 @@ fn insert_at<N: Nodes>(
     mut root: Option<N::Id>,
     id: N::Id,
     key: &N::Key,
+    path: &mut MutationScratch<N::Id>,
 ) -> Result<N::Id, N::Error> {
-    let mut path = Ancestors::new(id);
     while let Some(parent) = root {
         let right = match key.cmp(&nodes.key(parent)?) {
             core::cmp::Ordering::Less => false,
@@ -245,7 +259,7 @@ fn insert_at<N: Nodes>(
     }
     // Reject duplicates and overlong paths before changing an existing node.
     nodes.set_links(id, Links::EMPTY)?;
-    rebuild(nodes, &mut path, Some(id), 0)?.ok_or_else(|| nodes.corrupt())
+    rebuild(nodes, path, Some(id), 0)?.ok_or_else(|| nodes.corrupt())
 }
 
 fn remove_at<N: Nodes>(
@@ -253,8 +267,8 @@ fn remove_at<N: Nodes>(
     mut root: Option<N::Id>,
     id: N::Id,
     key: &N::Key,
+    path: &mut MutationScratch<N::Id>,
 ) -> Result<Option<N::Id>, N::Error> {
-    let mut path = Ancestors::new(id);
     let links = loop {
         let parent = root.ok_or_else(|| nodes.corrupt())?;
         let links = nodes.links(parent)?;
@@ -280,7 +294,7 @@ fn remove_at<N: Nodes>(
                 path.push(nodes, successor, false)?;
                 successor = next;
             };
-            let right = rebuild(nodes, &mut path, successor_links.right, boundary)?;
+            let right = rebuild(nodes, path, successor_links.right, boundary)?;
             nodes.set_links(
                 successor,
                 Links {
@@ -292,5 +306,5 @@ fn remove_at<N: Nodes>(
             Some(balance(nodes, successor)?)
         }
     };
-    rebuild(nodes, &mut path, replacement, 0)
+    rebuild(nodes, path, replacement, 0)
 }

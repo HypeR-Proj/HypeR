@@ -78,12 +78,10 @@ pub(super) fn run() -> Result<(), Error> {
         // This is the sole test-originated readiness/balance event. During
         // observation there are no scheduler reads, yields, timer waits, or
         // repeated request calls that could hide a lost continuation prompt.
-        scheduler::thread_ready(id)?;
-        threads[index] = Some((id, true));
-        spin_wait(
-            "balance continuation did not reach the tail candidate",
-            || OBSERVED_CPU.load(Ordering::Acquire) != usize::MAX || FAILED.load(Ordering::Acquire),
-        )?;
+        let mut started = false;
+        let observed = observe_from_deep_stack(id, &mut started);
+        threads[index] = Some((id, started));
+        observed?;
         if FAILED.load(Ordering::Acquire) || OBSERVED_CPU.load(Ordering::Acquire) != remote.get() {
             return Err(Error::Contract(
                 "tail candidate did not execute on its migration target",
@@ -117,9 +115,36 @@ pub(super) fn run() -> Result<(), Error> {
     result?;
     quiescence?;
     crate::pr_info!(
-        "HypeR test: single-event balance continuation beyond 64 registry slots passed"
+        "HypeR test: deep-stack single-event balance continuation beyond 64 registry slots passed"
     );
     Ok(())
+}
+
+/// Keep a syscall-sized frame live through enqueue and its IRQ-tail migration.
+/// Unlike a sampled watermark, this forces overlap with the balancing path.
+#[inline(never)]
+fn observe_from_deep_stack(id: ThreadId, started: &mut bool) -> Result<(), Error> {
+    let mut frame = [0u8; 8 * 1024];
+    for (index, byte) in frame.iter_mut().enumerate() {
+        // SAFETY: every byte belongs to the exclusively borrowed local array.
+        unsafe { core::ptr::write_volatile(byte, index as u8) };
+    }
+    core::hint::black_box(&frame);
+    scheduler::thread_ready(id)?;
+    *started = true;
+    let result = spin_wait(
+        "balance continuation did not reach the tail candidate",
+        || OBSERVED_CPU.load(Ordering::Acquire) != usize::MAX || FAILED.load(Ordering::Acquire),
+    );
+    core::hint::black_box(&frame);
+    if frame
+        .iter()
+        .enumerate()
+        .any(|(index, byte)| *byte != index as u8)
+    {
+        return Err(Error::Contract("balancing corrupted its caller's stack"));
+    }
+    result
 }
 
 fn spin_wait(failure: &'static str, condition: impl FnMut() -> bool) -> Result<(), Error> {
