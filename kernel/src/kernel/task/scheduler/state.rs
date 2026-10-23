@@ -1010,11 +1010,11 @@ impl Scheduler {
             return self.prepare_running_migration(cpu, current).map(Some);
         }
         let choice = self.with_cpu_domain(cpu, |_scheduler, local| local.choose_ready(yielding))?;
-        let Some((candidate, front)) = choice else {
+        let Some((next, front)) = choice else {
             return Ok(None);
         };
-        let membership = self.thread(candidate.id)?.queue_links().membership;
-        self.remove_ready(candidate.id, cpu, membership)?;
+        let membership = self.thread(next)?.queue_links().membership;
+        self.remove_ready(next, cpu, membership)?;
         if self.thread(current)?.state() == ThreadState::Running {
             if front {
                 self.enqueue_ready_front(current)?;
@@ -1022,7 +1022,7 @@ impl Scheduler {
                 self.enqueue_ready(current)?;
             }
         }
-        self.prepare_switch(cpu, current, candidate.id).map(Some)
+        self.prepare_switch(cpu, current, next).map(Some)
     }
 
     pub fn resolve_wait(

@@ -850,15 +850,8 @@ impl Process {
             ));
         }
         let prepared = self.prepare_user_thread()?;
-        let mut context = crate::hal::user::prepare_context(
-            start.entry().get(),
-            start.stack().get(),
-            start.tls().get(),
-        )
-        .map_err(ProcessError::UserEntry)?;
-        context.set_entry_argument(start.argument());
-        let execution = UserExecution::try_new(prepared.address_space.clone(), context)
-            .map_err(|()| ProcessError::Allocation)?;
+        let execution =
+            Self::prepare_user_execution(prepared.address_space.clone(), start, start.argument())?;
         let dormant = scheduler::prepare_user_thread_with_scheduling(
             name,
             prepared.thread.clone(),
@@ -921,8 +914,11 @@ impl Process {
                 return Err(error);
             }
         };
-        let execution =
-            self.prepare_initial_user_execution(prepared.address_space.clone(), argument)?;
+        let execution = Self::prepare_user_execution(
+            prepared.address_space.clone(),
+            self.image().initial_thread(),
+            argument,
+        )?;
         let dormant = scheduler::prepare_user_thread_with_scheduling(
             name,
             prepared.thread.clone(),
@@ -942,12 +938,11 @@ impl Process {
     // entering scheduler preparation. Keeping this frame separate leaves
     // room for IRQ entry, preemption and switch-tail retirement on this stack.
     #[inline(never)]
-    fn prepare_initial_user_execution(
-        &self,
+    fn prepare_user_execution(
         address_space: FallibleArc<NativeAddressSpace>,
+        start: UserThreadStart,
         argument: u64,
     ) -> Result<alloc::boxed::Box<core::cell::UnsafeCell<UserExecution>>, ProcessError> {
-        let start = self.image().initial_thread();
         // Match the architectural Result directly: mapping its error before
         // extracting the context creates extra full-register-image temporaries
         // in the kernel build profile.

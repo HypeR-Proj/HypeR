@@ -10,7 +10,7 @@ use hyper::cpu::CpuIndex;
 
 use super::Error;
 use super::algorithms::PolicyRuntime;
-use super::algorithms::arbitration::{Candidate, CpuWindow, Demand, DispatchKey, DispatchMode};
+use super::algorithms::arbitration::{Candidate, CpuWindow, Demand, DispatchKey};
 use super::algorithms::ready_index::{Links, Nodes, Tree};
 use super::registry::{CpuThreadTableAuthority, ThreadControlAuthority, ThreadTableWriteAuthority};
 use crate::kernel::task::policy::{
@@ -41,9 +41,7 @@ pub(super) struct CpuRunQueue {
 pub(super) struct ReadyThread {
     pub id: ThreadId,
     pub policy: SchedulingPolicy,
-    pub candidate: Candidate,
     pub key: DispatchKey,
-    pub mode: DispatchMode,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -206,16 +204,14 @@ impl CpuRunQueue {
             // The same CPU lock owns both passes. No queue, runtime or policy
             // can change while demand is assembled and these heads are read.
             let candidate = threads.snapshot(id)?.candidate();
-            let Some((key, mode)) = window.candidate_key(now, candidate, demand) else {
+            let Some((key, _)) = window.candidate_key(now, candidate, demand) else {
                 continue;
             };
             if ready.is_none_or(|old| (key, id.get()) < (old.key, old.id.get())) {
                 ready = Some(ReadyThread {
                     id,
                     policy: candidate.parameters.policy(),
-                    candidate,
                     key,
-                    mode,
                 });
             }
         }

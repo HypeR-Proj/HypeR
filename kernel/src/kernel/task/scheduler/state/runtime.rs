@@ -9,7 +9,7 @@ use super::super::algorithms::{
 };
 use super::{CPU_SCHEDULERS, CpuScheduler, Error};
 use crate::kernel::task::policy::{FairBackend, SchedulingPolicy};
-use crate::kernel::task::thread::ThreadState;
+use crate::kernel::task::thread::{ThreadId, ThreadState};
 use hyper::cpu::{CpuIndex, PerCpu};
 use hyper::sync::atomic::{AtomicU64, Ordering};
 
@@ -86,24 +86,23 @@ impl CpuScheduler {
     pub(super) fn choose_ready(
         &mut self,
         yielding: bool,
-    ) -> Result<Option<(super::super::queue::ReadyThread, bool)>, Error> {
+    ) -> Result<Option<(ThreadId, bool)>, Error> {
         let current = self.current_candidate()?;
         let selection = self.local_selection(current)?;
         let id = self.current;
-        let (runtime, parameters, deferred) =
+        let (expired, parameters, deferred) =
             self.thread_authority()
                 .with_thread(id, |_thread, schedule| {
                     (
-                        schedule.runtime,
+                        match schedule.runtime {
+                            PolicyRuntime::Fair(r) => r.remaining_ns() == 0,
+                            PolicyRuntime::Budget(r) => r.burst_remaining_ns() == 0,
+                            _ => false,
+                        },
                         schedule.parameters,
                         schedule.deferred_fifo_placement,
                     )
                 })?;
-        let expired = match runtime {
-            PolicyRuntime::Fair(r) => r.remaining_ns() == 0,
-            PolicyRuntime::Budget(r) => r.burst_remaining_ns() == 0,
-            _ => false,
-        };
         let key = current.and_then(|candidate| {
             self.window
                 .candidate_key(self.now(), candidate, selection.demand)
@@ -137,7 +136,9 @@ impl CpuScheduler {
                 schedule.deferred_fifo_placement = None
             })?;
         Ok(if should_switch {
-            selection.ready.map(|ready| (ready, !expired && !yielding))
+            selection
+                .ready
+                .map(|ready| (ready.id, !expired && !yielding))
         } else {
             None
         })

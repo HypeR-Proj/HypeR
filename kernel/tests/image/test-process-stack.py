@@ -18,6 +18,7 @@ spec.loader.exec_module(process_stack)
 SYMBOLS = (
     '15PreparedProcess7try_new',
     '7Process17finish_retirement',
+    '7Process34create_user_thread_with_scheduling',
     '24sys_process_builder_seal15ProcessServices',
     '36sys_memory_inspector_read_statistics15ProcessServices',
     '6loader11load_native',
@@ -108,6 +109,12 @@ class ProcessStackTests(unittest.TestCase):
                                           'sub sp, sp, #0xc30\n'
                                           'str xzr, [sp]\nbl 0x20000\nret')
         with self.assertRaisesRegex(ValueError, 'local_selection: entry frame 3216 exceeds'):
+            self.check()
+
+    def test_worker_creation_cannot_retain_register_image_scratch(self):
+        symbol = '7Process34create_user_thread_with_scheduling'
+        self.functions[symbol] = function(symbol, 'sub sp, sp, #3808\nret')
+        with self.assertRaisesRegex(ValueError, 'entry frame 3808 exceeds'):
             self.check()
 
     def test_dispatch_bounds_apply_to_self_test_images(self):

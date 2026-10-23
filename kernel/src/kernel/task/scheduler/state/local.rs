@@ -52,10 +52,10 @@ fn prepare_local_decision(cpu: CpuIndex, yielding: bool) -> Result<LocalSchedule
             return Ok(LocalScheduleAttempt::NeedsCoordinator);
         }
         let _ = preempt::take_pending_locked(cpu)?;
-        let Some((candidate, front)) = local.choose_ready(yielding)? else {
+        let Some((next, front)) = local.choose_ready(yielding)? else {
             return Ok(LocalScheduleAttempt::Complete(None));
         };
-        local.local_take_ready(candidate.id)?;
+        local.local_take_ready(next)?;
         let running = local
             .thread_authority()
             .with_thread(current, |_thread, schedule| {
@@ -65,7 +65,7 @@ fn prepare_local_decision(cpu: CpuIndex, yielding: bool) -> Result<LocalSchedule
             local.local_enqueue_ready(current, front)?;
         }
         let switch = local
-            .prepare_local_switch(current, candidate.id)
+            .prepare_local_switch(current, next)
             .unwrap_or_else(|error| scheduler_invariant(error));
         Ok(LocalScheduleAttempt::Complete(Some(switch)))
     })

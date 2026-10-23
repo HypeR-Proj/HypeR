@@ -38,6 +38,9 @@ def check(disassembly, *, self_test=False):
     budgets = {
         '15PreparedProcess7try_new': 2048,
         '7Process17finish_retirement': 2048,
+        # Worker creation must release architectural register-image scratch
+        # before scheduler admission and its possible preemption/retirement.
+        '7Process34create_user_thread_with_scheduling': 1024,
         # Keep address-space construction scratch off the subsequent loader
         # mapping/rollback call chain, and off the syscall coordinator itself.
         # Generic handlers also have self-test-only service implementations.

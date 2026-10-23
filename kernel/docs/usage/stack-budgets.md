@@ -41,11 +41,13 @@ The console attachment also exercises interactive guest input. For diagnosis,
 its terminated thread can be measured independently.
 
 The target explicitly enables both `kernel-test` and `kernel-stack-audit`.
-Acceptance uses observed stack
-watermarks, canaries, and reserve limits for complete workloads. Individual
-compiler-generated function frames are not CI budgets: inlining and compiler
-versions change their layout without necessarily changing end-to-end usage.
-No unstable compiler flags or `.stack_sizes` metadata are required.
+Acceptance uses observed stack watermarks, canaries, and reserve limits for
+complete workloads. The optimized image audit also bounds selected construction,
+mapping and scheduling frames to catch large temporary regressions. In particular,
+user-thread creation releases architectural context scratch before entering
+scheduler admission. These frame checks supplement runtime acceptance; they do
+not bound the complete call graph or every preemption point. No unstable compiler
+flags or `.stack_sizes` metadata are required.
 
 `sh tests/ci/run.sh native-stack-16k` builds a production image with 16 KiB
 kernel thread stacks and runs Native acceptance on one and four CPUs. This is
