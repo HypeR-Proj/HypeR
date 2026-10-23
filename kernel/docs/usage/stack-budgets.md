@@ -19,15 +19,14 @@ Stack sizes must be powers of two: 16–256 KiB for Thread stacks and 16–128 K
 for IRQ/emergency stacks. The configuration tool rejects unsupported sizes
 before writing the output file; Cargo enforces the same constraints.
 
-Stack count is derived, not a second tunable limit. The runtime arena has
-`CONFIG_SCHED_MAX_THREADS - 1 + 2 * CONFIG_MAX_CPUS` slots: bootstrap owns a
-separate boot stack, and each configured CPU has an IRQ and emergency stack.
-Physical stack pages are allocated on demand. The scheduler table and
-retirement queue remain bounded by `CONFIG_SCHED_MAX_THREADS`; see
-[kernel configuration](../../../docs/usage/deployment/configuration.md#kernel-architecture-and-resource-configuration).
-The retirement queue is allocated once during scheduler preparation, without
-constructing a capacity-sized temporary on the boot stack. The compact-address
-CI image also runs with the maximum configured Thread capacity (16384).
+Stack count has no separate configuration limit. Stack-slot metadata and physical
+pages grow on demand, while the architecture bounds the virtual stack arena.
+Bootstrap owns a separate boot stack; each configured CPU has an IRQ and emergency
+stack. The scheduler's address-stable slot segments also grow on demand. Retirement
+uses links in those existing slots and never allocates during Thread exit. Tests
+exercise more than 1024 simultaneous Threads and subsequent slot reuse; there is
+no thread-capacity-sized temporary on the boot stack.
+See [kernel configuration](../../../docs/usage/deployment/configuration.md#kernel-architecture-and-resource-configuration).
 
 ## Reproducing the checks
 

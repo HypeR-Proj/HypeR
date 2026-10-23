@@ -190,7 +190,7 @@ pub(super) enum DeferredFifoPlacement {
 pub struct ThreadId(u64);
 
 impl ThreadId {
-    const SLOT_BITS: u32 = 24;
+    pub(super) const SLOT_BITS: u32 = 24;
     const SLOT_MASK: u64 = (1 << Self::SLOT_BITS) - 1;
     const IDENTITY_LIMIT: u64 = u64::MAX >> Self::SLOT_BITS;
 

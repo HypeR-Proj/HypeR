@@ -153,9 +153,9 @@ const fn classify_scheduler_error(error: crate::kernel::task::scheduler::Error) 
 
     match error {
         SchedulerError::Allocation => Error::NoMemory,
-        SchedulerError::ThreadLimit
-        | SchedulerError::IdentifierExhausted
-        | SchedulerError::WaitGenerationExhausted => Error::ResourceLimit,
+        SchedulerError::IdentifierExhausted | SchedulerError::WaitGenerationExhausted => {
+            Error::ResourceLimit
+        }
         SchedulerError::EmptyCpuAffinity
         | SchedulerError::NoRegisteredCpuInAffinity
         | SchedulerError::InvalidCpuIndex
@@ -170,7 +170,8 @@ const fn classify_scheduler_error(error: crate::kernel::task::scheduler::Error) 
         | SchedulerError::ThreadTransitionInProgress
         | SchedulerError::MigrationBlockedByCpuLocalWait => Error::Busy,
         SchedulerError::Thread(error) => classify_thread_error(error),
-        SchedulerError::NotInitialized
+        SchedulerError::ThreadTableGrowth
+        | SchedulerError::NotInitialized
         | SchedulerError::AlreadyInitialized
         | SchedulerError::CurrentThreadMissing
         | SchedulerError::ThreadBlocked

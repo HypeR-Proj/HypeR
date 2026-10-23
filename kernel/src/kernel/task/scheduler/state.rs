@@ -24,7 +24,6 @@ pub(super) use runtime::expire_current_turn;
 pub(super) use runtime::{account_all_cpus, deadline_is_current};
 
 use alloc::boxed::Box;
-use alloc::vec::Vec;
 use hyper::cpu::{CpuIndex, PerCpu};
 use hyper::sync::InterruptSpinLock;
 
@@ -345,84 +344,8 @@ pub(super) struct RetiredThread {
     pub retirement: super::ResourceRetirement,
 }
 
-struct RetirementTicket {
-    id: ThreadId,
-    retirement: super::ResourceRetirement,
-}
-
-/// Fixed-capacity FIFO for teardown which may block or acquire subsystem locks.
-///
-/// A queued element retains its registry slot in `Retiring`, so the number of
-/// elements can never exceed the scheduler's fixed Thread capacity even when
-/// creators race a stalled reaper.
-struct RetirementQueue {
-    entries: Box<[Option<RetirementTicket>]>,
-    head: usize,
-    length: usize,
-}
-
-impl RetirementQueue {
-    fn new() -> Result<Self, Error> {
-        // Prepare the entire queue before scheduler publication. In particular,
-        // large configured capacities must not construct an equally large
-        // temporary on the boot stack. Enqueue/dequeue never allocate.
-        let mut entries = Vec::new();
-        entries
-            .try_reserve_exact(super::THREAD_CAPACITY)
-            .map_err(|_| Error::Allocation)?;
-        entries.resize_with(super::THREAD_CAPACITY, || None);
-        Ok(Self {
-            entries: entries.into_boxed_slice(),
-            head: 0,
-            length: 0,
-        })
-    }
-
-    fn push(&mut self, retired: RetirementTicket) -> Result<(), Error> {
-        if self.entries.is_empty()
-            || self.head >= self.entries.len()
-            || self.length >= self.entries.len()
-        {
-            return Err(Error::ThreadLimit);
-        }
-        let tail = self
-            .head
-            .checked_add(self.length)
-            .ok_or(Error::QueueCorrupted)?
-            % self.entries.len();
-        let next_length = self.length.checked_add(1).ok_or(Error::QueueCorrupted)?;
-        if self.entries[tail].is_some() {
-            return Err(Error::QueueCorrupted);
-        }
-        self.entries[tail] = Some(retired);
-        self.length = next_length;
-        Ok(())
-    }
-
-    fn pop(&mut self) -> Result<Option<RetirementTicket>, Error> {
-        if self.length == 0 {
-            return Ok(None);
-        }
-        if self.entries.is_empty() || self.head >= self.entries.len() {
-            return Err(Error::QueueCorrupted);
-        }
-        let retired = self.entries[self.head]
-            .take()
-            .ok_or(Error::QueueCorrupted)?;
-        self.head = self.head.checked_add(1).ok_or(Error::QueueCorrupted)? % self.entries.len();
-        self.length = self.length.checked_sub(1).ok_or(Error::QueueCorrupted)?;
-        Ok(Some(retired))
-    }
-
-    const fn is_empty(&self) -> bool {
-        self.length == 0
-    }
-}
-
 pub(super) struct Scheduler {
-    // Thread identities never repeat, while empty registry slots do. The
-    // complete bounded backing is allocated during scheduler initialization;
-    // user-created Threads cannot grow persistent kernel infrastructure.
+    // Slot backing grows outside locks; published segments never move.
     registry: ThreadRegistry,
     cpu_reservations: PerCpu<bool>,
     /// TransitionLock-owned admission truth for CPUs with an installed idle.
@@ -440,7 +363,8 @@ pub(super) struct Scheduler {
     /// pinned, blocked or otherwise ineligible Threads.
     balance_cursor: balance::BalanceCursor,
     terminated: ThreadQueue,
-    retirements: RetirementQueue,
+    retirement_head: Option<ThreadId>,
+    retirement_tail: Option<ThreadId>,
 }
 
 // SAFETY: registry slots, residence changes and coordinator metadata are
@@ -560,7 +484,6 @@ impl Scheduler {
     }
 
     pub fn new(boot_cpu: CpuIndex) -> Result<Self, Error> {
-        let retirements = RetirementQueue::new()?;
         let bootstrap =
             hyper::mm::try_box(Thread::bootstrap(boot_cpu)?).map_err(|_| Error::Allocation)?;
         let boot_idle_id = match ThreadId::from_scheduler_parts(1, 1) {
@@ -579,7 +502,8 @@ impl Scheduler {
             deferred_blocked_handoff: None,
             balance_cursor: balance::BalanceCursor::new(),
             terminated: ThreadQueue::new(),
-            retirements,
+            retirement_head: None,
+            retirement_tail: None,
         })
     }
 
@@ -599,7 +523,7 @@ impl Scheduler {
             return Err(Error::InvalidThreadState);
         }
         // All fallible scheduler construction is complete. From this point the
-        // fixed table has kernel lifetime and can later be addressed through
+        // stable directory has kernel lifetime and can later be addressed through
         // transferred CPU authority tokens without borrowing `Scheduler`.
         self.registry.publish_table();
         let table = self.registry.published_table();
@@ -1415,30 +1339,27 @@ impl Scheduler {
             QueueMembership::Terminated,
         )?;
         self.registry.begin_retirement(id)?;
-        let retired = RetirementTicket {
-            id,
-            retirement: super::ResourceRetirement::begin(),
-        };
-        if self.retirements.push(retired).is_err() {
-            // A registry slot remains Retiring for every queued element, so
-            // fixed-capacity overflow is an internal accounting violation.
-            hyper::debug::invariant_failure(
-                "task::scheduler::state::queue_terminated_retirement invariant",
-            );
+        if let Some(tail) = self.retirement_tail {
+            if self.registry.link_retirement(tail, id).is_err() {
+                scheduler_invariant(Error::QueueCorrupted);
+            }
+        } else {
+            self.retirement_head = Some(id);
         }
+        self.retirement_tail = Some(id);
         Ok(true)
     }
 
     pub fn take_retirement(&mut self) -> Result<Option<RetiredThread>, Error> {
-        let Some(ticket) = self.retirements.pop()? else {
+        let Some(id) = self.retirement_head else {
             return Ok(None);
         };
-        let thread = self.registry.take_retiring(ticket.id)?;
-        Ok(Some(RetiredThread {
-            id: ticket.id,
-            thread,
-            retirement: ticket.retirement,
-        }))
+        let (retired, next) = self.registry.take_retiring(id)?;
+        self.retirement_head = next;
+        if next.is_none() {
+            self.retirement_tail = None;
+        }
+        Ok(Some(retired))
     }
 
     pub fn complete_retirement(&mut self, id: ThreadId) -> Result<(), Error> {
@@ -1446,7 +1367,7 @@ impl Scheduler {
     }
 
     pub const fn has_retirements(&self) -> bool {
-        !self.retirements.is_empty()
+        self.retirement_head.is_some()
     }
 
     pub fn statistics(&self) -> Statistics {
@@ -1919,6 +1840,14 @@ impl Scheduler {
     ) -> Result<(), Error> {
         let mut threads = queue::ControlQueueAuthority::new(registry.control_authority());
         queue::control_remove(&mut threads, target, id, membership)
+    }
+
+    pub fn thread_table_growth(&self) -> Option<usize> {
+        self.registry.growth_needed()
+    }
+
+    pub fn install_thread_table_growth(&mut self, growth: &mut super::registry::TableGrowth) {
+        self.registry.install_growth(growth);
     }
 
     fn reserve_thread_slot(&mut self, cpu: CpuIndex) -> Result<ThreadReservation, Error> {

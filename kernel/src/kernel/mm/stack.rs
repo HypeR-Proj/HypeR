@@ -12,8 +12,6 @@ use hyper::sync::InterruptSpinLock;
 
 use super::page_block::PageBlock;
 
-const MAX_CPUS: usize = hyper::config::MAX_CPUS as usize;
-const MAX_STACKS: usize = hyper::config::KERNEL_STACK_SLOTS;
 const WATERMARK_BYTE: u8 = 0xa5;
 const WATERMARK_WORD: u64 = u64::from_ne_bytes([WATERMARK_BYTE; 8]);
 const STACK_CANARY: u64 = 0x4859_5045_5253_544b;
@@ -22,7 +20,6 @@ const IRQ_STACK_BYTES: usize = hyper::config::IRQ_STACK_SIZE_KB as usize * 1024;
 const EMERGENCY_STACK_BYTES: usize = hyper::config::EMERGENCY_STACK_SIZE_KB as usize * 1024;
 
 const _: () = {
-    assert!(MAX_STACKS > MAX_CPUS * 2);
     assert!(THREAD_STACK_BYTES.is_power_of_two());
     assert!(IRQ_STACK_BYTES.is_power_of_two());
     assert!(EMERGENCY_STACK_BYTES.is_power_of_two());
@@ -95,25 +92,62 @@ impl From<super::memory::Error> for Error {
 }
 
 struct StackSlots {
-    occupied: [bool; MAX_STACKS],
+    occupied: alloc::vec::Vec<u64>,
 }
 
 impl StackSlots {
     const fn new() -> Self {
         Self {
-            occupied: [false; MAX_STACKS],
+            occupied: alloc::vec::Vec::new(),
         }
     }
 
     fn reserve(&mut self) -> Option<usize> {
-        let slot = self.occupied.iter().position(|occupied| !*occupied)?;
-        self.occupied[slot] = true;
-        Some(slot)
+        let (word, occupied) = self
+            .occupied
+            .iter_mut()
+            .enumerate()
+            .find(|(_, bits)| **bits != u64::MAX)?;
+        let bit = (!*occupied).trailing_zeros() as usize;
+        *occupied |= 1u64 << bit;
+        Some(word * 64 + bit)
     }
 
     fn release(&mut self, slot: usize) {
-        if let Some(occupied) = self.occupied.get_mut(slot) {
-            *occupied = false;
+        let word = self
+            .occupied
+            .get_mut(slot / 64)
+            .unwrap_or_else(|| hyper::debug::invariant_failure("stack slot release out of range"));
+        let mask = 1u64 << (slot % 64);
+        if *word & mask == 0 {
+            hyper::debug::invariant_failure("stack slot released twice");
+        }
+        *word &= !mask;
+    }
+}
+
+/// Bitmap growth is prepared outside the IRQ-masked mapping lock. Racing
+/// creators reuse the winner's capacity and free spare buffers after unlocking.
+fn reserve_stack_slot() -> Result<usize, Error> {
+    let mut prepared = alloc::vec::Vec::new();
+    loop {
+        let result = STACK_SLOTS.with(|slots| {
+            if prepared.len() > slots.occupied.len() {
+                prepared[..slots.occupied.len()].copy_from_slice(&slots.occupied);
+                core::mem::swap(&mut prepared, &mut slots.occupied);
+            }
+            slots.reserve().ok_or(slots.occupied.len())
+        });
+        drop(core::mem::take(&mut prepared));
+        match result {
+            Ok(slot) => return Ok(slot),
+            Err(words) => {
+                let words = words.checked_mul(2).ok_or(Error::OutOfStacks)?.max(1);
+                prepared
+                    .try_reserve_exact(words)
+                    .map_err(|_| Error::OutOfStacks)?;
+                prepared.resize(words, 0);
+            }
         }
     }
 }
@@ -152,9 +186,7 @@ impl KernelStack {
         if !pages.is_power_of_two() {
             return Err(Error::InvalidConfiguration);
         }
-        let slot = STACK_SLOTS
-            .with(StackSlots::reserve)
-            .ok_or(Error::OutOfStacks)?;
+        let slot = reserve_stack_slot()?;
         let block = match PageBlock::allocate(pages.trailing_zeros() as usize) {
             Ok(block) => block,
             Err(error) => {

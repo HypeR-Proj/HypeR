@@ -223,18 +223,20 @@ fn olddefconfig_removes_obsolete_and_inactive_keys_without_resetting_tuning() {
         ("RANDOMIZE_BASE", "n"),
         ("ARM64_MAX_GIC_REDISTRIBUTOR_REGIONS", "16"),
         ("MAX_KERNEL_STACKS", "1024"),
+        ("SCHED_MAX_THREADS", "1024"),
         ("MAX_CPUS", "16"),
         ("TIMER_HZ", "250"),
         ("LOG_LINE_MAX", "1024"),
         ("KERNEL_STACK_SIZE_KB", "16"),
     ]);
     let (configuration, removed) = require_ok(resolve_existing(&schema, old));
-    assert_eq!(removed.len(), 5);
+    assert_eq!(removed.len(), 6);
     for name in [
         "ARM64_PA_BITS",
         "RANDOMIZE_BASE",
         "ARM64_MAX_GIC_REDISTRIBUTOR_REGIONS",
         "MAX_KERNEL_STACKS",
+        "SCHED_MAX_THREADS",
         "TIMER_HZ",
     ] {
         assert!(removed.iter().any(|item| item == name));
@@ -244,7 +246,6 @@ fn olddefconfig_removes_obsolete_and_inactive_keys_without_resetting_tuning() {
     assert_eq!(configuration.value("MAX_CPUS"), Some("16"));
     assert_eq!(configuration.value("LOG_LINE_MAX"), Some("1024"));
     assert_eq!(configuration.value("KERNEL_STACK_SIZE_KB"), Some("16"));
-    assert_eq!(configuration.value("SCHED_MAX_THREADS"), Some("1024"));
     require_ok(validate_kernel_configuration(&configuration, None));
 }
 
@@ -302,11 +303,6 @@ fn kernel_validation_rejects_unsupported_stack_sizes_and_pa_widths() {
         let config = require_ok(resolve(&schema, values(&[("KERNEL_STACK_SIZE_KB", value)])));
         require_ok(validate_kernel_configuration(&config, None));
     }
-    let config = require_ok(resolve(
-        &schema,
-        values(&[("MAX_CPUS", "64"), ("SCHED_MAX_THREADS", "64")]),
-    ));
-    assert!(validate_kernel_configuration(&config, None).is_err());
 }
 
 #[test]

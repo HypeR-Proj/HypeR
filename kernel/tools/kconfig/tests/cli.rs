@@ -189,7 +189,7 @@ fn migration_warns_and_removes_old_architecture_leakage() {
     let fixture = Fixture::new();
     require(fs::write(
         fixture.0.join("input"),
-        "CONFIG_ARCH_AARCH64=n\nCONFIG_ARCH_X86_64=y\nCONFIG_ARM64_PA_BITS=48\nCONFIG_MAX_KERNEL_STACKS=1024\nCONFIG_MAX_CPUS=16\n",
+        "CONFIG_ARCH_AARCH64=n\nCONFIG_ARCH_X86_64=y\nCONFIG_ARM64_PA_BITS=48\nCONFIG_MAX_KERNEL_STACKS=1024\nCONFIG_SCHED_MAX_THREADS=1024\nCONFIG_MAX_CPUS=16\n",
     ));
     let output = fixture.run("olddefconfig", "");
     assert!(
@@ -199,10 +199,11 @@ fn migration_warns_and_removes_old_architecture_leakage() {
     );
     let warnings = String::from_utf8_lossy(&output.stderr);
     assert!(warnings.contains("CONFIG_MAX_KERNEL_STACKS"));
+    assert!(warnings.contains("CONFIG_SCHED_MAX_THREADS"));
     assert!(warnings.contains("CONFIG_ARM64_PA_BITS"));
     let text = require(fs::read_to_string(fixture.0.join("output")));
     assert!(text.contains("CONFIG_MAX_CPUS=16"));
-    assert!(text.contains("CONFIG_SCHED_MAX_THREADS=1024"));
+    assert!(!text.contains("CONFIG_SCHED_MAX_THREADS"));
     assert!(!text.contains("CONFIG_ARM64_"));
 }
 

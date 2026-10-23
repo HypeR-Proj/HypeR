@@ -486,14 +486,21 @@ fn stack_range(slot: usize, pages: usize) -> Result<(usize, usize, usize), Error
     if pages == 0 || pages + 1 > STACK_SLOT_PAGES {
         return Err(Error::InvalidRange);
     }
-    let guard = STACK_ARENA_BASE
-        .checked_add(slot as u64 * STACK_SLOT_PAGES as u64 * PAGE_SIZE)
+    let stride = STACK_SLOT_PAGES as u64 * PAGE_SIZE;
+    let offset = (slot as u64)
+        .checked_mul(stride)
         .ok_or(Error::AddressOverflow)?;
-    Ok((
-        guard as usize,
-        (guard + PAGE_SIZE) as usize,
-        (guard + PAGE_SIZE + pages as u64 * PAGE_SIZE) as usize,
-    ))
+    let guard = STACK_ARENA_BASE
+        .checked_add(offset)
+        .ok_or(Error::AddressOverflow)?;
+    guard
+        .checked_add(stride - 1)
+        .ok_or(Error::AddressOverflow)?;
+    let bottom = guard.checked_add(PAGE_SIZE).ok_or(Error::AddressOverflow)?;
+    let top = bottom
+        .checked_add(pages as u64 * PAGE_SIZE)
+        .ok_or(Error::AddressOverflow)?;
+    Ok((guard as usize, bottom as usize, top as usize))
 }
 
 fn best_level(virtual_address: u64, physical_address: u64, remaining: u64) -> usize {

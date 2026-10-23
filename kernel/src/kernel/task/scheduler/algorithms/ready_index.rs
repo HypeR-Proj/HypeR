@@ -6,13 +6,10 @@
 //! The registry retains ownership of every node. The CPU lock must cover keys,
 //! links and the root together; changing a queued key requires remove/reinsert.
 
-/// The scheduler binds its configured registry capacity to this bound.
-pub(crate) const MAX_NODES: usize = 16_384;
-
-// An AVL tree of height h has at least F(h + 2) - 1 nodes. Height 20 already
-// needs 17,710 nodes, beyond MAX_NODES. Keep generous bounded corruption
-// headroom without recursive mutation frames on a 16 KiB kernel stack.
-const MAX_PATH: usize = 32;
+// A 24-bit registry slot namespace cannot contain the 24,157,816 nodes
+// required for AVL height 35. Forty entries include the removal successor path
+// and bound corrupted traversal without imposing a configured thread limit.
+const MAX_PATH: usize = 40;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Links<I> {
@@ -177,7 +174,7 @@ fn balance<N: Nodes>(nodes: &mut N, id: N::Id) -> Result<N::Id, N::Error> {
 /// avoids `Option<Id>`'s extra discriminant in the fixed stack scratch.
 struct Ancestors<I> {
     ids: [I; MAX_PATH],
-    right: u32,
+    right: u64,
     len: usize,
 }
 
@@ -193,7 +190,7 @@ impl<I: Copy> Ancestors<I> {
     fn push<N: Nodes<Id = I>>(&mut self, nodes: &N, id: I, right: bool) -> Result<(), N::Error> {
         let slot = self.ids.get_mut(self.len).ok_or_else(|| nodes.corrupt())?;
         *slot = id;
-        let bit = 1_u32 << self.len;
+        let bit = 1_u64 << self.len;
         self.right = (self.right & !bit) | if right { bit } else { 0 };
         self.len += 1;
         Ok(())
@@ -201,7 +198,7 @@ impl<I: Copy> Ancestors<I> {
 
     fn pop(&mut self) -> Option<(I, bool)> {
         self.len = self.len.checked_sub(1)?;
-        Some((self.ids[self.len], self.right & (1_u32 << self.len) != 0))
+        Some((self.ids[self.len], self.right & (1_u64 << self.len) != 0))
     }
 }
 

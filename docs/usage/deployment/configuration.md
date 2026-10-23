@@ -438,20 +438,17 @@ output. `olddefconfig` removes unavailable or obsolete settings with a warning
 and preserves applicable tuning.
 
 The configuration tool and Cargo share validation of supported PA widths,
-power-of-two stack sizes, and scheduler capacity. Duplicate assignments,
+power-of-two stack sizes, and scheduler budgets. Duplicate assignments,
 unknown keys, dependency cycles, and conflicting choices are errors, rather
 than silently taking the last value. Generated files retain menu headings to
 separate architecture, scheduler, stack-size and logging settings.
 
-`CONFIG_SCHED_MAX_THREADS` is the scheduler's reserved entry capacity, including
-bootstrap, idle threads, kernel workers, Native threads and vCPUs. Its fixed
-table keeps published slot addresses stable and reserves the retirement queue
-so Thread exit does not allocate. This remains a real implementation limit;
-it is not a reservation of every Thread's physical stack pages. Stack pages
-are allocated on demand. Runtime stack-slot capacity is derived from this
-thread capacity plus two exception stacks per configured CPU, excluding the
-bootstrap Thread, which has its own boot stack. IRQ/emergency stacks therefore
-do not consume the configured scheduler capacity.
+The scheduler has no configured global Thread-count limit. Registry segments,
+stack-slot metadata and physical stacks grow on demand; existing slot addresses
+stay stable across growth. Retiring Threads carry their own queue links, so exit
+does not allocate. Creation remains subject to memory availability, resource-domain
+quotas and representable IDs/virtual addresses. Vacant registry and stack slots
+are reused; published registry segments retain their high-water metadata backing.
 
 The scheduler menu also selects the Fair algorithm (`CONFIG_SCHED_FAIR_STRIDE`
 or `CONFIG_SCHED_FAIR_RR`), the common Budget period and vCPU defaults, the shared
@@ -462,10 +459,8 @@ See [scheduling policy and tickless execution](../../../kernel/docs/design/sched
 [component scheduling authority](../../design/services/components.md#scheduling-authority),
 and [VM scheduling configuration](../applications/vmm.md#scheduling).
 
-The old independent `CONFIG_MAX_KERNEL_STACKS` setting has been removed.
-After migration, `CONFIG_SCHED_MAX_THREADS` defaults to 1024; set it explicitly
-if a different thread budget is needed. Removing this budget entirely would
-require a growable scheduler registry and allocation-free retirement storage.
+Both `CONFIG_MAX_KERNEL_STACKS` and `CONFIG_SCHED_MAX_THREADS` have been removed.
+Run `olddefconfig` to discard these obsolete settings from a saved configuration.
 
 `CONFIG_ARM64_MAX_GIC_REDISTRIBUTOR_REGIONS` has also been removed. The
 allocation-free discovery scratch list retains its internal capacity of 16,

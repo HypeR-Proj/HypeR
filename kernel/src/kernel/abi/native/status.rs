@@ -133,7 +133,7 @@ pub(super) const fn status_from_scheduler_error(
 
     match error {
         Error::Allocation => HYPER_NATIVE_STATUS_NO_MEMORY,
-        Error::ThreadLimit | Error::IdentifierExhausted | Error::WaitGenerationExhausted => {
+        Error::IdentifierExhausted | Error::WaitGenerationExhausted => {
             HYPER_NATIVE_STATUS_RESOURCE_LIMIT
         }
         Error::EmptyCpuAffinity
@@ -143,7 +143,8 @@ pub(super) const fn status_from_scheduler_error(
         Error::InvalidThreadState => HYPER_NATIVE_STATUS_BAD_STATE,
         Error::SchedulingPermission(_) => HYPER_NATIVE_STATUS_ACCESS_DENIED,
         Error::InvalidSchedulingParameters => HYPER_NATIVE_STATUS_INVALID_ARGUMENT,
-        Error::NotInitialized
+        Error::ThreadTableGrowth
+        | Error::NotInitialized
         | Error::AlreadyInitialized
         | Error::CurrentThreadMissing
         | Error::ThreadNotFound

@@ -8,8 +8,8 @@ Threads retain the same lifecycle, affinity, wait and context-save machinery.
 `task/policy.rs` defines validated parameters; `scheduler/algorithms` owns pure
 accounting and ordering; the CPU scheduler owns Thread membership and dispatch.
 Ready indices use intrusive AVL nodes; updates keep a bounded ancestor path
-instead of stacking recursive frames. The 16,384-Thread capacity is checked
-against that path bound at compile time. Candidate selection retains only
+instead of stacking recursive frames. The path bound covers the entire 24-bit registry slot namespace; it does not
+impose a configurable Thread-count limit. Candidate selection retains only
 queue-head identities, keeping transient kernel-stack use independent of the
 number of runnable Threads.
 

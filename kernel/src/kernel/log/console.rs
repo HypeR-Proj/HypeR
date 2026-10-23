@@ -3,6 +3,8 @@
 
 //! Console ownership, filtering, and fatal-output access.
 
+use alloc::boxed::Box;
+use alloc::vec::Vec;
 use core::fmt::Write;
 
 use hyper::drivers::console::{ConsoleDevice, EmergencyConsoleHandle};
@@ -18,7 +20,6 @@ use hyper::sync::atomic::{AtomicUsize, Ordering};
 type KernelSpinLock<T> = InterruptSpinLock<T, crate::hal::irq::LocalMask>;
 
 const CONSOLE_LOGLEVEL_DEFAULT: Level = configured_console_level();
-const FLUSH_BARRIER_SLOTS: usize = crate::kernel::task::scheduler::THREAD_CAPACITY;
 const EMERGENCY_QUIESCENCE_POLLS: usize = 4096;
 const EMERGENCY_UART_ATTEMPTS: usize = 4096;
 
@@ -26,8 +27,8 @@ struct ConsoleState {
     device: Option<ConsoleDevice>,
     next_sequence: u64,
     maximum_level: Level,
-    barriers: DrainBarrierSet<FLUSH_BARRIER_SLOTS>,
-    barrier_waiters: [crate::kernel::task::WaitQueue; FLUSH_BARRIER_SLOTS],
+    barriers: Vec<Option<Box<FlushNode>>>,
+    active_barriers: usize,
 }
 
 impl ConsoleState {
@@ -36,8 +37,8 @@ impl ConsoleState {
             device: None,
             next_sequence: 0,
             maximum_level: CONSOLE_LOGLEVEL_DEFAULT,
-            barriers: DrainBarrierSet::new(),
-            barrier_waiters: [const { crate::kernel::task::WaitQueue::new() }; FLUSH_BARRIER_SLOTS],
+            barriers: Vec::new(),
+            active_barriers: 0,
         }
     }
 }
@@ -248,7 +249,11 @@ pub(super) fn advance(sequence: u64) -> Result<(), ConsoleProgressError> {
     CONSOLE.with(|state| {
         if state.next_sequence < sequence {
             state.next_sequence = sequence;
-            state.barriers.advance(sequence);
+            if state.active_barriers != 0 {
+                for node in state.barriers.iter_mut().flatten() {
+                    node.barrier.advance(sequence);
+                }
+            }
         }
         wake_completed_barriers(state).map_err(ConsoleProgressError::Scheduler)
     })
@@ -257,10 +262,13 @@ pub(super) fn advance(sequence: u64) -> Result<(), ConsoleProgressError> {
 pub(super) fn advance_overrun(sequence: u64, missed: u64) -> Result<(), ConsoleProgressError> {
     CONSOLE.with(|state| {
         if state.next_sequence < sequence {
-            state
-                .barriers
-                .advance_overrun(state.next_sequence, sequence, missed)
-                .map_err(ConsoleProgressError::Barrier)?;
+            if state.active_barriers != 0 {
+                for node in state.barriers.iter_mut().flatten() {
+                    node.barrier
+                        .advance_overrun(state.next_sequence, sequence, missed)
+                        .map_err(ConsoleProgressError::Barrier)?;
+                }
+            }
             state.next_sequence = sequence;
         }
         wake_completed_barriers(state).map_err(ConsoleProgressError::Scheduler)
@@ -287,7 +295,16 @@ pub(super) enum FlushBarrierRegistration {
 }
 
 pub(crate) struct FlushBarrier {
+    slot: Option<usize>,
+}
+
+// Boxed wait queues stay at the same address across directory growth. Each
+// registration owns its allocation until unlinking under CONSOLE; destruction
+// happens after dropping that lock, including interrupted/cancelled waits.
+struct FlushNode {
+    barrier: DrainBarrierSet<1>,
     token: Option<DrainBarrierToken>,
+    waiters: crate::kernel::task::WaitQueue,
 }
 
 /// Registers a finite log-ring watermark while the console cursor is stable.
@@ -296,32 +313,80 @@ pub(crate) struct FlushBarrier {
 /// `LOG_RING` before requesting a drain, and the worker releases it before
 /// advancing `CONSOLE`, so the reverse nested order does not exist.
 pub(super) fn register_flush_barrier() -> Result<FlushBarrierRegistration, DrainBarrierError> {
-    CONSOLE.with(|state| {
-        if WRITE_GATE.is_retired() {
-            return Ok(FlushBarrierRegistration::Complete(
-                ConsoleFlushOutcome::Emergency,
-            ));
-        }
-        if state.device.is_none() {
-            return Ok(FlushBarrierRegistration::Complete(
-                ConsoleFlushOutcome::NoConsole,
-            ));
-        }
-        let target_sequence = super::statistics().next_sequence;
-        match state
-            .barriers
-            .register(state.next_sequence, target_sequence)?
-        {
-            DrainBarrierRegistration::Complete => Ok(FlushBarrierRegistration::Complete(
-                ConsoleFlushOutcome::Drained,
-            )),
-            DrainBarrierRegistration::Pending(token) => {
-                Ok(FlushBarrierRegistration::Pending(FlushBarrier {
-                    token: Some(token),
-                }))
+    register_barrier(false)
+}
+
+fn register_barrier(force_pending: bool) -> Result<FlushBarrierRegistration, DrainBarrierError> {
+    let mut node = Some(
+        hyper::mm::try_box(FlushNode {
+            barrier: DrainBarrierSet::new(),
+            token: None,
+            waiters: crate::kernel::task::WaitQueue::new(),
+        })
+        .map_err(|_| DrainBarrierError::NoFreeSlot)?,
+    );
+    let mut prepared = Vec::new();
+    loop {
+        let result = CONSOLE.with(|state| {
+            if !force_pending {
+                if WRITE_GATE.is_retired() {
+                    return Ok(Ok(FlushBarrierRegistration::Complete(
+                        ConsoleFlushOutcome::Emergency,
+                    )));
+                }
+                if state.device.is_none() {
+                    return Ok(Ok(FlushBarrierRegistration::Complete(
+                        ConsoleFlushOutcome::NoConsole,
+                    )));
+                }
+            }
+            if prepared.len() > state.barriers.len() {
+                for (old, new) in state.barriers.iter_mut().zip(prepared.iter_mut()) {
+                    core::mem::swap(old, new);
+                }
+                core::mem::swap(&mut state.barriers, &mut prepared);
+            }
+            let Some(slot) = state.barriers.iter().position(Option::is_none) else {
+                return Err(state.barriers.len());
+            };
+            let target = if force_pending {
+                u64::MAX
+            } else {
+                super::statistics().next_sequence
+            };
+            let candidate = node
+                .as_mut()
+                .unwrap_or_else(|| barrier_invariant("missing flush allocation"));
+            match candidate.barrier.register(state.next_sequence, target) {
+                Ok(DrainBarrierRegistration::Complete) => Ok(Ok(
+                    FlushBarrierRegistration::Complete(ConsoleFlushOutcome::Drained),
+                )),
+                Ok(DrainBarrierRegistration::Pending(token)) => {
+                    candidate.token = Some(token);
+                    state.barriers[slot] = node.take();
+                    state.active_barriers += 1;
+                    Ok(Ok(FlushBarrierRegistration::Pending(FlushBarrier {
+                        slot: Some(slot),
+                    })))
+                }
+                Err(error) => Ok(Err(error)),
+            }
+        });
+        drop(core::mem::take(&mut prepared));
+        match result {
+            Ok(result) => return result,
+            Err(length) => {
+                let length = length
+                    .checked_mul(2)
+                    .ok_or(DrainBarrierError::NoFreeSlot)?
+                    .max(4);
+                prepared
+                    .try_reserve_exact(length)
+                    .map_err(|_| DrainBarrierError::NoFreeSlot)?;
+                prepared.resize_with(length, || None);
             }
         }
-    })
+    }
 }
 
 pub(super) fn wait_for_drain(
@@ -332,17 +397,17 @@ pub(super) fn wait_for_drain(
 
     scheduler::ensure_sleepable()?;
     loop {
-        let token = barrier.token_or_invariant();
+        let slot = barrier.slot_or_invariant();
         // SAFETY: The retained IRQ mask is consumed by the park transition or
         // dropped before this function resumes ordinary Thread execution.
         let (prepared, interrupt_mask) = unsafe {
             CONSOLE.with_mask_retained(|state| {
-                let status = barrier_status_or_invariant(state, token);
+                let status = barrier_status_or_invariant(state, slot);
                 match status {
                     DrainBarrierStatus::Pending => {
                         let registration = scheduler::begin_wait(WaitMobility::Migratable)?;
                         scheduler::prepare_registered_park_locked(
-                            &state.barrier_waiters[token.slot()],
+                            &flush_node(state, slot).waiters,
                             registration,
                         )
                         .map(Some)
@@ -353,7 +418,7 @@ pub(super) fn wait_for_drain(
         };
         let Some(prepared) = prepared? else {
             drop(interrupt_mask);
-            let status = CONSOLE.with(|state| barrier_status_or_invariant(state, token));
+            let status = CONSOLE.with(|state| barrier_status_or_invariant(state, slot));
             let outcome = match status {
                 DrainBarrierStatus::Drained => ConsoleFlushOutcome::Drained,
                 DrainBarrierStatus::Overrun { missed } => ConsoleFlushOutcome::Overrun { missed },
@@ -371,14 +436,12 @@ pub(super) fn wait_for_drain(
 
 #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn register_pending_flush_barrier_for_test() -> Result<FlushBarrier, DrainBarrierError> {
-    CONSOLE.with(
-        |state| match state.barriers.register(state.next_sequence, u64::MAX)? {
-            DrainBarrierRegistration::Pending(token) => Ok(FlushBarrier { token: Some(token) }),
-            DrainBarrierRegistration::Complete => {
-                barrier_invariant("test flush barrier unexpectedly completed during registration")
-            }
-        },
-    )
+    match register_barrier(true)? {
+        FlushBarrierRegistration::Pending(barrier) => Ok(barrier),
+        FlushBarrierRegistration::Complete(_) => {
+            barrier_invariant("test flush completed during registration")
+        }
+    }
 }
 
 #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
@@ -392,10 +455,12 @@ pub(crate) fn wait_pending_flush_barrier_for_test(
 pub(crate) fn flush_barrier_waiter_count_for_test(
     slot: usize,
 ) -> Result<usize, crate::kernel::task::scheduler::Error> {
-    CONSOLE.with(|state| match state.barrier_waiters.get(slot) {
-        Some(waiters) => waiters.len(),
-        None => Err(crate::kernel::task::scheduler::Error::InvalidWaitRegistration),
-    })
+    CONSOLE.with(
+        |state| match state.barriers.get(slot).and_then(Option::as_ref) {
+            Some(node) => node.waiters.len(),
+            None => Err(crate::kernel::task::scheduler::Error::InvalidWaitRegistration),
+        },
+    )
 }
 
 #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
@@ -403,38 +468,45 @@ pub(crate) fn cancel_flush_barrier_waiter_for_test(
     slot: usize,
     thread: crate::kernel::task::thread::ThreadId,
 ) -> Result<bool, crate::kernel::task::scheduler::Error> {
-    CONSOLE.with(|state| match state.barrier_waiters.get(slot) {
-        Some(waiters) => waiters.cancel(thread),
-        None => Err(crate::kernel::task::scheduler::Error::InvalidWaitRegistration),
-    })
+    CONSOLE.with(
+        |state| match state.barriers.get(slot).and_then(Option::as_ref) {
+            Some(node) => node.waiters.cancel(thread),
+            None => Err(crate::kernel::task::scheduler::Error::InvalidWaitRegistration),
+        },
+    )
 }
 
 #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
 pub(crate) fn active_flush_barrier_count_for_test() -> usize {
-    CONSOLE.with(|state| state.barriers.active_count())
+    CONSOLE.with(|state| state.active_barriers)
 }
 
 impl FlushBarrier {
-    fn token_or_invariant(&self) -> DrainBarrierToken {
-        match self.token {
-            Some(token) => token,
-            None => barrier_invariant("flush barrier token consumed twice"),
-        }
+    fn slot_or_invariant(&self) -> usize {
+        self.slot
+            .unwrap_or_else(|| barrier_invariant("flush barrier consumed twice"))
     }
 
     fn release(&mut self) {
-        let Some(token) = self.token.take() else {
+        let Some(slot) = self.slot.take() else {
             return;
         };
-        let result = CONSOLE.with(|state| state.barriers.release(token));
-        if result.is_err() {
-            barrier_invariant("flush barrier release used a stale token")
+        let retired = CONSOLE.with(|state| {
+            let retired = state.barriers[slot].take();
+            if retired.is_some() {
+                state.active_barriers -= 1;
+            }
+            retired
+        });
+        if retired.is_none() {
+            barrier_invariant("flush barrier released twice");
         }
+        drop(retired);
     }
 
     #[cfg(all(feature = "kernel-test", feature = "kernel-self-test"))]
     pub(crate) fn slot_for_test(&self) -> usize {
-        self.token_or_invariant().slot()
+        self.slot_or_invariant()
     }
 }
 
@@ -444,25 +516,33 @@ impl Drop for FlushBarrier {
     }
 }
 
-fn barrier_status_or_invariant(
-    state: &ConsoleState,
-    token: DrainBarrierToken,
-) -> DrainBarrierStatus {
-    match state.barriers.status(token) {
-        Ok(status) => status,
-        Err(_) => barrier_invariant("flush barrier observation used a stale token"),
-    }
+fn flush_node(state: &ConsoleState, slot: usize) -> &FlushNode {
+    state
+        .barriers
+        .get(slot)
+        .and_then(Option::as_deref)
+        .unwrap_or_else(|| barrier_invariant("stale flush barrier"))
+}
+
+fn barrier_status_or_invariant(state: &ConsoleState, slot: usize) -> DrainBarrierStatus {
+    let node = flush_node(state, slot);
+    let token = node
+        .token
+        .unwrap_or_else(|| barrier_invariant("missing flush token"));
+    node.barrier
+        .status(token)
+        .unwrap_or_else(|_| barrier_invariant("invalid flush token"))
 }
 
 fn wake_completed_barriers(
     state: &mut ConsoleState,
 ) -> Result<(), crate::kernel::task::scheduler::Error> {
-    if state.barriers.active_count() == 0 || !crate::kernel::task::is_ready() {
+    if state.active_barriers == 0 || !crate::kernel::task::is_ready() {
         return Ok(());
     }
-    for index in 0..FLUSH_BARRIER_SLOTS {
-        if state.barriers.take_completion_notification(index) {
-            let _ = crate::kernel::task::scheduler::wake_all(&state.barrier_waiters[index])?;
+    for node in state.barriers.iter_mut().flatten() {
+        if node.barrier.take_completion_notification(0) {
+            let _ = crate::kernel::task::scheduler::wake_all(&node.waiters)?;
         }
     }
     Ok(())

@@ -646,8 +646,9 @@ fn ready_index_two_child_removal_keeps_the_successors_right_subtree() {
 }
 
 #[test]
-fn ready_index_handles_the_maximum_registry_without_recursive_mutation() {
-    use algorithms::ready_index::{Links, MAX_NODES, Tree};
+fn ready_index_handles_large_populations_without_recursive_mutation() {
+    use algorithms::ready_index::{Links, Tree};
+    const MAX_NODES: usize = 32_768;
     use ready_index_fixture::{Registry, verify};
     use std::collections::BTreeSet;
     for reverse in [false, true] {
@@ -687,7 +688,7 @@ fn ready_index_rejects_duplicate_and_overlong_paths_before_mutation() {
     use ready_index_fixture::{Registry, verify};
     use std::collections::BTreeSet;
     let mut registry = Registry {
-        nodes: (0..35).map(|id| (id as u64, Links::EMPTY)).collect(),
+        nodes: (0..65).map(|id| (id as u64, Links::EMPTY)).collect(),
     };
     let mut tree = Tree::new();
     for id in 0..3 {
@@ -700,7 +701,7 @@ fn ready_index_rejects_duplicate_and_overlong_paths_before_mutation() {
     );
     // Existing root is 1. A forged sorted chain exceeds the bounded path;
     // rejection must occur before any of its links are rewritten.
-    for id in 1..34 {
+    for id in 1..64 {
         registry.nodes[id].1 = Links {
             left: None,
             right: Some(id + 1),
@@ -715,9 +716,9 @@ fn ready_index_rejects_duplicate_and_overlong_paths_before_mutation() {
             .collect::<Vec<_>>()
     };
     let before = links(&registry);
-    assert!(tree.contains(&mut registry, 34).is_err());
-    assert!(tree.insert(&mut registry, 34).is_err());
-    assert!(tree.remove(&mut registry, 34).is_err());
+    assert!(tree.contains(&mut registry, 64).is_err());
+    assert!(tree.insert(&mut registry, 64).is_err());
+    assert!(tree.remove(&mut registry, 64).is_err());
     assert_eq!(links(&registry), before);
     registry.nodes[1].1.left = Some(1);
     assert!(tree.first(&mut registry).is_err());

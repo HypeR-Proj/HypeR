@@ -44,6 +44,7 @@ mod stack_model;
 mod stage2_blocks;
 mod startup_readiness;
 mod support;
+mod thread_growth;
 mod thread_migration;
 mod thread_sleep;
 mod type_contracts;
@@ -74,6 +75,10 @@ pub(crate) fn run() {
         crate::kernel::task::scheduler::test_wait_queue_topology,
     );
     run_case("kernel scheduler/sync tests", scheduler_sync::run);
+    run_case(
+        "dynamic Thread population and retirement",
+        thread_growth::run,
+    );
     run_case(
         "file-cache growth and pressure ownership tests",
         io_cache::run,

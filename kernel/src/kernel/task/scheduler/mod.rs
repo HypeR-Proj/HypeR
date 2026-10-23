@@ -58,11 +58,6 @@ pub(crate) use balance::idle_for_test as balance_idle_for_test;
 pub(crate) use balance::initialize as initialize_load_balancing;
 pub(crate) use balance::service_irq_prompt as service_balance_irq_prompt;
 
-/// Maximum scheduler-owned Thread population, including the bootstrap Thread.
-pub(crate) const THREAD_CAPACITY: usize = hyper::config::SCHED_MAX_THREADS as usize;
-const _: () = assert!(THREAD_CAPACITY > hyper::cpu::MAX_CPUS);
-const _: () = assert!(THREAD_CAPACITY <= algorithms::ready_index::MAX_NODES);
-
 type CoordinatorLock =
     InterruptShardedLock<Option<Scheduler>, crate::hal::irq::LocalMask, { hyper::cpu::MAX_CPUS }>;
 type TransitionMask = InterruptMaskGuard<crate::hal::irq::LocalMask>;
@@ -139,7 +134,7 @@ impl ResourceRetirement {
     fn begin() -> Self {
         if RETIREMENTS_IN_PROGRESS
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
-                (count < THREAD_CAPACITY).then_some(count + 1)
+                count.checked_add(1)
             })
             .is_err()
         {
@@ -280,7 +275,8 @@ pub enum Error {
     AlreadyInitialized,
     NotInitialized,
     Allocation,
-    ThreadLimit,
+    /// Internal retry: allocate the missing stable table segment outside locks.
+    ThreadTableGrowth,
     IdentifierExhausted,
     CurrentThreadMissing,
     ThreadNotFound,
@@ -964,7 +960,28 @@ fn prepare_boxed_thread(
 fn reserve_thread(
     reserve: impl Fn(&mut Scheduler) -> Result<ThreadReservation, Error>,
 ) -> Result<ThreadReservation, Error> {
-    SCHEDULER.with(|slot| reserve(slot.as_mut().ok_or(Error::NotInitialized)?))
+    let mut growth = None;
+    loop {
+        let result = SCHEDULER.with(|slot| {
+            let scheduler = slot.as_mut().ok_or(Error::NotInitialized)?;
+            if let Some(growth) = growth.as_mut() {
+                scheduler.install_thread_table_growth(growth);
+            }
+            reserve(scheduler)
+        });
+        // Unused competing allocations are always destroyed outside the lock.
+        drop(growth.take());
+        match result {
+            Err(Error::ThreadTableGrowth) => {
+                if let Some(segment) =
+                    read_scheduler(|scheduler| Ok(scheduler.thread_table_growth()))?
+                {
+                    growth = Some(registry::TableGrowth::prepare(segment)?);
+                }
+            }
+            result => return result,
+        }
+    }
 }
 
 fn publish_thread(mut reservation: ThreadReservation, thread: Box<Thread>) -> Result<(), Error> {
