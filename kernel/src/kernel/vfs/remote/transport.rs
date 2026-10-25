@@ -20,7 +20,9 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use hyper::mm::FallibleArc;
 use hyper_filesystem::{
     Timestamp,
-    protocol::{self, DirectoryBatch, DirectoryCursor, Entry, Error, Operation, Request, Response},
+    protocol::{
+        self, DirectoryBatch, DirectoryCursor, Entry, Error, Operation, Request, ResponseRef,
+    },
 };
 
 pub(super) struct Health {
@@ -391,10 +393,10 @@ fn decode_response(
     operation: Operation,
     metadata: Option<&mut Entry>,
 ) -> Result<u64, Error> {
-    let response = Response::decode(bytes, sequence, operation).ok_or(Error::Corrupt)?;
-    let actual = response.result?;
+    let response = ResponseRef::decode(bytes, sequence, operation).ok_or(Error::Corrupt)?;
+    let actual = response.result()?;
     if let Some(metadata) = metadata {
-        *metadata = response.entry;
+        response.entry_into(metadata);
     }
     Ok(actual)
 }

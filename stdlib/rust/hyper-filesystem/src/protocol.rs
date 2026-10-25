@@ -235,6 +235,35 @@ impl Response {
         Some(())
     }
     pub fn decode(input: &[u8], sequence: u64, operation: Operation) -> Option<Self> {
+        let response = ResponseRef::decode(input, sequence, operation)?;
+        let mut entry = Entry::empty();
+        response.entry_into(&mut entry);
+        Some(Self {
+            sequence,
+            operation,
+            result: response.result,
+            entry,
+        })
+    }
+}
+
+/// A fully validated response borrowing its name from the wire frame.
+/// Scalar consumers need no name scratch; metadata consumers can fill existing
+/// storage without retaining an intermediate owned `Response` on their stack.
+pub struct ResponseRef<'a> {
+    result: Result<u64, Error>,
+    name: &'a [u8],
+    kind: u32,
+    mode: u32,
+    size: u64,
+    created: Option<Timestamp>,
+    accessed: Option<Timestamp>,
+    modified: Option<Timestamp>,
+}
+
+impl<'a> ResponseRef<'a> {
+    /// Validate the entire frame, including metadata on error/scalar replies.
+    pub fn decode(input: &'a [u8], sequence: u64, operation: Operation) -> Option<Self> {
         if input.len() != RESPONSE_BYTES
             || get(input, 0)? != sequence
             || Operation::decode(get(input, 8)?)? != operation
@@ -256,24 +285,37 @@ impl Response {
         {
             return None;
         }
-        let mut entry = Entry::empty();
-        entry.kind = kind;
-        entry.mode = mode;
-        entry.size = get(input, 48)?;
-        entry.name_len = length;
-        entry.name[..length].copy_from_slice(input.get(112..112 + length)?);
-        if !valid_name(&entry.name[..length]) {
+        let name = input.get(112..112 + length)?;
+        if !valid_name(name) {
             return None;
         }
-        entry.created = get_time(input, 64)?;
-        entry.accessed = get_time(input, 80)?;
-        entry.modified = get_time(input, 96)?;
         Some(Self {
-            sequence,
-            operation,
             result,
-            entry,
+            name,
+            kind,
+            mode,
+            size: get(input, 48)?,
+            created: get_time(input, 64)?,
+            accessed: get_time(input, 80)?,
+            modified: get_time(input, 96)?,
         })
+    }
+
+    pub const fn result(&self) -> Result<u64, Error> {
+        self.result
+    }
+
+    /// Replace caller-owned metadata only after full response validation.
+    pub fn entry_into(&self, entry: &mut Entry) {
+        entry.name[..self.name.len()].copy_from_slice(self.name);
+        entry.name[self.name.len()..].fill(0);
+        entry.name_len = self.name.len();
+        entry.kind = self.kind;
+        entry.mode = self.mode;
+        entry.size = self.size;
+        entry.created = self.created;
+        entry.accessed = self.accessed;
+        entry.modified = self.modified;
     }
 }
 fn valid_result(operation: Operation, result: Result<u64, Error>) -> bool {
