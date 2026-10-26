@@ -73,6 +73,7 @@ pub(super) fn dispatch_operation(
         abi::NativeOperation::CpuInspectorTraceStart
             | abi::NativeOperation::CpuInspectorTraceStop
             | abi::NativeOperation::CpuInspectorTraceRead
+            | abi::NativeOperation::ByteChannelTraceRpc
     );
     #[cfg(feature = "kernel-trace")]
     if trace_call {
@@ -190,6 +191,9 @@ pub(super) fn dispatch_operation(
         abi::NativeOperation::ObjectWaitMany => handlers::sys_object_wait_many(services, arguments),
         abi::NativeOperation::ByteChannelWrite => {
             handlers::sys_byte_channel_write(services, receiver, arguments)
+        }
+        abi::NativeOperation::ByteChannelTraceRpc => {
+            handlers::sys_byte_channel_trace_rpc(services, receiver, arguments)
         }
         abi::NativeOperation::ByteChannelRead => {
             handlers::sys_byte_channel_read(services, receiver, arguments)

@@ -151,6 +151,8 @@ impl PreparedSignalWait {
         charge: CommittedCharge,
     ) -> Result<Self, SignalWaitError> {
         let waiter = try_box(SignalWaiter {
+            #[cfg(feature = "kernel-trace")]
+            trace_source: 0,
             ticket: None,
             _source: None,
             requested,
@@ -164,6 +166,8 @@ impl PreparedSignalWait {
 }
 
 struct SignalWaiter {
+    #[cfg(feature = "kernel-trace")]
+    trace_source: u64,
     // `None` exists only while the fallible preparation is unpublished.
     ticket: Option<WaitTicket>,
     _source: Option<crate::kernel::task::WaitSourceRegistration>,
@@ -214,6 +218,8 @@ struct State {
 /// Signal state embedded at a stable address in one kernel object.
 pub(crate) struct SignalState {
     state: StateLock,
+    #[cfg(feature = "kernel-trace")]
+    trace_id: core::sync::atomic::AtomicU64,
 }
 
 impl SignalState {
@@ -224,6 +230,8 @@ impl SignalState {
     /// Constructs unpublished signal state with one authoritative initial level.
     pub(crate) const fn with_initial_level(level: SignalMask) -> Self {
         Self {
+            #[cfg(feature = "kernel-trace")]
+            trace_id: core::sync::atomic::AtomicU64::new(0),
             state: StateLock::new(State {
                 level,
                 sequence: 0,
@@ -232,6 +240,27 @@ impl SignalState {
                 observers: None,
             }),
         }
+    }
+
+    /// Bind a Channel's receive queue before either endpoint is published.
+    #[cfg(feature = "kernel-trace")]
+    pub(crate) fn with_trace_identity(self, id: u64) -> Self {
+        self.trace_id
+            .store(id, core::sync::atomic::Ordering::Relaxed);
+        self
+    }
+
+    #[cfg(feature = "kernel-trace")]
+    fn trace_identity(&self) -> u64 {
+        use core::sync::atomic::Ordering;
+        let existing = self.trace_id.load(Ordering::Relaxed);
+        if existing != 0 {
+            return existing;
+        }
+        let id = crate::kernel::trace::identity();
+        self.trace_id
+            .compare_exchange(0, id, Ordering::Relaxed, Ordering::Relaxed)
+            .map_or_else(|winner| winner, |_| id)
     }
 
     pub(crate) fn update(&self, clear: SignalMask, set: SignalMask) -> Result<(), SignalWaitError> {
@@ -356,6 +385,18 @@ impl SignalState {
     ) -> Result<SignalWaitOutcome, SignalWaitError> {
         let ticket = registration.ticket();
         prepared.waiter.ticket = Some(ticket);
+        #[cfg(feature = "kernel-trace")]
+        {
+            prepared.waiter.trace_source = self.trace_identity();
+        }
+        crate::tracepoint!(
+            Ipc,
+            "signal_wait",
+            source_id = prepared.waiter.trace_source,
+            thread = ticket.thread().get(),
+            wait = ticket.generation(),
+            signals = prepared.waiter.requested.bits()
+        );
         prepared.waiter._source = Some(crate::kernel::task::WaitSourceRegistration::new(
             ticket,
             crate::kernel::task::WaitSource::Signal,
@@ -407,6 +448,18 @@ impl SignalState {
         ticket: WaitTicket,
     ) {
         prepared.waiter.ticket = Some(ticket);
+        #[cfg(feature = "kernel-trace")]
+        {
+            prepared.waiter.trace_source = self.trace_identity();
+        }
+        crate::tracepoint!(
+            Ipc,
+            "signal_wait",
+            source_id = prepared.waiter.trace_source,
+            thread = ticket.thread().get(),
+            wait = ticket.generation(),
+            signals = prepared.waiter.requested.bits()
+        );
         prepared.waiter._source = Some(crate::kernel::task::WaitSourceRegistration::new(
             ticket,
             crate::kernel::task::WaitSource::Signal,
@@ -536,8 +589,17 @@ fn notify_waiter_if_matching(
         signals: level,
         sequence,
     };
-    let resolution =
-        scheduler::notify_registered_with(ticket, || waiter.observed = Some(snapshot))?;
+    let resolution = scheduler::notify_registered_with(ticket, || {
+        waiter.observed = Some(snapshot);
+        crate::tracepoint!(
+            Ipc,
+            "signal_wake",
+            source_id = waiter.trace_source,
+            thread = ticket.thread().get(),
+            wait = ticket.generation(),
+            signals = level.bits()
+        );
+    })?;
     if resolution.won != waiter.observed.is_some() {
         signal_invariant()
     }

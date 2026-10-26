@@ -17,7 +17,9 @@ For scheduler, syscall, IPC and I/O timelines, use the independent
 ## Build and authority
 
 The production feature `pmu-profiling` is **off by default**, independently of
-`kernel-test`. Enable it explicitly, preserving any other desired features:
+`kernel-test`. Enable **PMUv3 sampling** (`CONFIG_FEATURE_PMU_PROFILING`)
+under **Kernel → Optional kernel functionality** in `make menuconfig`. For an
+isolated build, an explicit override also works:
 
 ```sh
 make board-build ARCH=aarch64 KERNEL_FEATURES='rtc runtime-symbols crash-console pmu-profiling'
@@ -25,9 +27,9 @@ make board-build ARCH=aarch64 KERNEL_FEATURES='rtc runtime-symbols crash-console
 make rpi5-sd ARCH=aarch64 KERNEL_FEATURES='rtc runtime-symbols crash-console pmu-profiling'
 ```
 
-A product JSON can select the same feature in `kernel.features`; use either that
-selection or the Make override, not both. `perf` belongs to the ordinary system
-application profile and can be omitted through product component selection.
+The product's advanced `CONFIG_KERNEL_FEATURES` override can select the same
+production feature list; leave it at `"default"` to follow the kernel menu.
+`perf` belongs to the ordinary system application profile and can be omitted through product component selection.
 Without the feature, or without a supported firmware PMU, its queries report
 `NOT_SUPPORTED`. RISC-V and x86-64 currently report unsupported as well.
 

@@ -80,8 +80,10 @@ VM/object ownership observations.
 
 ## Optional heap profiling
 
-The `heap-profiling` kernel feature is disabled by default. Add it to the
-selected production feature set for a diagnostic build:
+The `heap-profiling` kernel feature is disabled by default. Enable **Detailed
+heap accounting** (`CONFIG_FEATURE_HEAP_PROFILING`) under **Kernel → Optional
+kernel functionality** in `make menuconfig`. An isolated build can also override
+the selected production feature set:
 
 ```sh
 make image ARCH=aarch64 \

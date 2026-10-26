@@ -4,6 +4,8 @@
 //! observed matching boundaries. Gaps invalidate pending spans; an incomplete
 //! stream is shown as instants instead of inventing timing across unknown loss.
 use super::model::{Capture, Event};
+#[path = "causal.rs"]
+mod causal;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
@@ -63,6 +65,14 @@ fn fields(c: &Capture, event: &Event) -> Value {
                     | "vm"
                     | "domain"
                     | "tag"
+                    | "queue"
+                    | "message"
+                    | "connection"
+                    | "request"
+                    | "source_id"
+                    | "wait"
+                    | "parent_connection"
+                    | "parent_request"
             ) {
                 json!(format!("{value:#x}"))
             } else if name == "status" {
@@ -112,6 +122,21 @@ impl<W: Write> JsonTrace<W> {
         }
         self.event(json!({"ph":"X","pid":pid,"tid":tid,"name":name,"cat":category,"ts":self.time(begin),"dur":(end-begin) as f64 / 1000.0,"args":args}))
     }
+
+    /// Explicit zero-duration slices let Perfetto bind arrows even when there
+    /// is no enclosing syscall (kernel-originated messages and wakeups).
+    fn anchor(
+        &mut self,
+        tid: u32,
+        event: &Event,
+        name: &str,
+        id: u64,
+        outgoing: bool,
+        args: Value,
+    ) -> io::Result<()> {
+        self.event(json!({"ph":"X","dur":0,"pid":2,"tid":tid,"name":name,"cat":"ipc",
+            "ts":self.time(event.time),"bind_id":format!("{id:#x}"),"flow_out":outgoing,"flow_in":!outgoing,"args":args}))
+    }
 }
 /// CPU lanes represent observed on-CPU intervals. Per-thread lanes show elapsed
 /// syscall/VM/fault time (which can include descheduling), and runnable latency.
@@ -160,6 +185,11 @@ pub fn perfetto(c: &Capture, output: impl Write) -> io::Result<()> {
     let mut io_lanes = BTreeMap::new();
     let mut depth = BTreeMap::<u64, u64>::new();
     let uncertain = !c.cross_cpu_spans();
+    let mut causal = if uncertain {
+        causal::Links::default()
+    } else {
+        causal::Links::new(c)
+    };
     for event in &c.events {
         let site = &c.sites[event.site];
         let gap = previous_sequence[event.cpu]
@@ -173,6 +203,7 @@ pub fn perfetto(c: &Capture, output: impl Write) -> io::Result<()> {
             irq.clear();
             io.clear();
             depth.clear();
+            causal.clear();
         }
         let thread = c.value(event, "thread");
         let tid = thread.and_then(|id| threads.get(&id).copied());
@@ -181,6 +212,9 @@ pub fn perfetto(c: &Capture, output: impl Write) -> io::Result<()> {
             "name":site.name,"cat":site.category,"ts":w.time(event.time),"args":fields(c,event)}))?;
         if gap {
             w.event(json!({"ph":"i","s":"t","pid":1,"tid":event.cpu+1,"name":"TRACE GAP","ts":w.time(event.time),"args":{"sequence":event.sequence}}))?;
+        }
+        if !uncertain {
+            causal.observe(c, event, &threads, &mut w)?;
         }
         if site.name == "sched_switch" {
             if let (Some(prev), Some(next)) = (c.value(event, "prev"), c.value(event, "next")) {

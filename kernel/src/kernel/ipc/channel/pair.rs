@@ -93,6 +93,8 @@ struct PairState {
 }
 
 pub(super) struct Pair {
+    #[cfg(feature = "kernel-trace")]
+    trace_id: u64,
     state: PairLock,
     signals: [SignalState; 2],
     publishing: [AtomicBool; 2],
@@ -120,17 +122,38 @@ impl Pair {
     }
 
     pub(super) fn new(charge: CommittedCharge) -> Self {
+        #[cfg(feature = "kernel-trace")]
+        let trace_id = crate::kernel::trace::identity();
+        let signals = [
+            SignalState::with_initial_level(super::ByteChannel::WRITABLE),
+            SignalState::with_initial_level(super::ByteChannel::WRITABLE),
+        ];
+        #[cfg(feature = "kernel-trace")]
+        let [first, second] = signals;
+        #[cfg(feature = "kernel-trace")]
+        let signals = [
+            first.with_trace_identity(trace_id),
+            second.with_trace_identity(if trace_id == 0 { 0 } else { trace_id + 1 }),
+        ];
         Self {
+            #[cfg(feature = "kernel-trace")]
+            trace_id,
             state: PairLock::new(PairState {
                 endpoints: [EndpointState::new(), EndpointState::new()],
                 next_message_sequence: 1,
             }),
-            signals: [
-                SignalState::with_initial_level(super::ByteChannel::WRITABLE),
-                SignalState::with_initial_level(super::ByteChannel::WRITABLE),
-            ],
+            signals,
             publishing: [AtomicBool::new(false), AtomicBool::new(false)],
             _charge: charge,
+        }
+    }
+
+    #[cfg(feature = "kernel-trace")]
+    pub(super) fn trace_queue(&self, side: Side) -> u64 {
+        if self.trace_id == 0 {
+            0
+        } else {
+            self.trace_id + side.index() as u64
         }
     }
 
@@ -192,6 +215,16 @@ impl Pair {
             endpoint.incoming.messages = checked_add(endpoint.incoming.messages, 1);
             endpoint.incoming.bytes = checked_add(endpoint.incoming.bytes, expected.bytes_u64());
             endpoint.incoming.push_back(message);
+            // Observe publication under the queue lock, before another CPU can
+            // commit a receive. Reservations and failed sends emit no enqueue.
+            crate::tracepoint!(
+                Ipc,
+                "ipc_enqueue",
+                queue = self.trace_queue(target),
+                message = sequence.0.get(),
+                thread = crate::kernel::trace::actor(),
+                bytes = expected.bytes_u64()
+            );
             finalize_close(endpoint)
         });
         self.reconcile_all();
@@ -257,6 +290,14 @@ impl Pair {
             endpoint.receive_claimed = false;
             endpoint.incoming.messages = checked_sub(endpoint.incoming.messages, 1);
             endpoint.incoming.bytes = checked_sub(endpoint.incoming.bytes, info.bytes_u64());
+            crate::tracepoint!(
+                Ipc,
+                "ipc_dequeue",
+                queue = self.trace_queue(side),
+                message = info.sequence.0.get(),
+                thread = crate::kernel::trace::actor(),
+                bytes = info.bytes_u64()
+            );
             finalize_close(endpoint)
         });
         self.reconcile_all();

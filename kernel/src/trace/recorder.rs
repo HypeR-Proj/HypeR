@@ -40,6 +40,13 @@ impl Session {
 #[derive(Clone, Copy)]
 pub struct Ticket(u64);
 
+impl Ticket {
+    /// Capture identity for explicit request contexts; never an authority token.
+    pub const fn generation(self) -> u64 {
+        self.0 >> FILTER_BITS
+    }
+}
+
 #[derive(Debug)]
 pub struct Batch {
     pub count: usize,

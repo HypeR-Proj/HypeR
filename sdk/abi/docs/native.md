@@ -130,6 +130,18 @@ Enum domains contain mutually exclusive values; flags contain independent bits.
 Constants contain bounds, sizes, addresses and sentinels. All are exported as
 fixed-width integer constants; grouping does not change wire field types.
 
+### `rpc_trace_phase` (enum)
+
+Optional, observational `ByteChannel` RPC annotations. Not transport operations.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `rpc_trace_query` | `0` | Probe support; all other arguments must be zero. |
+| `rpc_trace_client_begin` | `1` |  |
+| `rpc_trace_client_end` | `2` |  |
+| `rpc_trace_server_begin` | `3` |  |
+| `rpc_trace_server_end` | `4` |  |
+
 ### `handle_encoding` (constants)
 
 Handle value classes; the remaining bits are opaque process-local data.
@@ -777,6 +789,7 @@ RISC-V ISA extensions accepted in guest configuration.
 
 ## Semantic rules
 
+- byte_channel_trace_rpc is optional observational instrumentation requiring READ|WRITE on the endpoint; it cannot enable, read or stop a capture. A kernel without kernel-trace returns NOT_SUPPORTED. Query requires five zero arguments. Begin phases require a nonzero protocol request ID and detail is a caller-defined operation; generation/parent_connection/parent_request are either all zero or an explicitly propagated parent context. End phases carry the begin generation, nonzero request ID, caller-defined completion detail and zero parent fields. Success returns the admitted capture generation (zero when inactive or stale) and a boot-local connection identity shared by the endpoints. Contexts grant no authority. Request IDs must be unique among concurrent calls on a connection; clients and servers explicitly annotate their own boundaries. The kernel never parses opaque message payloads, infers parentage from thread adjacency, or retains annotations after the call. Stale generations do not correlate into a replacement capture. Missing boundaries produce incomplete observations rather than fabricated success.
 - Native invocations carry a process-local target handle in the selector register, a separate object-local operation, and six business argument registers. AArch64 uses x8/x6/x0..x5; RISC-V uses a7/a6/a0..a5. No global syscall number or implicit privileged target exists. Common handle operations use 0..5; object-specific operations start at 256 and may repeat across object kinds. Unknown target handles fail before operation dispatch; unknown operations return NOT_SUPPORTED. The receiver is not duplicated in the business arguments.
 - ExecutionContext and ObjectFactory are ordinary process-local, nontransferable capabilities bound to their creating Process. They never grant operations on another Process, Thread, address space or resource domain. ExecutionContext methods act on the invoking Thread or its Process; ObjectFactory charges every allocation to that Process's resource domain. SystemInfo grants public read-only ABI, configuration and clock observations. Closing or attenuating a capability does not implicitly recreate its authority.
 - device_dma_fault_info requires INSPECT and ASSIGN_DEVICE on the physical-device handle. It returns the first retained DMA containment report without consuming it; an all-zero record means no report. DMA_FAULT is a persistent level signal observed with WAIT. Claim and claim_matching grant WAIT. Fault evidence follows the device object across handle transfer; querying does not acknowledge or resume DMA. The kernel never selects a userspace process or stops a VM for this notification. The formal I/O runtime queries after adoption and journals each device's first report; bootstrap does not consume it. timestamp_ns is monotonic boot time. source 1 identifies SMMUv3. scope 1 means stream quarantine, with code holding the SMMUv3 event ID; scope 2 means controller containment, with code holding the captured GERROR bits (zero is possible for a software-detected failure). stream_id always identifies this handle's device. ADDRESS_VALID, READ and WRITE describe the address only for translation/access faults; controller reports disclose no other device's address. reserved is zero. A first stream report remains unchanged if the whole controller later fails. Quarantine and backing retention remain independent of observer presence or progress.
@@ -1161,6 +1174,26 @@ Object-local method `byte_channel_read`.
 | Capability effects | `endpoint: Borrow, kind=byte_channel, rights=0x10` |
 | User memory | `bytes: Write, len=byte_capacity bytes, max-bytes=65536; order=0` |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
+| Audit | `Capability` |
+
+Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+
+Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+
+### `byte_channel_trace_rpc`
+
+Object-local method `byte_channel_trace_rpc`.
+
+| Property | Contract |
+| --- | --- |
+| Receiver | `receiver: Borrow, kind=byte_channel, rights=0x30` |
+| Operation | 258 |
+| Feature | `Core` |
+| Arguments | `phase: u64`, `request: u64`, `detail: u64`, `generation: u64`, `parent_connection: u64`, `parent_request: u64` |
+| Results | `generation: u64`, `connection: u64` |
+| Capability effects | `receiver: Borrow, kind=byte_channel, rights=0x30` |
+| User memory | — |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Capability` |
 
 Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.

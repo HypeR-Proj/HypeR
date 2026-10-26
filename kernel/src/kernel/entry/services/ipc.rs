@@ -16,6 +16,21 @@ use crate::kernel::mm::user_space::UserSlice;
 use crate::kernel::process::UserThreadPhase;
 
 impl IpcServices for ProcessServices<'_> {
+    fn trace_byte_channel_rpc(
+        &self,
+        endpoint: &InvocationReceiver,
+        arguments: &[u64; 6],
+    ) -> Result<[u64; 2], hyper::abi::native::HyperNativeStatus> {
+        // Admission already validated this receiver's kind and READ|WRITE.
+        let endpoint = endpoint
+            .resolve::<crate::kernel::ipc::ByteChannel>(
+                crate::kernel::authority::Rights::READ
+                    .union(crate::kernel::authority::Rights::WRITE),
+            )
+            .map_err(|_| hyper::abi::native::HYPER_NATIVE_STATUS_INTERNAL)?;
+        endpoint.object().trace_rpc(arguments)
+    }
+
     fn create_byte_channel(&self) -> Result<[HandleValue; 2], ByteChannelServiceError> {
         crate::kernel::ipc::byte_channel_create(self.process)
     }

@@ -205,14 +205,15 @@ named VM commands, and `/data/vms.json` board configuration.
 
 HypeR uses an in-tree, dependency-free Kconfig-like tool. It reads
 `kernel/Kconfig`, writes `kernel/.config`, validates dependencies and ranges,
-and exports declared symbols as checked Rust `cfg` values and typed constants.
+and selects optional Cargo features. Other declared symbols are exported as
+checked Rust `cfg` values and typed constants.
 
 ```sh
 make menuconfig                 # product; Kernel opens its independent menu
-make defconfig                  # restore product defaults into .config
+make defconfig                  # restore product and kernel architecture defaults
 make olddefconfig               # migrate the product .config
 make -C kernel olddefconfig      # migrate kernel/.config
-make -C kernel defconfig         # restore kernel architecture defaults
+make -C kernel defconfig         # restore only kernel architecture defaults
 ```
 
 `CONFIG_FILE` selects an alternate complete configuration without replacing a

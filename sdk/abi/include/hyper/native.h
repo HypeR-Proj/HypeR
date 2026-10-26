@@ -16,6 +16,8 @@
 /**
  * @page hyper_native_contract Native ABI semantic contract
  *
+ * - byte_channel_trace_rpc is optional observational instrumentation requiring READ|WRITE on the endpoint; it cannot enable, read or stop a capture. A kernel without kernel-trace returns NOT_SUPPORTED. Query requires five zero arguments. Begin phases require a nonzero protocol request ID and detail is a caller-defined operation; generation/parent_connection/parent_request are either all zero or an explicitly propagated parent context. End phases carry the begin generation, nonzero request ID, caller-defined completion detail and zero parent fields. Success returns the admitted capture generation (zero when inactive or stale) and a boot-local connection identity shared by the endpoints. Contexts grant no authority. Request IDs must be unique among concurrent calls on a connection; clients and servers explicitly annotate their own boundaries. The kernel never parses opaque message payloads, infers parentage from thread adjacency, or retains annotations after the call. Stale generations do not correlate into a replacement capture. Missing boundaries produce incomplete observations rather than fabricated success.
+ *
  * - Native invocations carry a process-local target handle in the selector register, a separate object-local operation, and six business argument registers. AArch64 uses x8/x6/x0..x5; RISC-V uses a7/a6/a0..a5. No global syscall number or implicit privileged target exists. Common handle operations use 0..5; object-specific operations start at 256 and may repeat across object kinds. Unknown target handles fail before operation dispatch; unknown operations return NOT_SUPPORTED. The receiver is not duplicated in the business arguments.
  *
  * - ExecutionContext and ObjectFactory are ordinary process-local, nontransferable capabilities bound to their creating Process. They never grant operations on another Process, Thread, address space or resource domain. ExecutionContext methods act on the invoking Thread or its Process; ObjectFactory charges every allocation to that Process's resource domain. SystemInfo grants public read-only ABI, configuration and clock observations. Closing or attenuating a capability does not implicitly recreate its authority.
@@ -870,6 +872,51 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * Wait signal `peer_closed` for `guest_mailbox` objects; bit positions are object-local.
  */
 #define HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_PEER_CLOSED (UINT64_C(1) << 2)
+
+/**
+ * @defgroup hyper_native_rpc_trace_phase rpc_trace_phase (enum)
+ * @ingroup hyper_native
+ * Optional, observational `ByteChannel` RPC annotations. Not transport operations.
+ * @{
+ */
+/**
+ * `rpc_trace_query` in the `rpc_trace_phase` enum domain.
+ *
+ * Optional, observational `ByteChannel` RPC annotations. Not transport operations.
+ * Select one value; this is not a bit mask.
+ *
+ * Probe support; all other arguments must be zero.
+ */
+#define HYPER_NATIVE_RPC_TRACE_QUERY UINT64_C(0)
+/**
+ * `rpc_trace_client_begin` in the `rpc_trace_phase` enum domain.
+ *
+ * Optional, observational `ByteChannel` RPC annotations. Not transport operations.
+ * Select one value; this is not a bit mask.
+ */
+#define HYPER_NATIVE_RPC_TRACE_CLIENT_BEGIN UINT64_C(1)
+/**
+ * `rpc_trace_client_end` in the `rpc_trace_phase` enum domain.
+ *
+ * Optional, observational `ByteChannel` RPC annotations. Not transport operations.
+ * Select one value; this is not a bit mask.
+ */
+#define HYPER_NATIVE_RPC_TRACE_CLIENT_END UINT64_C(2)
+/**
+ * `rpc_trace_server_begin` in the `rpc_trace_phase` enum domain.
+ *
+ * Optional, observational `ByteChannel` RPC annotations. Not transport operations.
+ * Select one value; this is not a bit mask.
+ */
+#define HYPER_NATIVE_RPC_TRACE_SERVER_BEGIN UINT64_C(3)
+/**
+ * `rpc_trace_server_end` in the `rpc_trace_phase` enum domain.
+ *
+ * Optional, observational `ByteChannel` RPC annotations. Not transport operations.
+ * Select one value; this is not a bit mask.
+ */
+#define HYPER_NATIVE_RPC_TRACE_SERVER_END UINT64_C(4)
+/** @} */
 
 /**
  * @defgroup hyper_native_handle_encoding handle_encoding (constants)
@@ -3455,6 +3502,27 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
  */
 #define HYPER_NATIVE_OP_BYTE_CHANNEL_READ UINT64_C(257)
+
+/**
+ * Object-local method `byte_channel_trace_rpc`.
+ *
+ * | Property | Contract |
+ * | --- | --- |
+ * | Receiver | `receiver: Borrow, kind=byte_channel, rights=0x30` |
+ * | Operation | 258 |
+ * | Feature | `Core` |
+ * | Arguments | `phase: u64`, `request: u64`, `detail: u64`, `generation: u64`, `parent_connection: u64`, `parent_request: u64` |
+ * | Results | `generation: u64`, `connection: u64` |
+ * | Capability effects | `receiver: Borrow, kind=byte_channel, rights=0x30` |
+ * | User memory | — |
+ * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+ * | Audit | `Capability` |
+ *
+ * Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+ *
+ * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+ */
+#define HYPER_NATIVE_OP_BYTE_CHANNEL_TRACE_RPC UINT64_C(258)
 
 /**
  * Object-local method `console_read`.
