@@ -66,6 +66,16 @@ macro_rules! constant_groups {
 }
 
 constant_groups! {
+    /// Optional, observational `ByteChannel` RPC annotations. Not transport operations.
+    enum rpc_trace_phase {
+        /// Probe support; all other arguments must be zero.
+        rpc_trace_query = 0,
+        rpc_trace_client_begin = 1,
+        rpc_trace_client_end = 2,
+        rpc_trace_server_begin = 3,
+        rpc_trace_server_end = 4,
+    }
+
     /// Handle value classes; the remaining bits are opaque process-local data.
     constants handle_encoding {
         /// No handle is present. This value never identifies a live handle.

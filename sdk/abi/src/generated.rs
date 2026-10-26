@@ -375,6 +375,34 @@ pub const HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_WRITABLE: u64 = 1_u64 << 1;
 /// Wait signal `peer_closed` for `guest_mailbox` objects; bit positions are object-local.
 pub const HYPER_NATIVE_SIGNAL_GUEST_MAILBOX_PEER_CLOSED: u64 = 1_u64 << 2;
 
+/// `rpc_trace_query` in the `rpc_trace_phase` enum domain.
+///
+/// Optional, observational `ByteChannel` RPC annotations. Not transport operations.
+/// Select one value; this is not a bit mask.
+///
+/// Probe support; all other arguments must be zero.
+pub const HYPER_NATIVE_RPC_TRACE_QUERY: u64 = 0;
+/// `rpc_trace_client_begin` in the `rpc_trace_phase` enum domain.
+///
+/// Optional, observational `ByteChannel` RPC annotations. Not transport operations.
+/// Select one value; this is not a bit mask.
+pub const HYPER_NATIVE_RPC_TRACE_CLIENT_BEGIN: u64 = 1;
+/// `rpc_trace_client_end` in the `rpc_trace_phase` enum domain.
+///
+/// Optional, observational `ByteChannel` RPC annotations. Not transport operations.
+/// Select one value; this is not a bit mask.
+pub const HYPER_NATIVE_RPC_TRACE_CLIENT_END: u64 = 2;
+/// `rpc_trace_server_begin` in the `rpc_trace_phase` enum domain.
+///
+/// Optional, observational `ByteChannel` RPC annotations. Not transport operations.
+/// Select one value; this is not a bit mask.
+pub const HYPER_NATIVE_RPC_TRACE_SERVER_BEGIN: u64 = 3;
+/// `rpc_trace_server_end` in the `rpc_trace_phase` enum domain.
+///
+/// Optional, observational `ByteChannel` RPC annotations. Not transport operations.
+/// Select one value; this is not a bit mask.
+pub const HYPER_NATIVE_RPC_TRACE_SERVER_END: u64 = 4;
+
 /// `handle_invalid` in the `handle_encoding` constants domain.
 ///
 /// Handle value classes; the remaining bits are opaque process-local data.
@@ -2031,6 +2059,25 @@ pub const HYPER_NATIVE_OP_BYTE_CHANNEL_WRITE: u64 = 256;
 ///
 /// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
 pub const HYPER_NATIVE_OP_BYTE_CHANNEL_READ: u64 = 257;
+
+/// Object-local method `byte_channel_trace_rpc`.
+///
+/// | Property | Contract |
+/// | --- | --- |
+/// | Receiver | `receiver: Borrow, kind=byte_channel, rights=0x30` |
+/// | Operation | 258 |
+/// | Feature | `Core` |
+/// | Arguments | `phase: u64`, `request: u64`, `detail: u64`, `generation: u64`, `parent_connection: u64`, `parent_request: u64` |
+/// | Results | `generation: u64`, `connection: u64` |
+/// | Capability effects | `receiver: Borrow, kind=byte_channel, rights=0x30` |
+/// | User memory | — |
+/// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+/// | Audit | `Capability` |
+///
+/// Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+///
+/// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+pub const HYPER_NATIVE_OP_BYTE_CHANNEL_TRACE_RPC: u64 = 258;
 
 /// Object-local method `console_read`.
 ///
@@ -5466,6 +5513,8 @@ pub enum NativeOperation {
     ByteChannelWrite,
     /// Decoded method; see [`HYPER_NATIVE_OP_BYTE_CHANNEL_READ`] for its contract.
     ByteChannelRead,
+    /// Decoded method; see [`HYPER_NATIVE_OP_BYTE_CHANNEL_TRACE_RPC`] for its contract.
+    ByteChannelTraceRpc,
     /// Decoded method; see [`HYPER_NATIVE_OP_CONSOLE_READ`] for its contract.
     ConsoleRead,
     /// Decoded method; see [`HYPER_NATIVE_OP_CONSOLE_WRITE`] for its contract.
@@ -5893,6 +5942,7 @@ impl NativeOperation {
             (HYPER_NATIVE_OBJECT_OBJECT_FACTORY, HYPER_NATIVE_OP_BYTE_CHANNEL_CREATE) => Some(Self::ByteChannelCreate),
             (HYPER_NATIVE_OBJECT_BYTE_CHANNEL, HYPER_NATIVE_OP_BYTE_CHANNEL_WRITE) => Some(Self::ByteChannelWrite),
             (HYPER_NATIVE_OBJECT_BYTE_CHANNEL, HYPER_NATIVE_OP_BYTE_CHANNEL_READ) => Some(Self::ByteChannelRead),
+            (HYPER_NATIVE_OBJECT_BYTE_CHANNEL, HYPER_NATIVE_OP_BYTE_CHANNEL_TRACE_RPC) => Some(Self::ByteChannelTraceRpc),
             (HYPER_NATIVE_OBJECT_CONSOLE, HYPER_NATIVE_OP_CONSOLE_READ) => Some(Self::ConsoleRead),
             (HYPER_NATIVE_OBJECT_CONSOLE, HYPER_NATIVE_OP_CONSOLE_WRITE) => Some(Self::ConsoleWrite),
             (HYPER_NATIVE_OBJECT_DIRECTORY, HYPER_NATIVE_OP_DIRECTORY_OPEN_FILE) => Some(Self::DirectoryOpenFile),
@@ -6094,6 +6144,7 @@ impl NativeOperation {
             Self::ByteChannelCreate => HYPER_NATIVE_OP_BYTE_CHANNEL_CREATE,
             Self::ByteChannelWrite => HYPER_NATIVE_OP_BYTE_CHANNEL_WRITE,
             Self::ByteChannelRead => HYPER_NATIVE_OP_BYTE_CHANNEL_READ,
+            Self::ByteChannelTraceRpc => HYPER_NATIVE_OP_BYTE_CHANNEL_TRACE_RPC,
             Self::ConsoleRead => HYPER_NATIVE_OP_CONSOLE_READ,
             Self::ConsoleWrite => HYPER_NATIVE_OP_CONSOLE_WRITE,
             Self::DirectoryOpenFile => HYPER_NATIVE_OP_DIRECTORY_OPEN_FILE,
@@ -6294,6 +6345,7 @@ impl NativeOperation {
             Self::ByteChannelCreate => Some(HYPER_NATIVE_OBJECT_OBJECT_FACTORY),
             Self::ByteChannelWrite => Some(HYPER_NATIVE_OBJECT_BYTE_CHANNEL),
             Self::ByteChannelRead => Some(HYPER_NATIVE_OBJECT_BYTE_CHANNEL),
+            Self::ByteChannelTraceRpc => Some(HYPER_NATIVE_OBJECT_BYTE_CHANNEL),
             Self::ConsoleRead => Some(HYPER_NATIVE_OBJECT_CONSOLE),
             Self::ConsoleWrite => Some(HYPER_NATIVE_OBJECT_CONSOLE),
             Self::DirectoryOpenFile => Some(HYPER_NATIVE_OBJECT_DIRECTORY),
@@ -6494,6 +6546,7 @@ impl NativeOperation {
             Self::ByteChannelCreate => 1,
             Self::ByteChannelWrite => 3,
             Self::ByteChannelRead => 3,
+            Self::ByteChannelTraceRpc => 6,
             Self::ConsoleRead => 3,
             Self::ConsoleWrite => 3,
             Self::DirectoryOpenFile => 4,
@@ -6694,6 +6747,7 @@ impl NativeOperation {
             Self::ByteChannelCreate => 549755813888,
             Self::ByteChannelWrite => 32,
             Self::ByteChannelRead => 16,
+            Self::ByteChannelTraceRpc => 48,
             Self::ConsoleRead => 16,
             Self::ConsoleWrite => 32,
             Self::DirectoryOpenFile => 16,

@@ -81,6 +81,8 @@ pub(in crate::kernel::task::scheduler) fn complete_local_switch_tail(
             .handoff
             .for_ticket(ticket)
             .ok_or(Error::PreemptionInvariant)?;
+        #[cfg(feature = "kernel-trace")]
+        crate::kernel::trace::publish_actor(cpu, local.current.get());
         if switching.disposition != SwitchDisposition::Local {
             return Ok(LocalTailCompletion::NeedsCoordinator);
         }

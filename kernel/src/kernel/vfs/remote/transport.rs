@@ -151,6 +151,42 @@ impl Transport {
     ) -> Result<u64, Error> {
         self.sequence = self.sequence.checked_add(1).ok_or(Error::Closed)?;
         request.sequence = self.sequence;
+        #[cfg(feature = "kernel-trace")]
+        let context = self
+            .health
+            .channel
+            .object()
+            .trace_rpc(&[
+                hyper::abi::native::HYPER_NATIVE_RPC_TRACE_CLIENT_BEGIN,
+                self.sequence,
+                request.operation as u64,
+                0,
+                0,
+                0,
+            ])
+            .ok();
+        let result = self.transact_request(request, metadata);
+        #[cfg(feature = "kernel-trace")]
+        if let Some([generation, _]) = context
+            && generation != 0
+        {
+            let _ = self.health.channel.object().trace_rpc(&[
+                hyper::abi::native::HYPER_NATIVE_RPC_TRACE_CLIENT_END,
+                self.sequence,
+                result.as_ref().err().map_or(0, |error| *error as u64),
+                generation,
+                0,
+                0,
+            ]);
+        }
+        result
+    }
+
+    fn transact_request(
+        &mut self,
+        request: Request<'_>,
+        metadata: Option<&mut Entry>,
+    ) -> Result<u64, Error> {
         let operation = request.operation;
         let path = request.path;
         let target = request.target;

@@ -200,7 +200,7 @@ jobs:
       - name: Install Native SDK and QEMU tools
         uses: ./.github/actions/tools
         with:
-          packages: clang cmake cpio lld llvm make shellcheck ${{ matrix.suite != 'native-sdk' && 'qemu-system-arm squashfs-tools' || '' }}
+          packages: clang cmake cpio lld llvm make shellcheck ${{ matrix.suite != 'native-sdk' && 'qemu-system-arm squashfs-tools' || '' }} ${{ matrix.suite == 'native-trace' && 'dosfstools mtools erofs-utils device-tree-compiler' || '' }}
       - name: Run Native validation shard
         env:
           QEMU_MACHINE: virt,virtualization=on,gic-version=${{ matrix.gic || 3 }},dtb-randomness=on
@@ -216,6 +216,7 @@ jobs:
           path: |
             target/app/aarch64/*.log
             target/app/aarch64/trace-*.json
+            target/app/aarch64/trace-*.artifacts/*
             target/app/aarch64/pmu-*.jsonl
             target/app/aarch64/pmu-*.folded
             target/app/aarch64/pmu-*.svg

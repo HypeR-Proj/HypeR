@@ -302,6 +302,8 @@ struct PairState {
 }
 
 struct CapabilityPair {
+    #[cfg(feature = "kernel-trace")]
+    trace_id: u64,
     state: PairLock,
     signals: [SignalState; 2],
     publishing: [AtomicBool; 2],
@@ -436,11 +438,23 @@ impl KernelObject for CapabilityChannel {
 
 impl CapabilityPair {
     fn new(charge: CommittedCharge) -> Self {
+        #[cfg(feature = "kernel-trace")]
+        let trace_id = crate::kernel::trace::identity();
+        let signals = [SignalState::new(), SignalState::new()];
+        #[cfg(feature = "kernel-trace")]
+        let [first, second] = signals;
+        #[cfg(feature = "kernel-trace")]
+        let signals = [
+            first.with_trace_identity(trace_id),
+            second.with_trace_identity(if trace_id == 0 { 0 } else { trace_id + 1 }),
+        ];
         Self {
+            #[cfg(feature = "kernel-trace")]
+            trace_id,
             state: PairLock::new(PairState {
                 endpoints: [EndpointState::new(), EndpointState::new()],
             }),
-            signals: [SignalState::new(), SignalState::new()],
+            signals,
             publishing: [AtomicBool::new(false), AtomicBool::new(false)],
             _charge: charge,
         }
@@ -584,6 +598,17 @@ impl CapabilityPair {
                     registration_invariant();
                 }
                 receiver.phase = RegistrationPhase::Completed(outcome);
+                #[cfg(feature = "kernel-trace")]
+                if let CapabilityReceiveOutcome::Delivered(info) = outcome {
+                    crate::tracepoint!(
+                        Ipc,
+                        "cap_enqueue",
+                        queue = self.trace_queue(target),
+                        message = registration.id.0,
+                        thread = crate::kernel::trace::actor(),
+                        bytes = info.bytes as u64
+                    );
+                }
             });
             state.endpoints[target.index()].active_matches = match state.endpoints[target.index()]
                 .active_matches
@@ -612,6 +637,15 @@ impl CapabilityPair {
         complete_detached(local, CapabilityChannelError::EndpointClosed);
         complete_detached(peer, CapabilityChannelError::PeerClosed);
         self.reconcile_all();
+    }
+
+    #[cfg(feature = "kernel-trace")]
+    fn trace_queue(&self, side: Side) -> u64 {
+        if self.trace_id == 0 {
+            0
+        } else {
+            self.trace_id + side.index() as u64
+        }
     }
 
     fn reconcile_all(&self) {
@@ -881,7 +915,7 @@ impl PendingCapabilityReceive {
     }
 
     fn finish_park(self, outcome: WaitOutcome) -> CapabilityReceiveOutcome {
-        match outcome {
+        let result = match outcome {
             WaitOutcome::Notified => self.completed_outcome(),
             WaitOutcome::TimedOut | WaitOutcome::Cancelled => {
                 let error = match outcome {
@@ -903,7 +937,19 @@ impl PendingCapabilityReceive {
                 }
                 self.completed_outcome()
             }
+        };
+        #[cfg(feature = "kernel-trace")]
+        if let CapabilityReceiveOutcome::Delivered(info) = result {
+            crate::tracepoint!(
+                Ipc,
+                "cap_dequeue",
+                queue = self.pair.trace_queue(self.side),
+                message = self.registration.id.0,
+                thread = crate::kernel::trace::actor(),
+                bytes = info.bytes as u64
+            );
         }
+        result
     }
 
     fn completed_outcome(&self) -> CapabilityReceiveOutcome {

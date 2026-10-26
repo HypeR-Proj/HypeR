@@ -245,7 +245,7 @@ impl Scheduler {
                 on_commit();
                 Ok(ResolvedWait {
                     won: true,
-                    ready: Some(ready_waiter(local, ticket.thread(), preemption)),
+                    ready: Some(ready_waiter(local, ticket, preemption)),
                 })
             }
         }
@@ -297,7 +297,7 @@ impl Scheduler {
             let result = super::runtime::with_accounted_cpu(cpu, |local| {
                 let won = self.with_wait_queue(wait_queue, |queue| {
                     if queue.head != Some(id) {
-                        return Ok(false);
+                        return Ok(None);
                     }
                     let ticket = local
                         .thread_authority()
@@ -307,15 +307,15 @@ impl Scheduler {
                         .ok_or(Error::QueueCorrupted)?;
                     self.unlink_waiter(queue, wait_queue, id);
                     complete_record(local, ticket, WaitOutcome::Notified);
-                    Ok::<_, Error>(true)
+                    Ok::<_, Error>(Some(ticket))
                 })?;
-                if !won {
+                let Some(ticket) = won else {
                     return Ok(None);
-                }
+                };
                 if let Some(callback) = before_ready.take() {
                     callback(id);
                 }
-                let ready = ready_waiter(local, id, WakePreemption::Policy);
+                let ready = ready_waiter(local, ticket, WakePreemption::Policy);
                 Ok::<_, Error>(Some((id, ready)))
             })?;
             if result.is_some() {
@@ -372,9 +372,10 @@ fn complete_record(local: &mut CpuScheduler, ticket: WaitTicket, outcome: WaitOu
 
 fn ready_waiter(
     local: &mut CpuScheduler,
-    id: ThreadId,
+    ticket: WaitTicket,
     preemption: WakePreemption,
 ) -> ReadyOutcome {
+    let id = ticket.thread();
     if local
         .thread_authority()
         .with_thread(id, |_thread, schedule| {
@@ -391,7 +392,9 @@ fn ready_waiter(
         Scheduler,
         "sched_wakeup",
         thread = id.get(),
-        target_cpu = local.index.get() as u64
+        target_cpu = local.index.get() as u64,
+        wait = ticket.generation(),
+        waker = crate::kernel::trace::actor()
     );
     let candidate = local
         .thread_authority()

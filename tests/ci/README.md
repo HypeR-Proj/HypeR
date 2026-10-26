@@ -47,7 +47,7 @@ and the one-time Pages/required-check setup.
 | `native-console` | Paced input, pressure, shell restart and guest console |
 | `native-terminal` | Terminal modes, transformations and flow control |
 | `native-apps` | Native command-line applications plus editor/pager terminal interaction |
-| `native-trace` | One/four-CPU production trace capture, authority, CPU filtering, automatic expiry, generation replacement, loss and Perfetto export |
+| `native-trace` | One/four-CPU disk-backed trace capture, authority, filtering, expiry, loss, nested IPC/remote filesystem flows, and raw artifact extraction after unmount/QEMU exit |
 | `native-pmu` | Opt-in PMUv3 overflow sampling on every CPU, bounded capture and exact-ELF flame-graph export on GICv2/GICv3 |
 | `native-shell` | Shell language, editing, completion and redirection |
 | `native-services` | Service readiness, scoped control, captured stdio, query and restart limits; bounded postmortem retention, terminal disconnect, early progress, failed-console recovery, runtime failure reporting and boot-profile selection/adoption |

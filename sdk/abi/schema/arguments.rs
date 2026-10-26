@@ -2476,3 +2476,25 @@ pub(super) const SCHEDULING_BUILDER_ARGUMENTS: &[Argument] = &[
     scheduling_record(MemoryDirection::Read),
     scalar_argument("delegated_rights", ValueKind::Rights),
 ];
+
+/// Explicit RPC correlation; no message bytes or user pointers are interpreted.
+pub(super) const BYTE_CHANNEL_TRACE_RPC_ARGUMENTS: &[Argument] = &[
+    scalar_argument("phase", ValueKind::U64),
+    scalar_argument("request", ValueKind::U64),
+    scalar_argument("detail", ValueKind::U64),
+    scalar_argument("generation", ValueKind::U64),
+    scalar_argument("parent_connection", ValueKind::U64),
+    scalar_argument("parent_request", ValueKind::U64),
+];
+pub(super) const BYTE_CHANNEL_TRACE_RPC_RESULTS: &[ResultValue] = &[
+    ResultValue {
+        name: "generation",
+        kind: ValueKind::U64,
+        handle: None,
+    },
+    ResultValue {
+        name: "connection",
+        kind: ValueKind::U64,
+        handle: None,
+    },
+];

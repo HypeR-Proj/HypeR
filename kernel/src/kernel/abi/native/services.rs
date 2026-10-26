@@ -180,6 +180,12 @@ pub(in crate::kernel) trait ObjectServices {
 }
 
 pub(in crate::kernel) trait IpcServices {
+    fn trace_byte_channel_rpc(
+        &self,
+        endpoint: &InvocationReceiver,
+        arguments: &[u64; 6],
+    ) -> Result<[u64; 2], hyper::abi::native::HyperNativeStatus>;
+
     fn create_byte_channel(&self) -> Result<[HandleValue; 2], ByteChannelServiceError>;
     fn create_capability_channel(&self) -> Result<[HandleValue; 2], CapabilityChannelServiceError>;
     fn write_byte_channel(

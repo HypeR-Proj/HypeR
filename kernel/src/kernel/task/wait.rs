@@ -65,6 +65,11 @@ impl WaitTicket {
     pub(crate) const fn thread(self) -> ThreadId {
         self.thread
     }
+
+    #[cfg(feature = "kernel-trace")]
+    pub(crate) const fn generation(self) -> u64 {
+        self.generation
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -157,6 +162,12 @@ impl WaitRecord {
             queue,
             mobility,
         };
+        crate::tracepoint!(
+            Scheduler,
+            "wait_block",
+            thread = ticket.thread().get(),
+            wait = ticket.generation()
+        );
         Ok(())
     }
 
@@ -210,6 +221,18 @@ impl WaitRecord {
             generation: ticket.generation,
             outcome,
         };
+        crate::tracepoint!(
+            Scheduler,
+            "wait_complete",
+            thread = ticket.thread().get(),
+            wait = ticket.generation(),
+            outcome = match outcome {
+                WaitOutcome::Notified => 1,
+                WaitOutcome::TimedOut => 2,
+                WaitOutcome::Cancelled => 3,
+            },
+            waker = crate::kernel::trace::actor()
+        );
         Ok(())
     }
 

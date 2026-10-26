@@ -295,6 +295,14 @@ pub(crate) fn run_self_test() -> Result<(), SelfTestError> {
             ))
         }
 
+        fn trace_byte_channel_rpc(
+            &self,
+            _: &InvocationReceiver,
+            _: &[u64; 6],
+        ) -> Result<[u64; 2], hyper::abi::native::HyperNativeStatus> {
+            Err(HYPER_NATIVE_STATUS_NOT_SUPPORTED)
+        }
+
         fn write_byte_channel(
             &self,
             _: &InvocationReceiver,

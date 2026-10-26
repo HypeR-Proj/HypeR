@@ -522,6 +522,8 @@ pub fn initialize() -> Result<Capabilities, Error> {
             bootstrap_thread: ThreadId::BOOTSTRAP,
         })
     })?;
+    #[cfg(feature = "kernel-trace")]
+    crate::kernel::trace::publish_actor(cpu, ThreadId::BOOTSTRAP.get());
     preemption.commit();
     Ok(capabilities)
 }

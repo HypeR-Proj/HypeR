@@ -6,9 +6,17 @@
 //! Control/export require explicit CPU inspector profiling authority.
 
 #[cfg(feature = "kernel-trace")]
+mod context;
+#[cfg(feature = "kernel-trace")]
+mod rpc;
+#[cfg(feature = "kernel-trace")]
 mod runtime;
 #[cfg(feature = "kernel-trace")]
+pub(crate) use context::{actor, identity, publish_actor};
+#[cfg(feature = "kernel-trace")]
 pub use hyper::trace::{read, set_filter, start, stop};
+#[cfg(feature = "kernel-trace")]
+pub(crate) use rpc::annotate as annotate_rpc;
 #[cfg(feature = "kernel-trace")]
 pub use runtime::initialize;
 

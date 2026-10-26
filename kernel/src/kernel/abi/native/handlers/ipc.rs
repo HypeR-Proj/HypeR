@@ -153,3 +153,15 @@ pub(in crate::kernel::abi::native) fn capability_receive_result(
         Err(status) => failure(status),
     }
 }
+
+/// No pointers, allocations or ambient context; annotations never carry authority.
+pub(in crate::kernel::abi::native) fn sys_byte_channel_trace_rpc(
+    services: &impl IpcServices,
+    receiver: &InvocationReceiver,
+    arguments: &Arguments,
+) -> NativeAction {
+    NativeAction::Return(match services.trace_byte_channel_rpc(receiver, arguments) {
+        Ok(values) => success(values),
+        Err(status) => failure(status),
+    })
+}

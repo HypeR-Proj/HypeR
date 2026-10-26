@@ -5,6 +5,10 @@
 ///
 /// `tracepoint!(Scheduler, "thread_ready", thread = id, cpu = target)`
 ///
+/// `tracepoint!(ticket = admission, Ipc, "rpc_end", request = id)` retains an
+/// existing admission snapshot across a generation check; it cannot enable a
+/// capture or publish into a replacement session.
+///
 /// Fields must be nonblocking, side-effect-free scalar expressions. They are
 /// evaluated only after admission, with local IRQs masked and the ring owned.
 /// There is no timestamp, argument evaluation or site metadata in builds without
@@ -12,6 +16,12 @@
 #[cfg(feature = "kernel-trace")]
 #[macro_export]
 macro_rules! tracepoint {
+    (ticket = $ticket:expr, $category:ident, $name:literal $(, $field:ident = $value:expr)* $(,)?) => {{
+        static SITE: $crate::trace::Site = $crate::trace::Site::new(
+            $crate::trace::Category::$category, $name, &[$(stringify!($field)),*], file!(), line!(),
+        );
+        $crate::trace::emit($ticket, &SITE, || $crate::trace::values([$($value),*]));
+    }};
     ($category:ident, $name:literal $(, $field:ident = $value:expr)* $(,)?) => {{
         if let Some(ticket) = $crate::trace::enabled($crate::trace::Category::$category) {
             static SITE: $crate::trace::Site = $crate::trace::Site::new(
@@ -28,5 +38,6 @@ macro_rules! tracepoint {
 /// the disabled expansion evaluates none of them. See [`crate::trace`].
 #[macro_export]
 macro_rules! tracepoint {
+    (ticket = $ticket:expr, $category:ident, $name:literal $(, $field:ident = $value:expr)* $(,)?) => {{}};
     ($category:ident, $name:literal $(, $field:ident = $value:expr)* $(,)?) => {{}};
 }

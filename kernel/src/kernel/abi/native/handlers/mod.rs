@@ -59,8 +59,9 @@ pub(super) use inspect::{
     sys_task_inspector_scan_processes, sys_task_inspector_scan_threads,
 };
 pub(super) use ipc::{
-    sys_byte_channel_create, sys_byte_channel_read, sys_byte_channel_write,
-    sys_capability_channel_create, sys_capability_channel_receive, sys_capability_channel_try_send,
+    sys_byte_channel_create, sys_byte_channel_read, sys_byte_channel_trace_rpc,
+    sys_byte_channel_write, sys_capability_channel_create, sys_capability_channel_receive,
+    sys_capability_channel_try_send,
 };
 pub(super) use memory::{
     sys_vmar_allocate, sys_vmar_destroy, sys_vmar_lock_memory, sys_vmar_map, sys_vmar_map_file,

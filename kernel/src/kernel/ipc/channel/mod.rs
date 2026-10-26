@@ -110,6 +110,22 @@ pub(crate) struct ByteChannel {
 }
 
 impl ByteChannel {
+    /// Optional observations through authority already held on this endpoint.
+    pub(crate) fn trace_rpc(
+        &self,
+        arguments: &[u64; 6],
+    ) -> Result<[u64; 2], hyper::abi::native::HyperNativeStatus> {
+        #[cfg(feature = "kernel-trace")]
+        {
+            crate::kernel::trace::annotate_rpc(self.pair.trace_queue(Side::First), arguments)
+        }
+        #[cfg(not(feature = "kernel-trace"))]
+        {
+            let _ = arguments;
+            Err(hyper::abi::native::HYPER_NATIVE_STATUS_NOT_SUPPORTED)
+        }
+    }
+
     pub(crate) const READABLE: SignalMask = SignalMask::from_trusted_bits(
         hyper::abi::native::HYPER_NATIVE_SIGNAL_BYTE_CHANNEL_READABLE,
     );
