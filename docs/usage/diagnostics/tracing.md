@@ -102,7 +102,7 @@ with its captured identity, without inventing a parent process.
 | `scheduler` | Committed switches and their causes, reschedule requests/sources, wait registration/completion and outcomes, wakeups and migration publication |
 | `syscall` | Ordinary Native dispatch entry/return, operation and object kind, signed status |
 | `ipc` | Byte/capability commit identities, delivery lengths, signal wait/notification, explicit RPC annotations and syscall-level outcomes |
-| `io` | Native block submissions, completion/abort, per-device trace identity, tag, bytes and direction |
+| `io` | Logical block admission/completion/release, submitting Thread, exact batch-to-command links, transport slots and command completion/abort |
 | `memory` | Native page-fault handling entry/return and resolution |
 | `irq` | Physical IRQ service entry/return with interrupt ID, plus architecture-private kernel RPC delivery |
 | `vm` | vCPU run entry/return to its kernel runner with exit reason |
@@ -145,6 +145,9 @@ and `cap_enqueue`/`cap_dequeue` use a shared, boot-local connection identity and
 separate destination queues, plus the exact committed message/registration ID.
 They also cover kernel-originated ByteChannel messages, including remote VFS
 requests. These trace IDs are observations, never handles or lookup authority.
+Legacy `byte_send` / `byte_receive` outcomes skip `WOULD_BLOCK` polling;
+select `syscall` to inspect those attempts. Committed enqueue/dequeue records,
+non-polling failures and buffer-size probes remain available under `ipc`.
 Immediate fast-path syscalls, trace-control methods and RPC annotation methods
 are excluded from syscall tracing to avoid collection feedback. Other collector activity is
 visible and can perturb the workload.
@@ -195,11 +198,23 @@ and descheduling; they are not CPU usage. vCPU boundaries are returns to the run
 not every hardware exit handled by the HAL fast path. IRQ spans cover ordinary
 routed service and private kernel-RPC delivery, excluding scheduling postludes.
 
-Block spans and observed-outstanding counters describe Native block transport,
-not Linux I/O VM or physical controller internals. Concurrent requests occupy
-separate reusable lanes under each device, so overlap does not become fictional
-call nesting. Requests already in flight at capture start are not included in the
-initial counter. `--raw-events` adds source locations and scalar fields.
+Block transport tracks use separate slots for concurrent commands. Logical batch
+tracks use the queue's ticket slot and distinguish admission-to-completion from
+**Completion retained**, the time until reap or discard releases queue credits.
+**Dispatch delay** includes software queueing and preparation before the first
+command is published. It excludes quota waits before successful admission.
+**Block admission**, **Block dispatch** and **Block completion** arrows connect
+the submitting Thread, logical batches and physical commands. Merging and
+splitting are explicit many-to-many links, with contributed byte counts.
+Read, write, flush and control commands are distinct; an aborted command closes
+its observed lifetime, without claiming successful DMA quiescence. Counters count
+only commands with both boundaries captured, so they are not whole-device queue
+depth measurements. These observations stop at Native block transport and do not
+measure Linux I/O VM or physical controller internals. Missing slot metadata,
+unmatched/duplicate identities, loss or a partial CPU selection suppress derived
+associations.
+
+`--raw-events` adds source locations and scalar fields.
 JSONL and native protobuf retain nanoseconds; Chrome JSON uses microseconds
 relative to capture start with fractional precision. Native metadata is stored in
 the root HypeR track description, without additional capture-quality notices.

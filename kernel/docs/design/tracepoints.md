@@ -200,6 +200,32 @@ suppresses causal flows when any CPU stream is absent, lossy or truncated.
 Zero-duration complete slices with flow IDs bind arrows without inventing an
 enclosing syscall or nonzero execution time.
 
+The syscall-level byte-channel observations skip `WOULD_BLOCK`: an empty
+poll publishes or receives no message. Successful transfers and other outcomes
+remain observed, while the `syscall` category retains polling-call outcomes.
+This keeps busy reply polling from displacing committed IPC and I/O events.
+
+## Asynchronous block I/O
+
+The block pump owns physical `block_submit` / `block_complete` / `block_abort`
+observations. `block_command` adds the fixed transport slot and SCSI opcode.
+Logical `block_queued` / `block_ready` / `block_release` follow committed device
+sequence IDs rather than reusable queue tickets. `block_origin` observes the
+admitting Thread under the existing admission lock. `block_link` explicitly
+relates each contributed fragment to its physical command tag: merging and
+splitting never imply a one-to-one request/command relationship.
+
+The device lock orders admission before dispatch; completion and slot release
+are recorded under their existing queue locks before publishing wakeups or
+returned credits. No new object lookup, payload copy or allocation is performed
+for tracing. A request retains one trace-only device ID when compiled in; all
+new fields and the fragment traversal disappear when the feature is off. The
+fragment traversal also skips runtime-disabled I/O tracing, and one admission
+ticket prevents its records entering a replacement capture. Retained completions
+hold queue credits until reap/discard; this interval does not describe lingering
+request metadata references held by concurrent waiters. Exported aborts close
+logical observation only and do not prove backend DMA retirement.
+
 ## Validation
 
 Host tests exercise the production recorder for overwrite/cursors, independent

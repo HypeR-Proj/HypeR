@@ -466,6 +466,19 @@ impl Pump {
             command.range.bytes,
             operation == Operation::Read,
         )?);
+        // One command can cover several batches; one batch can require several
+        // commands. Retain those exact edges rather than attributing all I/O to
+        // the completion worker's Thread. The loop disappears without tracing.
+        #[cfg(feature = "kernel-trace")]
+        if let Some(ticket) = hyper_trace::enabled(hyper_trace::Category::Io)
+            && let Some(flight) = &command.flight
+        {
+            for piece in &command.pieces {
+                if let Some(active) = self.active.get(piece.active).and_then(Option::as_ref) {
+                    flight.trace_link(ticket, &active.request, piece.length);
+                }
+            }
+        }
         queue.state.with(|state| {
             state.inflight += 1;
             state.peak_inflight = state.peak_inflight.max(state.inflight);

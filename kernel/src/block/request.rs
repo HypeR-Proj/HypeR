@@ -37,6 +37,24 @@ impl Drop for Flight {
 }
 
 impl Flight {
+    #[cfg(feature = "kernel-trace")]
+    pub(super) fn trace_link(
+        &self,
+        ticket: hyper_trace::Ticket,
+        request: &super::queue::Request,
+        bytes: usize,
+    ) {
+        crate::tracepoint!(
+            ticket = ticket,
+            Io,
+            "block_link",
+            domain = self.trace.1,
+            tag = self.trace.0,
+            request = request.sequence.load(Ordering::Relaxed),
+            bytes = bytes as u64
+        );
+    }
+
     pub(super) fn ready(&self, device: &Device) -> Result<bool, Error> {
         Ok(device.u16(wire::USED + self.slot as u64 * wire::QUEUE_STRIDE + 2)? != self.index)
     }
@@ -139,6 +157,14 @@ impl Transport {
             domain = device.trace_id,
             bytes = length as u64,
             read = u64::from(read)
+        );
+        crate::tracepoint!(
+            Io,
+            "block_command",
+            domain = device.trace_id,
+            tag = self.tag,
+            slot = slot as u64,
+            opcode = u64::from(cdb[0])
         );
         Ok(flight)
     }

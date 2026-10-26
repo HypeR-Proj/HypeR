@@ -12,7 +12,7 @@ from command import Shell
 from guest_console import append_console_output
 from session import Session
 from trace_artifacts import TraceArtifacts, boot_command
-from trace_validation import validate_remote
+from trace_validation import validate_remote, validate_block
 
 
 def main():
@@ -27,13 +27,15 @@ def main():
         session.await_text(rb'HypeR: startup complete\n', timeout=240)
         session.await_text(rb'hyper-sh\$ ')
         shell = Shell(session)
-        capture_result = shell.run('perf trace record --raw-events --format chrome --snapshot --duration-ms 30000 --categories ipc,scheduler --no-names --poll-ms 1 --fail-on-loss --max-events 32768 -o /tmp/remote.json -- /bin/touch /data/trace-created', timeout=180)
+        capture_result = shell.run('perf trace record --raw-events --format chrome --duration-ms 30000 --categories ipc,scheduler,io --no-names --poll-ms 1 --fail-on-loss --max-events 32768 -o /tmp/remote.json -- /bin/cp /etc/hyper/components.json /data/trace-created', timeout=180)
         TraceArtifacts.save(shell, ('remote.json',))
     files = artifacts.extract(session, ('remote.json',))
-    capture_result.require('bounded filesystem snapshot')
-    validate_remote(json.loads(files['remote.json'].read_bytes()))
+    capture_result.require('filesystem capture')
+    payload = json.loads(files['remote.json'].read_bytes())
+    validate_remote(payload)
+    validate_block(payload)
     log.with_suffix('.json').write_bytes(files['remote.json'].read_bytes())
-    print('Remote filesystem RPC, kernel message commits and causal export passed')
+    print('Remote filesystem RPC, asynchronous block lifetimes and causal export passed')
 
 
 if __name__ == '__main__':

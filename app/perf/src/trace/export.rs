@@ -4,6 +4,8 @@
 //! observed matching boundaries. Gaps invalidate pending spans. Scheduling
 //! windows remain visible; original capture metadata retains loss information.
 use super::model::{Capture, Event};
+#[path = "block.rs"]
+mod block;
 #[path = "causal.rs"]
 mod causal;
 #[path = "proto/mod.rs"]
@@ -84,6 +86,7 @@ fn fields(c: &Capture, event: &Event) -> Value {
                     | "vm"
                     | "domain"
                     | "tag"
+                    | "ticket"
                     | "queue"
                     | "message"
                     | "connection"
@@ -158,7 +161,19 @@ impl<W: Write> TraceWriter<W> {
         outgoing: bool,
         args: Value,
     ) -> io::Result<()> {
-        self.event(json!({"ph":"X","dur":0,"pid":2,"tid":tid,"name":name,"cat":"ipc",
+        self.anchor_track((2, tid, "ipc"), event, name, id, outgoing, args)
+    }
+
+    fn anchor_track(
+        &mut self,
+        track: (u32, u32, &str),
+        event: &Event,
+        name: &str,
+        id: u64,
+        outgoing: bool,
+        args: Value,
+    ) -> io::Result<()> {
+        self.event(json!({"ph":"X","dur":0,"pid":track.0,"tid":track.1,"name":name,"cat":track.2,
             "ts":self.time(event.time),"bind_id":format!("{id:#x}"),"flow_out":outgoing,"flow_in":!outgoing,"args":args}))
     }
 }
@@ -203,7 +218,9 @@ fn render(c: &Capture, output: impl Write, raw_events: bool, native: bool) -> io
     w.name(1, 0, "HypeR CPU scheduling")?;
     w.name(2, 0, "HypeR threads (elapsed time)")?;
     w.name(3, 0, "HypeR IRQ service")?;
-    w.name(4, 0, "HypeR block requests")?;
+    w.name(4, 0, "HypeR block transport commands")?;
+    w.name(7, 0, "HypeR logical block batches")?;
+    w.name(6, 0, "HypeR captured block concurrency")?;
     for cpu in 0..c.info.cpu_count as u32 {
         w.name(1, cpu + 1, &format!("CPU {cpu}"))?;
         w.name(3, cpu + 1, &format!("CPU {cpu} IRQ"))?;
@@ -223,10 +240,6 @@ fn render(c: &Capture, output: impl Write, raw_events: bool, native: bool) -> io
     let mut pending: BTreeMap<(&str, u64), &Event> = BTreeMap::new();
     let mut ready: BTreeMap<u64, &Event> = BTreeMap::new();
     let mut irq: BTreeMap<usize, Vec<&Event>> = BTreeMap::new();
-    let mut io: BTreeMap<(u64, u64), &Event> = BTreeMap::new();
-    let mut early_completions: BTreeMap<(u64, u64), &Event> = BTreeMap::new();
-    let mut io_lanes = BTreeMap::new();
-    let mut depth = BTreeMap::<u64, u64>::new();
     let uncertain = !c.cross_cpu_spans();
     let scheduling = if raw_events {
         scheduling::Evidence::new(c)
@@ -244,9 +257,6 @@ fn render(c: &Capture, output: impl Write, raw_events: bool, native: bool) -> io
             pending.clear();
             ready.clear();
             irq.clear();
-            io.clear();
-            early_completions.clear();
-            depth.clear();
             causal.clear();
         }
         let thread = c.value(event, "thread");
@@ -338,57 +348,9 @@ fn render(c: &Capture, output: impl Write, raw_events: bool, native: bool) -> io
                 stack.clear();
             }
         }
-        // Device tags are checked, non-reused counters within a unique domain.
-        // A matching completion stays meaningful despite unrelated source loss.
-        if let (Some(domain), Some(tag)) = (c.value(event, "domain"), c.value(event, "tag"))
-            && domain != 0
-            && tag != 0
-        {
-            let lane = if let Some(id) = io_lanes.get(&domain) {
-                *id
-            } else {
-                let id = io_lanes.len() as u32 + 1;
-                io_lanes.insert(domain, id);
-                w.name(4, id, &format!("block device {domain:#x}"))?;
-                id
-            };
-            let key = (domain, tag);
-            let pair = if site.name == "block_submit" {
-                if let Some(end) = early_completions.remove(&key) {
-                    Some((event, end))
-                } else {
-                    io.insert(key, event);
-                    *depth.entry(domain).or_default() += 1;
-                    None
-                }
-            } else if matches!(site.name.as_str(), "block_complete" | "block_abort") {
-                if let Some(start) = io.remove(&key) {
-                    if let Some(depth) = depth.get_mut(&domain) {
-                        *depth = depth.saturating_sub(1);
-                    }
-                    Some((start, event))
-                } else {
-                    early_completions.insert(key, event);
-                    None
-                }
-            } else {
-                None
-            };
-            if let Some((start, end)) = pair {
-                let name = if c.sites[end.site].name == "block_abort" {
-                    "aborted"
-                } else if c.value(start, "read") == Some(1) {
-                    "read"
-                } else {
-                    "write/control"
-                };
-                let mut args = fields(c, start);
-                args["completion"] = fields(c, end);
-                w.span((4, lane), name, "io", start.time..end.time, args)?;
-            }
-            w.event(json!({"ph":"C","pid":4,"tid":lane,"name":format!("Outstanding device {domain:#x}"),"ts":w.time(event.time),"args":{"observed requests":depth.get(&domain).copied().unwrap_or(0)}}))?;
-        }
     }
+    block::export(c, &threads, &mut w)?;
+
     if !native {
         timeline::write(c, &threads, &mut w)?;
     }

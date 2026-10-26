@@ -98,6 +98,8 @@ pub(crate) struct QueueInfo {
 }
 
 pub(super) struct Request {
+    #[cfg(feature = "kernel-trace")]
+    trace_device: u64,
     pub(super) queue_id: u64,
     pub(super) ticket: AtomicU64,
     pub(super) sequence: AtomicU64,
@@ -210,9 +212,21 @@ impl Queue {
     pub(super) fn finish(&self, request: &Request, mut data: Payload, result: Result<(), Error>) {
         data.finish();
         self.state.with(|state| {
-            request.state.with(|request| {
-                request.data = Some(data);
-                request.result = Some(result);
+            request.state.with(|completion| {
+                completion.data = Some(data);
+                completion.result = Some(result);
+                crate::tracepoint!(
+                    Io,
+                    "block_ready",
+                    domain = request.trace_device,
+                    request = request.sequence.load(Ordering::Relaxed),
+                    status = super::async_service::completion_status(result) as u64,
+                    bytes = if result.is_ok() {
+                        request.length as u64
+                    } else {
+                        0
+                    }
+                );
             });
             state.completed += 1;
             state.completed_batches = state.completed_batches.saturating_add(1);
@@ -738,6 +752,8 @@ impl PreparedSubmission<'_> {
     }
     pub(crate) fn commit(mut self) -> Result<u64, QueueError> {
         let request = FallibleArc::try_new(Request {
+            #[cfg(feature = "kernel-trace")]
+            trace_device: self.owner.device.trace_id,
             queue_id: self.owner.queue.id,
             ticket: AtomicU64::new(self.ticket),
             sequence: AtomicU64::new(0),
@@ -778,6 +794,24 @@ impl PreparedSubmission<'_> {
                 state.revision = state.revision.wrapping_add(1);
                 device.sequence = sequence;
                 device.pending.push_back(request.clone());
+                // Record admission before the pump can consume this request.
+                // Device sequence is independent of queue ticket-slot reuse.
+                crate::tracepoint!(
+                    Io,
+                    "block_queued",
+                    domain = self.owner.device.trace_id,
+                    request = sequence,
+                    queue = request.queue_id,
+                    ticket = self.ticket
+                );
+                crate::tracepoint!(
+                    Io,
+                    "block_origin",
+                    domain = self.owner.device.trace_id,
+                    request = sequence,
+                    thread = crate::diagnostics::trace::actor(),
+                    operation = u64::from(request.operation.encode())
+                );
                 Ok(())
             })
         })?;
@@ -910,6 +944,13 @@ impl Device {
                     device.public_bytes -= request.length;
                 }
                 device.admission_revision = device.admission_revision.wrapping_add(1);
+                crate::tracepoint!(
+                    Io,
+                    "block_release",
+                    domain = self.trace_id,
+                    request = request.sequence.load(Ordering::Relaxed),
+                    queue = queue.id
+                );
                 removed
             })
         });

@@ -74,8 +74,13 @@ def main():
             raise AssertionError('collector left recording enabled')
         # Export happens outside all measured intervals. Serial carries command
         # status only; no trace body is printed or hex-framed by test-report.
-        remote_result = shell.run('perf trace record --raw-events --format chrome --snapshot --duration-ms 30000 --categories ipc,scheduler --no-names --poll-ms 1 --fail-on-loss --max-events 32768 -o /tmp/remote.json -- /bin/touch /data/trace-created', timeout=180)
-        shell.check('perf trace record --raw-events --format chrome --snapshot --duration-ms 50 --categories syscall --no-names --fail-on-loss -o /tmp/expiry.json')
+        # Loading an uncached executable includes filesystem RPC and block I/O.
+        # Drain this capture live: one CPU can exceed a single 4096-record ring
+        # while the separate bounded IPC workload above still uses a snapshot.
+        remote_result = shell.run('perf trace record --raw-events --format chrome --duration-ms 30000 --categories ipc,scheduler,io --no-names --poll-ms 1 --fail-on-loss --max-events 32768 -o /tmp/remote.json -- /bin/cp /etc/hyper/components.json /data/trace-created', timeout=180)
+        # Deadline-only snapshots test autonomous stop, not maximum syscall
+        # production rate; sparse scheduler observations keep the probe bounded.
+        shell.check('perf trace record --raw-events --format chrome --snapshot --duration-ms 50 --categories scheduler --no-names --fail-on-loss -o /tmp/expiry.json')
         shell.check('perf trace record --duration-ms 250 --categories scheduler --max-events 16384 -o /tmp/lanes.pftrace')
         native_result = shell.run('perf trace record --snapshot --duration-ms 30000 --categories ipc,scheduler --poll-ms 1 --fail-on-loss --max-events 16384 -o /tmp/native.pftrace -- /bin/lifecycle-stress trace', timeout=120)
         TraceArtifacts.save(shell, names)
@@ -83,7 +88,7 @@ def main():
     # Preserve all raw files before propagating strict capture failures.
     ipc_result.require('bounded IPC snapshot')
     command_result.require('bounded command exit snapshot')
-    remote_result.require('bounded filesystem snapshot')
+    remote_result.require('filesystem capture')
     native_result.require('native Perfetto IPC snapshot')
     validate_capture(files, args.logfile)
     print('Trace lifecycle, CPU filtering, loss and Perfetto export acceptance passed')

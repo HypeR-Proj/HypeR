@@ -64,7 +64,7 @@ def validate_capture(files, logfile):
         raise AssertionError('switch lost its packed cause or entry point')
     if not annotated or not any(c['switch_reason'] == 'block' for c in annotated):
         raise AssertionError('bounded IPC workload has no explicit blocking switch cause')
-    if not any(e.get('ph') == 'X' and e.get('pid') == 5
+    if not any(e.get('ph') == 'X' and e.get('pid') == 7
                and 'cpu' in e.get('args', {})
                for e in scheduling['traceEvents']):
         raise AssertionError('missing per-thread execution lanes')
@@ -95,7 +95,7 @@ def validate_capture(files, logfile):
         raise AssertionError('capture generation reused')
     events = payload['traceEvents']
     observed = {event['name'] for event in events}
-    if not {'sched_switch', 'syscall_enter', 'syscall_exit'} <= observed:
+    if not {'syscall_enter', 'syscall_exit'} <= observed:
         raise AssertionError(f'missing real instrumentation: {observed}')
     metadata = payload['metadata']
     loss = metadata['limited'] or any(row['overwritten'] or row['incomplete'] for row in metadata['losses'])
@@ -110,7 +110,10 @@ def validate_capture(files, logfile):
     if not complete(ipc):
         raise AssertionError('IPC workload lost the complete causal stream')
     names = {event['name'] for event in ipc['traceEvents']}
-    required = {'ipc_enqueue', 'ipc_dequeue', 'rpc_client_begin', 'rpc_server_begin',
+    # The deliberately 128-event-limited capture can end before its first
+    # context switch on one CPU. Assert scheduler coverage in the forced
+    # three-thread, lossless IPC workload instead of that truncated prefix.
+    required = {'sched_switch', 'ipc_enqueue', 'ipc_dequeue', 'rpc_client_begin', 'rpc_server_begin',
                 'rpc_parent', 'rpc_client_end', 'rpc_server_end', 'RPC round trip', 'RPC handler'}
     if not required <= names:
         raise AssertionError(f'missing causal boundaries: {required - names}')
@@ -137,6 +140,27 @@ def validate_capture(files, logfile):
     if not exits or any(row['status'] != 0 for row in exits):
         raise AssertionError(f'successful workload exit lost its status: {exits}')
     expiry = json.loads(files['expiry.json'].read_bytes())
-    if not complete(expiry) or not {'syscall_enter', 'syscall_exit'} <= {e['name'] for e in expiry['traceEvents']}:
+    if not complete(expiry) or 'sched_switch' not in {e['name'] for e in expiry['traceEvents']}:
         raise AssertionError('deadline-only snapshot failed to drain complete frozen records')
-    validate_remote(json.loads(files['remote.json'].read_bytes()))
+    remote = json.loads(files['remote.json'].read_bytes())
+    validate_remote(remote)
+    validate_block(remote)
+
+
+def validate_block(payload):
+    if not complete(payload):
+        raise AssertionError('block capture is incomplete')
+    events = payload['traceEvents']
+    names = {event['name'] for event in events}
+    required = {'block_queued', 'block_origin', 'block_submit', 'block_command',
+                'block_link', 'block_complete', 'block_ready', 'block_release',
+                'Block batch', 'Completion retained', 'Dispatch delay'}
+    if not required <= names:
+        raise AssertionError(f'missing async block boundaries: {required - names}')
+    for name in ('Block admission', 'Block dispatch', 'Block completion'):
+        if not any(event['name'] == name and event.get('flow_out') for event in events):
+            raise AssertionError(f'missing observed block flow: {name}')
+    physical = [event for event in events if event['ph'] == 'X' and event.get('pid') == 4]
+    if not physical or not any(event.get('args', {}).get('command', {}).get('slot') is not None
+                               for event in physical):
+        raise AssertionError('device command transport slot is unknown')
