@@ -12,8 +12,8 @@ deployment policy in the Linux I/O VM.
 
 | Input | Owns |
 | --- | --- |
-| `CONFIG_FILE` | Kernel architecture, address widths, stack sizes and numeric limits |
-| `KERNEL_FEATURES` | Optional production kernel capabilities |
+| `CONFIG_FILE` | Kernel architecture, address widths, stack sizes, numeric limits and Cargo features |
+| `KERNEL_FEATURES` | Explicit override of the saved kernel feature selection |
 | `SYSTEM_CONFIG` | Executable selection, selectable boot profiles, formal storage successors and optional kernel features |
 | `BOARD_CONFIG` | Physical devices, guest definitions, disk partitions and mount policy |
 | Component and service declarations | Build targets, required child programs, startup and capability grants |
@@ -86,8 +86,9 @@ make board-build SYSTEM_CONFIG=/tmp/hyper-product.config
 
 Only explicit saves change files. The kernel submenu saves `kernel/.config`
 (or `CONFIG_FILE`) independently; discarding product edits does not undo a
-kernel save. **Build policy** selects optional production Cargo features and
-the path to structured runtime boot policy. `BOARD_CONFIG` remains a separate
+kernel save. The kernel menu includes all optional Cargo features and test
+selectors. **Build policy** provides an advanced production feature override
+and the path to structured runtime boot policy. `BOARD_CONFIG` remains a separate
 hardware and mount policy input.
 
 Kconfig `depends on` relations constrain deployment. For example, the formal
@@ -162,21 +163,29 @@ workers and two tools:
 The workflow is:
 
 ```sh
-make defconfig                          # configs/default_defconfig -> .config
+make defconfig                          # reset product and kernel to defaults
 make menuconfig                         # edit product; Kernel opens its own menu
 make olddefconfig                       # fill new defaults, report removed settings
 make savedefconfig                      # export differences from defaults to ./defconfig
 make defconfig SYSTEM_DEFCONFIG=configs/custom_defconfig
 make savedefconfig SYSTEM_DEFCONFIG_OUTPUT=configs/custom_defconfig
-# Work on a separate product without replacing the local one:
-make defconfig SYSTEM_CONFIG=/tmp/product.config
+# Reset separate product and kernel files without replacing local configs:
+make defconfig SYSTEM_CONFIG=/tmp/product.config CONFIG_FILE=/tmp/kernel.config
 ```
 
-`defconfig` replaces the selected product file. `olddefconfig` preserves valid
-selections, drops obsolete or unavailable ones with warnings, and rejects invalid
+Root `defconfig` replaces both the selected product file and kernel configuration.
+`SYSTEM_DEFCONFIG` chooses the product preset; `ARCH` chooses
+`kernel/configs/qemu_<arch>_defconfig`. `SYSTEM_CONFIG` redirects only the product
+output; `CONFIG_FILE` independently redirects the kernel output (default
+`kernel/.config`). These outputs must resolve to different files. Use
+`make -C kernel defconfig ARCH=aarch64` to reset only the
+kernel. Both configurations are generated and validated, and their destination
+files prepared, before either existing configuration is replaced.
+`olddefconfig` preserves valid selections, drops obsolete or unavailable
+ones with warnings, and rejects invalid
 values of known symbols. `savedefconfig` writes a minimal fragment, not a second
-active configuration. None of these root commands modifies `kernel/.config`;
-use `make -C kernel defconfig` to reset the kernel. Normal builds reject unknown
+active configuration. Root `olddefconfig` and `savedefconfig` operate only on the
+product; use `make -C kernel olddefconfig` to migrate kernel settings. Normal builds reject unknown
 symbols, duplicate assignments and invalid types. No JSON product selection is
 accepted. The internal JSON communication between configuration tools and the
 generated image manifests are derived records, not editable alternatives.
@@ -344,18 +353,19 @@ replacement guest backend.
 
 ## Kernel features
 
-`KERNEL_FEATURES` is an exact comma-separated production feature set. An empty
-value builds without these optional capabilities. A product can carry the same
-selection in its JSON document:
+Use **Kernel → Optional kernel functionality** in root `make menuconfig`, or
+run `make -C kernel menuconfig` directly. Kernel settings are saved independently
+to `kernel/.config` (or `CONFIG_FILE`); normal builds translate its
+`CONFIG_FEATURE_*` booleans into Cargo features. All root kernel features except
+Cargo's `default` alias have individual switches, including test selectors under
+**Kernel test instrumentation**.
 
-```json
-{
-  "version": 1,
-  "kernel": {
-    "features": ["runtime-symbols"]
-  }
-}
-```
+An explicit `KERNEL_FEATURES` Make value replaces the saved feature selection;
+empty disables optional features. The product's advanced `CONFIG_KERNEL_FEATURES`
+string also remains available for an exact comma-separated production override.
+Leave it at `"default"` to follow the kernel configuration. A product override and
+a Make override cannot be selected together; test selectors are rejected in the
+product override.
 
 | Feature | Behavior when disabled |
 | --- | --- |
@@ -364,25 +374,25 @@ selection in its JSON document:
 | `crash-console` | No interactive kernel crash command loop; fatal reporting remains |
 | `pmu-profiling` | No AArch64 PMUv3 IRQ sampler or sample buffers; PMU queries report unsupported |
 | `heap-profiling` | No per-size-class heap occupancy and traffic counters; general memory accounting remains |
+| `kernel-trace` | No static tracepoint recording, metadata or per-CPU rings |
 
-The default feature set preserves the existing production behavior.
-It is declared once in `kernel/Cargo.toml`'s `features.default`; kernel Make
-derives the defaults from that graph, filtering capabilities by the manifest's
-architecture availability metadata. The product does not carry another default
-feature list. An explicit feature set replaces these defaults.
+Kconfig defaults preserve the existing production behavior: RTC and runtime
+symbols on all architectures, plus crash console on AArch64. Make passes the
+resolved selection with `--no-default-features`; Cargo defaults no longer decide
+normal Make builds. Direct Cargo use retains its own explicit feature interface.
 `pmu-profiling` is opt-in; see [PMU sampling](../diagnostics/profiling.md).
 `kernel-trace` is opt-in; see [Perfetto tracing](../diagnostics/tracing.md).
 `heap-profiling` is opt-in; see [memory diagnostics](../diagnostics/memory-diagnostics.md).
 Memory ownership, capability checks, device isolation, IPC and the scheduler are
-not optional security switches. The architecture and limit configuration stays
-in the kernel's Kconfig file; a capability has one feature owner instead of
-competing Cargo and Kconfig toggles.
+not optional security switches. Architecture, limits and feature selection
+share the kernel Kconfig resolver; Rust implementation gates remain Cargo
+features rather than a second set of `CONFIG_FEATURE_*` cfgs.
 
 Older local kernel configurations may contain `CONFIG_CRASH_CONSOLE` or
 `CONFIG_HEAP_PROFILING`. Run `make -C kernel olddefconfig ARCH=aarch64` to remove obsolete
 settings with an explicit warning while retaining recognized address, stack and
-resource limits. Select the corresponding Cargo features separately if needed;
-the removed values do not silently add features. Do not reset an otherwise
+resource limits. Select the corresponding `CONFIG_FEATURE_*` menu entries if
+needed; removed values do not silently add features. Do not reset an otherwise
 customized configuration merely to change optional functionality.
 
 ### Kernel architecture and resource configuration
@@ -418,8 +428,8 @@ The selected architecture must still match `ARCH` in subsequent build commands.
 The terminal frontend uses the same Rust resolver and kernel constraints as
 normal builds. It does not maintain a second schema or relax dependency checks.
 This submenu edits kernel Kconfig settings; the enclosing product menu edits
-userspace selection. Optional kernel Cargo features remain the separate
-`KERNEL_FEATURES` or product JSON input described above.
+userspace selection. Optional kernel Cargo features and test permissions are
+part of this kernel submenu and follow the saved kernel configuration.
 
 Architecture is a required `choice`: select exactly one of
 `CONFIG_ARCH_AARCH64=y`, `CONFIG_ARCH_RISCV64=y`, or `CONFIG_ARCH_X86_64=y`.
