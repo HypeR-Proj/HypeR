@@ -182,7 +182,8 @@ console and terminal input probes use their own readiness markers.
 
 ## QEMU observations
 
-PCI deployment, network and DMA containment jobs run in Debian 13 (`trixie`)
+PCI deployment, disk-backed trace capture, network and DMA containment jobs
+run in Debian 13 (`trixie`)
 containers, using the distribution QEMU package. They require QEMU 9.2 or newer
 for SMMUv3 stage-2; Ubuntu 24.04's package lacks that model. CI does not build
 QEMU. Package caches are separated by distribution and version. The dedicated
