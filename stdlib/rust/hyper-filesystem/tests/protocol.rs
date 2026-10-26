@@ -61,6 +61,83 @@ fn response_rejects_mismatched_transaction_and_malformed_metadata() {
     response.result = Ok(1);
     assert!(response.encode(&mut bytes).is_none());
 }
+
+#[test]
+fn borrowed_response_fills_existing_metadata_without_an_owned_name_copy() -> Result<(), &'static str>
+{
+    assert!(core::mem::size_of::<ResponseRef<'_>>() <= 160);
+    let mut response = Response {
+        sequence: 17,
+        operation: Operation::Stat,
+        result: Ok(0),
+        entry: Entry::empty(),
+    };
+    response.entry.name.fill(b'x');
+    response.entry.name_len = NAME_BYTES;
+    response.entry.kind = FILE;
+    response.entry.mode = 0o640;
+    response.entry.size = 123;
+    response.entry.created = hyper_filesystem::Timestamp::new(1, 2);
+    response.entry.accessed = hyper_filesystem::Timestamp::new(3, 4);
+    response.entry.modified = hyper_filesystem::Timestamp::new(5, 6);
+    let mut bytes = [0; RESPONSE_BYTES];
+    let mut output = Entry::empty();
+    for name_len in [NAME_BYTES, 3, 0] {
+        response.entry.name_len = name_len;
+        response.encode(&mut bytes).ok_or("encode")?;
+        let view = ResponseRef::decode(&bytes, 17, Operation::Stat).ok_or("decode")?;
+        assert_eq!(view.result(), Ok(0));
+        view.entry_into(&mut output);
+        assert_eq!(output.name_len, name_len);
+        assert!(output.name[..name_len].iter().all(|b| *b == b'x'));
+        assert!(output.name[name_len..].iter().all(|b| *b == 0));
+        assert_eq!((output.kind, output.mode, output.size), (FILE, 0o640, 123));
+        assert_eq!(output.created, response.entry.created);
+        assert_eq!(output.accessed, response.entry.accessed);
+        assert_eq!(output.modified, response.entry.modified);
+    }
+    Ok(())
+}
+
+#[test]
+fn borrowed_response_validates_metadata_even_for_scalar_and_error_replies()
+-> Result<(), &'static str> {
+    for result in [Ok(0), Err(Error::Missing)] {
+        let response = Response {
+            sequence: 17,
+            operation: Operation::Sync,
+            result,
+            entry: Entry::empty(),
+        };
+        let mut valid = [0; RESPONSE_BYTES];
+        response.encode(&mut valid).ok_or("encode")?;
+        assert_eq!(
+            ResponseRef::decode(&valid, 17, Operation::Sync)
+                .ok_or("decode")?
+                .result(),
+            result
+        );
+        assert!(ResponseRef::decode(&valid, 18, Operation::Sync).is_none());
+        assert!(ResponseRef::decode(&valid, 17, Operation::Stat).is_none());
+        assert!(ResponseRef::decode(&valid[..RESPONSE_BYTES - 1], 17, Operation::Sync).is_none());
+        for (offset, value) in [
+            (32, 99),
+            (40, 0o1000),
+            (56, NAME_BYTES as u64 + 1),
+            (72, u64::MAX),
+        ] {
+            let mut malformed = valid;
+            malformed[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
+            assert!(ResponseRef::decode(&malformed, 17, Operation::Sync).is_none());
+        }
+        let mut malformed = valid;
+        malformed[56..64].copy_from_slice(&1u64.to_le_bytes());
+        malformed[112] = b'/';
+        assert!(ResponseRef::decode(&malformed, 17, Operation::Sync).is_none());
+    }
+    Ok(())
+}
+
 #[test]
 fn symlink_metadata_and_bounded_readlink_replies_round_trip() {
     let mut response = Response {

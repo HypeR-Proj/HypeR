@@ -276,8 +276,9 @@ impl<T: Entry, A: NodeAccount> PersistentAvl<T, A> {
     pub fn iter(&self) -> Iter<'_, T, A> {
         Iter::new(self.root.as_deref(), None)
     }
-    /// Seek in O(log n), then visit successive keys in amortized O(1).
-    /// Iteration borrows the immutable root and never allocates.
+    /// Seek in O(log n), then walk a bounded ancestor cache without allocation.
+    /// Trees deeper than the cache occasionally reseek an omitted ancestor;
+    /// ordinary iteration never searches from the root for each entry.
     pub fn iter_from(&self, lower: T::Key) -> Iter<'_, T, A> {
         Iter::new(self.root.as_deref(), Some(lower))
     }
@@ -314,35 +315,54 @@ impl<T: Entry, A: NodeAccount> PersistentAvl<T, A> {
     }
 }
 
-// AVL minimum population grows faster than 2^(height/2). A tree whose nodes
-// fit in a usize-addressed allocation space cannot reach this path length.
-const MAX_HEIGHT: usize = 2 * usize::BITS as usize;
+// Mapping iterators remain live below usercopy, filesystem RPC and IRQ-tail
+// scheduling. A path sized for the entire address space cost 1 KiB per cursor.
+// This is a cache size, not a tree-height or population limit.
+const CACHED_DEPTH: usize = 16;
 
-/// An allocation-free cursor borrowing one immutable tree version. Its path
-/// has a fixed bound derived from the address space, independent of node count.
+/// An allocation-free cursor borrowing one immutable tree version. Keep the
+/// nearest pending ancestors; when they are exhausted, seek the nearest omitted
+/// ancestor in the same immutable root to recover the rest of the path.
 pub struct Iter<'a, T: Entry, A: NodeAccount> {
-    path: [Option<&'a Node<T, A>>; MAX_HEIGHT],
+    root: Option<&'a Node<T, A>>,
+    resume: Option<&'a Node<T, A>>,
+    path: [Option<&'a Node<T, A>>; CACHED_DEPTH],
     depth: usize,
 }
 
 impl<'a, T: Entry, A: NodeAccount> Iter<'a, T, A> {
-    fn new(mut root: Option<&'a Node<T, A>>, lower: Option<T::Key>) -> Self {
+    fn new(root: Option<&'a Node<T, A>>, lower: Option<T::Key>) -> Self {
         let mut iter = Self {
-            path: [None; MAX_HEIGHT],
+            root,
+            resume: None,
+            path: [None; CACHED_DEPTH],
             depth: 0,
         };
+        iter.seek(lower);
+        iter
+    }
+
+    fn seek(&mut self, lower: Option<T::Key>) {
+        let mut root = self.root;
         while let Some(node) = root {
             if lower.is_some_and(|key| node.value.key() < key) {
                 root = node.right.as_deref();
             } else {
-                iter.push(node);
+                self.push(node);
                 root = node.left.as_deref();
             }
         }
-        iter
     }
 
     fn push(&mut self, node: &'a Node<T, A>) {
+        if self.depth == CACHED_DEPTH {
+            // Pending ancestors have decreasing keys. The oldest cached one
+            // precedes every previously omitted ancestor, but follows every
+            // entry still cached. Replacing resume therefore loses no key.
+            self.resume = self.path[0];
+            self.path.copy_within(1.., 0);
+            self.depth -= 1;
+        }
         let Some(slot) = self.path.get_mut(self.depth) else {
             tree_invariant_failure();
         };
@@ -354,6 +374,12 @@ impl<'a, T: Entry, A: NodeAccount> Iter<'a, T, A> {
 impl<'a, T: Entry, A: NodeAccount> Iterator for Iter<'a, T, A> {
     type Item = &'a T;
     fn next(&mut self) -> Option<Self::Item> {
+        if self.depth == 0 {
+            let resume = self.resume.take()?;
+            // Inclusive: this node was omitted before it could be yielded.
+            // Keys remain stable for the lifetime of the borrowed snapshot.
+            self.seek(Some(resume.value.key()));
+        }
         self.depth = self.depth.checked_sub(1)?;
         let Some(node) = self.path[self.depth].take() else {
             tree_invariant_failure();
@@ -564,6 +590,73 @@ mod tests {
             assert!(account.0.calls.load(Ordering::Relaxed) - before <= 3 * depth);
         }
         assert_eq!(account.0.live.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn bounded_cursor_recovers_omitted_ancestors_without_losing_entries() {
+        // Construct valid, minimally populated AVL trees deeper than the
+        // cache. The left-heavy shape overflows during initial seek and later
+        // subtree walks; its mirror also checks paths with fewer pending nodes.
+        fn deep_tree(
+            height: usize,
+            left_heavy: bool,
+            key: &mut u64,
+            account: &Account,
+        ) -> Link<Value, Account> {
+            if height == 0 {
+                return None;
+            }
+            let (left, right) = if left_heavy {
+                (height - 1, height.saturating_sub(2))
+            } else {
+                (height.saturating_sub(2), height - 1)
+            };
+            let left = deep_tree(left, left_heavy, key, account);
+            let entry = value(*key, *key % 17, account);
+            *key += 2; // Absent lower bounds must also seek correctly.
+            let right = deep_tree(right, left_heavy, key, account);
+            Some(crate::require_ok(Node::make(entry, left, right, account)))
+        }
+
+        assert!(core::mem::size_of::<Iter<'_, Value, Account>>() <= 20 * size_of::<usize>());
+        for left_heavy in [true, false] {
+            let account = Account::default();
+            let mut end = 0;
+            let tree = PersistentAvl {
+                root: deep_tree(CACHED_DEPTH + 3, left_heavy, &mut end, &account),
+            };
+            assert_eq!(verify(&tree.root, None, None).0 as usize, CACHED_DEPTH + 3);
+            let calls = account.0.calls.load(Ordering::Relaxed);
+            account.0.probes.store(0, Ordering::Relaxed);
+            let mut cursor = tree.iter();
+            if left_heavy {
+                assert!(cursor.resume.is_some());
+            }
+            for expected in (0..end).step_by(2) {
+                assert_eq!(cursor.next().map(|v| v.key), Some(expected));
+            }
+            assert!(cursor.next().is_none());
+            assert!(cursor.next().is_none());
+            // The slow path may reseek, but must not search once per entry.
+            assert!(account.0.probes.load(Ordering::Relaxed) < tree.len() / 2);
+            for lower in (0..end + 2).step_by(137).chain([end - 1, end, end + 1]) {
+                assert!(
+                    tree.iter_from(lower)
+                        .map(|v| v.key)
+                        .eq((lower.div_ceil(2) * 2..end).step_by(2))
+                );
+            }
+            assert_eq!(account.0.calls.load(Ordering::Relaxed), calls);
+
+            // Publication of another root cannot change a cursor's resume key.
+            let mut cursor = tree.iter();
+            assert_eq!(cursor.next().map(|v| v.key), Some(0));
+            let changed = crate::require_ok(tree.remove(end / 4 * 2, &account));
+            assert!(cursor.map(|v| v.key).eq((2..end).step_by(2)));
+            drop(changed);
+            drop(tree);
+            assert_eq!(account.0.live.load(Ordering::Relaxed), 0);
+        }
     }
 
     #[test]

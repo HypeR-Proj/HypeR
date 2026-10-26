@@ -13,9 +13,9 @@ use core::marker::PhantomData;
 use core::sync::atomic::{AtomicU16, Ordering};
 
 #[cfg(not(test))]
-use super::try_box;
+use super::try_box_uninit;
 #[cfg(test)]
-use hyper::mm::try_box;
+use hyper::mm::try_box_uninit;
 
 const SEGMENT_SIZE: usize = 256;
 const SEGMENTS: usize = (u16::MAX as usize + 1) / SEGMENT_SIZE;
@@ -125,12 +125,24 @@ impl TranslationEpochSegment {
         }
     }
 
+    // Segment expansion is a cold path, but inlining its old by-value array
+    // construction reserved 4 KiB throughout Native process/VM creation.
+    #[inline(never)]
     pub fn try_new() -> Result<Box<Self>, TranslationEpochError> {
-        try_box(Self {
-            slots: [Slot::EMPTY; SEGMENT_SIZE],
-            free: [u64::MAX; SEGMENT_SIZE / 64],
-        })
-        .map_err(|_| TranslationEpochError::Allocation)
+        let mut segment =
+            try_box_uninit::<Self>().map_err(|_| TranslationEpochError::Allocation)?;
+        let pointer = segment.as_mut_ptr();
+        // SAFETY: The Box exclusively owns aligned storage for Self. Initialize
+        // every slot and the free bitmap in that allocation before exposing a
+        // reference to Self. No fallible operation or destructor intervenes.
+        unsafe {
+            let slots = core::ptr::addr_of_mut!((*pointer).slots).cast::<Slot>();
+            for index in 0..SEGMENT_SIZE {
+                slots.add(index).write(Slot::EMPTY);
+            }
+            core::ptr::addr_of_mut!((*pointer).free).write([u64::MAX; SEGMENT_SIZE / 64]);
+            Ok(segment.assume_init())
+        }
     }
 }
 
