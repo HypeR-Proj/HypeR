@@ -25,6 +25,7 @@ describe supported behavior and limits, not assumed Linux compatibility.
 - [Memory diagnostics](diagnostics/memory-diagnostics.md): snapshots, differences and optional heap profiling.
 - [PMU sampling and flame graphs](diagnostics/profiling.md): capture, conversion and interpretation limits.
 - [Perfetto timelines](diagnostics/tracing.md): event filters, bounded capture, export and loss interpretation.
+- [Scheduler benchmarks](diagnostics/scheduler-bench.md): periodic wakeup latency, same/cross-CPU handoff, fairness and reproducible distributions.
 - [Crash console](../../kernel/docs/usage/crash-console.md): configured post-failure inspection.
 - [Kernel stack budgets](../../kernel/docs/usage/stack-budgets.md): measurement and reproducing the checks.
 - [Storage qualification](../../tests/hardware/storage/README.md) and [network exercise](../../tests/hardware/network/README.md): hardware test procedures.
