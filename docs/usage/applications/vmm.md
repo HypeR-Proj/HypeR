@@ -41,6 +41,9 @@ application startup. Concurrent clients can still change the VM's state; waiting
 observes manager state and does not acquire an exclusive lifecycle lock.
 Ordinary command exchanges also have a 30-second response deadline; attached
 console sessions remain interactive without that time limit.
+Console endpoint handoff allows five seconds per peer. The manager and VM
+runtime share an absolute deadline, so a delayed attach request cannot restart
+the wait after the sender has timed out. A handoff timeout does not stop the VM.
 
 Each VM owns a separate runtime process, resource domain, task group, lifecycle
 tracker, and console session. The current policy allows eight definitions and
