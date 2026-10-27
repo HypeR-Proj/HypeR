@@ -340,8 +340,8 @@ Implementation entry points: [formal manager](../../../svc/fs-backend/src/main.r
 [formal worker transport](../../../lib/fs-service/src/lib.rs),
 [FAT worker](../../../svc/fs-fat/src/main.rs), [EROFS worker](../../../svc/fs-erofs/src/main.rs),
 [wire protocol](../../../stdlib/rust/hyper-filesystem/src/protocol.rs),
-[kernel adapter](../../../kernel/src/kernel/vfs/remote.rs), and
-[transport](../../../kernel/src/kernel/vfs/remote/transport.rs).
+[kernel adapter](../../../kernel/src/fs/vfs/remote/mod.rs), and
+[transport](../../../kernel/src/fs/vfs/remote/transport.rs).
 See [FAT semantics](fat.md) and [VFS cache](../../../kernel/docs/design/vfs.md#file-data-cache)
 for format details and memory policy.
 

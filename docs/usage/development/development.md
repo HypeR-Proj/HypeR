@@ -74,7 +74,12 @@ the settings in `.vscode/settings.json`, with the `rust-analyzer.` prefix remove
 and the repository root as their root directory. When adding an independent
 Cargo project, add its manifest to `linkedProjects`; kernel and SDK workspace
 members are discovered automatically. The kernel workspace includes the binary,
-`hyper-core`, and `hyper-hal`.
+`hyper-core`, `hyper-platform`, `hyper-drivers`, `hyper-vm-models`, `hyper-hal`,
+and `hyper-trace`.
+Only `kernel/Cargo.toml` belongs in `linkedProjects` for those seven crates;
+adding their manifests separately duplicates workspace discovery. Module moves
+within a crate are discovered through Rust module declarations, including
+directory-local `mod.rs` entry points, and need no editor path mapping.
 
 ## Testing and CI
 
@@ -276,15 +281,16 @@ exact coverage and supported runtime expectations.
 | Path | Responsibility |
 | --- | --- |
 | `kernel/` | Independently buildable hypervisor kernel, configuration, documentation, tests, and build tooling |
-| `kernel/hal/` | `hyper-hal` crate: public machine capabilities and private architecture implementations in `src/arch/` |
-| `kernel/core/` | `hyper-core` manifest for reusable mechanisms in `kernel/src/lib.rs`; no dependency on kernel policy or the selected HAL |
-| `kernel/src/hal/` | Portable HAL contracts in `hyper-core` |
+| `kernel/core/src/` | Foundation types, synchronization, containers, memory mechanisms and portable HAL contracts |
+| `kernel/platform/src/` | Firmware parsing and platform resource descriptions |
+| `kernel/drivers/src/` | Physical devices and firmware-interface drivers |
+| `kernel/vm-models/src/` | Guest-visible device models and portable virtualization contracts |
+| `kernel/hal/src/` | Public machine capabilities and private architecture implementations |
+| `kernel/trace/src/` | Bounded event recording and tracepoint macros |
+| `kernel/src/` | Runtime ownership, policy, scheduling, IRQ, memory, devices and VM orchestration |
+| `kernel/src/diagnostics/` | Logging, crash handling, inspection, symbols, profiling and trace control |
+| `kernel/src/fs/` | Filesystem primitives, archive import, VFS and file-cache residency |
 | `kernel/build_support/` | Shared build-time configuration parsing |
-| `kernel/src/kernel/` | Runtime ownership, policy, scheduling, IRQ, memory, devices, and VM orchestration |
-| `kernel/src/vm/` | Reusable VM packages, guest-visible models, and architecture-neutral virtualization vocabulary |
-| `kernel/src/drivers/` | Physical devices and firmware-interface drivers |
-| `kernel/src/platform/` | Firmware parsing and immutable platform description |
-| `kernel/src/mm/`, `kernel/src/sync/`, `kernel/src/time/` | Reusable allocation, synchronization, and timing mechanisms |
 | `sdk/abi/` | Native ABI schema, generated Rust definitions, C header, and reference |
 | `stdlib/hyper/` | Freestanding Native C runtime and architecture syscall veneers |
 | `svc/` | Formal background services, root component-manager, system-startup, journal and retirement |
