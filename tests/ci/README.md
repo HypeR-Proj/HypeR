@@ -55,7 +55,7 @@ and the one-time Pages/required-check setup.
 | `native-fleet` | Fleet configuration admission and error handling |
 | `native-storage-recovery` | Storage readiness and handoff failure recovery |
 | `native-filesystem` | Filesystem RPC and provider failure |
-| `native-runtime-crash` | Guest runtime failure and isolation in both fleet orders |
+| `native-runtime-crash` | Guest runtime failure and isolation in both fleet orders; console handoff also injects 250 ms receiver delay |
 | `native-vm` | VM smoke on both GIC backends and forced GICv3 common-register traps |
 | `native-gicv2` | GICv2 Native boot on one/four CPUs, console and runtime-crash recovery |
 | `native-smp-stack` | Serial aggregate of the three SMP suites and `native-retirement-stack` |
