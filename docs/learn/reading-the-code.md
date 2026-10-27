@@ -43,15 +43,17 @@ a reading aid—the node labels identify the actual owners.
 | Area | Start here | Responsibility |
 | --- | --- | --- |
 | Boot | [kernel main](../../kernel/src/main.rs) | Explicit initialization order and Native init startup |
-| Kernel policy | [kernel modules](../../kernel/src/kernel/mod.rs) | Processes, scheduling, capabilities, VFS and installed VMs |
+| Kernel policy | [kernel modules](../../kernel/src/main.rs) | Processes, scheduling, capabilities, VFS and installed VMs |
 | Hardware mechanisms | [HAL](../../kernel/hal/src/hal/vm.rs), [AArch64 backend](../../kernel/hal/src/arch/aarch64/mod.rs) | Hardware state and architecture-specific execution |
-| Reusable mechanisms | [core library](../../kernel/src/lib.rs) | Formats, interrupt models, memory and synchronization algorithms |
+| Foundation | [core library](../../kernel/core/src/lib.rs) | Shared types, memory contracts, containers and synchronization |
+| Device and VM mechanisms | [physical drivers](../../kernel/drivers/src/lib.rs), [VM models](../../kernel/vm-models/src/lib.rs), [platform discovery](../../kernel/platform/src/lib.rs) | Separate libraries depending on the foundation |
 | Native ABI | [ABI schema](../../sdk/abi/schema/native.rs) | Wire layout and generated Rust/C/reference definitions |
 | Applications | [application guide](../../app/README.md) | Init, shell, VM management and I/O services |
 
-`kernel/core` builds the reusable library from `kernel/src/lib.rs`.
-`kernel/hal` includes the selected architecture backend and depends on that
-library; it does not depend on the kernel binary. An upward transition uses an
+`kernel/core` owns the foundational library in `kernel/core/src/`; platform
+discovery, physical drivers, VM models and trace recording have separate crates.
+`kernel/hal` includes the selected architecture backend and depends on core,
+platform, drivers and VM models; it does not depend on the kernel binary. An upward transition uses an
 explicit registered entry/service boundary. See the
 [architecture contract](../../kernel/docs/architecture/README.md) for the rules behind
 this arrangement.
@@ -64,7 +66,7 @@ Read [boot.S](../../kernel/hal/src/arch/aarch64/boot.S), then the
 environment; the common startup sequence establishes memory, scheduling,
 interrupts, time and platform/VM services before publishing userspace.
 
-[Kernel init](../../kernel/src/kernel/init/mod.rs) snapshots `/init`, maps the selected
+[Kernel init](../../kernel/src/init/mod.rs) snapshots `/init`, maps the selected
 bootstrap loader and prepares initial capabilities. The userspace loader
 validates and maps init itself. [Bootstrap init runtime](../../bootstrap/stage1/init/src/runtime.rs) consumes
 the service manifest and supervises core services. After handoff,
@@ -133,14 +135,14 @@ flowchart TB
    [vm-support](../../lib/vm-support/src/lib.rs) contains shared loading/device
    mechanisms; [SDK VM bindings](../../stdlib/rust/hyper-os/src/vm.rs) expose the Native
    operations used here.
-3. [VM services](../../kernel/src/kernel/vm/service.rs) resolve capabilities and
+3. [VM services](../../kernel/src/vm/service.rs) resolve capabilities and
    implement `create_pending`, `seal`, `install` and `start_vcpu`.
-   [Pending objects](../../kernel/src/kernel/vm/objects/pending.rs),
-   [installed ownership](../../kernel/src/kernel/vm/installed.rs) and
-   [registry construction](../../kernel/src/kernel/vm/registry/construction.rs)
+   [Pending objects](../../kernel/src/vm/objects/pending.rs),
+   [installed ownership](../../kernel/src/vm/installed.rs) and
+   [registry construction](../../kernel/src/vm/registry/construction.rs)
    separate preparation from publication and execution ownership.
-4. [The vCPU runner](../../kernel/src/kernel/vm/vcpu/runner.rs) is a scheduler Thread.
-   [Transitions](../../kernel/src/kernel/vm/vcpu/transition.rs) acquire execution
+4. [The vCPU runner](../../kernel/src/vm/vcpu/runner.rs) is a scheduler Thread.
+   [Transitions](../../kernel/src/vm/vcpu/transition.rs) acquire execution
    ownership and activate hardware through the HAL before guest entry.
 
 Creation, installation and execution are separate steps. Receiving a successful
@@ -168,26 +170,26 @@ follow the selected case:
 
 | Guest event | Follow this code | What happens |
 | --- | --- | --- |
-| System register, WFI, PSCI | [vsysreg.rs](../../kernel/hal/src/arch/aarch64/vsysreg.rs) | Decode owned exit facts and produce an explicit action: resume, wait, stop or deferred completion |
-| Device MMIO | [kernel device dispatch](../../kernel/src/kernel/vm/device/aarch64.rs) | Handle kernel-owned devices or route an admitted request to userspace |
-| GIC registers | [GIC service](../../kernel/src/kernel/vm/device/gic.rs), [VM interrupt controller](../../kernel/hal/src/arch/aarch64/vm_interrupt.rs) | Decode access, synchronize hardware state and update the virtual interrupt model |
-| Guest memory fault | [guest memory owner](../../kernel/src/kernel/vm/memory.rs), [stage-2 backend](../../kernel/hal/src/arch/aarch64/stage2.rs) | Resolve admitted guest backing and translation faults; reject accesses outside policy |
-| Host IRQ while a guest runs | [IRQ entry](../../kernel/src/kernel/entry/irq.rs), [VM timer/maintenance integration](../../kernel/src/kernel/vm/timer.rs) | Dispatch the host interrupt, reconcile virtual delivery and schedule through the guest IRQ postlude when required |
-| Host software deadline | [timer service](../../kernel/src/kernel/time/timers.rs), [Callout lifecycle](../../kernel/src/kernel/time/callout/lifecycle.rs), [timer workers](../../kernel/src/kernel/time/worker.rs) | Claim expiry under the source queue lock; deliver an explicit IRQ callback or enqueue normal-context work. [Timer contracts](../../kernel/docs/design/timers.md) describe cancellation and shutdown. |
+| System register, WFI, PSCI | [vsysreg.rs](../../kernel/hal/src/arch/aarch64/vm/sysreg.rs) | Decode owned exit facts and produce an explicit action: resume, wait, stop or deferred completion |
+| Device MMIO | [kernel device dispatch](../../kernel/src/vm/device/aarch64.rs) | Handle kernel-owned devices or route an admitted request to userspace |
+| GIC registers | [GIC service](../../kernel/src/vm/device/gic.rs), [VM interrupt controller](../../kernel/hal/src/arch/aarch64/vm/interrupt.rs) | Decode access, synchronize hardware state and update the virtual interrupt model |
+| Guest memory fault | [guest memory owner](../../kernel/src/vm/memory/mod.rs), [stage-2 backend](../../kernel/hal/src/arch/aarch64/vm/stage2/mod.rs) | Resolve admitted guest backing and translation faults; reject accesses outside policy |
+| Host IRQ while a guest runs | [IRQ entry](../../kernel/src/entry/irq.rs), [VM timer/maintenance integration](../../kernel/src/vm/timer/mod.rs) | Dispatch the host interrupt, reconcile virtual delivery and schedule through the guest IRQ postlude when required |
+| Host software deadline | [timer service](../../kernel/src/time/timers/mod.rs), [Callout lifecycle](../../kernel/src/time/callout/lifecycle.rs), [timer workers](../../kernel/src/time/worker.rs) | Claim expiry under the source queue lock; deliver an explicit IRQ callback or enqueue normal-context work. [Timer contracts](../../kernel/docs/design/timers.md) describe cancellation and shutdown. |
 
 For a deferred device access, continue in
-[the vCPU runner](../../kernel/src/kernel/vm/vcpu/runner.rs) and
-[MMIO continuation](../../kernel/src/kernel/vm/vcpu/mmio.rs). Hardware is detached
+[the vCPU runner](../../kernel/src/vm/vcpu/runner.rs) and
+[MMIO continuation](../../kernel/src/vm/vcpu/mmio.rs). Hardware is detached
 before the Thread parks; a completion updates the saved instruction before
 re-entry. A userspace device request and an internal GIC synchronization request
 share a device-wait disposition but have different completion owners.
 
 For vGIC work, read the reusable
-[controller](../../kernel/src/vm/arm/gic/controller.rs) and
-[quiesce model](../../kernel/src/vm/arm/gic/quiesce.rs) alongside the hardware
-[save/restore backend](../../kernel/hal/src/arch/aarch64/vgic.rs).
+[controller](../../kernel/vm-models/src/arm/gic/controller.rs) and
+[quiesce model](../../kernel/vm-models/src/arm/gic/quiesce.rs) alongside the hardware
+[save/restore backend](../../kernel/hal/src/arch/aarch64/vm/vgic/mod.rs).
 The model's saved state and a running CPU's LR state are not interchangeable.
-The runtime [bank guard](../../kernel/hal/src/arch/aarch64/vgic/bank.rs) tracks
+The runtime [bank guard](../../kernel/hal/src/arch/aarch64/vm/vgic/bank.rs) tracks
 whether cleanup should save live hardware or reuse an already saved snapshot.
 
 **Following one exception:** record the exception class, guest PC, syndrome
@@ -226,29 +228,29 @@ than assuming every Rust operation passes through C.
 [The ABI schema](../../sdk/abi/schema/native.rs) is the starting point for a
 syscall's arguments, rights and result format.
 
-[HAL user entry](../../kernel/hal/src/arch/aarch64/user_entry.rs) handles the machine
-boundary. [The kernel user runner](../../kernel/src/kernel/entry/user.rs) owns the
+[HAL user entry](../../kernel/hal/src/arch/aarch64/user/entry.rs) handles the machine
+boundary. [The kernel user runner](../../kernel/src/entry/user/mod.rs) owns the
 Process/Thread execution context and the sleepable syscall-return protocol.
 Calls execute on the calling Thread's kernel stack with IRQs and preemption
 enabled. Blocking suspends that continuation; an actual scheduler switch
 detaches CPU-local translation, TLS and FP ownership before another Thread runs.
-[Native dispatch](../../kernel/src/kernel/abi/native/dispatch.rs) routes calls;
-[capability-domain handlers](../../kernel/src/kernel/abi/native/handlers/mod.rs)
+[Native dispatch](../../kernel/src/abi/native/dispatch.rs) routes calls;
+[capability-domain handlers](../../kernel/src/abi/native/handlers/mod.rs)
 decode requests against service contracts. Each syscall retains a separate
-machine frame, including [device calls](../../kernel/src/kernel/abi/native/handlers/device.rs)
-and [filesystem calls](../../kernel/src/kernel/abi/native/handlers/vfs/mod.rs).
-[Process services](../../kernel/src/kernel/entry/services.rs) bind those contracts
+machine frame, including [device calls](../../kernel/src/abi/native/handlers/device.rs)
+and [filesystem calls](../../kernel/src/abi/native/handlers/vfs/mod.rs).
+[Process services](../../kernel/src/entry/services/mod.rs) bind those contracts
 to the current Process, handles and user memory.
 
 Before returning to userspace, the runner checks stop and scheduling state and
 restores translation if the continuation was switched out. For usercopy, follow
 the service's explicit user-memory helpers into
-[the address-space owner](../../kernel/src/kernel/mm/user_space/address_space.rs),
+[the address-space owner](../../kernel/src/mm/user_space/address_space/mod.rs),
 not an assumed global `copy_from_user` function.
 
-The [service adapter modules](../../kernel/src/kernel/entry/services.rs) share a
-borrowed Process and Thread context. [Task services](../../kernel/src/kernel/entry/services/task.rs),
-[memory services](../../kernel/src/kernel/entry/services/memory.rs), and the other
+The [service adapter modules](../../kernel/src/entry/services/mod.rs) share a
+borrowed Process and Thread context. [Task services](../../kernel/src/entry/services/task.rs),
+[memory services](../../kernel/src/entry/services/memory.rs), and the other
 capability-specific children implement those contracts without extending that borrow.
 
 **Adding or changing a syscall:** trace schema → generated bindings → dispatch
@@ -266,10 +268,10 @@ loads a new image and address space.
 - **Process:** [std process adapter](../../sdk/toolchain/rust-std/overlay/std/src/sys/process/hyper.rs)
   and [libhyper process adapter](../../stdlib/hyper/src/std-process.c), or an explicit
   [SDK ProcessBuilder](../../stdlib/rust/hyper-os/src/task.rs), lead through Native
-  dispatch to [the kernel builder](../../kernel/src/kernel/process/builder.rs).
-  Follow `start_process_builder`, [bootstrap mapping](../../kernel/src/kernel/process/loader.rs),
-  [Process owner](../../kernel/src/kernel/process/owner.rs) and
-  [startup publication](../../kernel/src/kernel/process/owner/start.rs).
+  dispatch to [the kernel builder](../../kernel/src/process/builder.rs).
+  Follow `start_process_builder`, [bootstrap mapping](../../kernel/src/process/loader.rs),
+  [Process owner](../../kernel/src/process/owner/mod.rs) and
+  [startup publication](../../kernel/src/process/owner/start.rs).
   The kernel commits capabilities and a runnable bootstrap Thread together.
   The selected userspace loader maps the application and constructs its startup
   vector. The [bootstrap loader](../../bootstrap/stage1/userspace-loader/README.md)
@@ -281,11 +283,11 @@ loads a new image and address space.
   stops and joins the child rather than returning a retryable builder.
 - **Additional Thread:** [std thread adapter](../../sdk/toolchain/rust-std/overlay/std/src/sys/thread/hyper.rs)
   uses [thread_spawn.c](../../stdlib/hyper/src/thread_spawn.c). Native `thread_create`
-  reaches `create_thread` in [task services](../../kernel/src/kernel/entry/services/task.rs),
+  reaches `create_thread` in [task services](../../kernel/src/entry/services/task.rs),
   which validates start information and affinity and asks the Process owner to
   prepare the user Thread. Creation and `thread_start` are separate operations.
-  [UserThread](../../kernel/src/kernel/process/user_thread.rs) and
-  [scheduler Thread](../../kernel/src/kernel/task/thread.rs) serve different ownership roles.
+  [UserThread](../../kernel/src/process/user_thread.rs) and
+  [scheduler Thread](../../kernel/src/task/thread.rs) serve different ownership roles.
 - **Stack:** [stack.c](../../stdlib/hyper/src/stack.c) manages guarded reservations and
   explicit growth for both the runtime-created main stack and SDK-created worker stacks.
   [Runtime initialization](../../stdlib/hyper/src/runtime.c) copies startup data;
@@ -304,7 +306,7 @@ It passes `info.top` as the `initial_sp` argument of `hyper_thread_create`, with
 `worker` as the entry and the user-heap token pointer as the entry argument.
 The kernel does not dereference that token to discover the stack. The Process
 owner passes the supplied SP into `hal::user::prepare_context`;
-[AArch64 user context construction](../../kernel/hal/src/arch/aarch64/user_entry.rs)
+[AArch64 user context construction](../../kernel/hal/src/arch/aarch64/user/entry.rs)
 stores it in `MachineContext.stack_pointer`. When the scheduled Thread enters
 userspace, `aarch64_run_native_user` in
 [context.S](../../kernel/hal/src/arch/aarch64/context.S) explicitly loads that field,
@@ -327,11 +329,11 @@ and bounded by the capacity reserved at creation, not automatic fault-driven gro
 
 Start with [std fs](../../sdk/toolchain/rust-std/overlay/std/src/sys/fs/hyper.rs),
 [std-fs.c](../../stdlib/hyper/src/std-fs.c), then Native filesystem dispatch.
-[Kernel VFS services](../../kernel/src/kernel/vfs/service.rs) and
-[entry adapters](../../kernel/src/kernel/entry/services/vfs.rs) enforce capability
+[Kernel VFS services](../../kernel/src/fs/vfs/service.rs) and
+[entry adapters](../../kernel/src/entry/services/vfs.rs) enforce capability
 rights, copy payloads and invoke the VFS objects.
-[Path resolution](../../kernel/src/kernel/vfs/resolve.rs) follows the delegated
-root/cwd and mounts; [backend selection](../../kernel/src/kernel/vfs/instance.rs)
+[Path resolution](../../kernel/src/fs/vfs/resolve.rs) follows the delegated
+root/cwd and mounts; [backend selection](../../kernel/src/fs/vfs/instance.rs)
 determines the remaining path.
 
 ```mermaid
@@ -355,15 +357,15 @@ flowchart TB
     classDef machine fill:#f8fafc,stroke:#64748b,color:#0f172a
 ```
 
-For ramfs, read [the VFS adapter](../../kernel/src/kernel/vfs/ramfs.rs) and
-[ramfs implementation](../../kernel/src/fs/ramfs.rs).
-For `/data`, read [the remote filesystem adapter](../../kernel/src/kernel/vfs/remote.rs),
+For ramfs, read [the VFS adapter](../../kernel/src/fs/vfs/ramfs/mod.rs) and
+[ramfs implementation](../../kernel/src/fs/primitives/ramfs.rs).
+For `/data`, read [the remote filesystem adapter](../../kernel/src/fs/vfs/remote/mod.rs),
 [common service protocol](../../stdlib/rust/hyper-filesystem/src/protocol.rs),
 [FAT media engine](../../bootstrap/stage1/fs-fat/src/volume.rs),
-[block interface](../../kernel/src/fs/block.rs),
-[Native block owner](../../kernel/src/kernel/block/mod.rs),
-[request lifecycle](../../kernel/src/kernel/block/request.rs) and
-[queue wire format](../../kernel/src/kernel/block/wire.rs).
+[block interface](../../kernel/src/fs/primitives/block.rs),
+[Native block owner](../../kernel/src/block/mod.rs),
+[request lifecycle](../../kernel/src/block/request.rs) and
+[queue wire format](../../kernel/src/block/wire.rs).
 
 [Native storage](../../bootstrap/stage1/io-runtime/src/runtime/storage.rs) negotiates each
 configured Native volume client and moves its capability to
@@ -430,9 +432,9 @@ The [I/O broker](../../svc/io-runtime/src/runtime/broker/mod.rs) authorizes clie
 traffic. [The protocol](../../lib/vm-support/src/io_protocol.rs) defines the
 negotiation records.
 
-Inside HypeR, [VM I/O services](../../kernel/src/kernel/vm/io/service.rs),
-[mailboxes](../../kernel/src/kernel/vm/io/mailbox.rs) and
-[notifications](../../kernel/src/kernel/vm/io/notification.rs) implement the
+Inside HypeR, [VM I/O services](../../kernel/src/vm/io/service.rs),
+[mailboxes](../../kernel/src/vm/io/mailbox.rs) and
+[notifications](../../kernel/src/vm/io/notification.rs) implement the
 capability-scoped communication and notification mechanisms. This does not
 mean every data request becomes a vm-runtime MMIO round trip or that the path
 uses no kernel transitions. Payload buffers are shared with the backend rather
@@ -448,13 +450,13 @@ backing, DMA constraints and the limits of the zero-copy claim.
 
 ## 8. Follow teardown and tests before changing a path
 
-For VM exit, follow [installed lifecycle](../../kernel/src/kernel/vm/installed.rs),
-[vCPU lifecycle](../../kernel/src/kernel/vm/vcpu/lifecycle.rs),
-[registry control](../../kernel/src/kernel/vm/registry/control.rs) and
-[memory retirement](../../kernel/src/kernel/vm/memory/retirement.rs).
+For VM exit, follow [installed lifecycle](../../kernel/src/vm/installed.rs),
+[vCPU lifecycle](../../kernel/src/vm/vcpu/lifecycle.rs),
+[registry control](../../kernel/src/vm/registry/control.rs) and
+[memory retirement](../../kernel/src/vm/memory/retirement.rs).
 For Native exit, start with `finish_native_call` in
-[the user runner](../../kernel/src/kernel/entry/user.rs), then the Process owner
-and [scheduler](../../kernel/src/kernel/task/scheduler/mod.rs).
+[the user runner](../../kernel/src/entry/user/mod.rs), then the Process owner
+and [scheduler](../../kernel/src/task/scheduler/mod.rs).
 Guest execution stopping, publishing a terminal state, releasing handles and
 reclaiming hardware-backed storage are distinct events.
 
@@ -493,27 +495,27 @@ flowchart TB
 
 Read these in order:
 
-1. [Scheduler public operations](../../kernel/src/kernel/task/scheduler/mod.rs)
+1. [Scheduler public operations](../../kernel/src/task/scheduler/mod.rs)
    connect kernel callers to the scheduler. `kthread_create` is a useful entry
    for kernel workers; Native and vCPU Threads have their own prepared startup
    objects. Follow the specific caller rather than treating all creation paths
    as identical.
-2. [Scheduler state](../../kernel/src/kernel/task/scheduler/state.rs) and
-   [queues](../../kernel/src/kernel/task/scheduler/queue.rs) decide where a Thread
+2. [Scheduler state](../../kernel/src/task/scheduler/state/mod.rs) and
+   [queues](../../kernel/src/task/scheduler/queue.rs) decide where a Thread
    resides and whether it can run. The state owner retains registry, CPU locks,
    context-switch commit and retirement. Its private modules separate
-   [CPU-local decisions](../../kernel/src/kernel/task/scheduler/state/local.rs),
-   [affinity and migration](../../kernel/src/kernel/task/scheduler/state/migration.rs),
-   [class changes](../../kernel/src/kernel/task/scheduler/state/policy.rs), and
-   [load balancing](../../kernel/src/kernel/task/scheduler/state/balance.rs).
-   The [balancing Callout](../../kernel/src/kernel/task/scheduler/balance.rs) runs
+   [CPU-local decisions](../../kernel/src/task/scheduler/state/local.rs),
+   [affinity and migration](../../kernel/src/task/scheduler/state/migration.rs),
+   [class changes](../../kernel/src/task/scheduler/state/policy.rs), and
+   [load balancing](../../kernel/src/task/scheduler/state/balance.rs).
+   The [balancing Callout](../../kernel/src/task/scheduler/balance/mod.rs) runs
    bounded maintenance on an existing timer worker, outside IRQ delivery.
-   [Policy types](../../kernel/src/kernel/task/policy.rs) define priority and CPU masks.
-3. [Wait records](../../kernel/src/kernel/task/wait.rs) track a particular wait
-   attempt, its ticket and outcome. [Waiting transitions](../../kernel/src/kernel/task/scheduler/state/waiting.rs)
-   connect that protocol to scheduling; [timeouts](../../kernel/src/kernel/task/timeout.rs)
+   [Policy types](../../kernel/src/task/policy.rs) define priority and CPU masks.
+3. [Wait records](../../kernel/src/task/wait.rs) track a particular wait
+   attempt, its ticket and outcome. [Waiting transitions](../../kernel/src/task/scheduler/state/waiting.rs)
+   connect that protocol to scheduling; [timeouts](../../kernel/src/task/timeout.rs)
    provide another possible completion source.
-4. [Switch handoff](../../kernel/src/kernel/task/scheduler/switch_handoff.rs)
+4. [Switch handoff](../../kernel/src/task/scheduler/switch_handoff.rs)
    tracks ownership while the outgoing context is still being saved.
    [AArch64 context assembly](../../kernel/hal/src/arch/aarch64/context.S)
    implements the machine transition.
@@ -536,9 +538,9 @@ These facilities share scheduler machinery but answer different questions:
 
 | Facility | Meaning | Start here |
 | --- | --- | --- |
-| Object signals | Is this kernel object readable, writable or terminated? | [signals](../../kernel/src/kernel/object/signals.rs), [object waits](../../kernel/src/kernel/object/wait.rs) |
-| WaitSet | Which registered object subscription became ready? | [WaitSet](../../kernel/src/kernel/object/wait_set.rs) |
-| Atomic wait | Does this userspace word still have the expected value before sleeping? | [atomic waits](../../kernel/src/kernel/process/atomic_wait.rs) |
+| Object signals | Is this kernel object readable, writable or terminated? | [signals](../../kernel/src/object/signals.rs), [object waits](../../kernel/src/object/wait.rs) |
+| WaitSet | Which registered object subscription became ready? | [WaitSet](../../kernel/src/object/wait_set.rs) |
+| Atomic wait | Does this userspace word still have the expected value before sleeping? | [atomic waits](../../kernel/src/process/atomic_wait.rs) |
 
 [SDK wait bindings](../../stdlib/rust/hyper-os/src/wait.rs) show how applications
 consume object readiness. WaitSet registrations are persistent, with one-shot
@@ -578,26 +580,26 @@ flowchart TB
     classDef machine fill:#f8fafc,stroke:#64748b,color:#0f172a
 ```
 
-Begin with [handle storage](../../kernel/src/kernel/capability/handle.rs), then
-[Process handle operations](../../kernel/src/kernel/process/owner/handles.rs) and
-[linear handle transactions](../../kernel/src/kernel/process/owner/handle_transactions.rs).
+Begin with [handle storage](../../kernel/src/capability/handle/mod.rs), then
+[Process handle operations](../../kernel/src/process/owner/handles.rs) and
+[linear handle transactions](../../kernel/src/process/owner/handle_transactions.rs).
 A handle is local to a Process. Its numeric value is not a globally meaningful
 object identity, and copying the number into another Process does not delegate
-the object. [Handle pages](../../kernel/src/kernel/capability/handle/page.rs) and
-[storage](../../kernel/src/kernel/capability/handle/storage.rs) are the lower-level
+the object. [Handle pages](../../kernel/src/capability/handle/page.rs) and
+[storage](../../kernel/src/capability/handle/storage.rs) are the lower-level
 allocation mechanism, not the authority policy.
 
 For cross-Process transfer, start at `capability_channel_try_send` and
-`capability_channel_receive` in [IPC services](../../kernel/src/kernel/ipc/service.rs).
-Then read [the rendezvous object](../../kernel/src/kernel/ipc/capability_channel.rs)
-and [wire validation](../../kernel/src/kernel/ipc/capability_wire.rs).
+`capability_channel_receive` in [IPC services](../../kernel/src/ipc/service.rs).
+Then read [the rendezvous object](../../kernel/src/ipc/capability_channel.rs)
+and [wire validation](../../kernel/src/ipc/capability_wire.rs).
 The service matches a receiver and prepares its destination slots; source
 rights, object kind, move/duplicate disposition and user-memory delivery are
 part of the transaction. Inspect the abort branches as carefully as the final
 commit. Do not infer buffered capability delivery from the word “channel”.
 
-[Byte channels](../../kernel/src/kernel/ipc/channel/mod.rs) have a different
-purpose. [Prepared messages](../../kernel/src/kernel/ipc/channel/message.rs)
+[Byte channels](../../kernel/src/ipc/channel/mod.rs) have a different
+purpose. [Prepared messages](../../kernel/src/ipc/channel/message.rs)
 carry bytes with sender-sponsored accounting. Shell streams use these byte
 transports; authority delegation uses capability operations.
 
@@ -629,20 +631,20 @@ flowchart TB
     classDef machine fill:#f8fafc,stroke:#64748b,color:#0f172a
 ```
 
-[VMO/VMAR services](../../kernel/src/kernel/mm/user_space/service.rs) validate
+[VMO/VMAR services](../../kernel/src/mm/user_space/service.rs) validate
 capabilities for `create_vmo`, `map_vmo`, `map_private`, `protect` and `unmap`.
 A VMO describes backing; a VMAR scopes virtual-address authority. Neither is
 the same thing as the architecture's page table.
 
-[The address-space owner](../../kernel/src/kernel/mm/user_space/address_space.rs)
+[The address-space owner](../../kernel/src/mm/user_space/address_space/mod.rs)
 coordinates mappings and usercopy. Follow a `prepare_*` method through
-[the transaction](../../kernel/src/kernel/mm/user_space/transaction.rs), then
-[the machine boundary](../../kernel/src/kernel/mm/user_space/machine.rs) and
-[kernel adapter](../../kernel/src/kernel/mm/user_space/kernel_adapter.rs).
+[the transaction](../../kernel/src/mm/user_space/transaction.rs), then
+[the machine boundary](../../kernel/src/mm/user_space/machine/mod.rs) and
+[kernel adapter](../../kernel/src/mm/user_space/kernel_adapter.rs).
 Preparation and publication are distinct: resource acquisition or validation
 may fail without making a partially prepared mapping visible.
 
-[Incremental translation edits](../../kernel/src/mm/table_edit.rs) copy only touched
+[Incremental translation edits](../../kernel/core/src/mm/table_edit.rs) copy only touched
 paths in the AArch64/RISC-V Native page-table hierarchy. An immutable persistent
 index retains the candidate's exact table set; unchanged table pages are shared
 with the prior root. Logical edits enumerate changed ranges or changed private
@@ -653,15 +655,15 @@ remain owned until stale translations are unusable. Guest stage-2 tables use
 their separate implementation.
 
 For private writable views, read `prepare_private_write` and
-[private backing versions](../../kernel/src/kernel/mm/user_space/vmo/private_view.rs).
-The [Native user runner](../../kernel/src/kernel/entry/user.rs) is the other end
+[private backing versions](../../kernel/src/mm/user_space/vmo/private_view/mod.rs).
+The [Native user runner](../../kernel/src/entry/user/mod.rs) is the other end
 of this path when an access faults. Do not apply private-write/COW assumptions
 to shared guest memory used by I/O: those mappings have a different physical
 page lifetime contract, described in [the I/O design](../design/virtualization/io-vm.md).
 
 For stale-translation questions, continue into
-[kernel translation-ID ownership](../../kernel/src/kernel/mm/translation_id.rs)
-and [AArch64 identifiers](../../kernel/hal/src/arch/aarch64/translation_identifiers.rs).
+[kernel translation-ID ownership](../../kernel/src/mm/translation_id.rs)
+and [AArch64 identifiers](../../kernel/hal/src/arch/aarch64/memory/translation_identifiers.rs).
 Software ownership, hardware ASID/VMID, allocation generation and each CPU's
 completed invalidation epoch are distinct facts. Reusing a hardware number
 requires the invalidation protocol, not just a free slot in an allocator.
@@ -704,8 +706,8 @@ flowchart LR
     classDef core fill:#f0fdfa,stroke:#0f766e,color:#134e4a
 ```
 
-For physical input, read [PL011](../../kernel/src/drivers/serial/pl011/mod.rs),
-[the kernel console device](../../kernel/src/kernel/device/console.rs), then
+For physical input, read [PL011](../../kernel/drivers/src/serial/pl011/mod.rs),
+[the kernel console device](../../kernel/src/device/console.rs), then
 [console-raw](../../bootstrap/stage1/console-raw/src/main.rs). This separates UART
 reception/IRQ problems from the request-sized byte-stream transport.
 
@@ -722,7 +724,7 @@ read/flush/fence contracts.
 For guest attachment, read [vmm console](../../app/vmm/src/console.rs),
 [vm-runtime console](../../svc/vm-runtime/src/console.rs) and
 [console waits](../../svc/vm-runtime/src/console_wait.rs), then the
-[SBSA Generic UART model](../../kernel/src/vm/aarch64/device/sbsa_uart.rs).
+[SBSA Generic UART model](../../kernel/vm-models/src/aarch64/device/sbsa_uart.rs).
 A guest that stops consuming input must not make the control/detach path
 unreachable. Keep output, input backpressure and attachment lifetime separate
 when changing the relay.

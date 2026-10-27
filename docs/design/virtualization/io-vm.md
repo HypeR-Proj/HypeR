@@ -497,7 +497,7 @@ that every Linux block driver or physical device avoids bounce buffers.
 
 Guest RAM starts as a sparse VMO. However, admitting that VMO to the I/O VM
 currently populates **every page**, before the backend starts serving requests.
-`Mapping::prepare` in `kernel/src/kernel/vm/memory/live.rs` walks the full VMO,
+`Mapping::prepare` in `kernel/src/vm/memory/live.rs` walks the full VMO,
 calls `populate_page`, obtains physical addresses and constructs the shared
 extents. The current alias address is derived from the host physical address,
 so the complete extent description requires physical pages to exist first.

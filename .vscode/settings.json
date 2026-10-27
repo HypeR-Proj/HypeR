@@ -14,6 +14,7 @@
         "editor.tabSize": 8
     },
     "rust-analyzer.linkedProjects": [
+        // Includes all seven kernel crates; Cargo discovers their module layout.
         "kernel/Cargo.toml",
         "sdk/abi/Cargo.toml",
         "stdlib/rust/Cargo.toml",
