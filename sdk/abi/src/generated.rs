@@ -7127,6 +7127,30 @@ const _: () = assert!(core::mem::align_of::<HyperNativeTraceThread>() == 8);
 const _: () = assert!(core::mem::offset_of!(HyperNativeTraceThread, thread) == 0);
 const _: () = assert!(core::mem::offset_of!(HyperNativeTraceThread, name) == 8);
 
+/// Minimum supported prefix of `trace_thread_details`, in bytes; individual calls define their buffer lengths.
+pub const HYPER_NATIVE_TRACE_THREAD_DETAILS_MIN_SIZE: usize = 80;
+/// Wire layout for `trace_thread_details`.
+///
+/// Size: 80 bytes; alignment: 8 bytes; supported minimum prefix: 80 bytes.
+/// Scalar widths and member offsets are fixed across supported architectures.
+/// The minimum prefix describes extensibility, not permission to truncate every call's buffer;
+/// the consuming operation defines its accepted length.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HyperNativeTraceThreadDetails {
+    /// Wire offset 0 bytes; width 8 bytes.
+    pub thread: u64,
+    /// Wire offset 8 bytes; width 8 bytes.
+    pub koid: u64,
+    /// Wire offset 16 bytes; width 64 bytes.
+    pub name: [u8; 64],
+}
+const _: () = assert!(core::mem::size_of::<HyperNativeTraceThreadDetails>() == 80);
+const _: () = assert!(core::mem::align_of::<HyperNativeTraceThreadDetails>() == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeTraceThreadDetails, thread) == 0);
+const _: () = assert!(core::mem::offset_of!(HyperNativeTraceThreadDetails, koid) == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeTraceThreadDetails, name) == 16);
+
 /// Minimum supported prefix of `scheduling_parameters`, in bytes; individual calls define their buffer lengths.
 pub const HYPER_NATIVE_SCHEDULING_PARAMETERS_MIN_SIZE: usize = 64;
 /// Wire layout for `scheduling_parameters`.

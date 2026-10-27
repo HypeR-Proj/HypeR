@@ -182,7 +182,7 @@
  *
  * - cpu_inspector_trace_stop requires SET_ATTRIBUTES and the exact generation. It closes producer admission before joining short in-flight writers; BUSY requires retry. Repeated successful stop is idempotent until another capture starts. Generation is an observation/control token, not a capability or private capture owner. Any appropriately authorized inspector may control the global session.
  *
- * - cpu_inspector_trace_read requires INSPECT_DETAILS. CPU UINT64_MAX selects trace_info (160 bytes, generation and cursor zero). CPU UINT64_MAX-1 selects trace_thread (72 bytes, exact generation, cursor is scheduler ThreadId); names are live best-effort observations, not authority. Ordinary online CPU indices select trace_batch (2656 bytes, eight trace_record entries) with exact generation and a per-CPU cursor. Returned value0 is the exact written size. next advances across overwritten and returned records; count zero while running is not EOF. incomplete is sticky per generation/CPU and means unquantified producer loss. Stop freezes records and loss metadata until next start. Strings are UTF-8 with NUL padding, truncated to fixed bounds; all reserved/unused bytes are zero. No kernel pointer, raw handle encoding or userspace payload is exported. Event vocabulary is diagnostic and identified by the included build revision, not a stable behavioral ABI.
+ * - cpu_inspector_trace_read requires INSPECT_DETAILS. CPU UINT64_MAX selects trace_info (160 bytes, generation and cursor zero). CPU UINT64_MAX-1 selects trace_thread (72 bytes, exact generation, cursor is scheduler ThreadId); names are live best-effort observations, not authority. CPU UINT64_MAX-2 selects trace_thread_details (80 bytes, exact generation, cursor is scheduler ThreadId), adding the canonical Thread KOID for joining TaskInspector metadata. This optional query does not change the older record layouts. Ordinary online CPU indices select trace_batch (2656 bytes, eight trace_record entries) with exact generation and a per-CPU cursor. Returned value0 is the exact written size. next advances across overwritten and returned records; count zero while running is not EOF. incomplete is sticky per generation/CPU and means unquantified producer loss. Stop freezes records and loss metadata until next start. Strings are UTF-8 with NUL padding, truncated to fixed bounds; all reserved/unused bytes are zero. No kernel pointer, raw handle encoding or userspace payload is exported. Event vocabulary is diagnostic and identified by the included build revision, not a stable behavioral ABI.
  */
 #ifndef HYPER_NATIVE_H
 #define HYPER_NATIVE_H
@@ -7551,6 +7551,38 @@ HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_trace_thread_t) == 72, "trace_thread
 HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_trace_thread_t) == 8, "trace_thread alignment");
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_trace_thread_t, thread) == 0, "trace_thread.thread offset");
 HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_trace_thread_t, name) == 8, "trace_thread.name offset");
+
+/**
+ * Minimum supported prefix of `trace_thread_details`, in bytes; individual calls define their buffer lengths.
+ */
+#define HYPER_NATIVE_TRACE_THREAD_DETAILS_MIN_SIZE UINT64_C(80)
+/**
+ * Wire layout for `trace_thread_details`.
+ *
+ * Size: 80 bytes; alignment: 8 bytes; supported minimum prefix: 80 bytes.
+ * Scalar widths and member offsets are fixed across supported architectures.
+ * The minimum prefix describes extensibility, not permission to truncate every call's buffer;
+ * the consuming operation defines its accepted length.
+ */
+typedef struct hyper_native_trace_thread_details_t {
+    /**
+     * Wire offset 0 bytes; width 8 bytes.
+     */
+    uint64_t thread;
+    /**
+     * Wire offset 8 bytes; width 8 bytes.
+     */
+    uint64_t koid;
+    /**
+     * Wire offset 16 bytes; width 64 bytes.
+     */
+    uint8_t name[64];
+} hyper_native_trace_thread_details_t;
+HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_trace_thread_details_t) == 80, "trace_thread_details size");
+HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_trace_thread_details_t) == 8, "trace_thread_details alignment");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_trace_thread_details_t, thread) == 0, "trace_thread_details.thread offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_trace_thread_details_t, koid) == 8, "trace_thread_details.koid offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_trace_thread_details_t, name) == 16, "trace_thread_details.name offset");
 
 /**
  * Minimum supported prefix of `scheduling_parameters`, in bytes; individual calls define their buffer lengths.

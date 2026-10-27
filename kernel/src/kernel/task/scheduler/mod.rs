@@ -15,6 +15,7 @@ mod registry;
 mod stack_audit;
 mod state;
 mod switch_handoff;
+mod trace;
 
 #[cfg(not(test))]
 use cpu_time::account_cpu_time;
@@ -35,11 +36,13 @@ use hyper::sync::{InterruptMaskGuard, InterruptShardedLock};
 
 use self::registry::ThreadReservation;
 use self::state::{PreparedContextSwitch, Scheduler};
+use super::preempt::RescheduleSource;
 pub use super::thread::ThreadNameSnapshot;
 use super::thread::{
     ExternalThreadExecution, KernelThreadEntry, Thread, ThreadId, ThreadResourceOwnership,
     ThreadState,
 };
+use trace::SchedulePoint;
 
 use super::policy;
 pub use super::policy::{CpuMask, ThreadPriority};
@@ -559,6 +562,18 @@ pub(crate) fn trace_thread_name(id: u64) -> Result<ThreadNameSnapshot, Error> {
     thread_name(ThreadId::from_diagnostic(id))
 }
 
+/// Owned, authority-free join between recorder and object-inspector identities.
+#[cfg(feature = "kernel-trace")]
+pub(crate) fn trace_thread_details(
+    id: u64,
+) -> Result<(ThreadNameSnapshot, crate::kernel::object::Koid), Error> {
+    read_scheduler(|scheduler| {
+        scheduler.with_thread(ThreadId::from_diagnostic(id), |thread| {
+            (thread.name_snapshot(), thread.object_snapshot().object.koid)
+        })
+    })
+}
+
 /// Returns an owned name snapshot for the identified scheduler Thread.
 pub fn thread_name(id: ThreadId) -> Result<ThreadNameSnapshot, Error> {
     read_scheduler(|scheduler| scheduler.with_thread(id, Thread::name_snapshot))
@@ -825,7 +840,7 @@ pub(crate) fn configure_scheduling(
             .configure_scheduling(id, parameters, authority, limits)
     })?;
     if let Some(cpu) = target
-        && let Err(error) = request_reschedule(cpu)
+        && let Err(error) = request_reschedule(cpu, RescheduleSource::Policy)
     {
         // The parameters and ready-queue placement are already committed.
         // Returning a normal rejection here would misrepresent that state.
@@ -956,7 +971,7 @@ pub(in crate::kernel) fn request_user_thread_stop(
         crate::kernel::reaper::request();
     }
     if let Some(cpu) = target {
-        request_reschedule(cpu)?;
+        request_reschedule(cpu, RescheduleSource::Stop)?;
     }
     Ok(())
 }
@@ -1115,12 +1130,12 @@ pub(in crate::kernel) fn request_vcpu_stop(thread: ThreadId) -> Result<(), Error
                 }
             }
         }
-        state::VcpuStopTarget::Migrating(cpu) => request_reschedule(cpu)?,
+        state::VcpuStopTarget::Migrating(cpu) => request_reschedule(cpu, RescheduleSource::Stop)?,
         state::VcpuStopTarget::Runnable { cpu, ready } => {
             if let Some(ready) = ready {
                 publish_ready_outcome(ready)?;
             }
-            request_reschedule(cpu)?;
+            request_reschedule(cpu, RescheduleSource::Stop)?;
         }
         state::VcpuStopTarget::Terminated => {}
     }
@@ -1205,7 +1220,7 @@ pub fn set_thread_affinity(id: ThreadId, affinity: CpuMask) -> Result<MigrationS
 pub fn set_thread_fifo_policy(id: ThreadId, priority: ThreadPriority) -> Result<(), Error> {
     let target = update_thread_fifo_policy(id, priority)?;
     if let Some(cpu) = target {
-        request_reschedule(cpu)?;
+        request_reschedule(cpu, RescheduleSource::Policy)?;
     }
     Ok(())
 }
@@ -1229,7 +1244,7 @@ pub(crate) fn set_thread_fifo_policy_for_test(
 ) -> Result<bool, Error> {
     let target = update_thread_fifo_policy(id, priority)?;
     if let Some(cpu) = target {
-        request_reschedule(cpu)?;
+        request_reschedule(cpu, RescheduleSource::Policy)?;
     }
     Ok(target.is_some())
 }
@@ -1246,7 +1261,7 @@ pub fn set_thread_fair_policy(id: ThreadId) -> Result<(), Error> {
             .set_fair_policy(id)
     })?;
     if let Some(cpu) = target {
-        request_reschedule(cpu)?;
+        request_reschedule(cpu, RescheduleSource::Policy)?;
     }
     Ok(())
 }
@@ -1256,7 +1271,7 @@ pub fn set_thread_fair_policy(id: ThreadId) -> Result<(), Error> {
 pub(crate) fn deadline_expired(generation: u64) -> Result<(), Error> {
     let cpu = current_cpu()?;
     if state::deadline_is_current(cpu, generation) {
-        request_reschedule(cpu)?;
+        request_reschedule(cpu, RescheduleSource::Deadline)?;
     }
     Ok(())
 }
@@ -1265,7 +1280,7 @@ pub(crate) fn deadline_expired(generation: u64) -> Result<(), Error> {
 pub(crate) fn expire_current_turn_for_test() -> Result<(), Error> {
     let cpu = current_cpu()?;
     state::expire_current_turn(cpu)?;
-    request_reschedule(cpu)
+    request_reschedule(cpu, RescheduleSource::Deadline)
 }
 
 pub fn yield_now() -> Result<(), Error> {
@@ -1282,7 +1297,7 @@ pub fn yield_now() -> Result<(), Error> {
 /// never rotates equal-priority RT FIFO peers.
 pub fn cond_resched() -> Result<bool, Error> {
     ensure_sleepable()?;
-    cond_resched_inner()
+    cond_resched_inner(SchedulePoint::SafePoint)
 }
 
 /// Reconsiders scheduling from an outermost architecture IRQ continuation.
@@ -1307,10 +1322,10 @@ pub(crate) fn cond_resched_from_irq_tail(
     // the interrupted continuation; restored IRQ-mask state, not a live Rust
     // value, governs execution after the switch.
     tail.consume();
-    cond_resched_inner()
+    cond_resched_inner(SchedulePoint::IrqTail)
 }
 
-fn cond_resched_inner() -> Result<bool, Error> {
+fn cond_resched_inner(point: SchedulePoint) -> Result<bool, Error> {
     // SAFETY: This continuation transfers the exact prior interrupt state into
     // its saved ThreadContext at the final machine-switch boundary. Acquire
     // before balancing so its continuation prompt cannot reenter scheduling
@@ -1322,11 +1337,11 @@ fn cond_resched_inner() -> Result<bool, Error> {
     if !super::preempt::pending(cpu)? || !super::preempt::can_reschedule(cpu)? {
         return Ok(false);
     }
-    let pair = match state::prepare_local_preemption(cpu)? {
+    let pair = match state::prepare_local_preemption(cpu, point)? {
         state::LocalScheduleAttempt::Complete(pair) => pair,
         state::LocalScheduleAttempt::NeedsCoordinator => SCHEDULER.with(|slot| {
             let scheduler = slot.as_mut().ok_or(Error::NotInitialized)?;
-            scheduler.prepare_preemption(cpu)
+            scheduler.prepare_preemption(cpu, point)
         })?,
     };
     service_deadline_publication()?;
@@ -1590,7 +1605,7 @@ pub(crate) fn wake_all(wait_queue: &WaitQueue) -> Result<usize, Error> {
             let Some(cpu) = CpuIndex::new(index) else {
                 scheduler_invariant("wait-all CPU publication", Error::InvalidCpuIndex);
             };
-            if let Err(error) = request_reschedule(cpu) {
+            if let Err(error) = request_reschedule(cpu, RescheduleSource::Wakeup) {
                 scheduler_invariant("wait-all ready publication", error);
             }
         }
@@ -1749,7 +1764,7 @@ pub(crate) fn ensure_sleepable() -> Result<(), Error> {
 fn publish_ready_outcome(outcome: state::ReadyOutcome) -> Result<(), Error> {
     if outcome.changed {
         balance::request();
-        request_reschedule(outcome.target_cpu)?;
+        request_reschedule(outcome.target_cpu, RescheduleSource::Wakeup)?;
     }
     Ok(())
 }
@@ -1765,7 +1780,7 @@ fn publish_migration_outcome(outcome: state::MigrationOutcome) -> MigrationStatu
         publish_committed_ready(ready);
     }
     if let Some(source) = outcome.source_reschedule
-        && let Err(error) = request_reschedule(source)
+        && let Err(error) = request_reschedule(source, RescheduleSource::Migration)
     {
         // Assignment or a durable migration request is already committed.
         // A normal error would falsely imply rejection and could strand it.
@@ -1782,8 +1797,8 @@ fn scheduler_invariant(operation: &str, error: Error) -> ! {
     ))
 }
 
-fn request_reschedule(cpu: CpuIndex) -> Result<(), Error> {
-    if super::preempt::request(cpu)? {
+fn request_reschedule(cpu: CpuIndex, source: RescheduleSource) -> Result<(), Error> {
+    if super::preempt::request(cpu, source)? {
         super::super::irq::reschedule::notify(cpu);
     }
     Ok(())
@@ -1831,6 +1846,8 @@ pub(crate) fn reap_one_thread(
 
     #[cfg(all(feature = "kernel-test", feature = "kernel-stack-audit"))]
     stack_audit::record_retired(&thread);
+    #[cfg(feature = "kernel-trace")]
+    let koid = thread.object_snapshot().object.koid.get();
     retire_detached_thread(thread);
     let more = SCHEDULER.with(|slot| {
         let scheduler = slot.as_mut().ok_or(Error::NotInitialized)?;
@@ -1838,6 +1855,9 @@ pub(crate) fn reap_one_thread(
         Ok::<_, Error>(scheduler.has_retirements())
     })?;
     drop(retirement);
+    // Execution resources and retirement publications are now complete. Keep
+    // this distinct from the earlier Terminated switch-out observation.
+    crate::tracepoint!(Scheduler, "sched_reap", thread = id.get(), koid = koid);
     Ok(Some(more))
 }
 

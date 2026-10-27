@@ -32,6 +32,7 @@ use super::registry::{
     CpuScheduleAuthorityToken, ThreadRegistry, ThreadReservation, ThreadTableCapability,
 };
 use super::switch_handoff::{SwitchDisposition, SwitchHandoff, SwitchingContext};
+use super::trace::{SchedulePoint, SwitchReason};
 use super::{Error, MigrationStatus, SecondaryStack, Statistics};
 use crate::kernel::task::policy::{CpuMask, PlacementPolicy, SchedulingClass, SchedulingPolicy};
 use crate::kernel::task::thread::{
@@ -1006,43 +1007,56 @@ impl Scheduler {
     pub fn prepare_preemption(
         &mut self,
         cpu: CpuIndex,
+        point: SchedulePoint,
     ) -> Result<Option<PreparedContextSwitch>, Error> {
-        self.prepare_policy_decision(cpu, false)
+        self.prepare_policy_decision(cpu, false, point)
     }
 
     pub fn prepare_yield(&mut self, cpu: CpuIndex) -> Result<Option<PreparedContextSwitch>, Error> {
-        self.prepare_policy_decision(cpu, true)
+        self.prepare_policy_decision(cpu, true, SchedulePoint::Explicit)
     }
 
     fn prepare_policy_decision(
         &mut self,
         cpu: CpuIndex,
         yielding: bool,
+        point: SchedulePoint,
     ) -> Result<Option<PreparedContextSwitch>, Error> {
         let current = self.current_thread(cpu)?;
         if let Some(owner) = self.cpu_lock_required_for(current)? {
             return self.with_cpu_schedule_stored(owner, |scheduler| {
-                scheduler.prepare_policy_decision(cpu, yielding)
+                scheduler.prepare_policy_decision(cpu, yielding, point)
             });
         }
         let _ = super::super::preempt::take_pending_locked(cpu)?;
         if self.thread(current)?.pending_migration().is_some() {
-            return self.prepare_running_migration(cpu, current).map(Some);
+            return self
+                .prepare_running_migration(cpu, current, point)
+                .map(Some);
         }
         let choice = self.with_cpu_domain(cpu, |_scheduler, local| local.choose_ready(yielding))?;
         let Some((next, front)) = choice else {
             return Ok(None);
         };
+        let current_state = self.thread(current)?.state();
+        let reason = if current_state == ThreadState::Idle {
+            SwitchReason::Idle
+        } else if yielding {
+            SwitchReason::Yield
+        } else {
+            SwitchReason::Preempt
+        };
         let membership = self.thread(next)?.queue_links().membership;
         self.remove_ready(next, cpu, membership)?;
-        if self.thread(current)?.state() == ThreadState::Running {
+        if current_state == ThreadState::Running {
             if front {
                 self.enqueue_ready_front(current)?;
             } else {
                 self.enqueue_ready(current)?;
             }
         }
-        self.prepare_switch(cpu, current, next).map(Some)
+        self.prepare_switch(cpu, current, next, reason, point)
+            .map(Some)
     }
 
     pub fn resolve_wait(
@@ -1185,7 +1199,13 @@ impl Scheduler {
         if next != successor {
             scheduler_invariant(Error::QueueCorrupted);
         }
-        self.prepare_switch(cpu_slot, current, next)
+        self.prepare_switch(
+            cpu_slot,
+            current,
+            next,
+            SwitchReason::Exit,
+            SchedulePoint::Explicit,
+        )
     }
 
     pub fn request_user_stop(
@@ -1632,6 +1652,8 @@ impl Scheduler {
         cpu_slot: CpuIndex,
         current: ThreadId,
         next: ThreadId,
+        _reason: SwitchReason,
+        _point: SchedulePoint,
     ) -> Result<PreparedContextSwitch, Error> {
         let target_cpu = cpu_slot;
         if self.switching_from(cpu_slot)?.is_some() {
@@ -1668,12 +1690,13 @@ impl Scheduler {
             "sched_switch",
             prev = current.get(),
             next = next.get(),
-            prev_state = self
-                .thread(current)
-                .map_or(0, |thread| thread.state() as u64),
-            next_class = self
-                .thread(next)
-                .map_or(0, |thread| thread.scheduling_class() as u64)
+            state = super::trace::switch_state(
+                self.thread(current)
+                    .map_or(0, |thread| thread.state() as u64),
+                self.thread(next)
+                    .map_or(0, |thread| thread.scheduling_class() as u64)
+            ),
+            cause = super::trace::switch_cause(_reason, _point)
         );
         let previous = self.thread(current)?.context_pointer();
         let next = self.thread(next)?.context_pointer().cast_const();

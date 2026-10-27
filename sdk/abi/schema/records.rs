@@ -1234,6 +1234,29 @@ pub const RECORDS: &[Record] = &[
         ],
     },
     Record {
+        name: "trace_thread_details",
+        minimum_size: 80,
+        size: 80,
+        alignment: 8,
+        fields: &[
+            Field {
+                name: "thread",
+                kind: FieldKind::U64,
+                offset: 0,
+            },
+            Field {
+                name: "koid",
+                kind: FieldKind::U64,
+                offset: 8,
+            },
+            Field {
+                name: "name",
+                kind: FieldKind::Bytes(64),
+                offset: 16,
+            },
+        ],
+    },
+    Record {
         name: "scheduling_parameters",
         fields: SCHEDULING_PARAMETERS_FIELDS,
         minimum_size: 64,

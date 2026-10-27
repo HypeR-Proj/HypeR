@@ -171,7 +171,12 @@ impl Scheduler {
                 Err(error) => scheduler_invariant(error),
             }
             let switch = local
-                .prepare_local_switch(current, next)
+                .prepare_local_switch(
+                    current,
+                    next,
+                    super::SwitchReason::Block,
+                    super::SchedulePoint::Explicit,
+                )
                 .unwrap_or_else(|error| scheduler_invariant(error));
             Ok(PreparedWait::Park { switch, ticket })
         })

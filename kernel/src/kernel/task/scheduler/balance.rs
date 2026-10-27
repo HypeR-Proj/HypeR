@@ -75,7 +75,10 @@ pub(crate) fn service_irq_prompt() {
     if PROMPTS[cpu].swap(false, Ordering::AcqRel)
         && ENABLED.load(Ordering::Acquire)
         && work_pending()
-        && let Err(error) = crate::kernel::task::preempt::request(cpu)
+        && let Err(error) = crate::kernel::task::preempt::request(
+            cpu,
+            crate::kernel::task::preempt::RescheduleSource::Balance,
+        )
     {
         scheduler_invariant("load balance prompt", error.into());
     }
