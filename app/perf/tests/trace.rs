@@ -1796,3 +1796,59 @@ fn block_ticket_slot_reuse_preserves_identity_and_unknown_actor_is_not_a_caller(
     assert!(flows(&value).is_empty());
     Ok(())
 }
+
+#[test]
+fn logical_block_tracks_survive_native_export_without_aliasing_scheduler_tracks()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut c = capture();
+    block_event(
+        &mut c,
+        0,
+        2000,
+        "block_queued",
+        &[
+            ("domain", 7),
+            ("request", 1),
+            ("queue", 9),
+            ("ticket", 0x101),
+        ],
+    );
+    block_event(
+        &mut c,
+        0,
+        3000,
+        "block_ready",
+        &[("domain", 7), ("request", 1), ("status", 0), ("bytes", 512)],
+    );
+    block_event(
+        &mut c,
+        0,
+        4000,
+        "block_release",
+        &[("domain", 7), ("request", 1), ("queue", 9)],
+    );
+    let value = json(&mut c)?;
+    for name in ["Block batch", "Completion retained"] {
+        let span = spans(&value)
+            .into_iter()
+            .find(|event| event["name"] == name)
+            .ok_or("missing block interval")?;
+        assert_eq!(span["pid"], 7);
+    }
+    let mut native = Vec::new();
+    export::perfetto(&c, &mut native, false)?;
+    // The native writer discards synthetic scheduler tracks. Block intervals
+    // must retain their own descriptors and spans in the default output format.
+    for name in [
+        "HypeR logical block batches",
+        "Block batch",
+        "Completion retained",
+    ] {
+        assert!(
+            native
+                .windows(name.len())
+                .any(|bytes| bytes == name.as_bytes())
+        );
+    }
+    Ok(())
+}

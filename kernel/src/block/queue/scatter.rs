@@ -3,13 +3,14 @@
 
 //! Joined kernel-only reads into privately owned destination pages.
 
-use super::{
-    BlockAccess, BlockQueue, Error, QueueError, Range,
-    payload::{Destination, Payload},
-    plan, queue_error,
-};
 use alloc::vec::Vec;
 use core::ptr::NonNull;
+use {
+    crate::block::BlockAccess, crate::block::BlockQueue, crate::block::Error,
+    crate::block::QueueError, crate::block::Range, crate::block::plan,
+    crate::block::queue::payload::Destination, crate::block::queue::payload::Payload,
+    crate::block::queue_error,
+};
 
 impl BlockQueue {
     pub(crate) fn access(&self) -> BlockAccess {

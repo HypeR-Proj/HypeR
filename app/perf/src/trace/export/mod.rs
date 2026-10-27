@@ -4,15 +4,10 @@
 //! observed matching boundaries. Gaps invalidate pending spans. Scheduling
 //! windows remain visible; original capture metadata retains loss information.
 use super::model::{Capture, Event};
-#[path = "block.rs"]
 mod block;
-#[path = "causal.rs"]
 mod causal;
-#[path = "proto/mod.rs"]
 mod proto;
-#[path = "scheduling.rs"]
 mod scheduling;
-#[path = "timeline.rs"]
 mod timeline;
 use serde_json::{Value, json};
 use std::{

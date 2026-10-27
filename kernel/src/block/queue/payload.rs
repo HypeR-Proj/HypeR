@@ -3,11 +3,11 @@
 
 //! CPU-owned request storage. Only the dedicated exchange pool is visible to DMA.
 
-use super::{Device, Error, window::WindowLease};
+use crate::block::{Device, Error, window::WindowLease};
 use alloc::vec::Vec;
 use core::ptr::NonNull;
 
-pub(super) enum Payload {
+pub(in crate::block) enum Payload {
     Owned(Vec<u8>),
     Window {
         lease: WindowLease,
@@ -23,16 +23,16 @@ impl Default for Payload {
 
 /// A kernel-only synchronous borrow. Construction is restricted to the joined
 /// scatter-read path; completion must be joined even when waiting fails.
-pub(super) struct Destination {
-    pub(super) address: NonNull<u8>,
-    pub(super) length: usize,
+pub(in crate::block) struct Destination {
+    pub(in crate::block) address: NonNull<u8>,
+    pub(in crate::block) length: usize,
 }
 // SAFETY: Only the device pump accesses these exclusively borrowed bytes, and
 // the submitting thread joins that access before its mutable borrow can end.
 unsafe impl Send for Destination {}
 
 impl Payload {
-    pub(super) fn allocation_bytes(&self) -> Option<usize> {
+    pub(in crate::block) fn allocation_bytes(&self) -> Option<usize> {
         match self {
             Self::Owned(bytes) => Some(bytes.capacity()),
             Self::Window { ranges, .. } => ranges
@@ -44,26 +44,26 @@ impl Payload {
         }
     }
 
-    pub(super) fn owned_mut(&mut self) -> &mut [u8] {
+    pub(in crate::block) fn owned_mut(&mut self) -> &mut [u8] {
         match self {
             Self::Owned(bytes) => bytes,
             _ => &mut [],
         }
     }
-    pub(super) fn owned(&self) -> &[u8] {
+    pub(in crate::block) fn owned(&self) -> &[u8] {
         match self {
             Self::Owned(bytes) => bytes,
             _ => &[],
         }
     }
-    pub(super) fn finish(&mut self) {
+    pub(in crate::block) fn finish(&mut self) {
         // Source pins and borrowed destinations end before publishing completion.
         // Completed ordinary reads keep their owned bytes until reap.
         if !matches!(self, Self::Owned(_)) {
             *self = Self::default();
         }
     }
-    pub(super) fn write_to_device(
+    pub(in crate::block) fn write_to_device(
         &self,
         device: &Device,
         source: usize,
@@ -106,7 +106,7 @@ impl Payload {
             Self::Scatter(_) => Err(Error::Corrupt),
         }
     }
-    pub(super) fn read_from_device(
+    pub(in crate::block) fn read_from_device(
         &mut self,
         device: &Device,
         source: u64,

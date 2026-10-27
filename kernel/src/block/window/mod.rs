@@ -5,7 +5,6 @@
 //! mappings. Generations authorize submissions, while leases prevent reuse.
 
 use super::{BlockQueue, Lock, QueueError, plan};
-#[path = "window_state.rs"]
 mod state;
 use core::sync::atomic::{AtomicBool, Ordering};
 use hyper::mm::FallibleArc;

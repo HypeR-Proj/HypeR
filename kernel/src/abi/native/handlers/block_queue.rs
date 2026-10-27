@@ -22,7 +22,7 @@ use {
 fn status(error: TransferError) -> i64 {
     match error {
         TransferError::Capability(error) => status_from_process_error(error),
-        TransferError::Device(error) => crate::block::async_service::completion_status(Err(error)),
+        TransferError::Device(error) => crate::block::service::queue::completion_status(Err(error)),
         TransferError::Status(status) => status,
     }
 }

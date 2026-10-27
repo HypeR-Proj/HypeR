@@ -4,13 +4,10 @@
 //! Native block devices, bounded logical queues and asynchronous transport.
 //! Userspace negotiates the backend; one device pump owns its physical rings.
 
-pub(crate) mod async_service;
-mod payload;
 mod plan;
 mod pump;
 mod queue;
 mod request;
-mod scatter;
 pub(crate) mod service;
 mod transfer;
 mod window;

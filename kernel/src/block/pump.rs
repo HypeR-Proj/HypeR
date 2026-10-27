@@ -24,7 +24,7 @@ use {
 struct Active {
     queue: FallibleArc<Queue>,
     request: FallibleArc<Request>,
-    data: super::payload::Payload,
+    data: crate::block::queue::payload::Payload,
     cursor: Cursor,
     pieces: usize,
     flush_submitted: bool,

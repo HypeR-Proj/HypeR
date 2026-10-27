@@ -370,7 +370,7 @@ mod native_block_wire;
 mod native_block_plan;
 
 #[cfg(test)]
-#[path = "../../../src/block/window_state.rs"]
+#[path = "../../../src/block/window/state.rs"]
 mod native_block_window_state;
 
 #[cfg(test)]

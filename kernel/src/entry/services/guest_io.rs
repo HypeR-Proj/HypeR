@@ -102,7 +102,7 @@ impl crate::abi::native::GuestIoServices for ProcessServices<'_> {
         byte_limit: u64,
         inflight_limit: u32,
     ) -> Result<HandleValue, crate::block::service::TransferError> {
-        crate::block::async_service::create(
+        crate::block::service::queue::create(
             self.process,
             receiver,
             capacity,
@@ -117,13 +117,13 @@ impl crate::abi::native::GuestIoServices for ProcessServices<'_> {
         count: u32,
         frame: Option<UserSlice>,
     ) -> Result<u64, crate::block::service::TransferError> {
-        crate::block::async_service::submit(self.process, receiver, operation, count, frame)
+        crate::block::service::queue::submit(self.process, receiver, operation, count, frame)
     }
     fn create_block_queue_window(
         &self,
         receiver: &InvocationReceiver,
     ) -> Result<HandleValue, crate::block::service::TransferError> {
-        crate::block::async_service::create_window(self.process, receiver)
+        crate::block::service::queue::create_window(self.process, receiver)
     }
     fn submit_block_queue_window(
         &self,
@@ -132,7 +132,7 @@ impl crate::abi::native::GuestIoServices for ProcessServices<'_> {
         count: u32,
         frame: UserSlice,
     ) -> Result<u64, crate::block::service::TransferError> {
-        crate::block::async_service::submit_window(self.process, receiver, token, count, frame)
+        crate::block::service::queue::submit_window(self.process, receiver, token, count, frame)
     }
     fn wait_block_queue(
         &self,
@@ -140,7 +140,7 @@ impl crate::abi::native::GuestIoServices for ProcessServices<'_> {
         ticket: u64,
         deadline: u64,
     ) -> Result<(u64, i64), crate::block::service::TransferError> {
-        crate::block::async_service::wait(receiver, ticket, deadline, || {
+        crate::block::service::queue::wait(receiver, ticket, deadline, || {
             self.thread.stop_requested()
         })
     }
@@ -150,7 +150,7 @@ impl crate::abi::native::GuestIoServices for ProcessServices<'_> {
         bytes: u64,
         deadline: u64,
     ) -> Result<(), crate::block::service::TransferError> {
-        crate::block::async_service::wait_space(receiver, bytes, deadline, || {
+        crate::block::service::queue::wait_space(receiver, bytes, deadline, || {
             self.thread.stop_requested()
         })
     }
@@ -160,13 +160,13 @@ impl crate::abi::native::GuestIoServices for ProcessServices<'_> {
         ticket: u64,
         output: Option<UserSlice>,
     ) -> Result<(i64, usize), crate::block::service::TransferError> {
-        crate::block::async_service::reap(self.process, receiver, ticket, output)
+        crate::block::service::queue::reap(self.process, receiver, ticket, output)
     }
     fn block_queue_info(
         &self,
         receiver: &InvocationReceiver,
     ) -> Result<[u8; 128], crate::block::service::TransferError> {
-        crate::block::async_service::info(receiver)
+        crate::block::service::queue::info(receiver)
     }
     fn mount_filesystem(
         &self,

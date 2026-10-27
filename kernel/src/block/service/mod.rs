@@ -3,6 +3,8 @@
 
 //! Capability-bound block setup and bounded synchronous compatibility transfers.
 
+pub(crate) mod queue;
+
 use super::*;
 use crate::process::Process;
 use crate::vm::service::Error as ServiceError;

@@ -8,6 +8,9 @@
 //! payloads between admission and completion; reapers take completed payloads
 //! under a short lock and restore them if the user copy cannot commit.
 
+pub(super) mod payload;
+mod scatter;
+
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -27,10 +30,10 @@ use {
     crate::object::prepare_timed_wait, crate::object::private, crate::object::wait_one,
 };
 
-use super::payload::Payload;
 use super::plan::Operation;
 pub(crate) use super::plan::Range;
 use super::{Device, Lock, NativeBlock, plan, wire};
+use crate::block::queue::payload::Payload;
 
 pub(crate) const COMPLETED: u64 = 1;
 pub(crate) const WRITABLE: u64 = 2;
@@ -220,7 +223,7 @@ impl Queue {
                     "block_ready",
                     domain = request.trace_device,
                     request = request.sequence.load(Ordering::Relaxed),
-                    status = super::async_service::completion_status(result) as u64,
+                    status = crate::block::service::queue::completion_status(result) as u64,
                     bytes = if result.is_ok() {
                         request.length as u64
                     } else {

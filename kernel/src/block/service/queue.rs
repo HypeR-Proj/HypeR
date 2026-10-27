@@ -3,9 +3,9 @@
 
 //! Capability admission and user-copy transactions for asynchronous block queues.
 
-use super::service::TransferError;
-use super::{BlockQueue, NativeBlock, QueueError, QueueLimits, Range};
 use crate::authority::Rights;
+use crate::block::service::TransferError;
+use crate::block::{BlockQueue, NativeBlock, QueueError, QueueLimits, Range};
 use crate::mm::user_space::UserSlice;
 use alloc::vec::Vec;
 use hyper::abi::native::*;
@@ -318,12 +318,12 @@ pub(crate) fn submit_window(
         .resolve::<BlockQueue>(Rights::WRITE)
         .map_err(capability)?;
     if count == 0
-        || count as usize > super::plan::MAX_RANGES
+        || count as usize > crate::block::plan::MAX_RANGES
         || frame.length() != u64::from(count) * 24
     {
         return Err(queue_error(QueueError::Invalid));
     }
-    let mut records = [0u8; super::plan::MAX_RANGES * 24];
+    let mut records = [0u8; crate::block::plan::MAX_RANGES * 24];
     process
         .copy_from_user(frame, &mut records[..count as usize * 24])
         .map_err(capability)?;
@@ -357,7 +357,7 @@ pub(crate) fn submit_window(
         .prepare_payload(
             1,
             disk,
-            Some(super::payload::Payload::Window {
+            Some(crate::block::queue::payload::Payload::Window {
                 lease,
                 ranges: source,
             }),

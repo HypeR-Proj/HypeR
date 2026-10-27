@@ -12,6 +12,16 @@ contract. This facility does not introduce dirty file-page writeback.
 
 ## Ownership and placement
 
+The kernel implementation lives in `kernel/src/block/`. `queue/` owns logical
+requests, retained payloads and joined scatter reads; `service/` contains the
+capability-bound synchronous and queue entry points. `window/` groups backing
+ownership with its token/lease state machine. The device pump, transport request
+implementation and pure admission/dispatch planner remain separate modules.
+SDK queue bindings live under `stdlib/rust/hyper-os/src/block/`, while extent
+records belong to `stdlib/rust/hyper-filesystem/src/protocol/`. Perfetto rendering
+is grouped under `app/perf/src/trace/export/` and keeps logical block tracks
+separate from scheduler tracks in both Chrome and native protobuf output.
+
 `NativeBlock` identifies one exclusively delegated block export. A derived
 `BlockQueue` is a logical producer with its own admitted request and byte limits.
 Logical queues are independent of virtio request queues: one device engine
