@@ -843,3 +843,236 @@ fn lost_other_cpu_prefix_or_tail_cannot_join_distinct_invocations()
     }
     Ok(())
 }
+
+#[test]
+fn switch_causes_are_explicit_and_never_inferred_from_ready_state()
+-> Result<(), Box<dyn std::error::Error>> {
+    for (reason, point, name, preempted) in [
+        (1, 3, "yield", Some(false)),
+        (2, 3, "preempt", Some(true)),
+        (3, 3, "block", Some(false)),
+        (4, 3, "exit", Some(false)),
+        (5, 3, "migrate", Some(true)),
+        (5, 2, "migrate", Some(true)),
+        (5, 1, "migrate", Some(false)),
+        (5, 99, "migrate", None),
+        (6, 3, "idle-dispatch", Some(false)),
+        (99, 3, "unknown", None),
+    ] {
+        let mut c = capture();
+        add(
+            &mut c,
+            0,
+            2000,
+            0,
+            "sched_switch",
+            &[("prev", 1), ("next", 2), ("prev_state", 1)],
+        );
+        add(
+            &mut c,
+            0,
+            3000,
+            1,
+            "sched_switch_cause",
+            &[("prev", 2), ("next", 3), ("reason", reason), ("point", point)],
+        );
+        add(
+            &mut c,
+            0,
+            3000,
+            2,
+            "sched_switch",
+            &[("prev", 2), ("next", 3), ("prev_state", 1)],
+        );
+        let value = json(&mut c)?;
+        let slices = spans(&value);
+        assert_eq!(slices.len(), 1);
+        assert_eq!(slices[0]["args"]["switch_out_reason"], name);
+        assert_eq!(slices[0]["args"]["preempted"], serde_json::json!(preempted));
+        assert_eq!(
+            slices[0]["args"]["schedule_point"],
+            match point {
+                1 => "explicit",
+                2 => "safe-point",
+                3 => "irq-tail",
+                _ => "unknown",
+            }
+        );
+    }
+    for invalid in ["legacy", "gap", "identity", "intervening", "incomplete"] {
+        let mut c = capture();
+        add(
+            &mut c,
+            0,
+            2000,
+            0,
+            "sched_switch",
+            &[("prev", 1), ("next", 2)],
+        );
+        if invalid != "legacy" {
+            add(
+                &mut c,
+                0,
+                3000,
+                1,
+                "sched_switch_cause",
+                &[
+                    ("prev", 2),
+                    ("next", if invalid == "identity" { 4 } else { 3 }),
+                    ("reason", 2),
+                    ("point", 2),
+                ],
+            );
+        }
+        if invalid == "intervening" {
+            add(&mut c, 0, 3000, 2, "sched_wakeup", &[("thread", 4)]);
+        }
+        add(
+            &mut c,
+            0,
+            4000,
+            if matches!(invalid, "gap" | "intervening") {
+                3
+            } else if invalid == "legacy" {
+                1
+            } else {
+                2
+            },
+            "sched_switch",
+            &[("prev", 2), ("next", 3), ("prev_state", 1)],
+        );
+        if invalid == "incomplete" {
+            c.losses[0].incomplete = true;
+        }
+        let value = json(&mut c)?;
+        let last = value["traceEvents"]
+            .as_array()
+            .ok_or("missing events")?
+            .iter()
+            .rev()
+            .find(|e| e["name"] == "sched_switch")
+            .ok_or("missing switch")?;
+        assert!(last["args"]["cause"].is_null(), "{invalid}");
+    }
+    Ok(())
+}
+
+#[test]
+fn mismatched_nested_irq_boundaries_discard_outer_context()
+-> Result<(), Box<dyn std::error::Error>> {
+    for kind_mismatch in [false, true] {
+        let mut c = capture();
+        add(&mut c, 0, 2000, 0, "irq_enter", &[("irq", 26)]);
+        add(&mut c, 0, 3000, 1, "irq_enter", &[("irq", 7)]);
+        add(
+            &mut c,
+            0,
+            4000,
+            2,
+            "irq_exit",
+            &[
+                ("irq", if kind_mismatch { 7 } else { 8 }),
+                ("irq_kind", u64::from(kind_mismatch)),
+            ],
+        );
+        add(&mut c, 0, 5000, 3, "sched_request", &[("reason", 1)]);
+        add(&mut c, 0, 6000, 4, "irq_exit", &[("irq", 26)]);
+        // A fresh complete interval must still be usable after resynchronizing.
+        add(&mut c, 0, 7000, 5, "irq_enter", &[("irq", 30)]);
+        add(&mut c, 0, 8000, 6, "irq_exit", &[("irq", 30)]);
+        let value = json(&mut c)?;
+        let intervals = spans(&value);
+        assert_eq!(intervals.len(), 1);
+        assert_eq!(intervals[0]["name"], "IRQ 30");
+        let request = value["traceEvents"]
+            .as_array()
+            .ok_or("missing events")?
+            .iter()
+            .find(|e| e["name"] == "sched_request")
+            .ok_or("missing request")?;
+        assert!(request["args"]["irq_context"].is_null());
+    }
+    Ok(())
+}
+
+#[test]
+fn reschedule_irq_context_requires_matching_local_complete_boundaries()
+-> Result<(), Box<dyn std::error::Error>> {
+    for mode in [
+        "physical",
+        "nested",
+        "private",
+        "missing-exit",
+        "gap",
+        "mismatch",
+        "other-cpu",
+    ] {
+        let mut c = capture();
+        let kind = u64::from(mode == "private");
+        add(
+            &mut c,
+            0,
+            2000,
+            0,
+            "irq_enter",
+            &[("irq", 26), ("irq_kind", kind)],
+        );
+        let mut seq = 1;
+        if mode == "nested" {
+            add(&mut c, 0, 2500, seq, "irq_enter", &[("irq", 7)]);
+            seq += 1;
+        }
+        let cpu = usize::from(mode == "other-cpu");
+        add(
+            &mut c,
+            cpu,
+            3000,
+            if cpu == 0 { seq } else { 0 },
+            "sched_request",
+            &[("reason", 2), ("target_cpu", 1)],
+        );
+        seq += 1;
+        if mode == "nested" {
+            add(&mut c, 0, 3500, seq, "irq_exit", &[("irq", 7)]);
+            seq += 1;
+        }
+        if mode != "missing-exit" {
+            add(
+                &mut c,
+                0,
+                4000,
+                if mode == "gap" {
+                    seq + 1
+                } else if cpu == 1 {
+                    1
+                } else {
+                    seq
+                },
+                "irq_exit",
+                &[
+                    ("irq", if mode == "mismatch" { 30 } else { 26 }),
+                    ("irq_kind", kind),
+                ],
+            );
+        }
+        let value = json(&mut c)?;
+        let event = value["traceEvents"]
+            .as_array()
+            .ok_or("missing events")?
+            .iter()
+            .find(|e| e["name"] == "sched_request")
+            .ok_or("missing request")?;
+        assert_eq!(event["args"]["request_source"], "scheduler-deadline");
+        let context = &event["args"]["irq_context"];
+        match mode {
+            "physical" => assert_eq!(context["irq"], 26),
+            "nested" => assert_eq!(context["irq"], 7),
+            "private" => {
+                assert_eq!(context["kind"], "kernel-rpc");
+                assert!(context["irq"].is_null());
+            }
+            _ => assert!(context.is_null(), "{mode}"),
+        }
+    }
+    Ok(())
+}

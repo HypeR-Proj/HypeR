@@ -32,6 +32,24 @@ def validate_remote(payload):
 
 
 def validate_capture(files, logfile):
+    scheduling = json.loads(files['ipc.json'].read_bytes())
+    if not complete(scheduling):
+        raise AssertionError('scheduling cause capture is incomplete')
+    switches = [e for e in scheduling['traceEvents'] if e['name'] == 'sched_switch']
+    annotated = [e['args']['cause'] for e in switches if e['args'].get('cause') is not None]
+    if not annotated or not any(c['switch_reason'] == 'block' for c in annotated):
+        raise AssertionError('bounded IPC workload has no explicit blocking switch cause')
+    if any(c['switch_reason'] == 'preempt' for c in annotated) and not any(
+            e.get('ph') == 'X' and e.get('args', {}).get('preempted') is True
+            for e in scheduling['traceEvents']):
+        raise AssertionError('CPU execution slices omitted observed switch-out preemption')
+    requests = [e for e in scheduling['traceEvents'] if e['name'] == 'sched_request']
+    if not any(e['args'].get('request_source') == 'wakeup' for e in requests):
+        raise AssertionError('missing scheduler wakeup publication')
+    if any(e['args'].get('request_source') in (None, 'unknown') for e in requests):
+        raise AssertionError('scheduler request source was not decoded')
+    if not any(e['args'].get('irq_context') is not None for e in requests):
+        raise AssertionError('no scheduling request has a confirmed enclosing IRQ')
     frozen = files['frozen.jsonl'].read_bytes()
     rows = [json.loads(line) for line in frozen.splitlines() if line.strip()]
     if not rows[1:-1] or any(event['cpu'] != 0 for event in rows[1:-1]):

@@ -31,7 +31,9 @@ pub(crate) fn dispatch_kernel_rpc_entry(origin: InterruptOrigin) -> Action {
         Ok(irq) => irq,
         Err(error) => crate::kernel::irq::exception::fatal_interrupt(error.description(), None),
     };
+    crate::tracepoint!(Irq, "irq_enter", irq = 0, irq_kind = 1);
     dispatch_kernel_rpc();
+    crate::tracepoint!(Irq, "irq_exit", irq = 0, irq_kind = 1);
     complete_entry(irq, Action::Resume { postlude: None }, origin, None)
 }
 
@@ -53,7 +55,7 @@ pub(crate) fn dispatch(
             crate::kernel::irq::exception::fatal_interrupt(error.description(), Some(interrupt))
         }
     };
-    crate::tracepoint!(Irq, "irq_enter", irq = interrupt.get() as u64);
+    crate::tracepoint!(Irq, "irq_enter", irq = interrupt.get() as u64, irq_kind = 0);
     let action = if crate::kernel::crash::is_stop_interrupt(interrupt) {
         crate::kernel::irq::interrupt::complete(interrupt);
         Action::Stop
@@ -67,7 +69,7 @@ pub(crate) fn dispatch(
         crate::kernel::device::iommu::runtime::service_irq_prompt();
         Action::Resume { postlude: None }
     };
-    crate::tracepoint!(Irq, "irq_exit", irq = interrupt.get() as u64);
+    crate::tracepoint!(Irq, "irq_exit", irq = interrupt.get() as u64, irq_kind = 0);
     complete_entry(irq, action, origin, Some(interrupt))
 }
 

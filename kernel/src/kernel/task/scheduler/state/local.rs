@@ -13,6 +13,7 @@ use super::super::registry::{
     CpuScheduleAuthorityToken, CpuThreadTableAuthority, ThreadTableCapability,
 };
 use super::super::switch_handoff::{SwitchDisposition, SwitchHandoff};
+use super::super::trace::{SchedulePoint, SwitchReason};
 use super::super::{CrashTaskSnapshot, CurrentUser, CurrentVcpu, Error};
 use super::{
     CPU_SCHEDULERS, CpuScheduler, LocalScheduleAttempt, LocalTailCompletion, PreparedContextSwitch,
@@ -25,16 +26,21 @@ use crate::kernel::task::thread::{ThreadId, ThreadState};
 pub(in crate::kernel::task::scheduler) fn prepare_local_yield(
     cpu: CpuIndex,
 ) -> Result<LocalScheduleAttempt, Error> {
-    prepare_local_decision(cpu, true)
+    prepare_local_decision(cpu, true, SchedulePoint::Explicit)
 }
 
 pub(in crate::kernel::task::scheduler) fn prepare_local_preemption(
     cpu: CpuIndex,
+    point: SchedulePoint,
 ) -> Result<LocalScheduleAttempt, Error> {
-    prepare_local_decision(cpu, false)
+    prepare_local_decision(cpu, false, point)
 }
 
-fn prepare_local_decision(cpu: CpuIndex, yielding: bool) -> Result<LocalScheduleAttempt, Error> {
+fn prepare_local_decision(
+    cpu: CpuIndex,
+    yielding: bool,
+    point: SchedulePoint,
+) -> Result<LocalScheduleAttempt, Error> {
     super::runtime::with_accounted_cpu(cpu, |local| {
         if local.handoff.current().is_some() {
             return Err(Error::ThreadTransitionInProgress);
@@ -61,11 +67,18 @@ fn prepare_local_decision(cpu: CpuIndex, yielding: bool) -> Result<LocalSchedule
             .with_thread(current, |_thread, schedule| {
                 schedule.state == ThreadState::Running
             })?;
+        let reason = if !running {
+            SwitchReason::Idle
+        } else if yielding {
+            SwitchReason::Yield
+        } else {
+            SwitchReason::Preempt
+        };
         if running {
             local.local_enqueue_ready(current, front)?;
         }
         let switch = local
-            .prepare_local_switch(current, next)
+            .prepare_local_switch(current, next, reason, point)
             .unwrap_or_else(|error| scheduler_invariant(error));
         Ok(LocalScheduleAttempt::Complete(Some(switch)))
     })
@@ -311,6 +324,8 @@ impl CpuScheduler {
         &mut self,
         current: ThreadId,
         next: ThreadId,
+        _reason: SwitchReason,
+        _point: SchedulePoint,
     ) -> Result<PreparedContextSwitch, Error> {
         if self.handoff.current().is_some() || self.current != current || current == next {
             return Err(Error::ThreadTransitionInProgress);
@@ -348,6 +363,14 @@ impl CpuScheduler {
                     "task::scheduler::state::prepare_local_switch invariant",
                 )
             });
+        crate::tracepoint!(
+            Scheduler,
+            "sched_switch_cause",
+            prev = current.get(),
+            next = next.get(),
+            reason = _reason as u64,
+            point = _point as u64
+        );
         crate::tracepoint!(
             Scheduler,
             "sched_switch",

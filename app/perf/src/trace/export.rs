@@ -6,6 +6,8 @@
 use super::model::{Capture, Event};
 #[path = "causal.rs"]
 mod causal;
+#[path = "scheduling.rs"]
+mod scheduling;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
@@ -82,6 +84,7 @@ fn fields(c: &Capture, event: &Event) -> Value {
             },
         );
     }
+    scheduling::describe(c, event, &mut args);
     args.insert("sequence".into(), json!(event.sequence));
     args.insert("cpu".into(), json!(event.cpu));
     args.insert("source".into(), json!(c.sites[event.site].source));
@@ -185,6 +188,7 @@ pub fn perfetto(c: &Capture, output: impl Write) -> io::Result<()> {
     let mut io_lanes = BTreeMap::new();
     let mut depth = BTreeMap::<u64, u64>::new();
     let uncertain = !c.cross_cpu_spans();
+    let scheduling = scheduling::Evidence::new(c);
     let mut causal = if uncertain {
         causal::Links::default()
     } else {
@@ -208,8 +212,22 @@ pub fn perfetto(c: &Capture, output: impl Write) -> io::Result<()> {
         let thread = c.value(event, "thread");
         let tid = thread.and_then(|id| threads.get(&id).copied());
         // Preserve raw observations, including every scalar and exact source.
+        let mut args = fields(c, event);
+        let cause = scheduling
+            .switches
+            .get(&(event.cpu, event.sequence))
+            .map_or(Value::Null, |cause| fields(c, cause));
+        if site.name == "sched_switch" {
+            args["cause"] = cause.clone();
+        }
+        if site.name == "sched_request" {
+            args["irq_context"] = scheduling
+                .request_irqs
+                .get(&(event.cpu, event.sequence))
+                .map_or(Value::Null, |irq| scheduling::irq_context(c, irq));
+        }
         w.event(json!({"ph":"i","s":"t","pid":if tid.is_some(){2}else{1},"tid":tid.unwrap_or(event.cpu as u32+1),
-            "name":site.name,"cat":site.category,"ts":w.time(event.time),"args":fields(c,event)}))?;
+            "name":site.name,"cat":site.category,"ts":w.time(event.time),"args":args}))?;
         if gap {
             w.event(json!({"ph":"i","s":"t","pid":1,"tid":event.cpu+1,"name":"TRACE GAP","ts":w.time(event.time),"args":{"sequence":event.sequence}}))?;
         }
@@ -228,7 +246,8 @@ pub fn perfetto(c: &Capture, output: impl Write) -> io::Result<()> {
                         .cloned()
                         .unwrap_or_else(|| format!("thread {id:#x}"));
                     w.span((1,event.cpu as u32+1),&name,"scheduler",begin.time..event.time,
-                        json!({"thread":format!("{id:#x}"),"class":c.value(begin,"next_class"),"end_state":c.value(event,"prev_state")}))?;
+                        json!({"thread":format!("{id:#x}"),"class":c.value(begin,"next_class"),"end_state":c.value(event,"prev_state"),
+                            "switch_out_reason":cause["switch_reason"],"preempted":cause["preempted"],"schedule_point":cause["schedule_point"]}))?;
                 }
                 running[event.cpu] = Some((event, next));
                 if !uncertain
@@ -276,18 +295,29 @@ pub fn perfetto(c: &Capture, output: impl Write) -> io::Result<()> {
         if !c.losses[event.cpu].incomplete && site.name == "irq_enter" {
             irq.entry(event.cpu).or_default().push(event);
         }
-        if !c.losses[event.cpu].incomplete
-            && site.name == "irq_exit"
-            && let Some(start) = irq.get_mut(&event.cpu).and_then(Vec::pop)
-            && c.value(start, "irq") == c.value(event, "irq")
-        {
-            w.span(
-                (3, event.cpu as u32 + 1),
-                &format!("IRQ {}", c.value(event, "irq").unwrap_or(0)),
-                "irq",
-                start.time..event.time,
-                fields(c, start),
-            )?;
+        if !c.losses[event.cpu].incomplete && site.name == "irq_exit" {
+            let stack = irq.entry(event.cpu).or_default();
+            if let Some(start) = stack.pop()
+                && c.value(start, "irq").is_some()
+                && c.value(start, "irq") == c.value(event, "irq")
+                && c.value(start, "irq_kind").unwrap_or(0) == c.value(event, "irq_kind").unwrap_or(0)
+            {
+                w.span(
+                    (3, event.cpu as u32 + 1),
+                    &if c.value(start, "irq_kind") == Some(1) {
+                        "Kernel RPC".into()
+                    } else {
+                        format!("IRQ {}", c.value(event, "irq").unwrap_or(0))
+                    },
+                    "irq",
+                    start.time..event.time,
+                    fields(c, start),
+                )?;
+            } else {
+                // The remaining nesting is no longer trustworthy. Match the
+                // conservative rule used for request IRQ attribution.
+                stack.clear();
+            }
         }
         if !uncertain
             && let (Some(domain), Some(tag)) = (c.value(event, "domain"), c.value(event, "tag"))

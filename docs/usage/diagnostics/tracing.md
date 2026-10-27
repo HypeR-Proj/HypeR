@@ -88,16 +88,39 @@ SET_ATTRIBUTES; reads require INSPECT_DETAILS. Copying `perf` outside the truste
 
 | Category | Recorded observations |
 | --- | --- |
-| `scheduler` | Committed switches, wait registration/completion and outcomes, wakeups and migration publication |
+| `scheduler` | Committed switches and their causes, reschedule requests/sources, wait registration/completion and outcomes, wakeups and migration publication |
 | `syscall` | Ordinary Native dispatch entry/return, operation and object kind, signed status |
 | `ipc` | Byte/capability commit identities, delivery lengths, signal wait/notification, explicit RPC annotations and syscall-level outcomes |
 | `io` | Native block submissions, completion/abort, per-device trace identity, tag, bytes and direction |
 | `memory` | Native page-fault handling entry/return and resolution |
-| `irq` | IRQ service entry/return with interrupt ID |
+| `irq` | Physical IRQ service entry/return with interrupt ID, plus architecture-private kernel RPC delivery |
 | `vm` | vCPU run entry/return to its kernel runner with exit reason |
 
 Events are scalar observations; they contain no kernel addresses, user payloads
 or raw handle values. Successful receives report delivered bytes; failed receives report zero.
+
+`sched_switch_cause` accompanies a committed `sched_switch`. Its `reason` is
+1 yield, 2 policy preemption, 3 blocking, 4 exit, 5 migration, or 6 idle
+dispatch. `point` is 1 explicit operation, 2 cooperative safe point, or 3 IRQ
+tail. `perf` adds readable names and `preempted` to the observation and to the
+ending CPU execution slice. It is true for policy preemption and migration at
+a safe point or IRQ tail; migration committed by an explicit yield is voluntary.
+A safe-point switch can still preempt a runnable Thread; the path is distinct
+from its reason.
+Old captures, missing companions and unknown values remain unknown rather than
+inferring preemption from a Ready state. Companions must be adjacent in the same
+CPU sequence and match both Thread identities.
+
+`sched_request` records the target CPU, publishing Thread, whether an explicit
+notification was elected, and the request source: 1 wakeup, 2 scheduler deadline,
+3 stop, 4 policy change, 5 migration, or 6 load balancing. Requests coalesce and
+do not necessarily switch Threads. Enable `scheduler,irq` together to obtain
+`irq_context` on requests enclosed by a complete, matching local IRQ interval.
+It identifies a physical interrupt number or a private kernel-RPC prompt; gaps,
+unmatched boundaries, other-CPU IRQs and absent IRQ recording leave it null.
+An IRQ context describes where a request was published, not proof that this
+IRQ uniquely caused a later switch. Timer callbacks run in normal worker
+context, so their deadline requests need not themselves have an enclosing IRQ.
 Opposite channel endpoints have different KOIDs. Core `ipc_enqueue`/`ipc_dequeue`
 and `cap_enqueue`/`cap_dequeue` use a shared, boot-local connection identity and
 separate destination queues, plus the exact committed message/registration ID.

@@ -199,6 +199,7 @@ impl Scheduler {
         &mut self,
         cpu_slot: CpuIndex,
         current: ThreadId,
+        point: super::SchedulePoint,
     ) -> Result<PreparedContextSwitch, Error> {
         if self.thread(current)?.state() != ThreadState::Running
             || self.thread(current)?.pending_migration().is_none()
@@ -214,7 +215,7 @@ impl Scheduler {
         }
         self.record_fair_origin(current)?;
         self.thread_mut(current)?.set_state(ThreadState::Migrating);
-        self.prepare_switch(cpu_slot, current, next)
+        self.prepare_switch(cpu_slot, current, next, super::SwitchReason::Migrate, point)
     }
 
     fn move_blocked_thread(&mut self, id: ThreadId, plan: MigrationRequest) -> Result<(), Error> {

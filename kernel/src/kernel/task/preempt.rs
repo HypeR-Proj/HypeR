@@ -19,6 +19,19 @@ const OFFLINE: u32 = 0;
 const PREPARING: u32 = 1;
 const ONLINE: u32 = 2;
 
+/// Trace vocabulary for a committed request, not an exclusive cause: requests
+/// may coalesce and a later selection can retain the currently running Thread.
+#[derive(Clone, Copy)]
+#[repr(u8)]
+pub(crate) enum RescheduleSource {
+    Wakeup = 1,
+    Deadline = 2,
+    Stop = 3,
+    Policy = 4,
+    Migration = 5,
+    Balance = 6,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Error {
     AlreadyOnline,
@@ -115,7 +128,7 @@ impl Drop for CpuPreemptionReservation {
 /// `true` result elects this caller to send an explicit target notification.
 /// A newly pending local request inside IRQ dispatch returns `false`: that
 /// still-active interrupt already guarantees the target's IRQ-tail evaluation.
-pub(crate) fn request(cpu: CpuIndex) -> Result<bool, Error> {
+pub(crate) fn request(cpu: CpuIndex, _source: RescheduleSource) -> Result<bool, Error> {
     // SAFETY: Keep CPU identification, local IRQ-depth observation, and pending
     // publication in one masked interval. Otherwise IRQ-tail migration could
     // make this caller read another CPU's IRQ depth and suppress notification
@@ -126,7 +139,16 @@ pub(crate) fn request(cpu: CpuIndex) -> Result<bool, Error> {
     // Short-circuiting keeps remote callers from observing locally owned IRQ
     // depth. Perform every fallible check before electing the sole notifier.
     let notify = current_cpu()? != cpu || state.irq_depth.load(Ordering::Relaxed) == 0;
-    Ok(state.pending.publish() && notify)
+    let notify = state.pending.publish() && notify;
+    crate::tracepoint!(
+        Scheduler,
+        "sched_request",
+        target_cpu = cpu.get() as u64,
+        reason = _source as u64,
+        notify = notify as u64,
+        thread = crate::kernel::trace::actor()
+    );
+    Ok(notify)
 }
 
 pub(crate) fn pending(cpu: CpuIndex) -> Result<bool, Error> {

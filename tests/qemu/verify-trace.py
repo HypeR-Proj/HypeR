@@ -63,7 +63,7 @@ def main():
         # real blocked waits, and repeated protocol IDs on distinct connections.
         # One bounded command excludes serial control traffic and keeps the
         # collector off live rings. Continuous recording is tested separately.
-        ipc_result = shell.run('perf trace record --snapshot --duration-ms 30000 --categories ipc,scheduler --poll-ms 1 --no-names --fail-on-loss --max-events 16384 -o /tmp/ipc.json -- /bin/lifecycle-stress trace', timeout=120)
+        ipc_result = shell.run('perf trace record --snapshot --duration-ms 30000 --categories ipc,scheduler,irq --poll-ms 1 --no-names --fail-on-loss --max-events 16384 -o /tmp/ipc.json -- /bin/lifecycle-stress trace', timeout=120)
         # This checks exit semantics, not command latency. Leave room for slow
         # TCG runners; command completion still stops the recording immediately.
         shell.check('perf trace record --duration-ms 30000 --categories syscall --max-events 16384 --format jsonl -o /tmp/command.jsonl -- /bin/echo TRACE_COMMAND_OK')
