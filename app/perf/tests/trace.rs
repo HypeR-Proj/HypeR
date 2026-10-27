@@ -4,7 +4,7 @@ use crate::{export, model, options};
 use hyper_os::inspect::trace::TraceInfo;
 use model::{Capture, Event, Site};
 use serde_json::Value;
-fn capture() -> Capture {
+pub(super) fn capture() -> Capture {
     Capture::new(
         TraceInfo {
             generation: 1,
@@ -21,7 +21,14 @@ fn capture() -> Capture {
         128,
     )
 }
-fn add(c: &mut Capture, cpu: usize, time: u64, sequence: u64, name: &str, fields: &[(&str, u64)]) {
+pub(super) fn add(
+    c: &mut Capture,
+    cpu: usize,
+    time: u64,
+    sequence: u64,
+    name: &str,
+    fields: &[(&str, u64)],
+) {
     let site = c.sites.len();
     c.sites.push(Site {
         category: "test".into(),
@@ -43,10 +50,196 @@ fn add(c: &mut Capture, cpu: usize, time: u64, sequence: u64, name: &str, fields
     });
 }
 fn json(c: &mut Capture) -> Result<Value, Box<dyn std::error::Error>> {
+    render(c, true)
+}
+fn render(c: &mut Capture, raw_events: bool) -> Result<Value, Box<dyn std::error::Error>> {
     c.sort();
     let mut bytes = Vec::new();
-    export::perfetto(c, &mut bytes)?;
+    export::chrome(c, &mut bytes, raw_events)?;
     Ok(serde_json::from_slice(&bytes)?)
+}
+
+#[test]
+fn thread_lanes_follow_migration_without_raw_points() -> Result<(), Box<dyn std::error::Error>> {
+    let mut c = capture();
+    c.names.insert(42, "io-worker".into());
+    for (cpu, start, end) in [(0, 2000, 4000), (1, 5000, 7000)] {
+        add(
+            &mut c,
+            cpu,
+            start,
+            0,
+            "sched_switch",
+            &[("prev", 1), ("next", 42)],
+        );
+        add(
+            &mut c,
+            cpu,
+            end,
+            1,
+            "sched_switch",
+            &[("prev", 42), ("next", 1)],
+        );
+    }
+    let value = render(&mut c, false)?;
+    let runs: Vec<_> = spans(&value)
+        .into_iter()
+        .filter(|e| e["pid"] == 5)
+        .collect();
+    assert_eq!(runs.len(), 2);
+    assert_eq!(runs[0]["tid"], runs[1]["tid"]);
+    for (cpu, run) in runs.into_iter().enumerate() {
+        assert_eq!(run["name"], "Running");
+        assert_eq!(run["args"]["cpu"], cpu);
+        assert_eq!(run["args"]["switch_in_sequence"], 0);
+        assert_eq!(run["args"]["switch_out_sequence"], 1);
+    }
+    assert!(
+        !value["traceEvents"]
+            .as_array()
+            .ok_or("missing events")?
+            .iter()
+            .any(|e| e["name"] == "sched_switch")
+    );
+    Ok(())
+}
+
+#[test]
+fn explicit_bootstrap_switch_preserves_zero_scheduler_id() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mut c = capture();
+    c.names.insert(0, "bootstrap".into());
+    add(
+        &mut c,
+        0,
+        2000,
+        0,
+        "sched_switch",
+        &[("prev", 1), ("next", 0), ("state", 1)],
+    );
+    add(
+        &mut c,
+        0,
+        3000,
+        1,
+        "sched_switch",
+        &[("prev", 0), ("next", 1), ("state", 1)],
+    );
+    let value = render(&mut c, false)?;
+    assert!(
+        spans(&value)
+            .iter()
+            .any(|e| e["pid"] == 5 && e["args"]["thread"] == "0x0")
+    );
+    Ok(())
+}
+
+#[test]
+fn overlapping_cpu_observations_do_not_fabricate_parallel_thread_execution()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut c = capture();
+    for (cpu, start, end) in [(0, 2000, 6000), (1, 4000, 8000)] {
+        c.losses[cpu].incomplete = true;
+        add(
+            &mut c,
+            cpu,
+            start,
+            0,
+            "sched_switch",
+            &[("prev", 1), ("next", 42)],
+        );
+        add(
+            &mut c,
+            cpu,
+            end,
+            1,
+            "sched_switch",
+            &[("prev", 42), ("next", 1)],
+        );
+    }
+    let value = render(&mut c, false)?;
+    assert!(spans(&value).is_empty());
+    assert_eq!(value["metadata"]["cross_cpu_spans"], false);
+    Ok(())
+}
+
+#[test]
+fn scheduling_windows_reject_missing_or_inconsistent_boundaries()
+-> Result<(), Box<dyn std::error::Error>> {
+    for mode in ["gap", "identity", "missing-next"] {
+        let mut c = capture();
+        c.losses[0].incomplete = true;
+        add(
+            &mut c,
+            0,
+            2000,
+            0,
+            "sched_switch",
+            &[("prev", 1), ("next", 2)],
+        );
+        if mode == "missing-next" {
+            add(&mut c, 0, 3000, 1, "sched_switch", &[("prev", 2)]);
+        }
+        add(
+            &mut c,
+            0,
+            4000,
+            if mode == "identity" { 1 } else { 2 },
+            "sched_switch",
+            &[
+                ("prev", if mode == "identity" { 7 } else { 2 }),
+                ("next", 3),
+            ],
+        );
+        let value = render(&mut c, false)?;
+        assert!(spans(&value).is_empty(), "{mode}");
+    }
+    Ok(())
+}
+
+#[test]
+fn other_cpu_gaps_do_not_erase_local_execution_windows() -> Result<(), Box<dyn std::error::Error>> {
+    let mut c = capture();
+    add(
+        &mut c,
+        0,
+        2000,
+        0,
+        "sched_switch",
+        &[("prev", 1), ("next", 2)],
+    );
+    add(&mut c, 1, 3000, 0, "irq_enter", &[("irq", 26)]);
+    add(&mut c, 1, 4000, 2, "irq_exit", &[("irq", 26)]);
+    add(
+        &mut c,
+        0,
+        5000,
+        1,
+        "sched_switch",
+        &[("prev", 2), ("next", 1)],
+    );
+    let value = render(&mut c, false)?;
+    assert_eq!(spans(&value).len(), 2);
+    assert!(spans(&value).iter().all(|e| e["args"]["cpu"] == 0));
+    Ok(())
+}
+
+#[test]
+fn perfetto_cli_defaults_to_timelines() -> Result<(), Box<dyn std::error::Error>> {
+    use clap::Parser;
+    #[derive(Parser)]
+    struct Args {
+        #[command(subcommand)]
+        command: options::Command,
+    }
+    let args = Args::try_parse_from(["trace", "record"])?;
+    let options::Command::Record { export, .. } = args.command else {
+        return Err("wrong command".into());
+    };
+    assert!(!export.raw_events);
+    assert!(matches!(export.format, options::Format::Perfetto));
+    assert_eq!(export.output, "/tmp/trace.pftrace");
+    Ok(())
 }
 fn spans(value: &Value) -> Vec<&Value> {
     value["traceEvents"]
@@ -124,10 +317,10 @@ fn causal_delivery_is_directional_and_needs_committed_receive()
     assert_eq!(flows(&value).len(), 2);
     assert_ne!(flows(&value)[0]["bind_id"], flows(&value)[1]["bind_id"]);
     c.losses[1].overwritten = 1;
-    assert!(flows(&json(&mut c)?).is_empty());
+    assert_eq!(flows(&json(&mut c)?).len(), 2);
     c.losses[1].overwritten = 0;
     c.info.cpu_mask[0] = 1;
-    assert!(flows(&json(&mut c)?).is_empty());
+    assert_eq!(flows(&json(&mut c)?).len(), 2);
     Ok(())
 }
 
@@ -183,7 +376,7 @@ fn equal_time_message_delivery_does_not_depend_on_cpu_or_read_order()
                     std::fs::write(path, serde_json::to_vec(&value)?)?;
                 }
                 c.losses[0].incomplete = true;
-                assert!(flows(&json(&mut c)?).is_empty());
+                assert_eq!(flows(&json(&mut c)?).len(), 1);
             }
         }
     }
@@ -213,6 +406,36 @@ fn earlier_or_mismatched_receives_do_not_form_delivery_flows()
         );
         assert!(flows(&json(&mut c)?).is_empty());
     }
+    Ok(())
+}
+
+#[test]
+fn equal_time_block_completion_matches_across_cpus_after_unrelated_loss()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut c = capture();
+    add(
+        &mut c,
+        0,
+        2000,
+        0,
+        "block_complete",
+        &[("domain", 1), ("tag", 42)],
+    );
+    add(
+        &mut c,
+        1,
+        2000,
+        0,
+        "block_submit",
+        &[("domain", 1), ("tag", 42), ("read", 1)],
+    );
+    c.losses[1].incomplete = true;
+    let v = json(&mut c)?;
+    assert!(
+        spans(&v)
+            .iter()
+            .any(|e| e["pid"] == 4 && e["name"] == "read" && e["dur"] == 0.0)
+    );
     Ok(())
 }
 
@@ -400,6 +623,11 @@ fn explicit_rpc_parent_wait_and_message_flows_import_fixture()
     if let Some(path) = std::env::var_os("HYPER_TRACE_FIXTURE") {
         std::fs::write(path, serde_json::to_vec(&value)?)?;
     }
+    if let Some(path) = std::env::var_os("HYPER_TRACE_PROTO_RPC_FIXTURE") {
+        let mut output = Vec::new();
+        export::perfetto(&c, &mut output, false)?;
+        std::fs::write(path, output)?;
+    }
     Ok(())
 }
 
@@ -563,8 +791,9 @@ fn missing_events_never_form_a_complete_syscall() -> Result<(), Box<dyn std::err
     Ok(())
 }
 #[test]
-fn unknown_loss_disables_inferred_durations() -> Result<(), Box<dyn std::error::Error>> {
+fn incomplete_data_keeps_names_and_capture_metadata() -> Result<(), Box<dyn std::error::Error>> {
     let mut c = capture();
+    c.names.insert(2, "io-runtime".into());
     c.losses[0].incomplete = true;
     add(
         &mut c,
@@ -582,9 +811,28 @@ fn unknown_loss_disables_inferred_durations() -> Result<(), Box<dyn std::error::
         "sched_switch",
         &[("prev", 2), ("next", 1), ("state", 4)],
     );
-    let value = json(&mut c)?;
-    assert!(spans(&value).is_empty());
+    let value = render(&mut c, false)?;
+    let runs = spans(&value);
+    assert_eq!(runs.len(), 2);
+    assert!(
+        runs.iter()
+            .any(|run| run["pid"] == 5 && run["name"] == "Running")
+    );
     assert_eq!(value["metadata"]["losses"][0]["incomplete"], true);
+    assert!(
+        runs.iter()
+            .any(|run| run["pid"] == 1 && run["name"] == "io-runtime")
+    );
+    assert!(
+        !value["traceEvents"]
+            .as_array()
+            .ok_or("missing events")?
+            .iter()
+            .any(|e| matches!(
+                e["name"].as_str(),
+                Some("Incomplete trace data" | "TRACE LOSS" | "TRACE GAP")
+            ))
+    );
     Ok(())
 }
 #[test]
@@ -618,7 +866,7 @@ fn runnable_latency_and_cpu_spans_require_both_boundaries() -> Result<(), Box<dy
     );
     let value = json(&mut c)?;
     let items = spans(&value);
-    assert_eq!(items.len(), 2);
+    assert_eq!(items.len(), 3);
     assert!(
         items
             .iter()
@@ -691,6 +939,7 @@ fn record_cli_covers_limits_output_and_workload() -> Result<(), Box<dyn std::err
         "--output",
         "/tmp/a",
         "--no-names",
+        "--raw-events",
         "--fail-on-loss",
         "--snapshot",
         "--",
@@ -709,7 +958,7 @@ fn record_cli_covers_limits_output_and_workload() -> Result<(), Box<dyn std::err
             assert_eq!(capture.categories, 36);
             assert_eq!(capture.buffer_records, 64);
             assert_eq!(export.max_events, 100);
-            assert!(export.no_names && export.fail_on_loss);
+            assert!(export.no_names && export.fail_on_loss && export.raw_events);
             assert_eq!(poll_ms, 1);
             assert!(snapshot);
             assert_eq!(command, ["/bin/echo", "ok"]);
@@ -882,7 +1131,10 @@ fn switch_causes_are_explicit_and_never_inferred_from_ready_state()
             ],
         );
         let value = json(&mut c)?;
-        let slices = spans(&value);
+        let slices: Vec<_> = spans(&value)
+            .into_iter()
+            .filter(|s| s["pid"] == 1)
+            .collect();
         assert_eq!(slices.len(), 1);
         assert_eq!(slices[0]["args"]["switch_out_reason"], name);
         let switch = value["traceEvents"]

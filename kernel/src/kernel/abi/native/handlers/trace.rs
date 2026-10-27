@@ -18,6 +18,7 @@ const _: () = {
     assert!(core::mem::size_of::<HyperNativeTraceConfig>() == 56);
     assert!(core::mem::size_of::<HyperNativeTraceInfo>() == 160);
     assert!(core::mem::size_of::<HyperNativeTraceThread>() == 72);
+    assert!(core::mem::size_of::<HyperNativeTraceThreadDetails>() == 80);
     assert!(core::mem::size_of::<HyperNativeTraceRecord>() == 328);
     assert!(core::mem::size_of::<HyperNativeTraceBatch>() == 2656);
 };
@@ -56,6 +57,7 @@ pub(in crate::kernel::abi::native) fn sys_cpu_inspector_trace_read(
         let size = match args[1] {
             u64::MAX => 160,
             x if x == u64::MAX - 1 => 72,
+            x if x == u64::MAX - 2 => 80,
             _ => 2656,
         };
         let request = prepare_info_request(&[args[3], args[4], 0, 0, 0, 0], size, size)?;

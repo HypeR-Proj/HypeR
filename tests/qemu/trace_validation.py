@@ -4,6 +4,10 @@
 """Validate complete raw trace artifacts on the host after the disk is fenced."""
 
 import json
+from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'profiling'))
+from perfetto_proto import inspect as inspect_proto, one
 
 
 def complete(payload):
@@ -32,6 +36,22 @@ def validate_remote(payload):
 
 
 def validate_capture(files, logfile):
+    lanes = inspect_proto(files['lanes.pftrace'].read_bytes())
+    if not any(one(state, 4) == 3 for _, state in lanes['states']):
+        raise AssertionError('default Perfetto view lacks native scheduling states')
+    if not any(thread.get(3) for thread in lanes['threads']):
+        raise AssertionError('native process tree lacks thread names')
+    if not any(obj['process_koid'] for obj in lanes['metadata']['thread_objects'].values()):
+        raise AssertionError('scheduler ThreadIds were not joined to observed process owners')
+    if any(one(e, 23) == b'sched_switch' for _, e in lanes['events']):
+        raise AssertionError('default Perfetto view unexpectedly includes raw tracepoints')
+    native = inspect_proto(files['native.pftrace'].read_bytes())
+    outgoing = [one(e, 47) for _, e in native['events'] if 47 in e]
+    incoming = [one(e, 48) for _, e in native['events'] if 48 in e]
+    if not outgoing or sorted(outgoing) != sorted(incoming):
+        raise AssertionError('native IPC export lacks paired causal flow IDs')
+    if not any(one(e, 23) == b'RPC round trip' for _, e in native['events']):
+        raise AssertionError('native IPC export lacks RPC intervals')
     scheduling = json.loads(files['ipc.json'].read_bytes())
     if not complete(scheduling):
         raise AssertionError('scheduling cause capture is incomplete')
@@ -44,6 +64,10 @@ def validate_capture(files, logfile):
         raise AssertionError('switch lost its packed cause or entry point')
     if not annotated or not any(c['switch_reason'] == 'block' for c in annotated):
         raise AssertionError('bounded IPC workload has no explicit blocking switch cause')
+    if not any(e.get('ph') == 'X' and e.get('pid') == 5
+               and 'cpu' in e.get('args', {})
+               for e in scheduling['traceEvents']):
+        raise AssertionError('missing per-thread execution lanes')
     if any(c['switch_reason'] == 'preempt' for c in annotated) and not any(
             e.get('ph') == 'X' and e.get('args', {}).get('preempted') is True
             for e in scheduling['traceEvents']):
@@ -106,6 +130,8 @@ def validate_capture(files, logfile):
             raise AssertionError(f'missing observed causal flow: {name}')
     logfile.with_suffix('.ipc.json').write_bytes(files['ipc.json'].read_bytes())
     command_rows = [json.loads(line) for line in files['command.jsonl'].read_bytes().splitlines() if line.strip()]
+    if not complete({'metadata': command_rows[0]}) or command_rows[-1]['loss'] or command_rows[-1]['limited']:
+        raise AssertionError('command exit snapshot is incomplete')
     exits = [row['args'] for row in command_rows[1:-1]
              if row['event'] == 'syscall_exit' and row['args']['returned'] == 0]
     if not exits or any(row['status'] != 0 for row in exits):

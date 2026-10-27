@@ -164,10 +164,20 @@ pub(crate) fn query(generation: u64, cpu: u64, cursor: u64, out: &mut [u8]) -> R
     let size = match cpu {
         u64::MAX => 160,
         x if x == u64::MAX - 1 => 72,
+        x if x == u64::MAX - 2 => 80,
         _ => 2656,
     };
     if out.len() != size {
         return Err(HYPER_NATIVE_STATUS_INVALID_ARGUMENT);
+    }
+    if cpu == u64::MAX - 2 {
+        CONTROL.with(|capture| session(capture, generation))?;
+        let (name, koid) = crate::kernel::task::scheduler::trace_thread_details(cursor)
+            .map_err(|_| HYPER_NATIVE_STATUS_NOT_FOUND)?;
+        out.fill(0);
+        encode(&[cursor, koid.get()], out);
+        text(&mut out[16..80], name.as_str());
+        return Ok(80);
     }
     if cpu == u64::MAX - 1 {
         CONTROL.with(|capture| session(capture, generation))?;

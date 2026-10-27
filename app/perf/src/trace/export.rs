@@ -1,13 +1,17 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 //! Chrome Trace Event JSON accepted by Perfetto. Every derived span requires
-//! observed matching boundaries. Gaps invalidate pending spans; an incomplete
-//! stream is shown as instants instead of inventing timing across unknown loss.
+//! observed matching boundaries. Gaps invalidate pending spans. Scheduling
+//! windows remain visible; original capture metadata retains loss information.
 use super::model::{Capture, Event};
 #[path = "causal.rs"]
 mod causal;
+#[path = "proto/mod.rs"]
+mod proto;
 #[path = "scheduling.rs"]
 mod scheduling;
+#[path = "timeline.rs"]
+mod timeline;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
@@ -45,10 +49,22 @@ fn metadata(c: &Capture) -> Value {
         .iter()
         .map(|(id, name)| (format!("{id:#x}"), name))
         .collect();
+    let objects: BTreeMap<_, _> = c
+        .koids
+        .iter()
+        .map(|(id, koid)| {
+            (
+                format!("{id:#x}"),
+                json!({"koid":format!("{koid:#x}"),
+            "process_koid":c.tasks.get(id).and_then(|task|task.process).map(|id|format!("{id:#x}"))}),
+            )
+        })
+        .collect();
     json!({"format":"hyper-trace-v1","kernel":revision,"generation":c.info.generation,"clock":"monotonic-ns",
         "started_ns":c.info.started_ns,"deadline_ns":c.info.deadline_ns,"categories":c.info.categories,
         "capacity_per_cpu":c.info.capacity,"cpu_count":c.info.cpu_count,"cpu_mask":c.info.cpu_mask, "losses":losses,
-        "thread_names":names,"limited":c.limited,"cross_cpu_spans":c.cross_cpu_spans()})
+        "vm_threads":c.vms.iter().map(|(id, vm)| (format!("{id:#x}"), json!({"name":vm.name,"vcpu":vm.vcpu}))).collect::<BTreeMap<_,_>>(),
+        "thread_names":names,"thread_objects":objects,"limited":c.limited,"cross_cpu_spans":c.cross_cpu_spans()})
 }
 fn fields(c: &Capture, event: &Event) -> Value {
     let mut args = serde_json::Map::new();
@@ -59,6 +75,7 @@ fn fields(c: &Capture, event: &Event) -> Value {
             if matches!(
                 name.as_str(),
                 "thread"
+                    | "koid"
                     | "prev"
                     | "next"
                     | "waker"
@@ -91,13 +108,17 @@ fn fields(c: &Capture, event: &Event) -> Value {
     args.insert("line".into(), json!(c.sites[event.site].line));
     Value::Object(args)
 }
-struct JsonTrace<W> {
+struct TraceWriter<W> {
     output: W,
     first: bool,
     origin: u64,
+    native: Option<proto::Output>,
 }
-impl<W: Write> JsonTrace<W> {
+impl<W: Write> TraceWriter<W> {
     fn event(&mut self, value: Value) -> io::Result<()> {
+        if let Some(native) = self.native.as_mut() {
+            return native.event(value);
+        }
         if !self.first {
             self.output.write_all(b",\n")?;
         }
@@ -141,17 +162,45 @@ impl<W: Write> JsonTrace<W> {
             "ts":self.time(event.time),"bind_id":format!("{id:#x}"),"flow_out":outgoing,"flow_in":!outgoing,"args":args}))
     }
 }
-/// CPU lanes represent observed on-CPU intervals. Per-thread lanes show elapsed
-/// syscall/VM/fault time (which can include descheduling), and runnable latency.
+/// CPU and thread execution lanes represent bounded scheduling observations.
+/// Activity lanes show elapsed syscall/VM/fault time and runnable latency.
 /// These are native tracks, not fabricated Linux `sched_switch` records.
-pub fn perfetto(c: &Capture, output: impl Write) -> io::Result<()> {
-    let mut w = JsonTrace {
+pub fn chrome(c: &Capture, output: impl Write, raw_events: bool) -> io::Result<()> {
+    render(c, output, raw_events, false)
+}
+/// Native Perfetto protobuf populates the scheduler and thread-state tables.
+pub fn perfetto(c: &Capture, output: impl Write, raw_events: bool) -> io::Result<()> {
+    render(c, output, raw_events, true)
+}
+fn render(c: &Capture, output: impl Write, raw_events: bool, native: bool) -> io::Result<()> {
+    let mut threads = BTreeMap::new();
+    for event in &c.events {
+        for key in ["thread", "prev", "next", "waker"] {
+            if let Some(id) = c.value(event, key)
+                && (id != 0
+                    || matches!(key, "prev" | "next")
+                    || key == "thread" && c.sites[event.site].name == "sched_reap")
+                && !threads.contains_key(&id)
+            {
+                let tid = threads.len() as u32 + 1;
+                threads.insert(id, tid);
+            }
+        }
+    }
+    let mut w = TraceWriter {
         output,
         first: true,
         origin: c.info.started_ns,
+        native: if native {
+            Some(proto::Output::new(c, &threads, raw_events)?)
+        } else {
+            None
+        },
     };
-    w.output.write_all(b"{\"traceEvents\":[\n")?;
-    w.name(1, 0, "HypeR CPU execution")?;
+    if !native {
+        w.output.write_all(b"{\"traceEvents\":[\n")?;
+    }
+    w.name(1, 0, "HypeR CPU scheduling")?;
     w.name(2, 0, "HypeR threads (elapsed time)")?;
     w.name(3, 0, "HypeR IRQ service")?;
     w.name(4, 0, "HypeR block requests")?;
@@ -160,89 +209,65 @@ pub fn perfetto(c: &Capture, output: impl Write) -> io::Result<()> {
         w.name(3, cpu + 1, &format!("CPU {cpu} IRQ"))?;
     }
     // Export-local small IDs avoid truncating the kernel's 64-bit identifiers.
-    let mut threads = BTreeMap::new();
-    for event in &c.events {
-        for key in ["thread", "prev", "next", "waker"] {
-            if let Some(id) = c.value(event, key)
-                && !threads.contains_key(&id)
-            {
-                let tid = threads.len() as u32 + 1;
-                threads.insert(id, tid);
-                w.name(
-                    2,
-                    tid,
-                    &c.names
-                        .get(&id)
-                        .cloned()
-                        .unwrap_or_else(|| format!("thread {id:#x}")),
-                )?;
-            }
-        }
+    for (&id, &tid) in &threads {
+        w.name(
+            2,
+            tid,
+            &c.names
+                .get(&id)
+                .cloned()
+                .unwrap_or_else(|| format!("thread {id:#x}")),
+        )?;
     }
     let mut previous_sequence = vec![None; c.info.cpu_count as usize];
-    let mut running: Vec<Option<(&Event, u64)>> = vec![None; c.info.cpu_count as usize];
     let mut pending: BTreeMap<(&str, u64), &Event> = BTreeMap::new();
     let mut ready: BTreeMap<u64, &Event> = BTreeMap::new();
     let mut irq: BTreeMap<usize, Vec<&Event>> = BTreeMap::new();
     let mut io: BTreeMap<(u64, u64), &Event> = BTreeMap::new();
+    let mut early_completions: BTreeMap<(u64, u64), &Event> = BTreeMap::new();
     let mut io_lanes = BTreeMap::new();
     let mut depth = BTreeMap::<u64, u64>::new();
     let uncertain = !c.cross_cpu_spans();
-    let scheduling = scheduling::Evidence::new(c);
-    let mut causal = if uncertain {
-        causal::Links::default()
+    let scheduling = if raw_events {
+        scheduling::Evidence::new(c)
     } else {
-        causal::Links::new(c)
+        scheduling::Evidence::default()
     };
+    let mut causal = causal::Links::new(c);
     for event in &c.events {
         let site = &c.sites[event.site];
         let gap = previous_sequence[event.cpu]
             .is_some_and(|n: u64| n.checked_add(1) != Some(event.sequence));
         previous_sequence[event.cpu] = Some(event.sequence);
         if gap {
-            running[event.cpu] = None;
             // A migrated Thread or request completion may live on another CPU.
             pending.clear();
             ready.clear();
             irq.clear();
             io.clear();
+            early_completions.clear();
             depth.clear();
             causal.clear();
         }
         let thread = c.value(event, "thread");
         let tid = thread.and_then(|id| threads.get(&id).copied());
-        // Preserve raw observations, including every scalar and exact source.
-        let mut args = fields(c, event);
-        if site.name == "sched_request" {
-            args["irq_context"] = scheduling
-                .request_irqs
-                .get(&(event.cpu, event.sequence))
-                .map_or(Value::Null, |irq| scheduling::irq_context(c, irq));
+        if raw_events {
+            let mut args = fields(c, event);
+            if site.name == "sched_request" {
+                args["irq_context"] = scheduling
+                    .request_irqs
+                    .get(&(event.cpu, event.sequence))
+                    .map_or(Value::Null, |irq| scheduling::irq_context(c, irq));
+            }
+            w.event(json!({"ph":"i","s":"t","pid":if tid.is_some(){2}else{1},"tid":tid.unwrap_or(event.cpu as u32+1),
+                "name":site.name,"cat":site.category,"ts":w.time(event.time),"args":args}))?;
         }
-        w.event(json!({"ph":"i","s":"t","pid":if tid.is_some(){2}else{1},"tid":tid.unwrap_or(event.cpu as u32+1),
-            "name":site.name,"cat":site.category,"ts":w.time(event.time),"args":args}))?;
-        if gap {
+        if gap && raw_events {
             w.event(json!({"ph":"i","s":"t","pid":1,"tid":event.cpu+1,"name":"TRACE GAP","ts":w.time(event.time),"args":{"sequence":event.sequence}}))?;
         }
-        if !uncertain {
-            causal.observe(c, event, &threads, &mut w)?;
-        }
+        causal.observe(c, event, &threads, &mut w)?;
         if site.name == "sched_switch" {
             if let (Some(prev), Some(next)) = (c.value(event, "prev"), c.value(event, "next")) {
-                if !c.losses[event.cpu].incomplete
-                    && let Some((begin, id)) = running[event.cpu]
-                    && id == prev
-                {
-                    let name = c
-                        .names
-                        .get(&id)
-                        .cloned()
-                        .unwrap_or_else(|| format!("thread {id:#x}"));
-                    w.span((1,event.cpu as u32+1),&name,"scheduler",begin.time..event.time,
-                        json!({"thread":format!("{id:#x}"),"class":scheduling::next_class(c,begin),"end_state":scheduling::previous_state(c,event),
-                            "switch_out_reason":args["switch_reason"],"preempted":args["preempted"],"schedule_point":args["schedule_point"]}))?;
-                }
-                running[event.cpu] = Some((event, next));
                 if !uncertain
                     && let Some(begin) = ready.remove(&next)
                     && let Some(tid) = threads.get(&next)
@@ -313,8 +338,11 @@ pub fn perfetto(c: &Capture, output: impl Write) -> io::Result<()> {
                 stack.clear();
             }
         }
-        if !uncertain
-            && let (Some(domain), Some(tag)) = (c.value(event, "domain"), c.value(event, "tag"))
+        // Device tags are checked, non-reused counters within a unique domain.
+        // A matching completion stays meaningful despite unrelated source loss.
+        if let (Some(domain), Some(tag)) = (c.value(event, "domain"), c.value(event, "tag"))
+            && domain != 0
+            && tag != 0
         {
             let lane = if let Some(id) = io_lanes.get(&domain) {
                 *id
@@ -324,14 +352,30 @@ pub fn perfetto(c: &Capture, output: impl Write) -> io::Result<()> {
                 w.name(4, id, &format!("block device {domain:#x}"))?;
                 id
             };
-            if site.name == "block_submit" {
-                io.insert((domain, tag), event);
-                *depth.entry(domain).or_default() += 1;
-            } else if let Some(start) = io.remove(&(domain, tag)) {
-                if let Some(depth) = depth.get_mut(&domain) {
-                    *depth = depth.saturating_sub(1);
+            let key = (domain, tag);
+            let pair = if site.name == "block_submit" {
+                if let Some(end) = early_completions.remove(&key) {
+                    Some((event, end))
+                } else {
+                    io.insert(key, event);
+                    *depth.entry(domain).or_default() += 1;
+                    None
                 }
-                let name = if site.name == "block_abort" {
+            } else if matches!(site.name.as_str(), "block_complete" | "block_abort") {
+                if let Some(start) = io.remove(&key) {
+                    if let Some(depth) = depth.get_mut(&domain) {
+                        *depth = depth.saturating_sub(1);
+                    }
+                    Some((start, event))
+                } else {
+                    early_completions.insert(key, event);
+                    None
+                }
+            } else {
+                None
+            };
+            if let Some((start, end)) = pair {
+                let name = if c.sites[end.site].name == "block_abort" {
                     "aborted"
                 } else if c.value(start, "read") == Some(1) {
                     "read"
@@ -339,21 +383,27 @@ pub fn perfetto(c: &Capture, output: impl Write) -> io::Result<()> {
                     "write/control"
                 };
                 let mut args = fields(c, start);
-                args["completion"] = fields(c, event);
-                w.span((4, lane), name, "io", start.time..event.time, args)?;
+                args["completion"] = fields(c, end);
+                w.span((4, lane), name, "io", start.time..end.time, args)?;
             }
             w.event(json!({"ph":"C","pid":4,"tid":lane,"name":format!("Outstanding device {domain:#x}"),"ts":w.time(event.time),"args":{"observed requests":depth.get(&domain).copied().unwrap_or(0)}}))?;
         }
     }
+    if !native {
+        timeline::write(c, &threads, &mut w)?;
+    }
     // Deliberately do not close a running slice at the capture deadline: a final
     // switch/completion may never have been observed.
     for loss in &c.losses {
-        if loss.overwritten != 0 || loss.incomplete {
+        if raw_events && (loss.overwritten != 0 || loss.incomplete) {
             w.event(
                 json!({"ph":"i","s":"t","pid":1,"tid":loss.cpu+1,"name":"TRACE LOSS","ts":0,
                 "args":{"overwritten":loss.overwritten,"incomplete":loss.incomplete}}),
             )?;
         }
+    }
+    if let Some(native) = w.native.take() {
+        return native.finish(&mut w.output);
     }
     w.output
         .write_all(b"\n],\"displayTimeUnit\":\"ns\",\"metadata\":")?;

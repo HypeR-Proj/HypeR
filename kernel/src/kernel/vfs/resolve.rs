@@ -169,6 +169,7 @@ struct WalkOptions {
     missing: bool,
 }
 
+#[inline(never)]
 fn walk(
     view: &super::mounts::View,
     root: &Location,
@@ -178,12 +179,32 @@ fn walk(
     epochs: &mut Epochs,
     budget: &ScratchBudget,
 ) -> Result<Resolved, Error> {
+    let mut prepared = prepare_walk(root, value, budget)?;
+    if !value.text.starts_with('/') {
+        restore_start(view, root, start, &mut prepared, epochs, budget)?;
+    }
+    walk_components(view, &mut prepared, options, epochs, budget)
+}
+
+struct PreparedWalk {
+    // Drop ancestry before its retained name arena, just as the original locals.
+    traversal: Traversal<Step, ScratchBudget>,
+    pending: PendingPath<ScratchBudget>,
+}
+
+// Construction's by-value temporary state must not stay below later RPC waits.
+#[inline(never)]
+fn prepare_walk(
+    root: &Location,
+    value: &NormalizedPath,
+    budget: &ScratchBudget,
+) -> Result<PreparedWalk, Error> {
     let path = Path::new(&value.text).map_err(|_| Error::InvalidPath)?;
     let mut pending = PendingPath::new(path, budget.clone()).map_err(map_state_error)?;
     if value.directory_required {
         pending.require_final_directory().map_err(map_state_error)?;
     }
-    let mut traversal = Traversal::try_new(
+    let traversal = Traversal::try_new(
         Step {
             location: root.clone(),
             name: None,
@@ -191,22 +212,47 @@ fn walk(
         budget.clone(),
     )
     .map_err(map_state_error)?;
-    if !path.is_absolute() {
-        for (location, name) in view.ancestry(root, start, budget, |mount| {
-            epochs.observe(mount).map(|_| ())
-        })? {
-            traversal
-                .descend(Step {
-                    location,
-                    name: Some(
-                        pending
-                            .retain_name(Name::new(&name).map_err(|_| Error::InvalidPath)?)
-                            .map_err(map_state_error)?,
-                    ),
-                })
-                .map_err(map_state_error)?;
-        }
+    Ok(PreparedWalk { traversal, pending })
+}
+
+// Relative ancestry construction must retire before ordinary component lookup
+// can wait on backend IPC. Borrow the prepared state, without copying it.
+#[inline(never)]
+fn restore_start(
+    view: &super::mounts::View,
+    root: &Location,
+    start: &Location,
+    prepared: &mut PreparedWalk,
+    epochs: &mut Epochs,
+    budget: &ScratchBudget,
+) -> Result<(), Error> {
+    let PreparedWalk { pending, traversal } = prepared;
+    for (location, name) in view.ancestry(root, start, budget, |mount| {
+        epochs.observe(mount).map(|_| ())
+    })? {
+        traversal
+            .descend(Step {
+                location,
+                name: Some(
+                    pending
+                        .retain_name(Name::new(&name).map_err(|_| Error::InvalidPath)?)
+                        .map_err(map_state_error)?,
+                ),
+            })
+            .map_err(map_state_error)?;
     }
+    Ok(())
+}
+
+#[inline(never)]
+fn walk_components(
+    view: &super::mounts::View,
+    prepared: &mut PreparedWalk,
+    options: WalkOptions,
+    epochs: &mut Epochs,
+    budget: &ScratchBudget,
+) -> Result<Resolved, Error> {
+    let PreparedWalk { pending, traversal } = prepared;
     let mut parent = traversal.current().location.clone();
     let mut final_name = ScratchString::new(budget.clone());
     while let Some(component) = pending.pop() {
@@ -252,13 +298,7 @@ fn walk(
                     .attributes(candidate.node())?;
                 if attributes.kind() == NodeKind::Symlink && (options.follow || !pending.is_empty())
                 {
-                    follow_link(
-                        &mut pending,
-                        &mut traversal,
-                        &candidate,
-                        attributes.size(),
-                        budget,
-                    )?;
+                    follow_link(pending, traversal, &candidate, attributes.size(), budget)?;
                 } else {
                     traversal
                         .descend(Step {

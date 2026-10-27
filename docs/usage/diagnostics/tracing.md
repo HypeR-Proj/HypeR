@@ -6,9 +6,16 @@ SPDX-License-Identifier: Apache-2.0
 # Kernel timelines with Perfetto
 
 `perf trace` records static kernel events into bounded CPU-local rings and exports
-Chrome Trace Event JSON, which [Perfetto imports directly](https://perfetto.dev/docs/getting-started/other-formats).
+native Perfetto protobuf. It uses the public [GenericKernel and TrackEvent protocols](https://github.com/google/perfetto/tree/v58.2/protos/perfetto/trace), including real scheduler analysis tables.
 Open the exported file at <https://ui.perfetto.dev>. PMU samples/flame graphs remain
 available through the independent [PMU commands](profiling.md).
+
+The default view has CPU scheduling tracks and process-grouped Threads, with
+Running, Runnable and Sleeping states. Thread activity tracks contain IPC/RPC
+flows, syscall intervals and switch-out reasons. `perf` translates existing
+observations in userspace; no additional kernel event is needed. Add
+`--raw-events` to include raw instant observations. `--format chrome` retains
+Chrome Trace JSON for diagnostics; `--format jsonl` retains raw records.
 
 ## Build and capture
 
@@ -25,10 +32,10 @@ On HypeR, from the authorized formal shell:
 ```sh
 perf trace record --duration-ms 5000 --categories scheduler,syscall,ipc,io \
   --cpus all --buffer-records 4096 --poll-ms 10 \
-  --max-events 262144 --output /tmp/trace.json
+  --max-events 262144 --output /tmp/trace.pftrace
 
 perf trace record --duration-ms 10000 --categories scheduler,io \
-  --output /tmp/storage.json -- /bin/storage-qual read /data/storage-qual.bin 101
+  --output /tmp/storage.pftrace -- /bin/storage-qual read /data/storage-qual.bin 101
 ```
 
 The workload must be deployed separately. Recording stops when the command exits,
@@ -45,7 +52,7 @@ For a retained-tail capture without a resident collector:
 perf trace start --duration-ms 10000 --categories scheduler,vm --cpus 0-3
 vmm list
 perf trace status
-perf trace dump --output /data/trace.json
+perf trace dump --output /data/trace.pftrace
 ```
 
 `dump` stops recording before reading. `stop` is also available separately.
@@ -57,7 +64,7 @@ even if the collecting process exits unexpectedly.
 `/tmp` is volatile. For bulk export, copy the completed file to a writable
 filesystem and retrieve it through its backend. The QEMU harness below unmounts
 its data volume and extracts the file from the stopped disk image. `-o -` emits
-JSON on stdout, with diagnostics on stderr; it cannot be combined with a workload
+the selected format on stdout, with diagnostics on stderr; it cannot be combined with a workload
 command because child output would corrupt that stream.
 
 ## Capture controls
@@ -71,9 +78,10 @@ command because child output would corrupt that stream.
 | `--poll-ms` | 10 | `record` polling interval, 1–1000 ms; snapshot mode polls child/deadline state only |
 | `--snapshot` | off | `record` reads only after stopping; suitable for short workloads that fit the per-CPU rings |
 | `--max-events` | 262144 | Userspace event bound, 1–4000000 |
-| `--output`, `-o` | `/tmp/trace.json` | File or `-` for stdout |
-| `--format` | `perfetto` | Perfetto JSON or raw `jsonl` |
-| `--no-names` | off | Skip best-effort live Thread name lookup |
+| `--output`, `-o` | `/tmp/trace.pftrace` | File or `-` for stdout |
+| `--format` | `perfetto` | Native `perfetto` protobuf, diagnostic `chrome` JSON, or raw `jsonl` |
+| `--raw-events` | off | Include raw instant tracepoints in the Perfetto view; does not change kernel capture or JSONL |
+| `--no-names` | off | Skip best-effort Thread names and process grouping |
 | `--fail-on-loss` | off | Return failure if overwrite, incomplete stream or collector limit occurred; retain output |
 | `--overwrite` | off | Explicitly allow replacing an existing file |
 
@@ -82,7 +90,10 @@ Options belong to `start`, `record` or `dump` as appropriate; use
 selected CPUs, kernel identity, deadline and buffer bounds. Captures are global,
 not a per-process private resource. Start/stop require CpuInspector
 SET_ATTRIBUTES; reads require INSPECT_DETAILS. Copying `perf` outside the trusted
-`/bin/perf` launch path does not grant authority.
+`/bin/perf` launch path does not grant authority. The authorized shell also
+delegates read-only TaskInspector INSPECT for live process/thread grouping;
+standalone callers may omit it. Missing live metadata leaves an ungrouped Thread
+with its captured identity, without inventing a parent process.
 
 ## Events and interpretation
 
@@ -107,7 +118,7 @@ cause record to consume ring capacity or lose independently. `reason` is
 1 yield, 2 policy preemption, 3 blocking, 4 exit, 5 migration, or 6 idle
 dispatch. `point` is 1 explicit operation, 2 cooperative safe point, or 3 IRQ
 tail. `perf` adds readable names and `preempted` to the observation and to the
-ending CPU execution slice. It is true for policy preemption and migration at
+Thread activity track as **Switch out** (and the CPU slice in Chrome JSON). It is true for policy preemption and migration at
 a safe point or IRQ tail; migration committed by an explicit yield is voluntary.
 A safe-point switch can still preempt a runnable Thread; the path is distinct
 from its reason.
@@ -142,22 +153,72 @@ ABI status, including a successful yield; `returned=0` carries the requested
 thread/process exit code. Subsequent yield scheduling or process teardown is
 outside that dispatch interval.
 
-CPU lanes show observed switch-to-switch execution intervals. Thread lanes show
-elapsed syscall/fault/vCPU time and runnable latency. Elapsed time can include
-sleep and descheduling; it is not CPU usage. vCPU boundaries are returns to the
-runner, not every hardware exit handled by the HAL fast path. IRQ spans cover
-ordinary routed service through acknowledgement, excluding scheduling postludes
-and architecture-private RPC doorbells. Idle Threads
-are named like other Threads. Thread states and scheduling classes are numeric
-kernel enum values, interpreted against the included build identity.
+Native scheduling records populate Perfetto's `sched` and `thread_state` tables.
+CPU tracks and per-Thread states share one identity, including migration. Threads
+are grouped under observed process owners; idle Threads are identified separately.
+vCPUs are grouped under `vm-{name}` using VM-owner observations of their actual
+scheduler ThreadIds. The shell delegates a dedicated read-only VM observation
+channel; it does not give perf VM lifecycle or affinity control. Initial VM
+discovery finishes before `record` starts its deadline, so a slow observer cannot
+consume the workload's capture window before launch. New vCPU threads
+can trigger a bounded refresh during collection. Retired observations remain in
+the capture; a vCPU without ownership metadata stays unassigned rather than being
+guessed from a thread name or placed under kernel.
+Native Perfetto TIDs use the full observed Thread KOID, matching `ps --threads`,
+while track UUIDs remain export-local. Missing KOIDs use explicitly labelled
+export-local TIDs that exclude all observed KOIDs. Synthetic PIDs avoid every TID
+so Perfetto's implicit main threads cannot collide. Real process names include
+their full KOID, for example `fs-backend[0x0000000100000064]`.
+Capture metadata and Thread descriptors
+retain the separate scheduler ThreadId and process owner when available. KOIDs
+with bit 63 set retain every bit but appear signed in Perfetto's int64 TID column;
+metadata also preserves their hexadecimal form. An optional read-only query resolves
+ThreadId to KOID; TaskInspector supplies the live owner. Neither ID grants
+scheduling authority. `sched_reap` also retains the KOID after live lookup becomes
+unavailable. Chrome JSON keeps export-local track IDs. No Linux scheduler or signal
+ABI is implied:
+HypeR Blocked maps to generic Sleeping, Ready/Migrating to Runnable, and Terminated
+to Dead (shown as Zombie). A subsequent `sched_reap` records completed execution
+resource retirement and maps to Destroyed, closing the Zombie interval and setting
+the thread's end timestamp. If reaping falls outside the capture or its event is
+lost/filtered, that endpoint remains unknown. Exit and retirement at the same
+timestamp collapse to Destroyed without a zero-length Zombie interval.
+Actual priority values are not currently captured; `prio` is omitted instead of
+substituting a scheduling class. GenericKernel does not encode the
+Linux `R+` distinction; **Switch out** retains the actual `preempted` flag and
+HypeR scheduling reason/entry point.
+
+Thread activity intervals use reusable child tracks so interleaved RPCs retain
+their own start and end times without being interpreted as nested calls.
+They show elapsed syscall/fault/vCPU time, including sleep
+and descheduling; they are not CPU usage. vCPU boundaries are returns to the runner,
+not every hardware exit handled by the HAL fast path. IRQ spans cover ordinary
+routed service and private kernel-RPC delivery, excluding scheduling postludes.
 
 Block spans and observed-outstanding counters describe Native block transport,
-not Linux I/O VM or physical controller internals. Requests already in flight at
-capture start are not included in the initial counter. Raw events, all scalar
-arguments and source locations remain available by selecting an event. IDs are
-hex strings to preserve 64-bit values in JavaScript; viewer lane numbers are
-export-local identifiers. JSONL retains exact monotonic nanoseconds; Perfetto JSON
-uses microseconds relative to capture start, retaining fractional precision.
+not Linux I/O VM or physical controller internals. Concurrent requests occupy
+separate reusable lanes under each device, so overlap does not become fictional
+call nesting. Requests already in flight at capture start are not included in the
+initial counter. `--raw-events` adds source locations and scalar fields.
+JSONL and native protobuf retain nanoseconds; Chrome JSON uses microseconds
+relative to capture start with fractional precision. Native metadata is stored in
+the root HypeR track description, without additional capture-quality notices.
+
+Example analysis in Perfetto's SQL view:
+
+```sql
+SELECT s.ts, s.dur, s.cpu, t.name AS thread, p.name AS process, s.end_state
+FROM sched s
+JOIN thread t USING (utid)
+LEFT JOIN process p USING (upid)
+ORDER BY s.ts;
+
+SELECT t.name, s.state, SUM(s.dur) AS duration_ns
+FROM thread_state s
+JOIN thread t USING (utid)
+WHERE s.dur >= 0
+GROUP BY t.utid, s.state;
+```
 
 ## IPC and critical chains
 
@@ -166,8 +227,9 @@ Perfetto and select a **Message delivery** or **RPC dispatch** slice to follow i
 flow arrow. The destination includes `latency_ns`; inspect raw events for queue,
 message, connection and request IDs. Equal-timestamp message boundaries match by
 queue and message identity, even if CPU sorting visits the receive first; their
-latency is zero. **Wake to execution** connects a committed
-wait-queue wakeup to the next observed dispatch. `Blocked (notified/timeout/cancelled)`
+latency is zero. **Wakeup → Scheduled** connects an observed waker to the matching Thread
+dispatch after a bounded Sleeping interval. Chrome JSON also retains the
+**Wake to execution** wait-chain view for complete captures. `Blocked (notified/timeout/cancelled)`
 measures wait-registration completion; **Runnable** shows subsequent scheduling
 delay. These are elapsed observations, not a computed whole-system critical path.
 A signal wake identifies the winning source; it does not assert which of several
@@ -204,20 +266,27 @@ The bounded development fixture exercises duplex, nested RPC and actual waits:
 
 ```sh
 perf trace record --snapshot --duration-ms 30000 --categories ipc,scheduler --no-names \
-  --poll-ms 1 --fail-on-loss -o /tmp/ipc.json -- /bin/lifecycle-stress trace
+  --poll-ms 1 --fail-on-loss -o /tmp/ipc.pftrace -- /bin/lifecycle-stress trace
 ```
 
 Host tests can export an import fixture, and an installed upstream Perfetto
 `trace_processor` can validate its actual slice/flow tables:
 
 ```sh
-HYPER_TRACE_FIXTURE=/tmp/ipc-fixture.json make app-test APP_TEST_PACKAGE=hyper-perf
-python3 -B tests/profiling/verify-perfetto.py /tmp/ipc-fixture.json \
+HYPER_TRACE_PROTO_RPC_FIXTURE=/tmp/ipc-fixture.pftrace \
+  HYPER_TRACE_PROTO_SCHED_FIXTURE=/tmp/sched-fixture.pftrace \
+  make app-test APP_TEST_PACKAGE=hyper-perf
+python3 -B tests/profiling/verify-perfetto.py /tmp/ipc-fixture.pftrace \
   --processor /path/to/trace_processor
+python3 -B tests/profiling/verify-perfetto.py /tmp/sched-fixture.pftrace \
+  --processor /path/to/trace_processor --scheduling
 ```
 
 The same import check accepts `target/app/aarch64/trace-4.ipc.json` produced by
 `make test-trace`; it checks every exported arrow and rejects importer errors.
+For an ordinary timeline without causal flows, pass `--scheduling` to validate
+the native execution intervals against Perfetto's actual `sched` and
+`thread_state` tables. Both modes check flow counts and reject importer errors.
 Both QEMU trace targets boot a disposable disk-backed system with a minimal I/O
 VM, a system EROFS volume and a 64 MiB FAT data volume; no Alpine disk is needed.
 `test-trace` covers lifecycle, loss, explicit nested RPC and a remote FAT mutation.
@@ -255,20 +324,33 @@ and retain trace-only object/wait identities while recording is stopped.
 
 The collector stores approximately 64 bytes per event plus interned names/sites.
 It stops before exporting the file, avoiding export I/O inside the measured
-interval. Large JSON output can be substantially larger than that compact
-collection. Duration, ring capacity and event count are independent bounds.
+interval. Native export builds bounded packet storage proportional to the
+collected records, sorts derived endpoints, and serializes them in timestamp
+order. This storage is released after export. Large JSON output can be
+substantially larger than the compact collection. Duration, ring capacity and
+event count are independent bounds.
 
 Overwrites are counted per CPU. Contention/recursion/clock failure is a sticky
-`incomplete` flag, not an exact dropped-event count. Loss is in capture metadata
-and `TRACE LOSS`/`TRACE GAP` markers. Missing events invalidate pending spans;
-any capture loss suppresses inferred causal flows and cross-CPU durations, since a missing prefix
-or tail on one CPU can hide intervening operations of a migrated thread.
-CPU spans on an incomplete CPU are suppressed. Selecting only part of the online CPU set also
-suppresses causal flows and thread/I/O durations: a migrated thread may have unmatched boundaries
+`incomplete` flag, not an exact dropped-event count. Loss is retained in capture
+metadata; `--raw-events` also includes `TRACE LOSS`/`TRACE GAP` markers. Missing events invalidate pending spans;
+capture loss suppresses repeatable RPC annotations and elapsed syscall/wait
+intervals, since missing boundaries can hide another invocation. Committed IPC
+message sequences and device tags are non-reused within their unique queue/domain:
+matching observed endpoints remain valid despite unrelated source loss. Explicit
+sequence gaps still invalidate pending pairs conservatively.
+Matching switch-in/out identities still form an observed window, shown as
+native CPU execution and Thread states (or **Running**/**Idle** in Chrome JSON). Thread names stay unchanged and no
+additional capture-quality notices are displayed. Unlocated loss can hide
+intermediate switches, so a window's width is not necessarily precise CPU time.
+Explicit sequence gaps, missing endpoints and mismatched Thread identities leave
+holes. Overlapping observations of one Thread on multiple CPUs are omitted from
+both execution views instead of inventing a nesting order.
+Selecting only part of the online CPU set also
+suppresses repeatable RPC and elapsed Thread intervals: a migrated thread may have unmatched boundaries
 on an unselected CPU. Local CPU and IRQ intervals remain available. Neither unmatched starts nor truncated tails are
 invented into complete intervals. Increase capacity, reduce categories or drain
 more frequently to reduce overwrite; collecting itself also has overhead.
 
-These are HypeR tracks in Perfetto's `slice`/`args` tables. They do not fabricate
-Linux ftrace records or populate Linux-specific scheduler-analysis tables. No
-live Perfetto daemon or tracing service is installed on HypeR.
+Native scheduling uses the OS-independent `sched`/`thread_state` tables;
+activities and arrows use `slice`/`args`/`flow`. HypeR does not emit synthetic Linux
+ftrace records. No live Perfetto daemon or tracing service is installed.

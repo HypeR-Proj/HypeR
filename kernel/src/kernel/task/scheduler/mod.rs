@@ -562,6 +562,18 @@ pub(crate) fn trace_thread_name(id: u64) -> Result<ThreadNameSnapshot, Error> {
     thread_name(ThreadId::from_diagnostic(id))
 }
 
+/// Owned, authority-free join between recorder and object-inspector identities.
+#[cfg(feature = "kernel-trace")]
+pub(crate) fn trace_thread_details(
+    id: u64,
+) -> Result<(ThreadNameSnapshot, crate::kernel::object::Koid), Error> {
+    read_scheduler(|scheduler| {
+        scheduler.with_thread(ThreadId::from_diagnostic(id), |thread| {
+            (thread.name_snapshot(), thread.object_snapshot().object.koid)
+        })
+    })
+}
+
 /// Returns an owned name snapshot for the identified scheduler Thread.
 pub fn thread_name(id: ThreadId) -> Result<ThreadNameSnapshot, Error> {
     read_scheduler(|scheduler| scheduler.with_thread(id, Thread::name_snapshot))
@@ -1834,6 +1846,8 @@ pub(crate) fn reap_one_thread(
 
     #[cfg(all(feature = "kernel-test", feature = "kernel-stack-audit"))]
     stack_audit::record_retired(&thread);
+    #[cfg(feature = "kernel-trace")]
+    let koid = thread.object_snapshot().object.koid.get();
     retire_detached_thread(thread);
     let more = SCHEDULER.with(|slot| {
         let scheduler = slot.as_mut().ok_or(Error::NotInitialized)?;
@@ -1841,6 +1855,9 @@ pub(crate) fn reap_one_thread(
         Ok::<_, Error>(scheduler.has_retirements())
     })?;
     drop(retirement);
+    // Execution resources and retirement publications are now complete. Keep
+    // this distinct from the earlier Terminated switch-out observation.
+    crate::tracepoint!(Scheduler, "sched_reap", thread = id.get(), koid = koid);
     Ok(Some(more))
 }
 

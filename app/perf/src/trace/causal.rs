@@ -4,7 +4,7 @@
 //! Only explicit, matching commit identities establish causal edges. No payload
 //! parsing or inference from temporal proximity / a thread's previous message.
 
-use super::{Capture, Event, JsonTrace, fields};
+use super::{Capture, Event, TraceWriter, fields};
 use serde_json::json;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -71,9 +71,15 @@ impl<'capture> Links<'capture> {
         c: &Capture,
         e: &'capture Event,
         threads: &BTreeMap<u64, u32>,
-        w: &mut JsonTrace<impl Write>,
+        w: &mut TraceWriter<impl Write>,
     ) -> io::Result<()> {
         self.observe_message(c, e, threads, w)?;
+        // Queue identity and non-reused commit sequence establish delivery
+        // independently of unrelated lost observations. RPC user annotations
+        // and wait lifetimes need the stronger complete-capture contract.
+        if !c.cross_cpu_spans() {
+            return Ok(());
+        }
         self.observe_wait(c, e, threads, w)?;
         self.observe_rpc(c, e, threads, w)
     }
@@ -83,7 +89,7 @@ impl<'capture> Links<'capture> {
         c: &Capture,
         e: &'capture Event,
         threads: &BTreeMap<u64, u32>,
-        w: &mut JsonTrace<impl Write>,
+        w: &mut TraceWriter<impl Write>,
     ) -> io::Result<()> {
         let name = c.sites[e.site].name.as_str();
         if let (Some(queue), Some(message)) = (c.value(e, "queue"), c.value(e, "message"))
@@ -120,7 +126,7 @@ impl<'capture> Links<'capture> {
         c: &Capture,
         e: &'capture Event,
         threads: &BTreeMap<u64, u32>,
-        w: &mut JsonTrace<impl Write>,
+        w: &mut TraceWriter<impl Write>,
     ) -> io::Result<()> {
         let name = c.sites[e.site].name.as_str();
         if let (Some(thread), Some(wait)) = (c.value(e, "thread"), c.value(e, "wait")) {
@@ -169,7 +175,7 @@ impl<'capture> Links<'capture> {
         c: &Capture,
         e: &'capture Event,
         threads: &BTreeMap<u64, u32>,
-        w: &mut JsonTrace<impl Write>,
+        w: &mut TraceWriter<impl Write>,
     ) -> io::Result<()> {
         let name = c.sites[e.site].name.as_str();
         if let (Some(connection), Some(request)) = (c.value(e, "connection"), c.value(e, "request"))
@@ -256,7 +262,7 @@ impl<'capture> Links<'capture> {
         end: &Event,
         name: &str,
         threads: &BTreeMap<u64, u32>,
-        w: &mut JsonTrace<impl Write>,
+        w: &mut TraceWriter<impl Write>,
     ) -> io::Result<()> {
         let Some(thread) = c.value(end, "thread").or_else(|| c.value(end, "next")) else {
             return Ok(());
