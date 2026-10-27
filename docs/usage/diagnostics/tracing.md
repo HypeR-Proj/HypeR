@@ -99,7 +99,11 @@ SET_ATTRIBUTES; reads require INSPECT_DETAILS. Copying `perf` outside the truste
 Events are scalar observations; they contain no kernel addresses, user payloads
 or raw handle values. Successful receives report delivered bytes; failed receives report zero.
 
-`sched_switch_cause` accompanies a committed `sched_switch`. Its `reason` is
+One `sched_switch` record contains both Thread identities, packed state/class,
+and packed cause/entry point. The exporter expands the byte fields into named
+arguments: `state` holds `prev_state` in bits 0–7 and `next_class` in bits 8–15;
+`cause` holds `reason` in bits 0–7 and `point` in bits 8–15. There is no separate
+cause record to consume ring capacity or lose independently. `reason` is
 1 yield, 2 policy preemption, 3 blocking, 4 exit, 5 migration, or 6 idle
 dispatch. `point` is 1 explicit operation, 2 cooperative safe point, or 3 IRQ
 tail. `perf` adds readable names and `preempted` to the observation and to the
@@ -107,14 +111,18 @@ ending CPU execution slice. It is true for policy preemption and migration at
 a safe point or IRQ tail; migration committed by an explicit yield is voluntary.
 A safe-point switch can still preempt a runnable Thread; the path is distinct
 from its reason.
-Old captures, missing companions and unknown values remain unknown rather than
-inferring preemption from a Ready state. Companions must be adjacent in the same
-CPU sequence and match both Thread identities.
+Missing metadata and unknown values remain unknown rather than inferring
+preemption from a Ready state. A retained switch carries its own cause even
+when earlier records are lost; execution durations still require intact bounds.
 
 `sched_request` records the target CPU, publishing Thread, whether an explicit
 notification was elected, and the request source: 1 wakeup, 2 scheduler deadline,
-3 stop, 4 policy change, 5 migration, or 6 load balancing. Requests coalesce and
-do not necessarily switch Threads. Enable `scheduler,irq` together to obtain
+3 stop, 4 policy change, or 5 migration. Only transitions from not-pending to
+pending are recorded. Repeated requests that coalesce into an existing pending
+decision and internal load-balancing prompts do not consume records. Actual
+migration and switch events remain visible. These are request observations,
+not an exhaustive list of every contributor to a pending decision, and do not
+necessarily switch Threads. Enable `scheduler,irq` together to obtain
 `irq_context` on requests enclosed by a complete, matching local IRQ interval.
 It identifies a physical interrupt number or a private kernel-RPC prompt; gaps,
 unmatched boundaries, other-CPU IRQs and absent IRQ recording leave it null.

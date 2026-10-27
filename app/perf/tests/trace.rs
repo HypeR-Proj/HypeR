@@ -360,7 +360,7 @@ fn explicit_rpc_parent_wait_and_message_flows_import_fixture()
         15000,
         3,
         "sched_switch",
-        &[("prev", 30), ("next", 10), ("prev_state", 4)],
+        &[("prev", 30), ("next", 10), ("state", 4)],
     );
     add(
         &mut c,
@@ -572,7 +572,7 @@ fn unknown_loss_disables_inferred_durations() -> Result<(), Box<dyn std::error::
         2000,
         0,
         "sched_switch",
-        &[("prev", 1), ("next", 2), ("prev_state", 1)],
+        &[("prev", 1), ("next", 2), ("state", 1)],
     );
     add(
         &mut c,
@@ -580,7 +580,7 @@ fn unknown_loss_disables_inferred_durations() -> Result<(), Box<dyn std::error::
         4000,
         1,
         "sched_switch",
-        &[("prev", 2), ("next", 1), ("prev_state", 4)],
+        &[("prev", 2), ("next", 1), ("state", 4)],
     );
     let value = json(&mut c)?;
     assert!(spans(&value).is_empty());
@@ -606,7 +606,7 @@ fn runnable_latency_and_cpu_spans_require_both_boundaries() -> Result<(), Box<dy
         3000,
         0,
         "sched_switch",
-        &[("prev", 1), ("next", 2), ("prev_state", 4)],
+        &[("prev", 1), ("next", 2), ("state", 4)],
     );
     add(
         &mut c,
@@ -614,7 +614,7 @@ fn runnable_latency_and_cpu_spans_require_both_boundaries() -> Result<(), Box<dy
         6000,
         1,
         "sched_switch",
-        &[("prev", 2), ("next", 1), ("prev_state", 4)],
+        &[("prev", 2), ("next", 1), ("state", 4)],
     );
     let value = json(&mut c)?;
     let items = spans(&value);
@@ -866,28 +866,34 @@ fn switch_causes_are_explicit_and_never_inferred_from_ready_state()
             2000,
             0,
             "sched_switch",
-            &[("prev", 1), ("next", 2), ("prev_state", 1)],
+            &[("prev", 1), ("next", 2), ("state", 1)],
         );
         add(
             &mut c,
             0,
             3000,
             1,
-            "sched_switch_cause",
-            &[("prev", 2), ("next", 3), ("reason", reason), ("point", point)],
-        );
-        add(
-            &mut c,
-            0,
-            3000,
-            2,
             "sched_switch",
-            &[("prev", 2), ("next", 3), ("prev_state", 1)],
+            &[
+                ("prev", 2),
+                ("next", 3),
+                ("state", 1 | (2 << 8)),
+                ("cause", reason | (point << 8)),
+            ],
         );
         let value = json(&mut c)?;
         let slices = spans(&value);
         assert_eq!(slices.len(), 1);
         assert_eq!(slices[0]["args"]["switch_out_reason"], name);
+        let switch = value["traceEvents"]
+            .as_array()
+            .ok_or("missing events")?
+            .iter()
+            .rev()
+            .find(|e| e["name"] == "sched_switch")
+            .ok_or("missing switch")?;
+        assert_eq!(switch["args"]["prev_state"], 1);
+        assert_eq!(switch["args"]["next_class"], 2);
         assert_eq!(slices[0]["args"]["preempted"], serde_json::json!(preempted));
         assert_eq!(
             slices[0]["args"]["schedule_point"],
@@ -899,7 +905,30 @@ fn switch_causes_are_explicit_and_never_inferred_from_ready_state()
             }
         );
     }
-    for invalid in ["legacy", "gap", "identity", "intervening", "incomplete"] {
+    // Missing cause metadata must not infer preemption from Ready state.
+    let mut c = capture();
+    add(
+        &mut c,
+        0,
+        2000,
+        0,
+        "sched_switch",
+        &[("prev", 1), ("next", 2), ("state", 1)],
+    );
+    let value = json(&mut c)?;
+    let switch = value["traceEvents"]
+        .as_array()
+        .ok_or("missing events")?
+        .iter()
+        .find(|e| e["name"] == "sched_switch")
+        .ok_or("missing switch")?;
+    assert!(switch["args"]["preempted"].is_null());
+    Ok(())
+}
+
+#[test]
+fn switch_cause_is_atomic_even_after_loss() -> Result<(), Box<dyn std::error::Error>> {
+    for incomplete in [false, true] {
         let mut c = capture();
         add(
             &mut c,
@@ -907,59 +936,45 @@ fn switch_causes_are_explicit_and_never_inferred_from_ready_state()
             2000,
             0,
             "sched_switch",
-            &[("prev", 1), ("next", 2)],
+            &[
+                ("prev", 1),
+                ("next", 2),
+                ("state", 1),
+                ("cause", 1 | (1 << 8)),
+            ],
         );
-        if invalid != "legacy" {
-            add(
-                &mut c,
-                0,
-                3000,
-                1,
-                "sched_switch_cause",
-                &[
-                    ("prev", 2),
-                    ("next", if invalid == "identity" { 4 } else { 3 }),
-                    ("reason", 2),
-                    ("point", 2),
-                ],
-            );
-        }
-        if invalid == "intervening" {
-            add(&mut c, 0, 3000, 2, "sched_wakeup", &[("thread", 4)]);
-        }
         add(
             &mut c,
             0,
-            4000,
-            if matches!(invalid, "gap" | "intervening") {
-                3
-            } else if invalid == "legacy" {
-                1
-            } else {
-                2
-            },
+            3000,
+            2,
             "sched_switch",
-            &[("prev", 2), ("next", 3), ("prev_state", 1)],
+            &[
+                ("prev", 2),
+                ("next", 3),
+                ("state", 1),
+                ("cause", 2 | (3 << 8)),
+            ],
         );
-        if invalid == "incomplete" {
-            c.losses[0].incomplete = true;
-        }
+        c.losses[0].incomplete = incomplete;
         let value = json(&mut c)?;
-        let last = value["traceEvents"]
+        assert!(spans(&value).is_empty());
+        let switch = value["traceEvents"]
             .as_array()
             .ok_or("missing events")?
             .iter()
             .rev()
             .find(|e| e["name"] == "sched_switch")
             .ok_or("missing switch")?;
-        assert!(last["args"]["cause"].is_null(), "{invalid}");
+        assert_eq!(switch["args"]["preempted"], true);
+        assert_eq!(switch["args"]["schedule_point"], "irq-tail");
     }
     Ok(())
 }
 
 #[test]
-fn mismatched_nested_irq_boundaries_discard_outer_context()
--> Result<(), Box<dyn std::error::Error>> {
+fn mismatched_nested_irq_boundaries_discard_outer_context() -> Result<(), Box<dyn std::error::Error>>
+{
     for kind_mismatch in [false, true] {
         let mut c = capture();
         add(&mut c, 0, 2000, 0, "irq_enter", &[("irq", 26)]);

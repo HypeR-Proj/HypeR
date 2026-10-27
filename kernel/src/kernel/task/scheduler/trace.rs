@@ -21,3 +21,14 @@ pub(super) enum SchedulePoint {
     SafePoint = 2,
     IrqTail = 3,
 }
+
+/// Two byte-sized enums share a scalar so a switch needs only one ring record.
+#[cfg(feature = "kernel-trace")]
+pub(super) fn switch_state(previous: u64, next_class: u64) -> u64 {
+    previous | (next_class << 8)
+}
+
+#[cfg(feature = "kernel-trace")]
+pub(super) fn switch_cause(reason: SwitchReason, point: SchedulePoint) -> u64 {
+    reason as u64 | ((point as u64) << 8)
+}

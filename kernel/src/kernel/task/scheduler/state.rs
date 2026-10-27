@@ -1687,23 +1687,16 @@ impl Scheduler {
         })?;
         crate::tracepoint!(
             Scheduler,
-            "sched_switch_cause",
-            prev = current.get(),
-            next = next.get(),
-            reason = _reason as u64,
-            point = _point as u64
-        );
-        crate::tracepoint!(
-            Scheduler,
             "sched_switch",
             prev = current.get(),
             next = next.get(),
-            prev_state = self
-                .thread(current)
-                .map_or(0, |thread| thread.state() as u64),
-            next_class = self
-                .thread(next)
-                .map_or(0, |thread| thread.scheduling_class() as u64)
+            state = super::trace::switch_state(
+                self.thread(current)
+                    .map_or(0, |thread| thread.state() as u64),
+                self.thread(next)
+                    .map_or(0, |thread| thread.scheduling_class() as u64)
+            ),
+            cause = super::trace::switch_cause(_reason, _point)
         );
         let previous = self.thread(current)?.context_pointer();
         let next = self.thread(next)?.context_pointer().cast_const();

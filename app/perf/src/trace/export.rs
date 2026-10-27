@@ -213,13 +213,6 @@ pub fn perfetto(c: &Capture, output: impl Write) -> io::Result<()> {
         let tid = thread.and_then(|id| threads.get(&id).copied());
         // Preserve raw observations, including every scalar and exact source.
         let mut args = fields(c, event);
-        let cause = scheduling
-            .switches
-            .get(&(event.cpu, event.sequence))
-            .map_or(Value::Null, |cause| fields(c, cause));
-        if site.name == "sched_switch" {
-            args["cause"] = cause.clone();
-        }
         if site.name == "sched_request" {
             args["irq_context"] = scheduling
                 .request_irqs
@@ -246,8 +239,8 @@ pub fn perfetto(c: &Capture, output: impl Write) -> io::Result<()> {
                         .cloned()
                         .unwrap_or_else(|| format!("thread {id:#x}"));
                     w.span((1,event.cpu as u32+1),&name,"scheduler",begin.time..event.time,
-                        json!({"thread":format!("{id:#x}"),"class":c.value(begin,"next_class"),"end_state":c.value(event,"prev_state"),
-                            "switch_out_reason":cause["switch_reason"],"preempted":cause["preempted"],"schedule_point":cause["schedule_point"]}))?;
+                        json!({"thread":format!("{id:#x}"),"class":scheduling::next_class(c,begin),"end_state":scheduling::previous_state(c,event),
+                            "switch_out_reason":args["switch_reason"],"preempted":args["preempted"],"schedule_point":args["schedule_point"]}))?;
                 }
                 running[event.cpu] = Some((event, next));
                 if !uncertain
@@ -262,7 +255,7 @@ pub fn perfetto(c: &Capture, output: impl Write) -> io::Result<()> {
                         fields(c, begin),
                     )?;
                 }
-                if c.value(event, "prev_state") == Some(1) {
+                if scheduling::previous_state(c, event) == Some(1) {
                     ready.entry(prev).or_insert(event);
                 }
             }
@@ -300,7 +293,8 @@ pub fn perfetto(c: &Capture, output: impl Write) -> io::Result<()> {
             if let Some(start) = stack.pop()
                 && c.value(start, "irq").is_some()
                 && c.value(start, "irq") == c.value(event, "irq")
-                && c.value(start, "irq_kind").unwrap_or(0) == c.value(event, "irq_kind").unwrap_or(0)
+                && c.value(start, "irq_kind").unwrap_or(0)
+                    == c.value(event, "irq_kind").unwrap_or(0)
             {
                 w.span(
                     (3, event.cpu as u32 + 1),

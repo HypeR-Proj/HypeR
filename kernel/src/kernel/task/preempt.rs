@@ -139,15 +139,22 @@ pub(crate) fn request(cpu: CpuIndex, _source: RescheduleSource) -> Result<bool, 
     // Short-circuiting keeps remote callers from observing locally owned IRQ
     // depth. Perform every fallible check before electing the sole notifier.
     let notify = current_cpu()? != cpu || state.irq_depth.load(Ordering::Relaxed) == 0;
-    let notify = state.pending.publish() && notify;
-    crate::tracepoint!(
-        Scheduler,
-        "sched_request",
-        target_cpu = cpu.get() as u64,
-        reason = _source as u64,
-        notify = notify as u64,
-        thread = crate::kernel::trace::actor()
-    );
+    let newly_pending = state.pending.publish();
+    let notify = newly_pending && notify;
+    // Repeated publications coalesce into the same scheduling decision.
+    // Internal balancing prompts are maintenance, not workload wakeups; their
+    // actual placement changes and switches have their own observations.
+    #[cfg(feature = "kernel-trace")]
+    if newly_pending && !matches!(_source, RescheduleSource::Balance) {
+        crate::tracepoint!(
+            Scheduler,
+            "sched_request",
+            target_cpu = cpu.get() as u64,
+            reason = _source as u64,
+            notify = notify as u64,
+            thread = crate::kernel::trace::actor()
+        );
+    }
     Ok(notify)
 }
 

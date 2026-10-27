@@ -365,25 +365,18 @@ impl CpuScheduler {
             });
         crate::tracepoint!(
             Scheduler,
-            "sched_switch_cause",
-            prev = current.get(),
-            next = next.get(),
-            reason = _reason as u64,
-            point = _point as u64
-        );
-        crate::tracepoint!(
-            Scheduler,
             "sched_switch",
             prev = current.get(),
             next = next.get(),
-            prev_state = self
-                .thread_authority()
-                .with_thread(current, |_thread, schedule| schedule.state as u64)
-                .unwrap_or(0),
-            next_class = self
-                .thread_authority()
-                .with_thread(next, |_thread, schedule| schedule.scheduling.class() as u64)
-                .unwrap_or(0)
+            state = super::super::trace::switch_state(
+                self.thread_authority()
+                    .with_thread(current, |_thread, schedule| schedule.state as u64)
+                    .unwrap_or(0),
+                self.thread_authority()
+                    .with_thread(next, |_thread, schedule| schedule.scheduling.class() as u64)
+                    .unwrap_or(0)
+            ),
+            cause = super::super::trace::switch_cause(_reason, _point)
         );
         self.current = next;
         Ok(PreparedContextSwitch {

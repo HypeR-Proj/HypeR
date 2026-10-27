@@ -10,8 +10,14 @@ use std::collections::BTreeMap;
 
 pub(super) fn describe(c: &Capture, e: &Event, args: &mut Map<String, Value>) {
     match c.sites[e.site].name.as_str() {
-        "sched_switch_cause" => {
-            let reason = c.value(e, "reason");
+        "sched_switch" => {
+            let cause = c.value(e, "cause");
+            let reason = cause.map(|value| value & 0xff);
+            let point = cause.map(|value| (value >> 8) & 0xff);
+            args.insert("prev_state".into(), json!(previous_state(c, e)));
+            args.insert("next_class".into(), json!(next_class(c, e)));
+            args.insert("reason".into(), json!(reason));
+            args.insert("point".into(), json!(point));
             args.insert(
                 "switch_reason".into(),
                 json!(match reason {
@@ -31,7 +37,7 @@ pub(super) fn describe(c: &Capture, e: &Event, args: &mut Map<String, Value>) {
                     // A pending migration can also be committed by yield_now.
                     // Preserve the placement reason without calling that
                     // explicitly voluntary scheduling point a preemption.
-                    Some(5) => match c.value(e, "point") {
+                    Some(5) => match point {
                         Some(1) => json!(false),
                         Some(2 | 3) => json!(true),
                         _ => Value::Null,
@@ -42,7 +48,7 @@ pub(super) fn describe(c: &Capture, e: &Event, args: &mut Map<String, Value>) {
             );
             args.insert(
                 "schedule_point".into(),
-                json!(match c.value(e, "point") {
+                json!(match point {
                     Some(1) => "explicit",
                     Some(2) => "safe-point",
                     Some(3) => "irq-tail",
@@ -59,13 +65,20 @@ pub(super) fn describe(c: &Capture, e: &Event, args: &mut Map<String, Value>) {
                     Some(3) => "stop",
                     Some(4) => "policy-change",
                     Some(5) => "migration",
-                    Some(6) => "load-balance",
                     _ => "unknown",
                 }),
             );
         }
         _ => {}
     }
+}
+
+pub(super) fn previous_state(c: &Capture, e: &Event) -> Option<u64> {
+    c.value(e, "state").map(|state| state & 0xff)
+}
+
+pub(super) fn next_class(c: &Capture, e: &Event) -> Option<u64> {
+    c.value(e, "state").map(|state| (state >> 8) & 0xff)
 }
 
 struct IrqFrame<'a> {
@@ -75,7 +88,6 @@ struct IrqFrame<'a> {
 
 #[derive(Default)]
 pub(super) struct Evidence<'a> {
-    pub switches: BTreeMap<(usize, u64), &'a Event>,
     pub request_irqs: BTreeMap<(usize, u64), &'a Event>,
 }
 
@@ -92,18 +104,6 @@ impl<'a> Evidence<'a> {
                 irq[e.cpu].clear();
             }
             let name = c.sites[e.site].name.as_str();
-            if name == "sched_switch"
-                && !c.losses[e.cpu].incomplete
-                && consecutive
-                && let Some(p) = last
-                && c.sites[p.site].name == "sched_switch_cause"
-                && c.value(p, "prev").is_some()
-                && c.value(p, "next").is_some()
-                && c.value(p, "prev") == c.value(e, "prev")
-                && c.value(p, "next") == c.value(e, "next")
-            {
-                result.switches.insert((e.cpu, e.sequence), p);
-            }
             if c.losses[e.cpu].incomplete {
                 continue;
             }
