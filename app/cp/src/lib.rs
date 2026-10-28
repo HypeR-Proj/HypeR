@@ -116,7 +116,14 @@ fn copy_regular(
         }
         Err(error) => return Err(error),
     };
-    io::copy(&mut source, &mut destination)?;
+    let length = source.metadata()?.len();
+    hyper_os::fs::transfer::copy_range(
+        0,
+        length,
+        |_, bytes| io::Read::read_exact(&mut source, bytes),
+        |_, bytes| io::Write::write_all(&mut destination, bytes),
+    )
+    .map_err(io::Error::from)?;
     destination.set_permissions(mode).or_else(|error| {
         if error.kind() == io::ErrorKind::Unsupported {
             Ok(())

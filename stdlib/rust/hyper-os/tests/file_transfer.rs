@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
+#![allow(clippy::panic)]
+
 use super::*;
+use copy_range as copy;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -95,4 +98,69 @@ fn empty_and_overflowing_ranges_do_not_start_io() {
         copy(u64::MAX, 1, read, write),
         Err(Error::InvalidRange)
     ));
+}
+
+#[test]
+fn reader_progress_overlaps_the_consumer() -> io::Result<()> {
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (read_tx, read_rx) = mpsc::channel();
+    copy(
+        0,
+        (BATCH_BYTES * 2) as u64,
+        move |offset, _| {
+            if offset != 0 {
+                entered_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .map_err(io::Error::other)?;
+                read_tx.send(()).map_err(io::Error::other)?;
+            }
+            Ok(())
+        },
+        |offset, _| -> io::Result<()> {
+            if offset == 0 {
+                entered_tx.send(()).map_err(io::Error::other)?;
+                read_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .map_err(io::Error::other)?;
+            }
+            Ok(())
+        },
+    )
+    .map_err(io::Error::from)
+}
+
+#[test]
+fn panicking_consumer_disconnects_before_scope_joins() -> io::Result<()> {
+    // Keep a regression from hanging the entire host test process.
+    let (tx, rx) = mpsc::channel();
+    let thread = std::thread::spawn(move || {
+        let outcome = std::panic::catch_unwind(|| {
+            copy(
+                0,
+                (BATCH_BYTES * 8) as u64,
+                |_, _| Ok(()),
+                |_, _| -> Result<(), ()> { panic!("injected consumer panic") },
+            )
+        });
+        let _ = tx.send(outcome.is_err());
+    });
+    let caught = rx
+        .recv_timeout(Duration::from_secs(5))
+        .map_err(io::Error::other)?;
+    thread
+        .join()
+        .map_err(|_| io::Error::other("test thread panicked"))?;
+    assert!(caught);
+    Ok(())
+}
+
+#[test]
+fn panicking_reader_is_joined_and_reported() {
+    let result = copy(
+        0,
+        (BATCH_BYTES * 3) as u64,
+        |_, _| -> io::Result<()> { panic!("injected reader panic") },
+        |_, _| -> Result<(), ()> { Ok(()) },
+    );
+    assert!(matches!(result, Err(Error::WorkerStopped)));
 }

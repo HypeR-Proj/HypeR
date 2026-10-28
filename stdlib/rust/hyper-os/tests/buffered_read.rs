@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
+#![allow(clippy::panic)]
+
 use super::*;
+use alloc::vec;
 use std::cell::Cell;
 
 struct Source {
@@ -52,7 +55,7 @@ impl ReadAt for Source {
 }
 
 fn check_read(
-    source: &CachedSource<Source>,
+    source: &BufferedReader<Source>,
     offset: u64,
     length: usize,
 ) -> Result<(), Error<&'static str>> {
@@ -66,7 +69,7 @@ fn check_read(
 
 #[test]
 fn sparse_metadata_reads_reuse_pages_and_query_length_once() -> Result<(), Error<&'static str>> {
-    let source = CachedSource::new(Source::new(48 * 1024 * 1024))?;
+    let source = BufferedReader::new(Source::new(48 * 1024 * 1024))?;
     for _ in 0..100 {
         for offset in [13, 8 * 1024 * 1024 + 3, 40 * 1024 * 1024 + 7] {
             check_read(&source, offset, 4)?;
@@ -90,7 +93,7 @@ fn sparse_metadata_reads_reuse_pages_and_query_length_once() -> Result<(), Error
 #[test]
 fn crosses_pages_and_clips_read_ahead_at_eof() -> Result<(), Error<&'static str>> {
     let length = PAGE_BYTES as u64 + 17;
-    let source = CachedSource::new(Source::new(length))?;
+    let source = BufferedReader::new(Source::new(length))?;
     check_read(&source, PAGE_BYTES as u64 - 3, 20)?;
     assert_eq!(
         source.source.reads.borrow().as_slice(),
@@ -116,7 +119,7 @@ fn crosses_pages_and_clips_read_ahead_at_eof() -> Result<(), Error<&'static str>
 
 #[test]
 fn eviction_and_multi_page_reads_preserve_contents() -> Result<(), Error<&'static str>> {
-    let source = CachedSource::new(Source::new(8 * PAGE_BYTES as u64))?;
+    let source = BufferedReader::new(Source::new(8 * PAGE_BYTES as u64))?;
     for page in [0, 1, 2, 3, 4, 0, 5, 2, 7, 1] {
         check_read(&source, page * PAGE_BYTES as u64 + 11, 97)?;
     }
@@ -129,7 +132,7 @@ fn eviction_and_multi_page_reads_preserve_contents() -> Result<(), Error<&'stati
 #[test]
 fn failed_refill_cannot_publish_partial_data_or_corrupt_a_cached_page()
 -> Result<(), Error<&'static str>> {
-    let source = CachedSource::new(Source::new(8 * PAGE_BYTES as u64))?;
+    let source = BufferedReader::new(Source::new(8 * PAGE_BYTES as u64))?;
     for page in 0..CACHE_PAGES as u64 {
         check_read(&source, page * PAGE_BYTES as u64, 16)?;
     }

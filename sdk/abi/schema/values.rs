@@ -379,6 +379,7 @@ constant_groups! {
         directory_entry_name_max_bytes = (DIRECTORY_ENTRY_NAME_CAPACITY - 1) as u64,
         directory_max_path_bytes = 4096,
         file_max_read_bytes = 2 * 1024 * 1024,
+        file_max_prefetch_bytes = 512 * 1024,
         filesystem_switch_root_max_moves = 16,
     }
 

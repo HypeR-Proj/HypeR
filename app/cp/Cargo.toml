@@ -19,6 +19,7 @@ bench = false
 
 [dependencies]
 clap.workspace = true
+hyper-os = { workspace = true, features = ["std"] }
 
 [lints]
 workspace = true

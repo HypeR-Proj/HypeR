@@ -576,10 +576,19 @@ through backend CPU/DMA use and retirement.
 
 Business guests may enable one through four request queues; unused optional
 queues have canonical zero entries in activation records. Protocol versions 1
-and 2 are rejected; both repositories must use a matching version 3 generation. Image
-loading pipelines two 512 KiB userspace buffers between a scoped reader and the
-guest-memory writer. Read-ahead stays inside the selected payload and the reader
-is joined on success or failure. There is no idle polling or unbounded data cache.
+and 2 are rejected; both repositories must use a matching version 3 generation.
+Image loading uses the public SDK `hyper_os::fs::transfer::copy_range` mechanism,
+which pipelines two 512 KiB userspace buffers between a scoped reader and an
+arbitrary consumer. The VM consumer writes into guest memory; `cp` uses the same
+mechanism for ordinary files. Read-ahead stays inside the selected range and the
+reader is joined on success, failure or consumer unwind. The VM libraries and
+bootstrap contain no private transfer implementation.
+
+Sparse image validation uses the SDK's `fs::BufferedReader` over the common
+`fs::ReadAt` contract. Its four-page local buffer reduces small-read syscall
+cost; the kernel still owns the coherent, reclaimable file page cache. A new
+buffered view is created for each validation and dropped before payload copying.
+It is not a snapshot and does not make concurrent file mutation safe.
 
 The optional `hyper-vm-runtime/startup-profile` Cargo feature reports image
 validation, payload read/write, memory preparation, and installation timings.

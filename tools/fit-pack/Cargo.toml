@@ -21,3 +21,4 @@ unsafe_op_in_unsafe_fn = "deny"
 
 [patch.crates-io]
 hyper-abi = { path = "../../sdk/abi" }
+hyper-os = { path = "../../stdlib/rust/hyper-os" }

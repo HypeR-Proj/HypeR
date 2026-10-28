@@ -84,7 +84,7 @@ command because child output would corrupt that stream.
 | `--output`, `-o` | `/tmp/trace.pftrace` | File or `-` for stdout |
 | `--format` | `perfetto` | Native `perfetto` protobuf, diagnostic `chrome` JSON, or raw `jsonl` |
 | `--raw-events` | off | Include raw instant tracepoints in the Perfetto view; does not change kernel capture or JSONL |
-| `--no-names` | off | Skip best-effort Thread names and process grouping |
+| `--no-names` | off | Skip live name/owner lookups; retain identities recorded in events |
 | `--fail-on-loss` | off | Return failure if overwrite, incomplete stream or collector limit occurred; retain output |
 | `--overwrite` | off | Explicitly allow replacing an existing file |
 
@@ -95,8 +95,12 @@ not a per-process private resource. Start/stop/clear require CpuInspector
 SET_ATTRIBUTES; reads require INSPECT_DETAILS. Copying `perf` outside the trusted
 `/bin/perf` launch path does not grant authority. The authorized shell also
 delegates read-only TaskInspector INSPECT for live process/thread grouping;
-standalone callers may omit it. Missing live metadata leaves an ungrouped Thread
-with its captured identity, without inventing a parent process.
+standalone callers may omit it. Recorded `syscall_enter` events preserve process
+ownership even if the Thread has already been reaped before a snapshot or dump.
+When the process name is unavailable, it is shown as `process[KOID]`. Without
+either live ownership metadata or a recorded process identity, the Thread remains
+in the `threads` fallback group; its parent is not guessed. Include `syscall`
+when capturing short-lived Native workloads whose live metadata may disappear.
 
 ## Events and interpretation
 

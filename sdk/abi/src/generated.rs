@@ -1210,6 +1210,11 @@ pub const HYPER_NATIVE_DIRECTORY_MAX_PATH_BYTES: u64 = 4096;
 /// Path, directory-page, transfer and root-switch bounds.
 /// Numeric parameter or sentinel, not an enum discriminant.
 pub const HYPER_NATIVE_FILE_MAX_READ_BYTES: u64 = 2097152;
+/// `file_max_prefetch_bytes` in the `filesystem_limits` constants domain.
+///
+/// Path, directory-page, transfer and root-switch bounds.
+/// Numeric parameter or sentinel, not an enum discriminant.
+pub const HYPER_NATIVE_FILE_MAX_PREFETCH_BYTES: u64 = 524288;
 /// `filesystem_switch_root_max_moves` in the `filesystem_limits` constants domain.
 ///
 /// Path, directory-page, transfer and root-switch bounds.
@@ -4878,6 +4883,25 @@ pub const HYPER_NATIVE_OP_FILESYSTEM_MOUNT_RAMFS: u64 = 276;
 /// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
 pub const HYPER_NATIVE_OP_FILESYSTEM_SWITCH_ROOT: u64 = 277;
 
+/// Object-local method `file_prefetch`.
+///
+/// | Property | Contract |
+/// | --- | --- |
+/// | Receiver | `file: Borrow, kind=file, rights=0x10` |
+/// | Operation | 266 |
+/// | Feature | `Core` |
+/// | Arguments | `offset: u64`, `length: byte_count` |
+/// | Results | `completed: byte_count` |
+/// | Capability effects | `file: Borrow, kind=file, rights=0x10` |
+/// | User memory | — |
+/// | Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+/// | Audit | `Capability` |
+///
+/// Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+///
+/// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+pub const HYPER_NATIVE_OP_FILE_PREFETCH: u64 = 266;
+
 /// Object-local method `file_protect`.
 ///
 /// | Property | Contract |
@@ -6054,6 +6078,8 @@ pub enum NativeOperation {
     FilesystemMountRamfs,
     /// Decoded method; see [`HYPER_NATIVE_OP_FILESYSTEM_SWITCH_ROOT`] for its contract.
     FilesystemSwitchRoot,
+    /// Decoded method; see [`HYPER_NATIVE_OP_FILE_PREFETCH`] for its contract.
+    FilePrefetch,
     /// Decoded method; see [`HYPER_NATIVE_OP_FILE_PROTECT`] for its contract.
     FileProtect,
     /// Decoded method; see [`HYPER_NATIVE_OP_VMAR_MAP_FILE`] for its contract.
@@ -6358,6 +6384,7 @@ impl NativeOperation {
             (HYPER_NATIVE_OBJECT_DIRECTORY, HYPER_NATIVE_OP_FILESYSTEM_UNMOUNT) => Some(Self::FilesystemUnmount),
             (HYPER_NATIVE_OBJECT_DIRECTORY, HYPER_NATIVE_OP_FILESYSTEM_MOUNT_RAMFS) => Some(Self::FilesystemMountRamfs),
             (HYPER_NATIVE_OBJECT_DIRECTORY, HYPER_NATIVE_OP_FILESYSTEM_SWITCH_ROOT) => Some(Self::FilesystemSwitchRoot),
+            (HYPER_NATIVE_OBJECT_FILE, HYPER_NATIVE_OP_FILE_PREFETCH) => Some(Self::FilePrefetch),
             (HYPER_NATIVE_OBJECT_FILE, HYPER_NATIVE_OP_FILE_PROTECT) => Some(Self::FileProtect),
             (HYPER_NATIVE_OBJECT_VMAR, HYPER_NATIVE_OP_VMAR_MAP_FILE) => Some(Self::VmarMapFile),
             (HYPER_NATIVE_OBJECT_DIRECTORY, HYPER_NATIVE_OP_DIRECTORY_BEGIN_READ) => Some(Self::DirectoryBeginRead),
@@ -6569,6 +6596,7 @@ impl NativeOperation {
             Self::FilesystemUnmount => HYPER_NATIVE_OP_FILESYSTEM_UNMOUNT,
             Self::FilesystemMountRamfs => HYPER_NATIVE_OP_FILESYSTEM_MOUNT_RAMFS,
             Self::FilesystemSwitchRoot => HYPER_NATIVE_OP_FILESYSTEM_SWITCH_ROOT,
+            Self::FilePrefetch => HYPER_NATIVE_OP_FILE_PREFETCH,
             Self::FileProtect => HYPER_NATIVE_OP_FILE_PROTECT,
             Self::VmarMapFile => HYPER_NATIVE_OP_VMAR_MAP_FILE,
             Self::DirectoryBeginRead => HYPER_NATIVE_OP_DIRECTORY_BEGIN_READ,
@@ -6779,6 +6807,7 @@ impl NativeOperation {
             Self::FilesystemUnmount => Some(HYPER_NATIVE_OBJECT_DIRECTORY),
             Self::FilesystemMountRamfs => Some(HYPER_NATIVE_OBJECT_DIRECTORY),
             Self::FilesystemSwitchRoot => Some(HYPER_NATIVE_OBJECT_DIRECTORY),
+            Self::FilePrefetch => Some(HYPER_NATIVE_OBJECT_FILE),
             Self::FileProtect => Some(HYPER_NATIVE_OBJECT_FILE),
             Self::VmarMapFile => Some(HYPER_NATIVE_OBJECT_VMAR),
             Self::DirectoryBeginRead => Some(HYPER_NATIVE_OBJECT_DIRECTORY),
@@ -6989,6 +7018,7 @@ impl NativeOperation {
             Self::FilesystemUnmount => 2,
             Self::FilesystemMountRamfs => 2,
             Self::FilesystemSwitchRoot => 1,
+            Self::FilePrefetch => 2,
             Self::FileProtect => 0,
             Self::VmarMapFile => 4,
             Self::DirectoryBeginRead => 0,
@@ -7199,6 +7229,7 @@ impl NativeOperation {
             Self::FilesystemUnmount => 160,
             Self::FilesystemMountRamfs => 17179869344,
             Self::FilesystemSwitchRoot => 17179869344,
+            Self::FilePrefetch => 16,
             Self::FileProtect => 34359738368,
             Self::VmarMapFile => 64,
             Self::DirectoryBeginRead => 16,
