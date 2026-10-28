@@ -13,7 +13,7 @@ pub(super) fn capture() -> Capture {
             categories: 127,
             cpu_count: 2,
             capacity: 64,
-            maximum_capacity: 4096,
+            maximum_capacity: 16384,
             running: 0,
             cpu_mask: core::array::from_fn(|i| if i == 0 { 3 } else { 0 }),
             revision: [0; 64],
@@ -978,6 +978,16 @@ fn record_cli_covers_limits_output_and_workload() -> Result<(), Box<dyn std::err
     ] {
         assert!(Args::try_parse_from(["trace", "record", flag, "0"]).is_err());
     }
+    for arguments in [
+        vec!["trace", "start"],
+        vec!["trace", "start", "--buffer-records", "16384"],
+    ] {
+        match Args::try_parse_from(arguments)?.command {
+            options::Command::Start(capture) => assert_eq!(capture.config().capacity, 16384),
+            _ => return Err("wrong command".into()),
+        }
+    }
+    assert!(Args::try_parse_from(["trace", "start", "--buffer-records", "16385"]).is_err());
     Ok(())
 }
 

@@ -1062,6 +1062,35 @@ pub const INVOCATIONS: &[Invocation] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
+    Invocation {
+        operation: 263,
+        name: "cpu_inspector_trace_clear",
+        feature: FeatureGate::Core,
+        receiver: Argument {
+            name: "inspector",
+            kind: ValueKind::Handle,
+            handle: Some(HandleArgument {
+                object: ObjectConstraint::Kind("cpu_inspector"),
+                required_rights: RIGHT_SET_ATTRIBUTES,
+                disposition: HandleDisposition::Borrow,
+            }),
+            memory: None,
+        },
+        arguments: &[Argument {
+            name: "generation",
+            kind: ValueKind::U64,
+            handle: None,
+            memory: None,
+        }],
+        results: &[],
+        blocking: BlockingClass::Never,
+        cancellation: CancellationClass::None,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Object,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
     // Reads are tied to an expected capture generation, preventing a stale cursor
     // from being interpreted against a newly started profiling session.
     Invocation {

@@ -66,6 +66,7 @@ pub(super) fn dispatch_operation(
         operation,
         abi::NativeOperation::CpuInspectorTraceStart
             | abi::NativeOperation::CpuInspectorTraceStop
+            | abi::NativeOperation::CpuInspectorTraceClear
             | abi::NativeOperation::CpuInspectorTraceRead
             | abi::NativeOperation::ByteChannelTraceRpc
     );
@@ -649,6 +650,9 @@ pub(super) fn dispatch_operation(
         }
         abi::NativeOperation::CpuInspectorTraceStop => {
             handlers::sys_cpu_inspector_trace_stop(services, receiver, arguments)
+        }
+        abi::NativeOperation::CpuInspectorTraceClear => {
+            handlers::sys_cpu_inspector_trace_clear(services, receiver, arguments)
         }
         abi::NativeOperation::CpuInspectorTraceRead => {
             handlers::sys_cpu_inspector_trace_read(services, receiver, arguments)

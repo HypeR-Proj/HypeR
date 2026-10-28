@@ -2997,6 +2997,25 @@ pub const HYPER_NATIVE_OP_CPU_INSPECTOR_TRACE_START: u64 = 260;
 /// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
 pub const HYPER_NATIVE_OP_CPU_INSPECTOR_TRACE_STOP: u64 = 261;
 
+/// Object-local method `cpu_inspector_trace_clear`.
+///
+/// | Property | Contract |
+/// | --- | --- |
+/// | Receiver | `inspector: Borrow, kind=cpu_inspector, rights=0x80000000` |
+/// | Operation | 263 |
+/// | Feature | `Core` |
+/// | Arguments | `generation: u64` |
+/// | Results | — |
+/// | Capability effects | `inspector: Borrow, kind=cpu_inspector, rights=0x80000000` |
+/// | User memory | — |
+/// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+/// | Audit | `Object` |
+///
+/// Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+///
+/// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+pub const HYPER_NATIVE_OP_CPU_INSPECTOR_TRACE_CLEAR: u64 = 263;
+
 /// Object-local method `cpu_inspector_trace_read`.
 ///
 /// | Property | Contract |
@@ -5837,6 +5856,8 @@ pub enum NativeOperation {
     CpuInspectorTraceStart,
     /// Decoded method; see [`HYPER_NATIVE_OP_CPU_INSPECTOR_TRACE_STOP`] for its contract.
     CpuInspectorTraceStop,
+    /// Decoded method; see [`HYPER_NATIVE_OP_CPU_INSPECTOR_TRACE_CLEAR`] for its contract.
+    CpuInspectorTraceClear,
     /// Decoded method; see [`HYPER_NATIVE_OP_CPU_INSPECTOR_TRACE_READ`] for its contract.
     CpuInspectorTraceRead,
     /// Decoded method; see [`HYPER_NATIVE_OP_CPU_INSPECTOR_READ`] for its contract.
@@ -6238,6 +6259,7 @@ impl NativeOperation {
             (HYPER_NATIVE_OBJECT_CPU_INSPECTOR, HYPER_NATIVE_OP_CPU_INSPECTOR_PROFILE_READ) => Some(Self::CpuInspectorProfileRead),
             (HYPER_NATIVE_OBJECT_CPU_INSPECTOR, HYPER_NATIVE_OP_CPU_INSPECTOR_TRACE_START) => Some(Self::CpuInspectorTraceStart),
             (HYPER_NATIVE_OBJECT_CPU_INSPECTOR, HYPER_NATIVE_OP_CPU_INSPECTOR_TRACE_STOP) => Some(Self::CpuInspectorTraceStop),
+            (HYPER_NATIVE_OBJECT_CPU_INSPECTOR, HYPER_NATIVE_OP_CPU_INSPECTOR_TRACE_CLEAR) => Some(Self::CpuInspectorTraceClear),
             (HYPER_NATIVE_OBJECT_CPU_INSPECTOR, HYPER_NATIVE_OP_CPU_INSPECTOR_TRACE_READ) => Some(Self::CpuInspectorTraceRead),
             (HYPER_NATIVE_OBJECT_CPU_INSPECTOR, HYPER_NATIVE_OP_CPU_INSPECTOR_READ) => Some(Self::CpuInspectorRead),
             (HYPER_NATIVE_OBJECT_FILE, HYPER_NATIVE_OP_FILE_GET_INFO) => Some(Self::FileGetInfo),
@@ -6448,6 +6470,7 @@ impl NativeOperation {
             Self::CpuInspectorProfileRead => HYPER_NATIVE_OP_CPU_INSPECTOR_PROFILE_READ,
             Self::CpuInspectorTraceStart => HYPER_NATIVE_OP_CPU_INSPECTOR_TRACE_START,
             Self::CpuInspectorTraceStop => HYPER_NATIVE_OP_CPU_INSPECTOR_TRACE_STOP,
+            Self::CpuInspectorTraceClear => HYPER_NATIVE_OP_CPU_INSPECTOR_TRACE_CLEAR,
             Self::CpuInspectorTraceRead => HYPER_NATIVE_OP_CPU_INSPECTOR_TRACE_READ,
             Self::CpuInspectorRead => HYPER_NATIVE_OP_CPU_INSPECTOR_READ,
             Self::FileGetInfo => HYPER_NATIVE_OP_FILE_GET_INFO,
@@ -6657,6 +6680,7 @@ impl NativeOperation {
             Self::CpuInspectorProfileRead => Some(HYPER_NATIVE_OBJECT_CPU_INSPECTOR),
             Self::CpuInspectorTraceStart => Some(HYPER_NATIVE_OBJECT_CPU_INSPECTOR),
             Self::CpuInspectorTraceStop => Some(HYPER_NATIVE_OBJECT_CPU_INSPECTOR),
+            Self::CpuInspectorTraceClear => Some(HYPER_NATIVE_OBJECT_CPU_INSPECTOR),
             Self::CpuInspectorTraceRead => Some(HYPER_NATIVE_OBJECT_CPU_INSPECTOR),
             Self::CpuInspectorRead => Some(HYPER_NATIVE_OBJECT_CPU_INSPECTOR),
             Self::FileGetInfo => Some(HYPER_NATIVE_OBJECT_FILE),
@@ -6866,6 +6890,7 @@ impl NativeOperation {
             Self::CpuInspectorProfileRead => 5,
             Self::CpuInspectorTraceStart => 1,
             Self::CpuInspectorTraceStop => 1,
+            Self::CpuInspectorTraceClear => 1,
             Self::CpuInspectorTraceRead => 5,
             Self::CpuInspectorRead => 2,
             Self::FileGetInfo => 2,
@@ -7075,6 +7100,7 @@ impl NativeOperation {
             Self::CpuInspectorProfileRead => 8589934592,
             Self::CpuInspectorTraceStart => 2147483648,
             Self::CpuInspectorTraceStop => 2147483648,
+            Self::CpuInspectorTraceClear => 2147483648,
             Self::CpuInspectorTraceRead => 8589934592,
             Self::CpuInspectorRead => 8,
             Self::FileGetInfo => 8,

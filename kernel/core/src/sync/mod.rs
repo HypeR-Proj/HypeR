@@ -13,5 +13,7 @@ mod publication;
 pub use atomic_borrow::{AtomicBorrowClaim, AtomicBorrowError, AtomicBorrowPtr};
 pub use deferred_work::{DeferredWork, WorkDisposition};
 pub use generation::GenerationTaggedState;
-pub use lock::{InterruptMaskGuard, InterruptShardedLock, InterruptSpinLock, SpinLock};
+pub use lock::{
+    InterruptMaskGuard, InterruptShardedLock, InterruptSpinLock, SpinLock, SpinLockGuard,
+};
 pub use publication::{PublishError, PublishedOnce};

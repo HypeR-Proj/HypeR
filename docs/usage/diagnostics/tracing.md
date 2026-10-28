@@ -31,11 +31,11 @@ On HypeR, from the authorized formal shell:
 
 ```sh
 perf trace record --duration-ms 5000 --categories scheduler,syscall,ipc,io \
-  --cpus all --buffer-records 4096 --poll-ms 10 \
-  --max-events 262144 --output /tmp/trace.pftrace
+  --cpus all --buffer-records 16384 --poll-ms 10 \
+  --max-events 262144 --output /tmp/trace.pftrace && perf trace clear
 
 perf trace record --duration-ms 10000 --categories scheduler,io \
-  --output /tmp/storage.pftrace -- /bin/storage-qual read /data/storage-qual.bin 101
+  --output /tmp/storage.pftrace -- /bin/storage-qual read /data/storage-qual.bin 101 && perf trace clear
 ```
 
 The workload must be deployed separately. Recording stops when the command exits,
@@ -52,13 +52,15 @@ For a retained-tail capture without a resident collector:
 perf trace start --duration-ms 10000 --categories scheduler,vm --cpus 0-3
 vmm list
 perf trace status
-perf trace dump --output /data/trace.pftrace
+perf trace dump --output /data/trace.pftrace && perf trace clear
 ```
 
 `dump` stops recording before reading. `stop` is also available separately.
 Both accept `--generation N` to reject an unexpected replacement capture.
+`clear` also accepts this guard and releases a stopped capture's buffers; it
+rejects a running capture. Omit `clear` when another dump is needed.
 Starting again discards the previous capture. Reading is non-destructive, so
-another dump is possible until the next start. The kernel stops at the deadline
+another dump is possible until the next start or clear. The kernel stops at the deadline
 even if the collecting process exits unexpectedly.
 
 `/tmp` is volatile. For bulk export, copy the completed file to a writable
@@ -74,7 +76,7 @@ command because child output would corrupt that stream.
 | `--duration-ms` | 10000 | Kernel-enforced duration, 1–300000 ms |
 | `--categories` | `scheduler,vm,ipc,io` | Comma-separated categories below, or `all` |
 | `--cpus` | `all` | Online indices/ranges, e.g. `0,2-3`; offline CPUs fail |
-| `--buffer-records` | 4096 | Retained records per CPU, 64–4096 |
+| `--buffer-records` | 16384 | Records allocated per selected CPU at start, 64–16384 |
 | `--poll-ms` | 10 | `record` polling interval, 1–1000 ms; snapshot mode polls child/deadline state only |
 | `--snapshot` | off | `record` reads only after stopping; suitable for short workloads that fit the per-CPU rings |
 | `--max-events` | 262144 | Userspace event bound, 1–4000000 |
@@ -88,7 +90,7 @@ command because child output would corrupt that stream.
 Options belong to `start`, `record` or `dump` as appropriate; use
 `perf trace COMMAND --help` for the exact syntax. `status` shows the generation,
 selected CPUs, kernel identity, deadline and buffer bounds. Captures are global,
-not a per-process private resource. Start/stop require CpuInspector
+not a per-process private resource. Start/stop/clear require CpuInspector
 SET_ATTRIBUTES; reads require INSPECT_DETAILS. Copying `perf` outside the trusted
 `/bin/perf` launch path does not grant authority. The authorized shell also
 delegates read-only TaskInspector INSPECT for live process/thread grouping;
@@ -309,6 +311,12 @@ Its complete causal captures use one `record --snapshot` invocation: no live rin
 reader contends with producers, and no start/dump command roundtrip fills the rings
 with terminal traffic. Buffer capacity and loss checks still apply; snapshot mode
 retains only what fits in the compiled per-CPU rings.
+The FAT scenario warms executable and source pages before capturing only `ipc,io`
+events for the mutation, leaving room even in the one-CPU ring. Scheduler coverage
+is checked in the separate bounded IPC workload.
+After successful export, both harnesses issue `perf trace clear`; failed exports
+retain the capture for diagnosis. The repeated-dump probe clears only after both
+files have been produced.
 `make test-trace-remote ARCH=aarch64` runs only the remote filesystem scenario.
 
 Trace bodies are never printed through the console. Capture/export writes `/tmp`
@@ -328,10 +336,13 @@ guest command retains its serial command report and the disposable disk under
 
 ## Bounds and loss
 
-Compiled-in storage is 4096 × 56 bytes per configured CPU (224 KiB plus ring
-headers), even with tracing disabled at runtime. Reducing `--buffer-records`
-changes the overwrite window, not this reservation. Without `kernel-trace`,
-record storage and instrumentation compile out. Runtime-disabled points only
+Payload storage is allocated at `start`, only for selected CPUs and the requested
+record count. The default is 16384 × 56 bytes (896 KiB) per selected CPU, or 3.5 MiB
+for four CPUs, plus small control headers. No payload buffers exist before the
+first capture or after `clear`. `stop` retains them for repeatable export.
+Replacement prepares new buffers before releasing the old capture, so allocation
+failure preserves the old data and temporary usage includes both captures.
+Without `kernel-trace`, storage and instrumentation compile out. Runtime-disabled points only
 check an atomic category flag; enabled points mask local IRQs briefly and use
 try-only ring access, without allocation or cross-CPU producer locking.
 Feature-enabled kernels also publish one CPU-local actor scalar per context switch

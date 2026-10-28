@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::{Category, Filter, Record, Site};
+use alloc::vec::Vec;
 use hyper_core::sync::{
-    SpinLock,
-    atomic::{AtomicU64, AtomicUsize, Ordering},
+    SpinLock, SpinLockGuard,
+    atomic::{AtomicU64, Ordering},
 };
 
 const FILTER_BITS: u32 = 8;
@@ -24,6 +25,7 @@ pub enum Error {
     InvalidFilter,
     NotRecording,
     Exhausted,
+    Allocation,
 }
 
 /// A generation-qualified control/read token, never reused by this recorder.
@@ -58,31 +60,27 @@ pub struct Batch {
     pub incomplete: bool,
 }
 
-struct Ring<const N: usize> {
-    generation: u64,
+struct Ring {
     next: u64,
-    records: [Option<Record>; N],
-    capacity: usize,
+    records: Vec<Option<Record>>,
 }
-impl<const N: usize> Ring<N> {
+impl Ring {
     const fn new() -> Self {
         Self {
-            generation: 0,
             next: 0,
-            records: [None; N],
-            capacity: N,
+            records: Vec::new(),
         }
     }
 }
 
 #[repr(align(64))]
-struct Cpu<const N: usize> {
-    ring: SpinLock<Ring<N>>,
+struct Cpu {
+    ring: SpinLock<Ring>,
     // generation << 2 | frozen | loss. Stop freezes metadata as well as records;
     // delayed rejected producers must not change an exported or replaced run.
     loss: AtomicU64,
 }
-impl<const N: usize> Cpu<N> {
+impl Cpu {
     const fn new() -> Self {
         Self {
             ring: SpinLock::new(Ring::new()),
@@ -102,9 +100,10 @@ impl<const N: usize> Cpu<N> {
 struct Control {
     generation: u64,
     stopped: bool,
+    present: bool,
 }
 
-/// Fixed storage for CPU-local rings. Every lock acquisition is a single try;
+/// Dynamically prepared CPU-local rings. Every lock acquisition is a single try;
 /// producers never spin, allocate or acquire the control lock. Readers and
 /// producers share a ring lock, including recursive interrupt-context calls.
 ///
@@ -113,9 +112,8 @@ struct Control {
 /// pins producers to the CPU whose ring they select.
 pub struct Recorder<const CPUS: usize, const CAPACITY: usize> {
     requested: AtomicU64,
-    capacity: AtomicUsize,
     control: SpinLock<Control>,
-    cpus: [Cpu<CAPACITY>; CPUS],
+    cpus: [Cpu; CPUS],
 }
 
 impl<const CPUS: usize, const CAPACITY: usize> Default for Recorder<CPUS, CAPACITY> {
@@ -129,50 +127,77 @@ impl<const CPUS: usize, const CAPACITY: usize> Recorder<CPUS, CAPACITY> {
         assert!(CPUS > 0 && CAPACITY > 0);
         Self {
             requested: AtomicU64::new(0),
-            capacity: AtomicUsize::new(CAPACITY),
             control: SpinLock::new(Control {
                 generation: 0,
                 stopped: true,
+                present: false,
             }),
             cpus: [const { Cpu::new() }; CPUS],
         }
     }
 
-    /// Start explicitly discards the previous capture. Rings reset lazily on
-    /// their first new event, avoiding a large clear in the control path.
+    /// Allocates outside recorder locks. Publishing or clearing swaps ownership
+    /// only; drop the preparation after releasing any enclosing control locks.
+    pub fn prepare(
+        &self,
+        capacity: usize,
+        selected: impl Fn(usize) -> bool,
+    ) -> Result<PreparedCapture<'_, CPUS, CAPACITY>, Error> {
+        if capacity == 0 || capacity > CAPACITY {
+            return Err(Error::InvalidFilter);
+        }
+        self.prepare_storage(capacity, selected)
+    }
+
+    /// Reserves only the small ownership/lock metadata needed to detach a capture.
+    pub fn prepare_clear(&self) -> Result<PreparedCapture<'_, CPUS, CAPACITY>, Error> {
+        self.prepare_storage(0, |_| false)
+    }
+
+    fn prepare_storage(
+        &self,
+        capacity: usize,
+        selected: impl Fn(usize) -> bool,
+    ) -> Result<PreparedCapture<'_, CPUS, CAPACITY>, Error> {
+        let mut rings = Vec::new();
+        rings
+            .try_reserve_exact(CPUS)
+            .map_err(|_| Error::Allocation)?;
+        let mut guards = Vec::new();
+        guards
+            .try_reserve_exact(CPUS)
+            .map_err(|_| Error::Allocation)?;
+        for cpu in 0..CPUS {
+            let mut ring = Ring::new();
+            if selected(cpu) {
+                ring.records
+                    .try_reserve_exact(capacity)
+                    .map_err(|_| Error::Allocation)?;
+                ring.records.resize(capacity, None);
+            }
+            rings.push(ring);
+        }
+        Ok(PreparedCapture {
+            recorder: self,
+            rings,
+            guards,
+            capacity,
+            consumed: false,
+        })
+    }
+
+    /// Convenience for ordinary thread context without an enclosing control lock.
     pub fn start(&self, filter: Filter) -> Result<Session, Error> {
         self.start_with_capacity(filter, CAPACITY)
     }
 
-    /// Selects a bounded overwrite window without allocating in producer context.
     pub fn start_with_capacity(&self, filter: Filter, capacity: usize) -> Result<Session, Error> {
-        if filter.0 == 0 || capacity == 0 || capacity > CAPACITY {
-            return Err(Error::InvalidFilter);
-        }
-        self.control
-            .try_with(|control| {
-                if !control.stopped {
-                    return Err(Error::Busy);
-                }
-                let generation = control
-                    .generation
-                    .checked_add(1)
-                    .filter(|value| *value <= MAX_GENERATION)
-                    .ok_or(Error::Exhausted)?;
-                for cpu in &self.cpus {
-                    cpu.loss.store(generation << 2, Ordering::Relaxed);
-                }
-                self.capacity.store(capacity, Ordering::Relaxed);
-                control.generation = generation;
-                control.stopped = false;
-                // Publishes the initialized loss stamps and the new filter together.
-                self.requested.store(
-                    (generation << FILTER_BITS) | u64::from(filter.0),
-                    Ordering::Release,
-                );
-                Ok(Session(generation))
-            })
-            .ok_or(Error::Busy)?
+        self.prepare(capacity, |_| true)?.start(filter)
+    }
+
+    /// Release a stopped capture; its generation remains permanently retired.
+    pub fn clear(&self, session: Session) -> Result<(), Error> {
+        self.prepare_clear()?.clear(session)
     }
 
     /// After acquiring control, disable admission and join writers without
@@ -180,7 +205,7 @@ impl<const CPUS: usize, const CAPACITY: usize> Recorder<CPUS, CAPACITY> {
     pub fn stop(&self, session: Session) -> Result<(), Error> {
         self.control
             .try_with(|control| {
-                if control.generation != session.0 {
+                if !control.present || control.generation != session.0 {
                     return Err(Error::InvalidSession);
                 }
                 self.requested.store(0, Ordering::Release);
@@ -205,7 +230,7 @@ impl<const CPUS: usize, const CAPACITY: usize> Recorder<CPUS, CAPACITY> {
     pub fn set_filter(&self, session: Session, filter: Filter) -> Result<(), Error> {
         self.control
             .try_with(|control| {
-                if control.generation != session.0 {
+                if !control.present || control.generation != session.0 {
                     return Err(Error::InvalidSession);
                 }
                 if control.stopped {
@@ -249,18 +274,13 @@ impl<const CPUS: usize, const CAPACITY: usize> Recorder<CPUS, CAPACITY> {
         if cpu
             .ring
             .try_with(|ring| {
-                if self.requested.load(Ordering::Acquire) != ticket.0 {
+                if self.requested.load(Ordering::Acquire) != ticket.0 || ring.records.is_empty() {
                     return;
                 }
                 let Some(timestamp_ns) = clock() else {
                     cpu.lost(generation);
                     return;
                 };
-                if ring.generation != generation {
-                    ring.generation = generation;
-                    ring.next = 0;
-                    ring.capacity = self.capacity.load(Ordering::Relaxed);
-                }
                 let Some(next) = ring.next.checked_add(1) else {
                     cpu.lost(generation);
                     return;
@@ -271,7 +291,8 @@ impl<const CPUS: usize, const CAPACITY: usize> Recorder<CPUS, CAPACITY> {
                     site,
                     values: fields(),
                 };
-                ring.records[ring.next as usize % ring.capacity] = Some(record);
+                let index = ring.next as usize % ring.records.len();
+                ring.records[index] = Some(record);
                 ring.next = next;
             })
             .is_none()
@@ -292,24 +313,20 @@ impl<const CPUS: usize, const CAPACITY: usize> Recorder<CPUS, CAPACITY> {
         let cpu = self.cpus.get(cpu).ok_or(Error::InvalidCpu)?;
         self.control
             .try_with(|control| {
-                if control.generation != session.0 {
+                if !control.present || control.generation != session.0 {
                     return Err(Error::InvalidSession);
                 }
                 cpu.ring
                     .try_with(|ring| {
-                        let end = if ring.generation == session.0 {
-                            ring.next
-                        } else {
-                            0
-                        };
-                        let oldest = end.saturating_sub(ring.capacity as u64);
+                        let end = ring.next;
+                        let oldest = end.saturating_sub(ring.records.len() as u64);
                         let first = cursor.max(oldest);
                         let count = end
                             .saturating_sub(first)
                             .min(out.len().min(READ_BATCH) as u64)
                             as usize;
                         for (index, dst) in out.iter_mut().take(count).enumerate() {
-                            *dst = ring.records[(first as usize + index) % ring.capacity];
+                            *dst = ring.records[(first as usize + index) % ring.records.len()];
                         }
                         Batch {
                             count,
@@ -319,6 +336,102 @@ impl<const CPUS: usize, const CAPACITY: usize> Recorder<CPUS, CAPACITY> {
                         }
                     })
                     .ok_or(Error::Busy)
+            })
+            .ok_or(Error::Busy)?
+    }
+}
+
+/// Prepared payload storage plus preallocated lock bookkeeping. No allocation or
+/// destruction occurs while publishing; the replaced storage retires on Drop.
+pub struct PreparedCapture<'a, const CPUS: usize, const CAPACITY: usize> {
+    recorder: &'a Recorder<CPUS, CAPACITY>,
+    rings: Vec<Ring>,
+    guards: Vec<SpinLockGuard<'a, Ring>>,
+    capacity: usize,
+    consumed: bool,
+}
+
+impl<const CPUS: usize, const CAPACITY: usize> Drop for PreparedCapture<'_, CPUS, CAPACITY> {
+    fn drop(&mut self) {
+        // Also release locks before storage during a host-test unwind.
+        self.guards.clear();
+    }
+}
+
+impl<const CPUS: usize, const CAPACITY: usize> PreparedCapture<'_, CPUS, CAPACITY> {
+    fn lock_rings(&mut self) -> Result<(), Error> {
+        for cpu in &self.recorder.cpus {
+            let Some(guard) = cpu.ring.try_lock() else {
+                self.guards.clear();
+                return Err(Error::Busy);
+            };
+            self.guards.push(guard);
+        }
+        Ok(())
+    }
+
+    fn replace(&mut self) {
+        for (ring, guard) in self.rings.iter_mut().zip(&mut self.guards) {
+            core::mem::swap(ring, &mut **guard);
+        }
+        self.consumed = true;
+        self.guards.clear();
+    }
+
+    /// Publish all selected rings atomically with admission. A failed start leaves
+    /// both the old capture and this preparation intact, ready for retry or Drop.
+    pub fn start(&mut self, filter: Filter) -> Result<Session, Error> {
+        if self.consumed || self.capacity == 0 || filter.0 == 0 {
+            return Err(Error::InvalidFilter);
+        }
+        self.recorder
+            .control
+            .try_with(|control| {
+                if !control.stopped {
+                    return Err(Error::Busy);
+                }
+                let generation = control
+                    .generation
+                    .checked_add(1)
+                    .filter(|value| *value <= MAX_GENERATION)
+                    .ok_or(Error::Exhausted)?;
+                self.lock_rings()?;
+                for cpu in &self.recorder.cpus {
+                    cpu.loss.store(generation << 2, Ordering::Relaxed);
+                }
+                self.replace();
+                control.generation = generation;
+                control.stopped = false;
+                control.present = true;
+                // Rings are unlocked before producers can observe admission.
+                self.recorder.requested.store(
+                    (generation << FILTER_BITS) | u64::from(filter.0),
+                    Ordering::Release,
+                );
+                Ok(Session(generation))
+            })
+            .ok_or(Error::Busy)?
+    }
+
+    /// Detach only an already stopped capture. All readers and delayed writers
+    /// are excluded before any storage moves; deallocation happens on Drop.
+    pub fn clear(&mut self, session: Session) -> Result<(), Error> {
+        if self.consumed || self.capacity != 0 {
+            return Err(Error::InvalidFilter);
+        }
+        self.recorder
+            .control
+            .try_with(|control| {
+                if !control.present || control.generation != session.0 {
+                    return Err(Error::InvalidSession);
+                }
+                if !control.stopped {
+                    return Err(Error::Busy);
+                }
+                self.lock_rings()?;
+                self.replace();
+                control.present = false;
+                Ok(())
             })
             .ok_or(Error::Busy)?
     }

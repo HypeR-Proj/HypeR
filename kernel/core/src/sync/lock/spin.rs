@@ -5,6 +5,8 @@
 
 use core::cell::UnsafeCell;
 use core::hint::spin_loop;
+use core::marker::PhantomData;
+use core::ops::{Deref, DerefMut};
 
 use crate::sync::atomic::{AtomicBool, Ordering};
 
@@ -15,6 +17,25 @@ pub struct SpinLock<T> {
 }
 
 struct LockRelease<'lock>(&'lock AtomicBool);
+
+/// A short exclusive borrow obtained without waiting. Must not cross a yield.
+pub struct SpinLockGuard<'lock, T> {
+    value: &'lock mut T,
+    _release: LockRelease<'lock>,
+    _local: PhantomData<*mut ()>,
+}
+
+impl<T> Deref for SpinLockGuard<'_, T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        self.value
+    }
+}
+impl<T> DerefMut for SpinLockGuard<'_, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        self.value
+    }
+}
 
 impl Drop for LockRelease<'_> {
     fn drop(&mut self) {
@@ -70,6 +91,12 @@ impl<T> SpinLock<T> {
     /// Fatal and diagnostic paths use this to avoid waiting on a lock held by
     /// the context that they interrupted.
     pub fn try_with<R>(&self, operation: impl FnOnce(&mut T) -> R) -> Option<R> {
+        self.try_lock().map(|mut guard| operation(&mut guard))
+    }
+
+    /// Acquires without waiting, allowing several locks to be joined before a
+    /// transactional update. Drop all guards before allocating, freeing or yielding.
+    pub fn try_lock(&self) -> Option<SpinLockGuard<'_, T>> {
         if self
             .locked
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -78,11 +105,12 @@ impl<T> SpinLock<T> {
             return None;
         }
 
-        let release = LockRelease(&self.locked);
         // SAFETY: The successful transition above gives this caller exclusive
-        // access until `release` is dropped.
-        let result = operation(unsafe { &mut *self.value.get() });
-        drop(release);
-        Some(result)
+        // access until the guard's release token is dropped.
+        Some(SpinLockGuard {
+            value: unsafe { &mut *self.value.get() },
+            _release: LockRelease(&self.locked),
+            _local: PhantomData,
+        })
     }
 }

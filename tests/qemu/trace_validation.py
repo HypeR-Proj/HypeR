@@ -64,7 +64,10 @@ def validate_capture(files, logfile):
         raise AssertionError('switch lost its packed cause or entry point')
     if not annotated or not any(c['switch_reason'] == 'block' for c in annotated):
         raise AssertionError('bounded IPC workload has no explicit blocking switch cause')
-    if not any(e.get('ph') == 'X' and e.get('pid') == 7
+    execution_lanes = {e['pid'] for e in scheduling['traceEvents']
+                       if e.get('ph') == 'M' and e.get('name') == 'process_name'
+                       and e.get('args', {}).get('name') == 'HypeR thread execution'}
+    if not any(e.get('ph') == 'X' and e.get('pid') in execution_lanes
                and 'cpu' in e.get('args', {})
                for e in scheduling['traceEvents']):
         raise AssertionError('missing per-thread execution lanes')
@@ -102,7 +105,7 @@ def validate_capture(files, logfile):
     if loss and metadata['cross_cpu_spans']:
         raise AssertionError('lossy capture inferred cross-CPU durations')
     # The collector must not feed itself by tracing the trace-read method.
-    if any(event['name'] == 'syscall_enter' and event.get('args', {}).get('operation') in (260, 261, 262)
+    if any(event['name'] == 'syscall_enter' and event.get('args', {}).get('operation') in (260, 261, 262, 263)
            and event['args'].get('kind') == 19 for event in events):
         raise AssertionError('trace control recursively generated syscall events')
     logfile.with_suffix('.json').write_bytes(files['trace.json'].read_bytes())

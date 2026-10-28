@@ -67,12 +67,12 @@ the feature-enabled compile/test gate is therefore required.
 The machine adapter is `crate::diagnostics::trace`; portable storage lives in `hyper_trace`.
 Control/read operations belong in ordinary thread context. The internal recorder
 also supports kernel self-tests. Production userspace uses CpuInspector methods
-260 (start, SET_ATTRIBUTES), 261 (stop, SET_ATTRIBUTES), and 262 (read,
-INSPECT_DETAILS). Ordinary applications do not receive these rights; the formal
+260 (start, SET_ATTRIBUTES), 261 (stop, SET_ATTRIBUTES), 262 (read,
+INSPECT_DETAILS), and 263 (clear, SET_ATTRIBUTES). Ordinary applications do not receive these rights; the formal
 shell delegates its profiling authority only to `/bin/perf`.
 
 Start accepts categories, a 256-bit online-CPU mask (zero means all), a 1–300000 ms
-deadline and 64–4096 retained records per CPU. One ordinary callout closes admission
+deadline and 64–16384 retained records per CPU. One ordinary callout closes admission
 at expiry, then retries joining any short in-flight producer. No periodic tick or
 remote IPI is required. Killing the collector does not leave recording enabled.
 A privileged caller can stop/read another capture; generation tokens reject stale
@@ -97,10 +97,10 @@ let batch = trace::read(capture, cpu, cursor, &mut records)?;
 ```
 
 Start rejects an empty filter and a capture not yet successfully stopped. It
-allocates nothing and replaces the previous capture, using a new non-repeating
-generation. Exhaustion is reported rather than wrapping capture identity. Rings
-reset lazily on their first record of that generation; old contents are never
-returned as new records. Repeated stop and non-destructive reads are supported.
+prepares fresh storage before replacing the previous capture, using a new
+non-repeating generation. Exhaustion is reported rather than wrapping capture
+identity. New rings start empty; old contents are never returned as new records.
+Repeated stop and non-destructive reads are supported until clear or replacement.
 
 Changing filters can leave an already admitted event in flight. Once stop has
 acquired control it closes admission, then tries each CPU ring to join writers.
@@ -113,13 +113,22 @@ writers are short software operations, with no remote hardware state to disarm.
 
 ## Storage, concurrency and loss
 
-Instrumented builds reserve 4096 records per configured CPU, with 56 bytes per
-record on the supported 64-bit targets: 224 KiB per CPU plus a small aligned
-control header. The buffers are static, not on thread/IRQ stacks. They stay
-reserved while the instrumented image runs; builds without the feature have no
-recorder buffers. The capture capacity selects a smaller overwrite window; it
-does not release the compiled reservation. Capacity changes only at start, never
-while producers use a capture. Each CPU header is cache-line aligned.
+Instrumented builds initially contain only small per-CPU control headers. Start
+allocates the requested capacity for selected CPUs in ordinary thread context,
+before taking control/ring locks. The default and maximum are 16384 records per
+CPU, with 56 bytes per record on supported 64-bit targets: 896 KiB per selected
+CPU. Payload buffers never live on thread/IRQ stacks. Each CPU header is
+cache-line aligned; unselected CPUs have empty buffers.
+
+Publication tries all ring locks before swapping any ownership and opening
+admission. Preallocated lock bookkeeping keeps this bounded transaction free of
+allocation. Failure leaves the previous capture intact; replaced buffers are
+freed after releasing control locks. Stop joins writers but retains the buffers.
+Clear accepts only a stopped generation, detaches its buffers under the same
+locks, then frees them outside the locks and invalidates the generation. The
+generation counter is not reset. Read/control attempts using a cleared generation
+fail, and the next start allocates fresh storage. Builds without the feature have
+no recorder buffers.
 
 The machine adapter masks local interrupts through CPU selection, timestamping
 and append, restoring the caller's exact prior mask. Rings use the existing

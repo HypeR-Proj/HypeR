@@ -27,7 +27,12 @@ def main():
         session.await_text(rb'HypeR: startup complete\n', timeout=240)
         session.await_text(rb'hyper-sh\$ ')
         shell = Shell(session)
-        capture_result = shell.run('perf trace record --raw-events --format chrome --duration-ms 30000 --categories ipc,scheduler,io --no-names --poll-ms 1 --fail-on-loss --max-events 32768 -o /tmp/remote.json -- /bin/cp /etc/hyper/components.json /data/trace-created', timeout=180)
+        # Bound the snapshot to the FAT mutation, without live readers contending
+        # with ring writers. Warm page-in and omit unrelated scheduler traffic.
+        shell.check('cp /etc/hyper/components.json /tmp/trace-warmup')
+        capture_result = shell.run('perf trace record --raw-events --format chrome --snapshot --duration-ms 30000 --categories ipc,io --no-names --poll-ms 1 --fail-on-loss --max-events 32768 -o /tmp/remote.json -- /bin/cp /etc/hyper/components.json /data/trace-created', timeout=180)
+        if capture_result.status == 0:
+            shell.check('perf trace clear')
         TraceArtifacts.save(shell, ('remote.json',))
     files = artifacts.extract(session, ('remote.json',))
     capture_result.require('filesystem capture')

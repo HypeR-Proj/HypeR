@@ -712,6 +712,13 @@ pub(crate) trait SystemInspectServices: UserMemoryServices {
     ) -> crate::diagnostics::trace::Result<()> {
         Err(hyper::abi::native::HYPER_NATIVE_STATUS_NOT_SUPPORTED)
     }
+    fn trace_clear(
+        &self,
+        _receiver: &InvocationReceiver,
+        _generation: u64,
+    ) -> crate::diagnostics::trace::Result<()> {
+        Err(hyper::abi::native::HYPER_NATIVE_STATUS_NOT_SUPPORTED)
+    }
     fn trace_read(
         &self,
         _receiver: &InvocationReceiver,
