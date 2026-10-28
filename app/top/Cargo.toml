@@ -21,7 +21,6 @@ bench = false
 clap.workspace = true
 hyper-os.workspace = true
 hyper-rt.workspace = true
-hyper-terminal.workspace = true
 
 [lints]
 workspace = true
@@ -29,6 +28,8 @@ workspace = true
 [target.'cfg(target_os = "hyper")'.dependencies]
 hyper-clap-shared.workspace = true
 hyper-tool-args-shared.workspace = true
+hyper-text-ui-shared.workspace = true
 
 [target.'cfg(not(target_os = "hyper"))'.dependencies]
 hyper-tool-args.workspace = true
+hyper-text-ui.workspace = true

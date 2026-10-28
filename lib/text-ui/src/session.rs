@@ -102,6 +102,10 @@ impl Session {
         Ok(None)
     }
     pub fn wait(&self, extra: Option<WaitItem<'_>>) -> Result<(), Error> {
+        self.wait_until(extra, hyper_os::DEADLINE_INFINITE)
+    }
+    /// Wait for input, resize, an optional source, or an absolute monotonic deadline.
+    pub fn wait_until(&self, extra: Option<WaitItem<'_>>, deadline: u64) -> Result<(), Error> {
         let mut waits = vec![self.input.wait_item()];
         if let Some(event) = self.terminal.event_wait_item() {
             waits.push(event);
@@ -110,9 +114,9 @@ impl Session {
             waits.push(extra);
         }
         let deadline = if self.decoder.incomplete() {
-            self.partial_until
+            self.partial_until.min(deadline)
         } else {
-            hyper_os::DEADLINE_INFINITE
+            deadline
         };
         match wait_many(&waits, deadline) {
             Ok(_) | Err(hyper_os::Error::Status(hyper_os::Status::TIMED_OUT)) => Ok(()),
