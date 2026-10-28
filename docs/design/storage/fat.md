@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 
 The Native `fs-fat` worker (default path `/boot/svc/fs-fat` after the root switch)
 mounts an exclusively owned logical block volume,
-not a copy of its contents in ramfs. `hyper_fatfs::block::BlockDevice` describes
+not a copy of its contents in ramfs. `hyper_fs_fat::block::BlockDevice` describes
 512-byte sector transfers and a durable flush. The kernel retains generic VFS
 and cache coordination; FAT media parsing runs in the worker. See
 [filesystem services](filesystem-services.md) for process startup, authority,
@@ -18,7 +18,7 @@ FAT parsing and mutations use the MIT-licensed `rafalh/rust-fatfs` revision
 `third_party/rust-fatfs`. Its provenance document records the local correctness
 and bounded-stack fixes; the original MIT copyright and license are retained.
 Its no-std, no-alloc configuration provides long filenames. HypeR keeps the
-library behind `hyper_fatfs::FatVolume`; upstream files and directories do not
+library behind `hyper_fs_fat::FatVolume`; upstream files and directories do not
 escape the adapter.
 
 ## Media admission
@@ -50,20 +50,50 @@ metadata. Device errors may have committed part of an operation.
 ## Synchronization and lifetime
 
 Writes complete before the volume operation returns. Within an operation, eight
-128 KiB heap windows coalesce cluster-sized data writes and repeated FAT sector
-updates. Dirty-sector bitmaps retain only modified sectors; contiguous dirty
-runs become block requests. Up to four disjoint requests are submitted together through the Native bounded
-write-batch operation, preserving independent queue storage until completion. Eviction,
-upstream stream flushes and the operation boundary drain pending writes. A
-recoverable error such as no space also drains completed metadata rollback.
-An uncertain device error poisons the volume without retrying a partial batch.
+128 KiB heap windows coalesce copied data writes and repeated FAT sector
+updates. Aligned file payload from the kernel-owned read-only source window
+bypasses these buffers: the adapter collects source-range descriptors instead
+of copying the payload. Adjacent disk and source offsets coalesce; a batch
+submits at 64 KiB, the range limit, or the operation boundary. Pending metadata
+is submitted before source references, and pending references before copied
+metadata or a conflicting read. Dirty-sector bitmaps retain only modified sectors; contiguous dirty
+runs become block requests. Each worker owns one logical block queue with sixteen
+completion slots, a 2 MiB retained-payload limit and at most four device commands
+in flight. These are limits rather than eagerly allocated payload storage.
+One submission contains at most sixteen disjoint ranges totaling 512 KiB.
+Windows with a contiguous 64 KiB dirty run submit immediately so device work
+can overlap subsequent FAT traversal even when a 128 KiB file write straddles
+physical window boundaries. Eviction and upstream stream flushes submit partial
+windows; smaller sparse metadata writes remain coalesced until those boundaries.
 
-Pending sectors are the authoritative read view until drained. Four 4 KiB
+Copied submission retains a private kernel payload before returning, so the
+worker can reuse its own metadata buffers while earlier I/O remains in flight.
+Source-window submission copies descriptors only and retains a kernel lease on
+the active operation's bytes. The readonly source window cannot be reused until
+all its accepted work completes and the filesystem request finishes. Admission
+backpressure reaps any completed local batch before retrying, instead of waiting
+for all older batches. If this worker has no outstanding batches, it waits for
+the requested byte count and one free slot in the shared device budget; another
+queue's temporary pressure does not poison the mount. Later overlapping reads
+and writes use the same queue and observe device submission dependencies.
+Disjoint work can complete out of order.
+
+Every volume operation joins all accepted writes before replying, including
+after a read, allocation-budget or other operation failure. Completion cleanup
+does not pass through the poisoned-device admission gate. It publishes any
+previously accepted pending range batch and joins submitted work; it does not
+start another filesystem mutation. A recoverable error such as no space first submits completed
+metadata rollback. An uncertain device error poisons the volume without retrying
+a partial batch. The completion boundary preserves synchronous file-write
+semantics; this is not a cross-operation dirty file cache.
+
+Buffered sectors are the authoritative read view until submitted. Four 4 KiB
 read-through windows batch nearby metadata fields and keep directory and FAT
 lookups from displacing each other on every read; bulk file data bypasses them.
 Writes update overlapping read windows, and failed writes invalidate them.
 Fixed media buffers, including the 1 MiB write buffer, reside in the
-worker and consume its process memory quota. Ordinary writes do not claim stable-storage durability. `sync`
+worker and consume its process memory quota. Queue payloads are separately
+bounded and charged by the kernel. Ordinary writes do not claim stable-storage durability. `sync`
 explicitly commits upstream FSInfo and directory metadata, drains the adapter,
 issues the block device's durable flush, and retains the mounted metadata view.
 
@@ -82,8 +112,12 @@ directly and combine adjacent data sectors instead of reopening and walking the
 FAT chain for every transfer. Each map also owns four 4 KiB read-through windows
 for partial-sector file reads, avoiding repeated device requests while parsing
 image headers. Aligned bulk reads bypass these windows. All of this fixed
-storage resides in the worker resource domain. Highly fragmented files
-fall back to ordinary FAT reads without allocating an unbounded extent table.
+storage resides in the worker resource domain. The remote bulk-read operation
+returns up to 64 byte-range extents per prefix instead of copying file bytes
+through the worker. The kernel executes the plan directly into private cache or
+request pages via the I/O VM exchange pool. Highly fragmented files walk the FAT
+chain to produce bounded prefixes without allocating an unbounded extent table;
+ordinary buffered reads remain available as a fallback.
 All potentially mutating operations invalidate maps and their windows before touching media,
 including operations that subsequently fail. The sole worker serializes map
 construction, use and invalidation. An initial map build takes the size from
@@ -97,8 +131,13 @@ the admission scan. A failed synchronization closes the mounted view.
 Upstream destructors attempt I/O. Device access is therefore gated to explicit
 operations, with failures latched and returned to the caller. Dropping the
 HypeR volume closes this gate before dropping upstream state; no destructor
-can submit I/O. Upstream's frequent stream flushes only drain buffered transfers;
+can submit I/O. Upstream's frequent stream flushes only submit buffered transfers;
 they do not turn every file read or stat into a physical cache barrier.
+Graceful provider handoff joins completions before returning the original block
+capability and moving the same queue and source window with the live transport.
+The old media adapter drops its queue alias; the replacement retains the
+transport's original queue authority. An abnormal queue close does not imply
+that physical DMA has stopped; the kernel retains that ownership until retirement.
 
 A read-only block volume rejects mutations before changing cached metadata.
 Read, stat, synchronization and teardown issue no writes or device flushes;

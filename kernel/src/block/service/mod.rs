@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Capability-bound block setup and bounded exclusive volume transfers.
+//! Capability-bound block setup and bounded synchronous compatibility transfers.
+
+pub(crate) mod queue;
 
 use super::*;
 use crate::process::Process;
@@ -53,26 +55,15 @@ pub(crate) fn create(
         .commit();
     let owner = backend.object().owner();
     let notification = Notification::prepare_native(&owner, notify_base, notify_irq, &domain)?;
-    let device = FallibleArc::try_new(Device {
-        #[cfg(feature = "kernel-trace")]
-        trace_id: next_trace_id()?,
-        memory: backing,
-        guest_base,
-        notification,
-        domain,
-        state: InterruptSpinLock::new(State {
-            busy: false,
-            failed: false,
-            sectors: 0,
-            indices: [0; wire::REQUEST_QUEUES],
-            tag: 0,
-            readonly: false,
-            capability_alive: true,
-        }),
-        available: SignalState::new(),
-
-        _charge: charge,
-    })
+    let device = FallibleArc::try_new(
+        Device::new(backing, guest_base, notification, domain, charge).map_err(
+            |error| match error {
+                super::QueueError::NoMemory => ServiceError::NoMemory,
+                super::QueueError::ResourceLimit => ServiceError::ResourceLimit,
+                _ => ServiceError::BadState,
+            },
+        )?,
+    )
     .map_err(|_| ServiceError::NoMemory)?;
     let reservation = process.reserve_handles::<1>()?;
     let prepare = || {
@@ -128,7 +119,6 @@ pub(crate) fn activate(
         .map_err(ActivationError::Capability)?;
     block
         .object()
-        .device
         .activate(readonly)
         .map(|sectors| (sectors, readonly))
         .map_err(ActivationError::Device)
@@ -224,14 +214,4 @@ pub(crate) enum TransferError {
     Capability(crate::process::ProcessError),
     Device(Error),
     Status(i64),
-}
-
-// Correlation survives queue index reuse and distinguishes independently created
-// devices in the same resource domain. This is never an address or authority.
-#[cfg(feature = "kernel-trace")]
-fn next_trace_id() -> Result<u64, ServiceError> {
-    use core::sync::atomic::{AtomicU64, Ordering};
-    static NEXT: AtomicU64 = AtomicU64::new(1);
-    NEXT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-        .map_err(|_| ServiceError::ResourceLimit)
 }

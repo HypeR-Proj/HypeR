@@ -360,7 +360,7 @@ flowchart TB
 For ramfs, read [the VFS adapter](../../kernel/src/fs/vfs/ramfs/mod.rs) and
 [ramfs implementation](../../kernel/src/fs/primitives/ramfs.rs).
 For `/data`, read [the remote filesystem adapter](../../kernel/src/fs/vfs/remote/mod.rs),
-[common service protocol](../../stdlib/rust/hyper-filesystem/src/protocol.rs),
+[common service protocol](../../stdlib/rust/hyper-filesystem/src/protocol/mod.rs),
 [FAT media engine](../../bootstrap/stage1/fs-fat/src/volume.rs),
 [block interface](../../kernel/src/fs/primitives/block.rs),
 [Native block owner](../../kernel/src/block/mod.rs),

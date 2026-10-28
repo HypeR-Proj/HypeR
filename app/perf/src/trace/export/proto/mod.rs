@@ -211,7 +211,7 @@ impl Output {
                 let time = nanoseconds(&value["ts"]);
                 let duration = nanoseconds(&value["dur"]);
                 let slice = value["ph"] == "X" && duration != 0;
-                let uuid = if matches!(pid, 2 | 4) && slice {
+                let uuid = if matches!(pid, 2 | 4 | 7) && slice {
                     self.slice_lane(pid, tid, time, time.saturating_add(duration))?
                 } else {
                     track(pid, tid)
