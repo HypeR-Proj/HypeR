@@ -204,3 +204,20 @@ fn trailing_dot_copies_contents_into_existing_directory() -> io::Result<()> {
     assert!(!d.path("out/source").exists());
     Ok(())
 }
+
+#[test]
+fn copies_multiple_transfer_windows_and_the_final_tail() -> io::Result<()> {
+    let d = Directory::new()?;
+    let bytes: Vec<u8> = (0..(2 * 1024 * 1024 + 17))
+        .map(|i| (i % 251) as u8)
+        .collect();
+    fs::write(d.path("source"), &bytes)?;
+    assert!(copy_regular(
+        &d.path("source"),
+        &d.path("copy"),
+        fs::metadata(d.path("source"))?.permissions(),
+        false
+    )?);
+    assert_eq!(fs::read(d.path("copy"))?, bytes);
+    Ok(())
+}

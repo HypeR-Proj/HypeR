@@ -289,6 +289,16 @@ worker nor the I/O VM obtains writable access to cached pages. See
 [block I/O data paths](block-io.md#filesystem-integration) for copy boundaries and
 fallbacks.
 
+Demand reads fill the complete file pages covering the requested range, bounded
+by EOF and the scatter batch limit, and return only the requested bytes. This
+also caches the surrounding bytes of small ELF headers and segment boundaries.
+Short backend reads never publish an incomplete non-EOF page; admission pressure
+falls back to exact-range reads without requiring cache retention.
+Large file-read syscalls end their first batch at the next 512 KiB file boundary
+and align subsequent batches. Page rounding therefore stays inside the cache
+fill limit for unaligned callers too; applications need no private alignment
+workaround to avoid falling back to scratch reads at every batch.
+
 Cached pages pin the content record rather than an open capability. Closing the
 last handle leaves its identity available while cached pages survive; reopening
 from the same or another process can hit them. After all live and cached owners
@@ -346,6 +356,30 @@ the page; the cache cannot discard that lookup entry while it is mapped. Private
 writes and partially initialized ELF boundary pages use private storage. If cache
 admission is paused under pressure, a new mapping may fall back to a private
 copy; sharing is an optimization, not a prerequisite for reading the file.
+Mapping population first probes resident complete pages without I/O or a scratch
+copy, then fills remaining holes in bounded batches. ELF boundary pages stay
+private with bytes outside the segment zeroed, even when the source file page is
+fully cached.
+
+The userspace loaders first prepare the required ELF header page explicitly,
+so parsing cached headers does not start a competing sequential prediction.
+They validate all load segments, then merge overlapping or
+adjacent file-page ranges independently of virtual mapping permissions. Before
+mapping they request a bounded `file_prefetch` fill, with a total preparation
+budget of 512 KiB per image in addition to the header page. BSS, file holes and
+non-loadable sections outside the rounded ranges are skipped. Larger images
+continue through bounded demand reads rather than staging their entire contents
+before mapping. Static bootstrap,
+formal executable startup and shared-library loading use the same policy in
+their independently owned loaders.
+
+`file_prefetch` requires File READ and fills cache pages synchronously without a
+userspace payload buffer. It does not enqueue sequential read-ahead or update its
+prediction state. It returns the completed requested prefix, which can be zero
+under admission pressure or for RAMFS. Backend errors propagate to the caller;
+loaders treat preparation as optional and still validate every demand read and
+mapping. No prefetch result guarantees residency or bypasses file protection,
+execute authority, private writes, or ELF segment zero-fill rules.
 
 `LOCK_MEMORY` is a separate VMAR right. Explicit range locking, or locking all
 current mappings, populates the selected bytes before success and prevents clean

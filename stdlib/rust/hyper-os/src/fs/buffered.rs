@@ -1,10 +1,16 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-//! Bounded read-ahead for one validation pass over sparse FIT metadata.
+//! Bounded buffering of sparse positioned reads.
+//!
+//! This is a per-reader view, not the coherent kernel page cache. It avoids
+//! repeated syscall/copy overhead for small reads. Create a fresh reader after
+//! mutations, or hold content protection for a stable view. Large sequential
+//! transfers should recover the source with `BufferedReader::into_inner`.
 
-use hyper_vm_image::ReadAt;
-use std::cell::RefCell;
+use super::ReadAt;
+use alloc::vec::Vec;
+use core::cell::RefCell;
 
 const PAGE_BYTES: usize = 4096;
 const CACHE_PAGES: usize = 4;
@@ -27,15 +33,16 @@ struct Cache {
     next: usize,
 }
 
-/// A temporary metadata view, not a file snapshot. Create a fresh view for each
-/// validation and recover the source before streaming the large payloads.
-pub struct CachedSource<S> {
+/// A bounded read buffer tied to one source. It neither freezes content nor
+/// establishes cache coherence with concurrent writes. All returned bytes are
+/// copied out; no buffer borrow escapes a read.
+pub struct BufferedReader<S> {
     source: S,
     length: u64,
     cache: RefCell<Cache>,
 }
 
-impl<S: ReadAt> CachedSource<S> {
+impl<S: ReadAt> BufferedReader<S> {
     pub fn new(source: S) -> Result<Self, Error<S::Error>> {
         let length = source.length().map_err(Error::Source)?;
         // Reserve on the heap without constructing a 16 KiB stack temporary.
@@ -61,7 +68,7 @@ impl<S: ReadAt> CachedSource<S> {
     }
 }
 
-impl<S: ReadAt> ReadAt for CachedSource<S> {
+impl<S: ReadAt> ReadAt for BufferedReader<S> {
     type Error = Error<S::Error>;
 
     fn length(&self) -> Result<u64, Self::Error> {
@@ -115,5 +122,5 @@ impl<S: ReadAt> ReadAt for CachedSource<S> {
 }
 
 #[cfg(test)]
-#[path = "../../tests/image_read_cache.rs"]
+#[path = "../../tests/buffered_read.rs"]
 mod tests;

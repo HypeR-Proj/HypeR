@@ -4155,6 +4155,25 @@ pub const INVOCATIONS: &[Invocation] = &[
         flags: FlagPolicy::None,
         failure_results: &[],
     },
+    // Bounded synchronous cache fill; no user buffer or residency authority.
+    Invocation {
+        operation: 266,
+        name: "file_prefetch",
+        feature: FeatureGate::Core,
+        receiver: file_argument(RIGHT_READ),
+        arguments: &[
+            scalar_argument("offset", ValueKind::U64),
+            scalar_argument("length", ValueKind::ByteCount),
+        ],
+        results: &[scalar_result("completed", ValueKind::ByteCount)],
+        blocking: BlockingClass::MayBlock,
+        cancellation: CancellationClass::None,
+        restart: RestartClass::Never,
+        completion: CompletionClass::Returns,
+        audit: AuditClass::Capability,
+        flags: FlagPolicy::None,
+        failure_results: &[],
+    },
     // Acquire mandatory write exclusion through a separate protection token.
     // Its lifetime controls mapping consistency; this is not a userspace snapshot.
     Invocation {

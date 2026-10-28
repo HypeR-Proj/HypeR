@@ -70,6 +70,8 @@
  *
  * - VM power control requires WRITE authority. virtual_machine_get_power_request returns a non-consuming snapshot of one pending request, or would_block when none exists. Request IDs identify one completion and stale IDs are rejected. Operations are CPU_ON (1), CPU_OFF (2), SYSTEM_OFF (3), and SYSTEM_RESET (4); accept is strictly 0 or 1. Reserved output is zero. POWER_REQUEST signals pending work, and VCPU_TERMINATED prompts inspection of per-vCPU terminal state. virtual_machine_open_vcpu returns a control handle for an already configured vCPU; it does not change the immutable topology. The runtime owns lifecycle policy; no guest request is forwarded to host firmware. Guest suspend operations remain unsupported.
  *
+ * - file_prefetch requires File READ and synchronously attempts to fill the clean cache for offset/length without a user buffer. Length is at most FILE_MAX_PREFETCH_BYTES (512 KiB); overflow or larger requests are INVALID_ARGUMENT. Reads are clipped to EOF and may fill surrounding complete file pages. The result is the completed requested prefix, possibly zero for an uncached backend, an oversized page-rounded range, or cache admission failure. Backend errors propagate. This is optional preparation, not a content snapshot or residency guarantee: pages remain reclaimable and ordinary reads/mappings must still handle misses. It neither changes the per-open sequential predictor nor queues further read-ahead. Hold content protection separately when planning stable executable ranges.
+ *
  * - PROTECT grants authority to acquire content protection, not READ, WRITE or EXECUTE. Directory/file derivation can only attenuate this right. file_protect returns a process-local nonduplicable, nontransferable FileProtection with MAP|INSPECT and the size observed under protection. Protection rejects writes and resize through every alias but does not freeze names or other metadata. Closing the token releases its reference; protected file mappings retain separate references until unmap or owner-process teardown. After all owner threads stop and its handles close, teardown detaches protected sources without allocation. External VMAR owners can retain the dead address space and its charged pages, but not protection or permission to refill from the file. vmar_map_file requires File READ, additionally EXECUTE for executable mappings, FileProtection MAP for that same canonical file, and MAP on a VMAR of the calling process. It uses private_mapping range/zero-fill semantics. COPY_ON_WRITE permits clean pages to retire after translation invalidation and fault back from the protected file. Both file mapping modes populate clean pageable contents; EAGER does not grant residency. Full clean pages share canonical cache storage, while partial pages and private writes remain isolated. LOCK_MEMORY on a process-owned VMAR authorizes vmar_lock_memory/ vmar_unlock_memory. Range calls require page-aligned nonempty ranges; VMAR_MEMORY_CURRENT selects only currently mapped pages, including descendants, with address and size zero. Lock success populates the range and charges PinnedPages to the requester; repeated lock is idempotent. Unmap and process teardown release locks; future mappings are not locked. Shared pages remain cached while a mapping retains them. ProcessBuilder memory-lock delegation requires TaskFactory LOCK_MEMORY and explicit enablement before seal. Both modes retain protection until unmap or owner-process teardown; private modified pages cannot be discarded without another backing store. File snapshot VMOs are not exported to userspace. Explicit mapping and user-buffer copy syscalls report allocation, quota or I/O failures. Hardware refaults have no syscall result; when bounded reclaim/refill retries fail, the kernel terminates the Process as an unhandled page fault. Reclaim is best effort and page-table withdrawal may require temporary transaction resources before releasing pages.
  *
  * - Immutable VMO snapshots grant READ and MAP but never WRITE. vmo_create_snapshot coherently copies its source and reports Busy while writable mappings or hardware writers exist. Private mappings require source READ|MAP and VMAR MAP: source_offset is page aligned, data_offset is less than one page, source_length bytes starting at source_offset+data_offset initialize destination data_offset; all other destination bytes are zero. Writable private views never permit EXECUTE. Executable private views additionally require an executable source VMO and source EXECUTE rights; sanitized pages are sealed and instruction-published before mapping, with no writable alias. Copy-on-write mode shares immutable full pages until first write; eager mode allocates all private pages before publication. Private writes, including kernel copyout and atomic waits, cannot change the source or another private view. Ordinary writable/shared VMOs and exclusive hardware leases keep their stable backing contract. Snapshot bytes and old page versions remain owned through acknowledged translation retirement.
@@ -2278,6 +2280,13 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * Numeric parameter or sentinel, not an enum discriminant.
  */
 #define HYPER_NATIVE_FILE_MAX_READ_BYTES UINT64_C(2097152)
+/**
+ * `file_max_prefetch_bytes` in the `filesystem_limits` constants domain.
+ *
+ * Path, directory-page, transfer and root-switch bounds.
+ * Numeric parameter or sentinel, not an enum discriminant.
+ */
+#define HYPER_NATIVE_FILE_MAX_PREFETCH_BYTES UINT64_C(524288)
 /**
  * `filesystem_switch_root_max_moves` in the `filesystem_limits` constants domain.
  *
@@ -6676,6 +6685,27 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
  */
 #define HYPER_NATIVE_OP_FILESYSTEM_SWITCH_ROOT UINT64_C(277)
+
+/**
+ * Object-local method `file_prefetch`.
+ *
+ * | Property | Contract |
+ * | --- | --- |
+ * | Receiver | `file: Borrow, kind=file, rights=0x10` |
+ * | Operation | 266 |
+ * | Feature | `Core` |
+ * | Arguments | `offset: u64`, `length: byte_count` |
+ * | Results | `completed: byte_count` |
+ * | Capability effects | `file: Borrow, kind=file, rights=0x10` |
+ * | User memory | — |
+ * | Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
+ * | Audit | `Capability` |
+ *
+ * Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
+ *
+ * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
+ */
+#define HYPER_NATIVE_OP_FILE_PREFETCH UINT64_C(266)
 
 /**
  * Object-local method `file_protect`.

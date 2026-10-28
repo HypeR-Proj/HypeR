@@ -3,12 +3,8 @@
 
 //! Admit only native guest architectures; ITB metadata owns image identity.
 
-mod read_cache;
-
-pub use read_cache::{CachedSource, Error as CachedReadError};
-
 use crate::fleet::Configuration;
-use hyper_vm_image::{Architecture, ConfiguredImage, GuestImage, ReadAt};
+use hyper_vm_image::{Architecture, ConfiguredImage, GuestImage};
 
 pub fn configure(image: GuestImage, config: &Configuration) -> Result<ConfiguredImage, String> {
     let host = match std::env::consts::ARCH {
@@ -29,20 +25,10 @@ pub fn configure(image: GuestImage, config: &Configuration) -> Result<Configured
 
 /// Manager admission uses its existing READ authority, without transferring it.
 pub fn validate_file(file: &hyper_os::fs::File, config: &Configuration) -> Result<(), String> {
-    struct Source<'a>(&'a hyper_os::fs::File);
-    impl ReadAt for Source<'_> {
-        type Error = hyper_os::Error;
-        fn length(&self) -> Result<u64, Self::Error> {
-            self.0.size()
-        }
-        fn read_exact_at(&self, offset: u64, output: &mut [u8]) -> Result<(), Self::Error> {
-            self.0.read_exact_at(offset, output)
-        }
-    }
     // FIT metadata alternates between structure tokens and the string table,
     // often on distant pages separated by payloads. Keep this cache local to
     // admission; it is not a snapshot, and the runtime still revalidates on start.
-    let source = read_cache::CachedSource::new(Source(file))
+    let source = hyper_os::fs::BufferedReader::new(file)
         .map_err(|error| format!("cannot read ITB: {error:?}"))?;
     let image =
         hyper_vm_image::parse(&source).map_err(|error| format!("invalid ITB: {error:?}"))?;
