@@ -340,8 +340,7 @@ fn storage_is_prepared_only_for_selected_cpus_and_clear_retires_generation() {
     for value in 0..5 {
         emit(&r, 1, value);
     }
-    let mut clear = crate::require_ok(r.prepare_clear());
-    assert_eq!(clear.clear(first), Err(Error::Busy));
+    assert_eq!(r.clear(first), Err(Error::Busy));
     crate::require_ok(r.stop(first));
     let mut out = [None; 8];
     assert_eq!(crate::require_ok(r.read(first, 0, 0, &mut out)).count, 0);
@@ -349,8 +348,8 @@ fn storage_is_prepared_only_for_selected_cpus_and_clear_retires_generation() {
     let b = crate::require_ok(r.read(first, 1, 0, &mut out));
     assert_eq!((a.count, a.overwritten), (3, 2));
     assert_eq!((a.count, a.next), (b.count, b.next));
-    crate::require_ok(clear.clear(first));
-    drop(clear);
+    let retired = crate::require_ok(r.detach(first));
+    drop(retired);
     assert!(matches!(
         r.read(first, 1, 0, &mut out),
         Err(Error::InvalidSession)

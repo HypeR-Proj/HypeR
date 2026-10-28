@@ -5,7 +5,8 @@
 //! machine adapter; the disabled fast path is a single category/generation load.
 
 use super::{
-    Batch, Category, Error, Filter, PreparedCapture, Record, Recorder, Session, Site, Ticket,
+    Batch, Category, Error, Filter, PreparedCapture, Record, Recorder, RetiredCapture, Session,
+    Site, Ticket,
 };
 use hyper_core::sync::PublishedOnce;
 
@@ -27,9 +28,8 @@ pub fn prepare(
     }
     RECORDER.prepare(capacity, selected)
 }
-pub fn prepare_clear()
--> Result<PreparedCapture<'static, { hyper_core::cpu::MAX_CPUS }, CAPACITY>, Error> {
-    RECORDER.prepare_clear()
+pub fn detach(session: Session) -> Result<RetiredCapture, Error> {
+    RECORDER.detach(session)
 }
 
 /// Publish the sole machine adapter before allowing capture. Replacing the

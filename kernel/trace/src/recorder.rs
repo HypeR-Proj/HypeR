@@ -4,7 +4,7 @@
 use super::{Category, Filter, Record, Site};
 use alloc::vec::Vec;
 use hyper_core::sync::{
-    SpinLock, SpinLockGuard,
+    SpinLock,
     atomic::{AtomicU64, Ordering},
 };
 
@@ -101,6 +101,7 @@ struct Control {
     generation: u64,
     stopped: bool,
     present: bool,
+    retirement: Vec<Ring>,
 }
 
 /// Dynamically prepared CPU-local rings. Every lock acquisition is a single try;
@@ -131,13 +132,14 @@ impl<const CPUS: usize, const CAPACITY: usize> Recorder<CPUS, CAPACITY> {
                 generation: 0,
                 stopped: true,
                 present: false,
+                retirement: Vec::new(),
             }),
             cpus: [const { Cpu::new() }; CPUS],
         }
     }
 
-    /// Allocates outside recorder locks. Publishing or clearing swaps ownership
-    /// only; drop the preparation after releasing any enclosing control locks.
+    /// Allocates payloads and retirement metadata outside recorder locks. Publish
+    /// swaps ownership only; drop the preparation after releasing enclosing locks.
     pub fn prepare(
         &self,
         capacity: usize,
@@ -149,11 +151,6 @@ impl<const CPUS: usize, const CAPACITY: usize> Recorder<CPUS, CAPACITY> {
         self.prepare_storage(capacity, selected)
     }
 
-    /// Reserves only the small ownership/lock metadata needed to detach a capture.
-    pub fn prepare_clear(&self) -> Result<PreparedCapture<'_, CPUS, CAPACITY>, Error> {
-        self.prepare_storage(0, |_| false)
-    }
-
     fn prepare_storage(
         &self,
         capacity: usize,
@@ -163,8 +160,8 @@ impl<const CPUS: usize, const CAPACITY: usize> Recorder<CPUS, CAPACITY> {
         rings
             .try_reserve_exact(CPUS)
             .map_err(|_| Error::Allocation)?;
-        let mut guards = Vec::new();
-        guards
+        let mut retirement = Vec::new();
+        retirement
             .try_reserve_exact(CPUS)
             .map_err(|_| Error::Allocation)?;
         for cpu in 0..CPUS {
@@ -176,11 +173,12 @@ impl<const CPUS: usize, const CAPACITY: usize> Recorder<CPUS, CAPACITY> {
                 ring.records.resize(capacity, None);
             }
             rings.push(ring);
+            retirement.push(Ring::new());
         }
         Ok(PreparedCapture {
             recorder: self,
             rings,
-            guards,
+            retirement,
             capacity,
             consumed: false,
         })
@@ -197,7 +195,35 @@ impl<const CPUS: usize, const CAPACITY: usize> Recorder<CPUS, CAPACITY> {
 
     /// Release a stopped capture; its generation remains permanently retired.
     pub fn clear(&self, session: Session) -> Result<(), Error> {
-        self.prepare_clear()?.clear(session)
+        drop(self.detach(session)?);
+        Ok(())
+    }
+
+    /// Detaches a stopped capture without allocating. Drop the returned owner
+    /// after releasing any enclosing control locks to reclaim its storage.
+    pub fn detach(&self, session: Session) -> Result<RetiredCapture, Error> {
+        self.control
+            .try_with(|control| {
+                if !control.present || control.generation != session.0 {
+                    return Err(Error::InvalidSession);
+                }
+                if !control.stopped {
+                    return Err(Error::Busy);
+                }
+                let locks: [_; CPUS] = core::array::from_fn(|cpu| &self.cpus[cpu].ring);
+                let mut index = 0;
+                if !SpinLock::try_with_each(&locks, |ring| {
+                    core::mem::swap(ring, &mut control.retirement[index]);
+                    index += 1;
+                }) {
+                    return Err(Error::Busy);
+                }
+                control.present = false;
+                Ok(RetiredCapture {
+                    _rings: core::mem::take(&mut control.retirement),
+                })
+            })
+            .ok_or(Error::Busy)?
     }
 
     /// After acquiring control, disable admission and join writers without
@@ -341,43 +367,23 @@ impl<const CPUS: usize, const CAPACITY: usize> Recorder<CPUS, CAPACITY> {
     }
 }
 
-/// Prepared payload storage plus preallocated lock bookkeeping. No allocation or
-/// destruction occurs while publishing; the replaced storage retires on Drop.
+/// Detached storage. Its destructor reclaims payloads and retirement metadata;
+/// callers holding outer locks must move this owner out before dropping it.
+#[must_use = "drop retired storage outside enclosing control locks"]
+pub struct RetiredCapture {
+    _rings: Vec<Ring>,
+}
+
+/// Prepared payloads and empty retirement slots. Replaced storage retires on Drop.
 pub struct PreparedCapture<'a, const CPUS: usize, const CAPACITY: usize> {
     recorder: &'a Recorder<CPUS, CAPACITY>,
     rings: Vec<Ring>,
-    guards: Vec<SpinLockGuard<'a, Ring>>,
+    retirement: Vec<Ring>,
     capacity: usize,
     consumed: bool,
 }
 
-impl<const CPUS: usize, const CAPACITY: usize> Drop for PreparedCapture<'_, CPUS, CAPACITY> {
-    fn drop(&mut self) {
-        // Also release locks before storage during a host-test unwind.
-        self.guards.clear();
-    }
-}
-
 impl<const CPUS: usize, const CAPACITY: usize> PreparedCapture<'_, CPUS, CAPACITY> {
-    fn lock_rings(&mut self) -> Result<(), Error> {
-        for cpu in &self.recorder.cpus {
-            let Some(guard) = cpu.ring.try_lock() else {
-                self.guards.clear();
-                return Err(Error::Busy);
-            };
-            self.guards.push(guard);
-        }
-        Ok(())
-    }
-
-    fn replace(&mut self) {
-        for (ring, guard) in self.rings.iter_mut().zip(&mut self.guards) {
-            core::mem::swap(ring, &mut **guard);
-        }
-        self.consumed = true;
-        self.guards.clear();
-    }
-
     /// Publish all selected rings atomically with admission. A failed start leaves
     /// both the old capture and this preparation intact, ready for retry or Drop.
     pub fn start(&mut self, filter: Filter) -> Result<Session, Error> {
@@ -395,43 +401,29 @@ impl<const CPUS: usize, const CAPACITY: usize> PreparedCapture<'_, CPUS, CAPACIT
                     .checked_add(1)
                     .filter(|value| *value <= MAX_GENERATION)
                     .ok_or(Error::Exhausted)?;
-                self.lock_rings()?;
-                for cpu in &self.recorder.cpus {
-                    cpu.loss.store(generation << 2, Ordering::Relaxed);
+                let locks: [_; CPUS] = core::array::from_fn(|cpu| &self.recorder.cpus[cpu].ring);
+                let mut index = 0;
+                if !SpinLock::try_with_each(&locks, |ring| {
+                    core::mem::swap(ring, &mut self.rings[index]);
+                    self.recorder.cpus[index]
+                        .loss
+                        .store(generation << 2, Ordering::Relaxed);
+                    index += 1;
+                }) {
+                    return Err(Error::Busy);
                 }
-                self.replace();
+                // Retain fresh empty slots for allocation-free clear. Any previous
+                // metadata leaves through this preparation, outside control locks.
+                core::mem::swap(&mut control.retirement, &mut self.retirement);
+                self.consumed = true;
                 control.generation = generation;
                 control.stopped = false;
                 control.present = true;
-                // Rings are unlocked before producers can observe admission.
                 self.recorder.requested.store(
                     (generation << FILTER_BITS) | u64::from(filter.0),
                     Ordering::Release,
                 );
                 Ok(Session(generation))
-            })
-            .ok_or(Error::Busy)?
-    }
-
-    /// Detach only an already stopped capture. All readers and delayed writers
-    /// are excluded before any storage moves; deallocation happens on Drop.
-    pub fn clear(&mut self, session: Session) -> Result<(), Error> {
-        if self.consumed || self.capacity != 0 {
-            return Err(Error::InvalidFilter);
-        }
-        self.recorder
-            .control
-            .try_with(|control| {
-                if !control.present || control.generation != session.0 {
-                    return Err(Error::InvalidSession);
-                }
-                if !control.stopped {
-                    return Err(Error::Busy);
-                }
-                self.lock_rings()?;
-                self.replace();
-                control.present = false;
-                Ok(())
             })
             .ok_or(Error::Busy)?
     }

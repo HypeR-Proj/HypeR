@@ -144,22 +144,23 @@ pub(crate) fn stop(generation: u64) -> Result<()> {
 }
 
 pub(crate) fn clear(generation: u64) -> Result<()> {
-    let mut retired = trace::prepare_clear().map_err(status)?;
-    CONTROL.with(|capture| {
+    let retired = CONTROL.with(|capture| {
         let session = session(capture, generation)?;
         if capture.running {
             return Err(HYPER_NATIVE_STATUS_BUSY);
         }
-        retired.clear(session).map_err(status)?;
+        let retired = trace::detach(session).map_err(status)?;
         capture.session = None;
         capture.started = 0;
         capture.deadline = 0;
         capture.categories = 0;
         capture.capacity = 0;
         capture.cpus = [0; 4];
-        Ok(())
-    })
-    // `retired` frees the detached buffers after CONTROL has been released.
+        Ok(retired)
+    })?;
+    // Reclaim only after CONTROL has been released; no allocation is needed.
+    drop(retired);
+    Ok(())
 }
 fn expire(_: &(), timer: CalloutRef<'_>, _: TimerEvent) {
     CONTROL.with(|capture| {

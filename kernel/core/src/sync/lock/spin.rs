@@ -5,8 +5,6 @@
 
 use core::cell::UnsafeCell;
 use core::hint::spin_loop;
-use core::marker::PhantomData;
-use core::ops::{Deref, DerefMut};
 
 use crate::sync::atomic::{AtomicBool, Ordering};
 
@@ -18,22 +16,16 @@ pub struct SpinLock<T> {
 
 struct LockRelease<'lock>(&'lock AtomicBool);
 
-/// A short exclusive borrow obtained without waiting. Must not cross a yield.
-pub struct SpinLockGuard<'lock, T> {
-    value: &'lock mut T,
-    _release: LockRelease<'lock>,
-    _local: PhantomData<*mut ()>,
+struct LocksRelease<'a, T> {
+    locks: &'a [&'a SpinLock<T>],
+    held: usize,
 }
 
-impl<T> Deref for SpinLockGuard<'_, T> {
-    type Target = T;
-    fn deref(&self) -> &T {
-        self.value
-    }
-}
-impl<T> DerefMut for SpinLockGuard<'_, T> {
-    fn deref_mut(&mut self) -> &mut T {
-        self.value
+impl<T> Drop for LocksRelease<'_, T> {
+    fn drop(&mut self) {
+        for lock in &self.locks[..self.held] {
+            lock.locked.store(false, Ordering::Release);
+        }
     }
 }
 
@@ -86,17 +78,35 @@ impl<T> SpinLock<T> {
         result
     }
 
+    /// Acquires every lock before visiting any value, without waiting or allocating.
+    /// Contention (including a duplicate lock) releases the acquired prefix and
+    /// returns false without invoking `operation`. Callbacks must not yield or
+    /// acquire these locks; unwind releases every lock but does not undo mutations.
+    pub fn try_with_each(locks: &[&Self], mut operation: impl FnMut(&mut T)) -> bool {
+        let mut release = LocksRelease { locks, held: 0 };
+        for lock in locks {
+            if lock
+                .locked
+                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_err()
+            {
+                return false;
+            }
+            release.held += 1;
+        }
+        for lock in locks {
+            // SAFETY: Every distinct lock was acquired above and remains held
+            // until `release` drops. Each exclusive reference stays in its callback.
+            operation(unsafe { &mut *lock.value.get() });
+        }
+        true
+    }
+
     /// Runs `operation` only when the lock can be acquired immediately.
     ///
     /// Fatal and diagnostic paths use this to avoid waiting on a lock held by
     /// the context that they interrupted.
     pub fn try_with<R>(&self, operation: impl FnOnce(&mut T) -> R) -> Option<R> {
-        self.try_lock().map(|mut guard| operation(&mut guard))
-    }
-
-    /// Acquires without waiting, allowing several locks to be joined before a
-    /// transactional update. Drop all guards before allocating, freeing or yielding.
-    pub fn try_lock(&self) -> Option<SpinLockGuard<'_, T>> {
         if self
             .locked
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -105,12 +115,11 @@ impl<T> SpinLock<T> {
             return None;
         }
 
-        Some(SpinLockGuard {
-            // SAFETY: The successful transition above gives this caller exclusive
-            // access until the guard's release token is dropped.
-            value: unsafe { &mut *self.value.get() },
-            _release: LockRelease(&self.locked),
-            _local: PhantomData,
-        })
+        let release = LockRelease(&self.locked);
+        // SAFETY: The successful transition above gives this caller exclusive
+        // access until `release` is dropped.
+        let result = operation(unsafe { &mut *self.value.get() });
+        drop(release);
+        Some(result)
     }
 }

@@ -121,19 +121,20 @@ CPU. Payload buffers never live on thread/IRQ stacks. Each CPU header is
 cache-line aligned; unselected CPUs have empty buffers.
 
 Publication tries all ring locks before swapping any ownership and opening
-admission. Preallocated lock bookkeeping keeps this bounded transaction free of
-allocation. Failure leaves the previous capture intact; replaced buffers are
-freed after releasing control locks. Stop joins writers but retains the buffers.
+admission. A bounded stack array of lock references keeps this transaction free
+of allocation; payload storage remains on the heap. Failure leaves the previous
+capture intact; replaced buffers are freed after releasing control locks. Stop joins writers but retains the buffers.
 Clear accepts only a stopped generation, detaches its buffers under the same
-locks, then frees them outside the locks and invalidates the generation. The
-generation counter is not reset. Read/control attempts using a cleared generation
-fail, and the next start allocates fresh storage. Builds without the feature have
+locks, then frees them outside the locks and invalidates the generation. Empty
+retirement slots are reserved at start, so clear needs no new allocation and can
+release a capture even under memory pressure. The generation counter is not
+reset. Read/control attempts using a cleared generation fail, and the next start allocates fresh storage. Builds without the feature have
 no recorder buffers.
 
 The machine adapter masks local interrupts through CPU selection, timestamping
 and append, restoring the caller's exact prior mask. Rings use the existing
-`SpinLock` exclusively through `try_with`; neither producer, control nor reader
-waits for a lock. An interrupted/recursive producer or a competing reader can
+`SpinLock` exclusively through `try_with` and `try_with_each`; neither producer,
+control nor reader waits for a lock. An interrupted/recursive producer or a competing reader can
 cause loss, but never makes the producer spin on an interrupted owner. There is
 no global writer counter or cross-CPU producer lock. Record append and batch copy
 are protected by the same acquire/release lock, preventing torn records.

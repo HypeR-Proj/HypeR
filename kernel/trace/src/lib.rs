@@ -15,10 +15,10 @@ mod macros;
 mod recorder;
 #[cfg(feature = "kernel-trace")]
 pub use global::{
-    CAPACITY, MachineEmitter, clear, emit, enabled, install, prepare, prepare_clear, read,
-    record_at, set_filter, start, start_with_capacity, stop,
+    CAPACITY, MachineEmitter, clear, detach, emit, enabled, install, prepare, read, record_at,
+    set_filter, start, start_with_capacity, stop,
 };
-pub use recorder::{Batch, Error, PreparedCapture, Recorder, Session, Ticket};
+pub use recorder::{Batch, Error, PreparedCapture, Recorder, RetiredCapture, Session, Ticket};
 
 /// Independently selectable event groups. Values are filter bits, not priorities.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

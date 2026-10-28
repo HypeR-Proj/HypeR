@@ -58,7 +58,8 @@ perf trace dump --output /data/trace.pftrace && perf trace clear
 `dump` stops recording before reading. `stop` is also available separately.
 Both accept `--generation N` to reject an unexpected replacement capture.
 `clear` also accepts this guard and releases a stopped capture's buffers; it
-rejects a running capture. Omit `clear` when another dump is needed.
+rejects a running capture and needs no new memory allocation to release buffers.
+Omit `clear` when another dump is needed.
 Starting again discards the previous capture. Reading is non-destructive, so
 another dump is possible until the next start or clear. The kernel stops at the deadline
 even if the collecting process exits unexpectedly.

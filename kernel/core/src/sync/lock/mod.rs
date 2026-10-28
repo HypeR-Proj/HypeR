@@ -9,4 +9,4 @@ mod spin;
 
 pub use interrupt::{InterruptMaskGuard, InterruptSpinLock};
 pub use sharded::InterruptShardedLock;
-pub use spin::{SpinLock, SpinLockGuard};
+pub use spin::SpinLock;
