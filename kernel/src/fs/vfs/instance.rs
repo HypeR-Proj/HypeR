@@ -257,6 +257,9 @@ impl FilesystemInstance {
         .map_err(Error::from)
     }
 
+    // Filesystem construction finishes before mount-point traversal. Do not
+    // retain the by-value backend and resource-admission scratch below its RPC.
+    #[inline(never)]
     pub(super) fn try_empty_ramfs(sponsor: &ResourceDomain) -> Result<FallibleArc<Self>, Error> {
         let charge = allocation_charge::<Self>(sponsor)?;
         FallibleArc::try_new(Self {
@@ -278,6 +281,8 @@ impl FilesystemInstance {
         }
     }
 
+    // Remote backend construction completes before mount-point lookup RPCs.
+    #[inline(never)]
     pub(super) fn try_from_remote(
         device: super::remote::Transport,
         sponsor: &ResourceDomain,
