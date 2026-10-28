@@ -27,7 +27,8 @@ static int64_t delegate(uint64_t builder, uint64_t source, uint32_t purpose, uin
 	if (!source)
 		return HYPER_NATIVE_STATUS_ACCESS_DENIED;
 	hyper_native_handle_info_t info = {0};
-	int64_t status = hyper_handle_get_info(source, &info).status;
+	int64_t status =
+		hyper_handle_get_info(source, &info, sizeof(hyper_native_handle_info_t)).status;
 	if (status != 0)
 		return status;
 	return hyper_process_builder_add_handle(builder, source, purpose, info.object_kind,
@@ -49,7 +50,8 @@ int64_t __hyper_std_process_begin(const char *program, size_t size, const char *
 	if (cwd_size) {
 		uint64_t base = cwd[0] == '/' ? root : working;
 		hyper_native_handle_info_t info = {0};
-		status = hyper_handle_get_info(base, &info).status;
+		status = hyper_handle_get_info(base, &info, sizeof(hyper_native_handle_info_t))
+				 .status;
 		if (status)
 			goto fail;
 		hyper_call_result_t opened =
@@ -281,7 +283,9 @@ int64_t __hyper_std_process_start(uint64_t *token, uint64_t *process)
 int64_t __hyper_std_process_id(uint64_t process, uint64_t *id)
 {
 	hyper_native_object_basic_info_t info = {0};
-	int64_t status = hyper_object_get_basic_info(process, &info).status;
+	int64_t status = hyper_object_get_basic_info(process, &info,
+						     sizeof(hyper_native_object_basic_info_t))
+				 .status;
 	if (status == 0)
 		*id = info.koid & HYPER_NATIVE_KOID_SLOT_MASK;
 	return status;
@@ -304,7 +308,8 @@ int64_t __hyper_std_process_wait(uint64_t process, uint32_t block, uint32_t *don
 	if (wait.status != 0)
 		return wait.status;
 	hyper_native_process_info_t info = {0};
-	int64_t status = hyper_process_get_info(process, &info).status;
+	int64_t status =
+		hyper_process_get_info(process, &info, sizeof(hyper_native_process_info_t)).status;
 	if (status != 0)
 		return status;
 	*done = 1;

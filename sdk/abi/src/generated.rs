@@ -384,12 +384,48 @@ pub const HYPER_NATIVE_SIGNAL_BLOCK_QUEUE_WRITABLE: u64 = 1_u64 << 1;
 /// Wait signal `peer_closed` for `block_queue` objects; bit positions are object-local.
 pub const HYPER_NATIVE_SIGNAL_BLOCK_QUEUE_PEER_CLOSED: u64 = 1_u64 << 2;
 
+/// `vmo_create_contiguous` in the `vmo_create` flags domain.
+///
+/// VMO allocation options; zero uses ordinary noncontiguous backing.
+/// Independent flag bit; combine permitted members with bitwise OR.
+pub const HYPER_NATIVE_VMO_CREATE_CONTIGUOUS: u64 = 1;
+
+/// `filesystem_mount_read_only` in the `filesystem_mount` flags domain.
+///
+/// Filesystem attachment options.
+/// Independent flag bit; combine permitted members with bitwise OR.
+pub const HYPER_NATIVE_FILESYSTEM_MOUNT_READ_ONLY: u64 = 1;
+
+/// `file_open_create` in the `file_open` flags domain.
+///
+/// File-open options; EXCLUSIVE requires CREATE.
+/// Independent flag bit; combine permitted members with bitwise OR.
+pub const HYPER_NATIVE_FILE_OPEN_CREATE: u64 = 1;
+/// `file_open_exclusive` in the `file_open` flags domain.
+///
+/// File-open options; EXCLUSIVE requires CREATE.
+/// Independent flag bit; combine permitted members with bitwise OR.
+pub const HYPER_NATIVE_FILE_OPEN_EXCLUSIVE: u64 = 2;
+/// `file_open_truncate` in the `file_open` flags domain.
+///
+/// File-open options; EXCLUSIVE requires CREATE.
+/// Independent flag bit; combine permitted members with bitwise OR.
+pub const HYPER_NATIVE_FILE_OPEN_TRUNCATE: u64 = 4;
+
+/// `directory_open_nofollow` in the `directory_open` flags domain.
+///
+/// Directory traversal options.
+/// Independent flag bit; combine permitted members with bitwise OR.
+///
+/// Reject a symbolic link in the final path component.
+pub const HYPER_NATIVE_DIRECTORY_OPEN_NOFOLLOW: u64 = 1;
+
 /// `rpc_trace_query` in the `rpc_trace_phase` enum domain.
 ///
 /// Optional, observational `ByteChannel` RPC annotations. Not transport operations.
 /// Select one value; this is not a bit mask.
 ///
-/// Probe support; all other arguments must be zero.
+/// Probe support; all other request fields must be zero.
 pub const HYPER_NATIVE_RPC_TRACE_QUERY: u64 = 0;
 /// `rpc_trace_client_begin` in the `rpc_trace_phase` enum domain.
 ///
@@ -2154,11 +2190,11 @@ pub const HYPER_NATIVE_OP_BYTE_CHANNEL_READ: u64 = 257;
 /// | Receiver | `receiver: Borrow, kind=byte_channel, rights=0x30` |
 /// | Operation | 258 |
 /// | Feature | `Core` |
-/// | Arguments | `phase: u64`, `request: u64`, `detail: u64`, `generation: u64`, `parent_connection: u64`, `parent_request: u64` |
+/// | Arguments | `request: user_address`, `request_size: byte_count` |
 /// | Results | `generation: u64`, `connection: u64` |
 /// | Capability effects | `receiver: Borrow, kind=byte_channel, rights=0x30` |
-/// | User memory | — |
-/// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+/// | User memory | `request: Read, len=request_size bytes, max-bytes=4096, record=rpc_trace_request; order=0` |
+/// | Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Capability` |
 ///
 /// Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
@@ -2211,7 +2247,7 @@ pub const HYPER_NATIVE_OP_CONSOLE_WRITE: u64 = 257;
 /// | Receiver | `directory: Borrow, kind=directory, rights=0x10` |
 /// | Operation | 256 |
 /// | Feature | `Core` |
-/// | Arguments | `path: user_address`, `path_size: byte_count`, `requested_rights: rights`, `options: u32` |
+/// | Arguments | `path: user_address`, `path_size: byte_count`, `requested_rights: rights`, `options: u32`, `mode: u32` |
 /// | Results | `file: handle` |
 /// | Capability effects | `directory: Borrow, kind=directory, rights=0x10`, `file: produce, kind=file, exact-from(requested_rights), allowed=0x9800000bb, required-from=directory` |
 /// | User memory | `path: Read, len=path_size bytes, max-bytes=4096; order=0` |
@@ -2515,10 +2551,10 @@ pub const HYPER_NATIVE_OP_PROCESS_GET_INFO: u64 = 257;
 /// | Receiver | `inspector: Borrow, kind=task_inspector, rights=0x8` |
 /// | Operation | 256 |
 /// | Feature | `Core` |
-/// | Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count` |
+/// | Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count`, `record_size: byte_count` |
 /// | Results | `count: element_count`, `next_cursor: u64` |
 /// | Capability effects | `inspector: Borrow, kind=task_inspector, rights=0x8` |
-/// | User memory | `records: Write, len=capacity elements, max-elements=8, element-size=96, record=task_process; order=0` |
+/// | User memory | `records: Write, len=capacity records, max-elements=8, stride=record_size bytes, max-stride=4096, record=task_process; order=0` |
 /// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Task` |
 ///
@@ -2534,10 +2570,10 @@ pub const HYPER_NATIVE_OP_TASK_INSPECTOR_SCAN_PROCESSES: u64 = 256;
 /// | Receiver | `inspector: Borrow, kind=task_inspector, rights=0x8` |
 /// | Operation | 257 |
 /// | Feature | `Core` |
-/// | Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count` |
+/// | Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count`, `record_size: byte_count` |
 /// | Results | `count: element_count`, `next_cursor: u64` |
 /// | Capability effects | `inspector: Borrow, kind=task_inspector, rights=0x8` |
-/// | User memory | `records: Write, len=capacity elements, max-elements=8, element-size=104, record=task_thread; order=0` |
+/// | User memory | `records: Write, len=capacity records, max-elements=8, stride=record_size bytes, max-stride=4096, record=task_thread; order=0` |
 /// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Task` |
 ///
@@ -2572,10 +2608,10 @@ pub const HYPER_NATIVE_OP_TASK_INSPECTOR_DERIVE_PROCESS: u64 = 258;
 /// | Receiver | `inspector: Borrow, kind=object_inspector, rights=0x8` |
 /// | Operation | 256 |
 /// | Feature | `Core` |
-/// | Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count` |
+/// | Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count`, `record_size: byte_count` |
 /// | Results | `count: element_count`, `next_cursor: u64` |
 /// | Capability effects | `inspector: Borrow, kind=object_inspector, rights=0x8` |
-/// | User memory | `records: Write, len=capacity elements, max-elements=8, element-size=104, record=object_inspection; order=0` |
+/// | User memory | `records: Write, len=capacity records, max-elements=8, stride=record_size bytes, max-stride=4096, record=object_inspection; order=0` |
 /// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Object` |
 ///
@@ -2591,10 +2627,10 @@ pub const HYPER_NATIVE_OP_OBJECT_INSPECTOR_SCAN_OBJECTS: u64 = 256;
 /// | Receiver | `inspector: Borrow, kind=object_inspector, rights=0x8` |
 /// | Operation | 257 |
 /// | Feature | `Core` |
-/// | Arguments | `process_koid: u64`, `cursor: u64`, `records: user_address`, `capacity: element_count` |
+/// | Arguments | `process_koid: u64`, `cursor: u64`, `records: user_address`, `capacity: element_count`, `record_size: byte_count` |
 /// | Results | `count: element_count`, `next_cursor: u64` |
 /// | Capability effects | `inspector: Borrow, kind=object_inspector, rights=0x8` |
-/// | User memory | `records: Write, len=capacity elements, max-elements=8, element-size=40, record=handle_inspection; order=0` |
+/// | User memory | `records: Write, len=capacity records, max-elements=8, stride=record_size bytes, max-stride=4096, record=handle_inspection; order=0` |
 /// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Object` |
 ///
@@ -2724,11 +2760,11 @@ pub const HYPER_NATIVE_OP_DIRECTORY_OPEN_DIRECTORY: u64 = 257;
 /// | Receiver | `receiver: Borrow, kind=object_factory, rights=0x8000000000` |
 /// | Operation | 259 |
 /// | Feature | `Core` |
-/// | Arguments | `size: byte_count` |
+/// | Arguments | `size: byte_count`, `options: u64` |
 /// | Results | `vmo: handle` |
 /// | Capability effects | `receiver: Borrow, kind=object_factory, rights=0x8000000000`, `vmo: produce, kind=vmo, fixed=0x7b` |
 /// | User memory | — |
-/// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+/// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
 /// | Audit | `Object` |
 ///
 /// Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
@@ -2876,10 +2912,10 @@ pub const HYPER_NATIVE_OP_VMAR_DESTROY: u64 = 260;
 /// | Receiver | `stream: Borrow, kind=directory_stream, rights=0x10` |
 /// | Operation | 256 |
 /// | Feature | `Core` |
-/// | Arguments | `cookie: u64`, `records: user_address`, `capacity: element_count`, `options: u32` |
+/// | Arguments | `cookie: u64`, `records: user_address`, `capacity: element_count`, `options: u32`, `record_size: byte_count` |
 /// | Results | `count: element_count`, `next_cookie: u64` |
 /// | Capability effects | `stream: Borrow, kind=directory_stream, rights=0x10` |
-/// | User memory | `records: Write, len=capacity elements, max-elements=4, element-size=280, record=directory_entry; order=0` |
+/// | User memory | `records: Write, len=capacity records, max-elements=4, stride=record_size bytes, max-stride=4096, record=directory_entry; order=0` |
 /// | Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
 /// | Audit | `Capability` |
 ///
@@ -2971,10 +3007,10 @@ pub const HYPER_NATIVE_OP_CPU_INSPECTOR_PROFILE_READ: u64 = 259;
 /// | Receiver | `inspector: Borrow, kind=cpu_inspector, rights=0x80000000` |
 /// | Operation | 260 |
 /// | Feature | `Core` |
-/// | Arguments | `configuration: user_address` |
+/// | Arguments | `request: user_address`, `request_size: byte_count` |
 /// | Results | `generation: u64` |
 /// | Capability effects | `inspector: Borrow, kind=cpu_inspector, rights=0x80000000` |
-/// | User memory | `configuration: Read, fixed-bytes=56, record=trace_config; order=0` |
+/// | User memory | `request: Read, len=request_size bytes, max-bytes=4096, record=trace_config; order=0` |
 /// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Object` |
 ///
@@ -3446,10 +3482,10 @@ pub const HYPER_NATIVE_OP_VIRTUAL_SERIAL_WRITE: u64 = 257;
 /// | Receiver | `receiver: Borrow, kind=execution_context, rights=0x200000` |
 /// | Operation | 260 |
 /// | Feature | `Core` |
-/// | Arguments | `entry: u64`, `stack: u64`, `tls: u64`, `argument: u64`, `affinity_words: user_address`, `word_count: element_count` |
+/// | Arguments | `request: user_address`, `request_size: byte_count` |
 /// | Results | `thread: handle` |
 /// | Capability effects | `receiver: Borrow, kind=execution_context, rights=0x200000`, `thread: produce, kind=thread, fixed=0x10000000c0f, inherited-from(receiver), mask=0xe0000000000` |
-/// | User memory | `affinity_words: Read, len=word_count elements, max-elements=4, element-size=8; order=0` |
+/// | User memory | `request: Read, len=request_size bytes, max-bytes=4096, record=thread_create_request; order=0` |
 /// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Task` |
 ///
@@ -3590,25 +3626,6 @@ pub const HYPER_NATIVE_OP_FILE_WRITE_AT: u64 = 258;
 ///
 /// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
 pub const HYPER_NATIVE_OP_FILE_RESIZE: u64 = 259;
-
-/// Object-local method `directory_create_file`.
-///
-/// | Property | Contract |
-/// | --- | --- |
-/// | Receiver | `directory: Borrow, kind=directory, rights=0x30` |
-/// | Operation | 259 |
-/// | Feature | `Core` |
-/// | Arguments | `path: user_address`, `path_size: byte_count`, `requested_rights: rights`, `mode: u32` |
-/// | Results | `file: handle` |
-/// | Capability effects | `directory: Borrow, kind=directory, rights=0x30`, `file: produce, kind=file, exact-from(requested_rights), allowed=0x9800000bb, required-from=directory` |
-/// | User memory | `path: Read, len=path_size bytes, max-bytes=4096; order=0` |
-/// | Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
-/// | Audit | `Capability` |
-///
-/// Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
-///
-/// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
-pub const HYPER_NATIVE_OP_DIRECTORY_CREATE_FILE: u64 = 259;
 
 /// Object-local method `directory_create_directory`.
 ///
@@ -4009,25 +4026,6 @@ pub const HYPER_NATIVE_OP_DIRECTORY_CANONICALIZE: u64 = 270;
 /// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
 pub const HYPER_NATIVE_OP_DIRECTORY_REMOVE_IF: u64 = 271;
 
-/// Object-local method `directory_open_directory_nofollow`.
-///
-/// | Property | Contract |
-/// | --- | --- |
-/// | Receiver | `directory: Borrow, kind=directory, rights=0x10` |
-/// | Operation | 272 |
-/// | Feature | `Core` |
-/// | Arguments | `path: user_address`, `path_length: byte_count`, `rights: rights` |
-/// | Results | `directory: handle` |
-/// | Capability effects | `directory: Borrow, kind=directory, rights=0x10`, `directory: produce, kind=directory, exact-from(rights), allowed=0x9800000bb, required-from=directory` |
-/// | User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0` |
-/// | Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
-/// | Audit | `Capability` |
-///
-/// Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
-///
-/// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
-pub const HYPER_NATIVE_OP_DIRECTORY_OPEN_DIRECTORY_NOFOLLOW: u64 = 272;
-
 /// Object-local method `file_sync`.
 ///
 /// | Property | Contract |
@@ -4103,25 +4101,6 @@ pub const HYPER_NATIVE_OP_FILE_UNLOCK: u64 = 264;
 ///
 /// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
 pub const HYPER_NATIVE_OP_CLOCK_GET_REALTIME: u64 = 258;
-
-/// Object-local method `directory_open_file_with_options`.
-///
-/// | Property | Contract |
-/// | --- | --- |
-/// | Receiver | `directory: Borrow, kind=directory, rights=0x10` |
-/// | Operation | 273 |
-/// | Feature | `Core` |
-/// | Arguments | `path: user_address`, `path_length: byte_count`, `rights: rights`, `options: u32`, `mode: u32` |
-/// | Results | `file: handle` |
-/// | Capability effects | `directory: Borrow, kind=directory, rights=0x10`, `file: produce, kind=file, exact-from(rights), allowed=0x9800000bb, required-from=directory` |
-/// | User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0` |
-/// | Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
-/// | Audit | `Capability` |
-///
-/// Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
-///
-/// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
-pub const HYPER_NATIVE_OP_DIRECTORY_OPEN_FILE_WITH_OPTIONS: u64 = 273;
 
 /// Object-local method `virtual_machine_creation_lease_get_platform_info`.
 ///
@@ -4331,25 +4310,6 @@ pub const HYPER_NATIVE_OP_GUEST_MEMORY_CREATE: u64 = 259;
 ///
 /// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
 pub const HYPER_NATIVE_OP_PENDING_VIRTUAL_MACHINE_MAP_MEMORY: u64 = 262;
-
-/// Object-local method `vmo_create_contiguous`.
-///
-/// | Property | Contract |
-/// | --- | --- |
-/// | Receiver | `receiver: Borrow, kind=object_factory, rights=0x8000000000` |
-/// | Operation | 262 |
-/// | Feature | `Core` |
-/// | Arguments | `size: byte_count` |
-/// | Results | `vmo: handle` |
-/// | Capability effects | `receiver: Borrow, kind=object_factory, rights=0x8000000000`, `vmo: produce, kind=vmo, fixed=0x7b` |
-/// | User memory | — |
-/// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
-/// | Audit | `Capability` |
-///
-/// Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
-///
-/// Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
-pub const HYPER_NATIVE_OP_VMO_CREATE_CONTIGUOUS: u64 = 262;
 
 /// Object-local method `device_claim`.
 ///
@@ -4567,10 +4527,10 @@ pub const HYPER_NATIVE_OP_NATIVE_BLOCK_ACTIVATE: u64 = 256;
 /// | Receiver | `directory: Borrow, kind=directory, rights=0xa0` |
 /// | Operation | 274 |
 /// | Feature | `Core` |
-/// | Arguments | `channel: handle`, `buffer: handle`, `path: user_address`, `path_length: byte_count`, `read_only: u64`, `queue: handle` |
+/// | Arguments | `channel: handle`, `buffer: handle`, `queue: handle`, `request: user_address`, `request_size: byte_count` |
 /// | Results | — |
 /// | Capability effects | `directory: Borrow, kind=directory, rights=0xa0`, `channel: Borrow, kind=byte_channel, rights=0x34`, `buffer: Borrow, kind=vmo, rights=0x70`, `queue: Borrow, kind=block_queue, rights=0x14` |
-/// | User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0` |
+/// | User memory | `request: Read, len=request_size bytes, max-bytes=4096, record=filesystem_mount_request; order=0` |
 /// | Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Capability` |
 ///
@@ -4681,10 +4641,10 @@ pub const HYPER_NATIVE_OP_DEVICE_RESOURCE_INFO: u64 = 258;
 /// | Receiver | `authority: Borrow, kind=device_assignment_authority, rights=0x8` |
 /// | Operation | 259 |
 /// | Feature | `Core` |
-/// | Arguments | `query: user_address`, `output: user_address`, `capacity: byte_count` |
+/// | Arguments | `query: user_address`, `query_size: byte_count`, `output: user_address`, `capacity: byte_count` |
 /// | Results | `value: u64` |
 /// | Capability effects | `authority: Borrow, kind=device_assignment_authority, rights=0x8` |
-/// | User memory | `query: Read, fixed-bytes=24, record=device_firmware_query; order=0`, `output: Write, len=capacity bytes, max-bytes=65536; order=1` |
+/// | User memory | `query: Read, len=query_size bytes, max-bytes=4096, record=device_firmware_query; order=0`, `output: Write, len=capacity bytes, max-bytes=65536; order=1` |
 /// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Capability` |
 ///
@@ -4871,10 +4831,10 @@ pub const HYPER_NATIVE_OP_FILESYSTEM_MOUNT_RAMFS: u64 = 276;
 /// | Receiver | `directory: Borrow, kind=directory, rights=0x4000000a0` |
 /// | Operation | 277 |
 /// | Feature | `Core` |
-/// | Arguments | `request: user_address` |
+/// | Arguments | `request: user_address`, `request_size: byte_count` |
 /// | Results | — |
 /// | Capability effects | `directory: Borrow, kind=directory, rights=0x4000000a0` |
-/// | User memory | `request: Read, fixed-bytes=48, record=filesystem_root_switch; order=0` |
+/// | User memory | `request: Read, len=request_size bytes, max-bytes=4096, record=filesystem_root_switch; order=0` |
 /// | Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Capability` |
 ///
@@ -5118,10 +5078,10 @@ pub const HYPER_NATIVE_OP_PROCESS_BUILDER_SET_MEMORY_LOCK: u64 = 263;
 /// | Receiver | `directory: Borrow, kind=directory, rights=0x4000000a0` |
 /// | Operation | 279 |
 /// | Feature | `Core` |
-/// | Arguments | `request: user_address` |
+/// | Arguments | `request: user_address`, `request_size: byte_count` |
 /// | Results | `transition: handle` |
 /// | Capability effects | `directory: Borrow, kind=directory, rights=0x4000000a0`, `transition: produce, kind=root_transition, fixed=0x2a` |
-/// | User memory | `request: Read, fixed-bytes=48, record=filesystem_root_switch; order=0` |
+/// | User memory | `request: Read, len=request_size bytes, max-bytes=4096, record=filesystem_root_switch; order=0` |
 /// | Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Capability` |
 ///
@@ -5479,10 +5439,10 @@ pub const HYPER_NATIVE_OP_NATIVE_BLOCK_TRANSFER: u64 = 257;
 /// | Receiver | `receiver: Borrow, kind=execution_context, rights=0x8` |
 /// | Operation | 266 |
 /// | Feature | `Core` |
-/// | Arguments | `configuration: user_address` |
-/// | Results | — |
+/// | Arguments | `configuration: user_address`, `configuration_size: byte_count` |
+/// | Results | `supported_size: byte_count` |
 /// | Capability effects | `receiver: Borrow, kind=execution_context, rights=0x8` |
-/// | User memory | `configuration: Write, fixed-bytes=64, record=scheduling_parameters; order=0` |
+/// | User memory | `configuration: Write, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
 /// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Task` |
 ///
@@ -5498,10 +5458,10 @@ pub const HYPER_NATIVE_OP_THREAD_GET_CURRENT_SCHEDULING: u64 = 266;
 /// | Receiver | `receiver: Borrow, kind=execution_context, rights=0x0` |
 /// | Operation | 267 |
 /// | Feature | `Core` |
-/// | Arguments | `configuration: user_address` |
+/// | Arguments | `configuration: user_address`, `configuration_size: byte_count` |
 /// | Results | — |
 /// | Capability effects | `receiver: Borrow, kind=execution_context, rights=0x0` |
-/// | User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+/// | User memory | `configuration: Read, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
 /// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Task` |
 ///
@@ -5517,10 +5477,10 @@ pub const HYPER_NATIVE_OP_THREAD_SET_CURRENT_SCHEDULING: u64 = 267;
 /// | Receiver | `receiver: Borrow, kind=thread, rights=0x8` |
 /// | Operation | 258 |
 /// | Feature | `Core` |
-/// | Arguments | `configuration: user_address` |
-/// | Results | — |
+/// | Arguments | `configuration: user_address`, `configuration_size: byte_count` |
+/// | Results | `supported_size: byte_count` |
 /// | Capability effects | `receiver: Borrow, kind=thread, rights=0x8` |
-/// | User memory | `configuration: Write, fixed-bytes=64, record=scheduling_parameters; order=0` |
+/// | User memory | `configuration: Write, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
 /// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Task` |
 ///
@@ -5536,10 +5496,10 @@ pub const HYPER_NATIVE_OP_THREAD_GET_SCHEDULING: u64 = 258;
 /// | Receiver | `receiver: Borrow, kind=thread, rights=0x0` |
 /// | Operation | 259 |
 /// | Feature | `Core` |
-/// | Arguments | `configuration: user_address` |
+/// | Arguments | `configuration: user_address`, `configuration_size: byte_count` |
 /// | Results | — |
 /// | Capability effects | `receiver: Borrow, kind=thread, rights=0x0` |
-/// | User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+/// | User memory | `configuration: Read, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
 /// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Task` |
 ///
@@ -5555,10 +5515,10 @@ pub const HYPER_NATIVE_OP_THREAD_SET_SCHEDULING: u64 = 259;
 /// | Receiver | `receiver: Borrow, kind=virtual_cpu, rights=0x8` |
 /// | Operation | 261 |
 /// | Feature | `Core` |
-/// | Arguments | `configuration: user_address` |
-/// | Results | — |
+/// | Arguments | `configuration: user_address`, `configuration_size: byte_count` |
+/// | Results | `supported_size: byte_count` |
 /// | Capability effects | `receiver: Borrow, kind=virtual_cpu, rights=0x8` |
-/// | User memory | `configuration: Write, fixed-bytes=64, record=scheduling_parameters; order=0` |
+/// | User memory | `configuration: Write, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
 /// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Task` |
 ///
@@ -5574,10 +5534,10 @@ pub const HYPER_NATIVE_OP_VIRTUAL_CPU_GET_SCHEDULING: u64 = 261;
 /// | Receiver | `receiver: Borrow, kind=virtual_cpu, rights=0x0` |
 /// | Operation | 262 |
 /// | Feature | `Core` |
-/// | Arguments | `configuration: user_address` |
+/// | Arguments | `configuration: user_address`, `configuration_size: byte_count` |
 /// | Results | — |
 /// | Capability effects | `receiver: Borrow, kind=virtual_cpu, rights=0x0` |
-/// | User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+/// | User memory | `configuration: Read, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
 /// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Task` |
 ///
@@ -5593,10 +5553,10 @@ pub const HYPER_NATIVE_OP_VIRTUAL_CPU_SET_SCHEDULING: u64 = 262;
 /// | Receiver | `receiver: Borrow, kind=process_builder, rights=0x0` |
 /// | Operation | 265 |
 /// | Feature | `Core` |
-/// | Arguments | `configuration: user_address`, `delegated_rights: rights` |
+/// | Arguments | `configuration: user_address`, `configuration_size: byte_count`, `delegated_rights: rights` |
 /// | Results | — |
 /// | Capability effects | `receiver: Borrow, kind=process_builder, rights=0x0` |
-/// | User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+/// | User memory | `configuration: Read, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
 /// | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 /// | Audit | `Task` |
 ///
@@ -5942,8 +5902,6 @@ pub enum NativeOperation {
     FileWriteAt,
     /// Decoded method; see [`HYPER_NATIVE_OP_FILE_RESIZE`] for its contract.
     FileResize,
-    /// Decoded method; see [`HYPER_NATIVE_OP_DIRECTORY_CREATE_FILE`] for its contract.
-    DirectoryCreateFile,
     /// Decoded method; see [`HYPER_NATIVE_OP_DIRECTORY_CREATE_DIRECTORY`] for its contract.
     DirectoryCreateDirectory,
     /// Decoded method; see [`HYPER_NATIVE_OP_DIRECTORY_REMOVE`] for its contract.
@@ -5986,8 +5944,6 @@ pub enum NativeOperation {
     DirectoryCanonicalize,
     /// Decoded method; see [`HYPER_NATIVE_OP_DIRECTORY_REMOVE_IF`] for its contract.
     DirectoryRemoveIf,
-    /// Decoded method; see [`HYPER_NATIVE_OP_DIRECTORY_OPEN_DIRECTORY_NOFOLLOW`] for its contract.
-    DirectoryOpenDirectoryNofollow,
     /// Decoded method; see [`HYPER_NATIVE_OP_FILE_SYNC`] for its contract.
     FileSync,
     /// Decoded method; see [`HYPER_NATIVE_OP_FILE_LOCK`] for its contract.
@@ -5996,8 +5952,6 @@ pub enum NativeOperation {
     FileUnlock,
     /// Decoded method; see [`HYPER_NATIVE_OP_CLOCK_GET_REALTIME`] for its contract.
     ClockGetRealtime,
-    /// Decoded method; see [`HYPER_NATIVE_OP_DIRECTORY_OPEN_FILE_WITH_OPTIONS`] for its contract.
-    DirectoryOpenFileWithOptions,
     /// Decoded method; see [`HYPER_NATIVE_OP_VIRTUAL_MACHINE_CREATION_LEASE_GET_PLATFORM_INFO`] for its contract.
     VirtualMachineCreationLeaseGetPlatformInfo,
     /// Decoded method; see [`HYPER_NATIVE_OP_VMO_CREATE_SNAPSHOT`] for its contract.
@@ -6020,8 +5974,6 @@ pub enum NativeOperation {
     GuestMemoryCreate,
     /// Decoded method; see [`HYPER_NATIVE_OP_PENDING_VIRTUAL_MACHINE_MAP_MEMORY`] for its contract.
     PendingVirtualMachineMapMemory,
-    /// Decoded method; see [`HYPER_NATIVE_OP_VMO_CREATE_CONTIGUOUS`] for its contract.
-    VmoCreateContiguous,
     /// Decoded method; see [`HYPER_NATIVE_OP_DEVICE_CLAIM`] for its contract.
     DeviceClaim,
     /// Decoded method; see [`HYPER_NATIVE_OP_PHYSICAL_DEVICE_INFO`] for its contract.
@@ -6316,7 +6268,6 @@ impl NativeOperation {
             (HYPER_NATIVE_OBJECT_EXECUTION_CONTEXT, HYPER_NATIVE_OP_THREAD_SLEEP) => Some(Self::ThreadSleep),
             (HYPER_NATIVE_OBJECT_FILE, HYPER_NATIVE_OP_FILE_WRITE_AT) => Some(Self::FileWriteAt),
             (HYPER_NATIVE_OBJECT_FILE, HYPER_NATIVE_OP_FILE_RESIZE) => Some(Self::FileResize),
-            (HYPER_NATIVE_OBJECT_DIRECTORY, HYPER_NATIVE_OP_DIRECTORY_CREATE_FILE) => Some(Self::DirectoryCreateFile),
             (HYPER_NATIVE_OBJECT_DIRECTORY, HYPER_NATIVE_OP_DIRECTORY_CREATE_DIRECTORY) => Some(Self::DirectoryCreateDirectory),
             (HYPER_NATIVE_OBJECT_DIRECTORY, HYPER_NATIVE_OP_DIRECTORY_REMOVE) => Some(Self::DirectoryRemove),
             (HYPER_NATIVE_OBJECT_OBJECT_FACTORY, HYPER_NATIVE_OP_WAIT_SET_CREATE) => Some(Self::WaitSetCreate),
@@ -6338,12 +6289,10 @@ impl NativeOperation {
             (HYPER_NATIVE_OBJECT_DIRECTORY, HYPER_NATIVE_OP_DIRECTORY_READ_LINK) => Some(Self::DirectoryReadLink),
             (HYPER_NATIVE_OBJECT_DIRECTORY, HYPER_NATIVE_OP_DIRECTORY_CANONICALIZE) => Some(Self::DirectoryCanonicalize),
             (HYPER_NATIVE_OBJECT_DIRECTORY, HYPER_NATIVE_OP_DIRECTORY_REMOVE_IF) => Some(Self::DirectoryRemoveIf),
-            (HYPER_NATIVE_OBJECT_DIRECTORY, HYPER_NATIVE_OP_DIRECTORY_OPEN_DIRECTORY_NOFOLLOW) => Some(Self::DirectoryOpenDirectoryNofollow),
             (HYPER_NATIVE_OBJECT_FILE, HYPER_NATIVE_OP_FILE_SYNC) => Some(Self::FileSync),
             (HYPER_NATIVE_OBJECT_FILE, HYPER_NATIVE_OP_FILE_LOCK) => Some(Self::FileLock),
             (HYPER_NATIVE_OBJECT_FILE, HYPER_NATIVE_OP_FILE_UNLOCK) => Some(Self::FileUnlock),
             (HYPER_NATIVE_OBJECT_SYSTEM_INFO, HYPER_NATIVE_OP_CLOCK_GET_REALTIME) => Some(Self::ClockGetRealtime),
-            (HYPER_NATIVE_OBJECT_DIRECTORY, HYPER_NATIVE_OP_DIRECTORY_OPEN_FILE_WITH_OPTIONS) => Some(Self::DirectoryOpenFileWithOptions),
             (HYPER_NATIVE_OBJECT_VIRTUAL_MACHINE_CREATION_LEASE, HYPER_NATIVE_OP_VIRTUAL_MACHINE_CREATION_LEASE_GET_PLATFORM_INFO) => Some(Self::VirtualMachineCreationLeaseGetPlatformInfo),
             (HYPER_NATIVE_OBJECT_VMO, HYPER_NATIVE_OP_VMO_CREATE_SNAPSHOT) => Some(Self::VmoCreateSnapshot),
             (HYPER_NATIVE_OBJECT_VMAR, HYPER_NATIVE_OP_VMAR_MAP_PRIVATE) => Some(Self::VmarMapPrivate),
@@ -6355,7 +6304,6 @@ impl NativeOperation {
             (HYPER_NATIVE_OBJECT_VIRTUAL_CPU, HYPER_NATIVE_OP_VIRTUAL_CPU_COMPLETE_MMIO) => Some(Self::VirtualCpuCompleteMmio),
             (HYPER_NATIVE_OBJECT_VMO, HYPER_NATIVE_OP_GUEST_MEMORY_CREATE) => Some(Self::GuestMemoryCreate),
             (HYPER_NATIVE_OBJECT_PENDING_VIRTUAL_MACHINE, HYPER_NATIVE_OP_PENDING_VIRTUAL_MACHINE_MAP_MEMORY) => Some(Self::PendingVirtualMachineMapMemory),
-            (HYPER_NATIVE_OBJECT_OBJECT_FACTORY, HYPER_NATIVE_OP_VMO_CREATE_CONTIGUOUS) => Some(Self::VmoCreateContiguous),
             (HYPER_NATIVE_OBJECT_DEVICE_ASSIGNMENT_AUTHORITY, HYPER_NATIVE_OP_DEVICE_CLAIM) => Some(Self::DeviceClaim),
             (HYPER_NATIVE_OBJECT_PHYSICAL_DEVICE, HYPER_NATIVE_OP_PHYSICAL_DEVICE_INFO) => Some(Self::PhysicalDeviceInfo),
             (HYPER_NATIVE_OBJECT_DEVICE_ASSIGNMENT_AUTHORITY, HYPER_NATIVE_OP_VMO_GET_DMA_EXTENT) => Some(Self::VmoGetDmaExtent),
@@ -6528,7 +6476,6 @@ impl NativeOperation {
             Self::ThreadSleep => HYPER_NATIVE_OP_THREAD_SLEEP,
             Self::FileWriteAt => HYPER_NATIVE_OP_FILE_WRITE_AT,
             Self::FileResize => HYPER_NATIVE_OP_FILE_RESIZE,
-            Self::DirectoryCreateFile => HYPER_NATIVE_OP_DIRECTORY_CREATE_FILE,
             Self::DirectoryCreateDirectory => HYPER_NATIVE_OP_DIRECTORY_CREATE_DIRECTORY,
             Self::DirectoryRemove => HYPER_NATIVE_OP_DIRECTORY_REMOVE,
             Self::WaitSetCreate => HYPER_NATIVE_OP_WAIT_SET_CREATE,
@@ -6550,12 +6497,10 @@ impl NativeOperation {
             Self::DirectoryReadLink => HYPER_NATIVE_OP_DIRECTORY_READ_LINK,
             Self::DirectoryCanonicalize => HYPER_NATIVE_OP_DIRECTORY_CANONICALIZE,
             Self::DirectoryRemoveIf => HYPER_NATIVE_OP_DIRECTORY_REMOVE_IF,
-            Self::DirectoryOpenDirectoryNofollow => HYPER_NATIVE_OP_DIRECTORY_OPEN_DIRECTORY_NOFOLLOW,
             Self::FileSync => HYPER_NATIVE_OP_FILE_SYNC,
             Self::FileLock => HYPER_NATIVE_OP_FILE_LOCK,
             Self::FileUnlock => HYPER_NATIVE_OP_FILE_UNLOCK,
             Self::ClockGetRealtime => HYPER_NATIVE_OP_CLOCK_GET_REALTIME,
-            Self::DirectoryOpenFileWithOptions => HYPER_NATIVE_OP_DIRECTORY_OPEN_FILE_WITH_OPTIONS,
             Self::VirtualMachineCreationLeaseGetPlatformInfo => HYPER_NATIVE_OP_VIRTUAL_MACHINE_CREATION_LEASE_GET_PLATFORM_INFO,
             Self::VmoCreateSnapshot => HYPER_NATIVE_OP_VMO_CREATE_SNAPSHOT,
             Self::VmarMapPrivate => HYPER_NATIVE_OP_VMAR_MAP_PRIVATE,
@@ -6567,7 +6512,6 @@ impl NativeOperation {
             Self::VirtualCpuCompleteMmio => HYPER_NATIVE_OP_VIRTUAL_CPU_COMPLETE_MMIO,
             Self::GuestMemoryCreate => HYPER_NATIVE_OP_GUEST_MEMORY_CREATE,
             Self::PendingVirtualMachineMapMemory => HYPER_NATIVE_OP_PENDING_VIRTUAL_MACHINE_MAP_MEMORY,
-            Self::VmoCreateContiguous => HYPER_NATIVE_OP_VMO_CREATE_CONTIGUOUS,
             Self::DeviceClaim => HYPER_NATIVE_OP_DEVICE_CLAIM,
             Self::PhysicalDeviceInfo => HYPER_NATIVE_OP_PHYSICAL_DEVICE_INFO,
             Self::VmoGetDmaExtent => HYPER_NATIVE_OP_VMO_GET_DMA_EXTENT,
@@ -6739,7 +6683,6 @@ impl NativeOperation {
             Self::ThreadSleep => Some(HYPER_NATIVE_OBJECT_EXECUTION_CONTEXT),
             Self::FileWriteAt => Some(HYPER_NATIVE_OBJECT_FILE),
             Self::FileResize => Some(HYPER_NATIVE_OBJECT_FILE),
-            Self::DirectoryCreateFile => Some(HYPER_NATIVE_OBJECT_DIRECTORY),
             Self::DirectoryCreateDirectory => Some(HYPER_NATIVE_OBJECT_DIRECTORY),
             Self::DirectoryRemove => Some(HYPER_NATIVE_OBJECT_DIRECTORY),
             Self::WaitSetCreate => Some(HYPER_NATIVE_OBJECT_OBJECT_FACTORY),
@@ -6761,12 +6704,10 @@ impl NativeOperation {
             Self::DirectoryReadLink => Some(HYPER_NATIVE_OBJECT_DIRECTORY),
             Self::DirectoryCanonicalize => Some(HYPER_NATIVE_OBJECT_DIRECTORY),
             Self::DirectoryRemoveIf => Some(HYPER_NATIVE_OBJECT_DIRECTORY),
-            Self::DirectoryOpenDirectoryNofollow => Some(HYPER_NATIVE_OBJECT_DIRECTORY),
             Self::FileSync => Some(HYPER_NATIVE_OBJECT_FILE),
             Self::FileLock => Some(HYPER_NATIVE_OBJECT_FILE),
             Self::FileUnlock => Some(HYPER_NATIVE_OBJECT_FILE),
             Self::ClockGetRealtime => Some(HYPER_NATIVE_OBJECT_SYSTEM_INFO),
-            Self::DirectoryOpenFileWithOptions => Some(HYPER_NATIVE_OBJECT_DIRECTORY),
             Self::VirtualMachineCreationLeaseGetPlatformInfo => Some(HYPER_NATIVE_OBJECT_VIRTUAL_MACHINE_CREATION_LEASE),
             Self::VmoCreateSnapshot => Some(HYPER_NATIVE_OBJECT_VMO),
             Self::VmarMapPrivate => Some(HYPER_NATIVE_OBJECT_VMAR),
@@ -6778,7 +6719,6 @@ impl NativeOperation {
             Self::VirtualCpuCompleteMmio => Some(HYPER_NATIVE_OBJECT_VIRTUAL_CPU),
             Self::GuestMemoryCreate => Some(HYPER_NATIVE_OBJECT_VMO),
             Self::PendingVirtualMachineMapMemory => Some(HYPER_NATIVE_OBJECT_PENDING_VIRTUAL_MACHINE),
-            Self::VmoCreateContiguous => Some(HYPER_NATIVE_OBJECT_OBJECT_FACTORY),
             Self::DeviceClaim => Some(HYPER_NATIVE_OBJECT_DEVICE_ASSIGNMENT_AUTHORITY),
             Self::PhysicalDeviceInfo => Some(HYPER_NATIVE_OBJECT_PHYSICAL_DEVICE),
             Self::VmoGetDmaExtent => Some(HYPER_NATIVE_OBJECT_DEVICE_ASSIGNMENT_AUTHORITY),
@@ -6874,10 +6814,10 @@ impl NativeOperation {
             Self::ByteChannelCreate => 1,
             Self::ByteChannelWrite => 3,
             Self::ByteChannelRead => 3,
-            Self::ByteChannelTraceRpc => 6,
+            Self::ByteChannelTraceRpc => 2,
             Self::ConsoleRead => 3,
             Self::ConsoleWrite => 3,
-            Self::DirectoryOpenFile => 4,
+            Self::DirectoryOpenFile => 5,
             Self::FileReadAt => 4,
             Self::CapabilityChannelCreate => 1,
             Self::CapabilityChannelTrySend => 5,
@@ -6893,18 +6833,18 @@ impl NativeOperation {
             Self::ProcessRequestStop => 0,
             Self::ObjectWaitMany => 3,
             Self::ProcessGetInfo => 2,
-            Self::TaskInspectorScanProcesses => 3,
-            Self::TaskInspectorScanThreads => 3,
+            Self::TaskInspectorScanProcesses => 4,
+            Self::TaskInspectorScanThreads => 4,
             Self::TaskInspectorDeriveProcess => 1,
-            Self::ObjectInspectorScanObjects => 3,
-            Self::ObjectInspectorScanHandles => 4,
+            Self::ObjectInspectorScanObjects => 4,
+            Self::ObjectInspectorScanHandles => 5,
             Self::ObjectInspectorDeriveProcess => 1,
             Self::TaskInspectorDeriveTaskGroup => 1,
             Self::ObjectInspectorDeriveTaskGroup => 1,
             Self::TaskInspectorDeriveResourceDomain => 1,
             Self::ObjectInspectorDeriveResourceDomain => 1,
             Self::DirectoryOpenDirectory => 4,
-            Self::VmoCreate => 1,
+            Self::VmoCreate => 2,
             Self::VmoRead => 3,
             Self::VmoWrite => 3,
             Self::VmarAllocate => 3,
@@ -6912,12 +6852,12 @@ impl NativeOperation {
             Self::VmarProtect => 3,
             Self::VmarUnmap => 2,
             Self::VmarDestroy => 0,
-            Self::DirectoryRead => 4,
+            Self::DirectoryRead => 5,
             Self::MemoryInspectorRead => 2,
             Self::CpuInspectorProfileStart => 2,
             Self::CpuInspectorProfileStop => 1,
             Self::CpuInspectorProfileRead => 5,
-            Self::CpuInspectorTraceStart => 1,
+            Self::CpuInspectorTraceStart => 2,
             Self::CpuInspectorTraceStop => 1,
             Self::CpuInspectorTraceClear => 1,
             Self::CpuInspectorTraceRead => 5,
@@ -6942,7 +6882,7 @@ impl NativeOperation {
             Self::VirtualSerialCreate => 0,
             Self::VirtualSerialRegisterOutput => 1,
             Self::VirtualSerialWrite => 2,
-            Self::ThreadCreate => 6,
+            Self::ThreadCreate => 2,
             Self::ThreadStart => 0,
             Self::ThreadRequestStop => 0,
             Self::AtomicWait => 3,
@@ -6950,7 +6890,6 @@ impl NativeOperation {
             Self::ThreadSleep => 1,
             Self::FileWriteAt => 4,
             Self::FileResize => 1,
-            Self::DirectoryCreateFile => 4,
             Self::DirectoryCreateDirectory => 3,
             Self::DirectoryRemove => 3,
             Self::WaitSetCreate => 1,
@@ -6972,12 +6911,10 @@ impl NativeOperation {
             Self::DirectoryReadLink => 4,
             Self::DirectoryCanonicalize => 4,
             Self::DirectoryRemoveIf => 4,
-            Self::DirectoryOpenDirectoryNofollow => 3,
             Self::FileSync => 1,
             Self::FileLock => 2,
             Self::FileUnlock => 0,
             Self::ClockGetRealtime => 0,
-            Self::DirectoryOpenFileWithOptions => 5,
             Self::VirtualMachineCreationLeaseGetPlatformInfo => 3,
             Self::VmoCreateSnapshot => 0,
             Self::VmarMapPrivate => 3,
@@ -6989,7 +6926,6 @@ impl NativeOperation {
             Self::VirtualCpuCompleteMmio => 3,
             Self::GuestMemoryCreate => 0,
             Self::PendingVirtualMachineMapMemory => 4,
-            Self::VmoCreateContiguous => 1,
             Self::DeviceClaim => 1,
             Self::PhysicalDeviceInfo => 2,
             Self::VmoGetDmaExtent => 5,
@@ -7001,13 +6937,13 @@ impl NativeOperation {
             Self::GuestNotificationControl => 1,
             Self::NativeBlockCreate => 4,
             Self::NativeBlockActivate => 1,
-            Self::FilesystemMount => 6,
+            Self::FilesystemMount => 5,
             Self::GuestMappingCreate => 2,
             Self::GuestMappingRelease => 0,
             Self::DeviceClaimMatching => 4,
             Self::DeviceProfileInfo => 2,
             Self::DeviceResourceInfo => 3,
-            Self::DeviceFirmwareRead => 3,
+            Self::DeviceFirmwareRead => 4,
             Self::DeviceClaimBundle => 3,
             Self::DeviceMmio => 4,
             Self::DeviceIrqPending => 0,
@@ -7017,7 +6953,7 @@ impl NativeOperation {
             Self::ObjectInspectorReadDetails => 5,
             Self::FilesystemUnmount => 2,
             Self::FilesystemMountRamfs => 2,
-            Self::FilesystemSwitchRoot => 1,
+            Self::FilesystemSwitchRoot => 2,
             Self::FilePrefetch => 2,
             Self::FileProtect => 0,
             Self::VmarMapFile => 4,
@@ -7030,7 +6966,7 @@ impl NativeOperation {
             Self::VmarLockMemory => 3,
             Self::VmarUnlockMemory => 3,
             Self::ProcessBuilderSetMemoryLock => 1,
-            Self::FilesystemBeginRootSwitch => 1,
+            Self::FilesystemBeginRootSwitch => 2,
             Self::FilesystemFinishRootSwitch => 1,
             Self::GuestMemoryTransfer => 4,
             Self::GuestMemoryScalar => 4,
@@ -7049,13 +6985,13 @@ impl NativeOperation {
             Self::ThreadSetCurrentName => 2,
             Self::DeviceDmaFaultInfo => 2,
             Self::NativeBlockTransfer => 4,
-            Self::ThreadGetCurrentScheduling => 1,
-            Self::ThreadSetCurrentScheduling => 1,
-            Self::ThreadGetScheduling => 1,
-            Self::ThreadSetScheduling => 1,
-            Self::VirtualCpuGetScheduling => 1,
-            Self::VirtualCpuSetScheduling => 1,
-            Self::ProcessBuilderSetScheduling => 2,
+            Self::ThreadGetCurrentScheduling => 2,
+            Self::ThreadSetCurrentScheduling => 2,
+            Self::ThreadGetScheduling => 2,
+            Self::ThreadSetScheduling => 2,
+            Self::VirtualCpuGetScheduling => 2,
+            Self::VirtualCpuSetScheduling => 2,
+            Self::ProcessBuilderSetScheduling => 3,
             Self::BlockQueueCreate => 3,
             Self::BlockQueueSubmit => 4,
             Self::BlockQueueWait => 2,
@@ -7161,7 +7097,6 @@ impl NativeOperation {
             Self::ThreadSleep => 32,
             Self::FileWriteAt => 32,
             Self::FileResize => 32,
-            Self::DirectoryCreateFile => 48,
             Self::DirectoryCreateDirectory => 48,
             Self::DirectoryRemove => 48,
             Self::WaitSetCreate => 549755813888,
@@ -7183,12 +7118,10 @@ impl NativeOperation {
             Self::DirectoryReadLink => 16,
             Self::DirectoryCanonicalize => 16,
             Self::DirectoryRemoveIf => 48,
-            Self::DirectoryOpenDirectoryNofollow => 16,
             Self::FileSync => 32,
             Self::FileLock => 4294967296,
             Self::FileUnlock => 4294967296,
             Self::ClockGetRealtime => 16,
-            Self::DirectoryOpenFileWithOptions => 16,
             Self::VirtualMachineCreationLeaseGetPlatformInfo => 8,
             Self::VmoCreateSnapshot => 16,
             Self::VmarMapPrivate => 64,
@@ -7200,7 +7133,6 @@ impl NativeOperation {
             Self::VirtualCpuCompleteMmio => 32,
             Self::GuestMemoryCreate => 112,
             Self::PendingVirtualMachineMapMemory => 32,
-            Self::VmoCreateContiguous => 549755813888,
             Self::DeviceClaim => 32768,
             Self::PhysicalDeviceInfo => 8,
             Self::VmoGetDmaExtent => 65536,
@@ -7307,6 +7239,118 @@ pub const fn hyper_native_failure_result_mask(
         None => 0,
     }
 }
+
+/// Minimum supported prefix of `thread_create_request`, in bytes; individual calls define their buffer lengths.
+pub const HYPER_NATIVE_THREAD_CREATE_REQUEST_MIN_SIZE: usize = 64;
+/// Wire layout for `thread_create_request`.
+///
+/// Size: 64 bytes; alignment: 8 bytes; supported minimum prefix: 64 bytes.
+/// Scalar widths and member offsets are fixed across supported architectures.
+/// The minimum prefix describes extensibility, not permission to truncate every call's buffer;
+/// the consuming operation defines its accepted length.
+///
+/// Used by: `thread_create`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HyperNativeThreadCreateRequest {
+    /// Wire offset 0 bytes; width 8 bytes.
+    pub entry: u64,
+    /// Wire offset 8 bytes; width 8 bytes.
+    pub stack: u64,
+    /// Wire offset 16 bytes; width 8 bytes.
+    pub tls: u64,
+    /// Wire offset 24 bytes; width 8 bytes.
+    pub argument: u64,
+    /// Wire offset 32 bytes; width 8 bytes.
+    pub affinity_words: u64,
+    /// Wire offset 40 bytes; width 8 bytes.
+    pub affinity_word_count: u64,
+    /// Wire offset 48 bytes; width 8 bytes.
+    pub flags: u64,
+    /// Wire offset 56 bytes; width 8 bytes.
+    pub reserved: u64,
+}
+const _: () = assert!(core::mem::size_of::<HyperNativeThreadCreateRequest>() == 64);
+const _: () = assert!(core::mem::align_of::<HyperNativeThreadCreateRequest>() == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeThreadCreateRequest, entry) == 0);
+const _: () = assert!(core::mem::offset_of!(HyperNativeThreadCreateRequest, stack) == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeThreadCreateRequest, tls) == 16);
+const _: () = assert!(core::mem::offset_of!(HyperNativeThreadCreateRequest, argument) == 24);
+const _: () = assert!(core::mem::offset_of!(HyperNativeThreadCreateRequest, affinity_words) == 32);
+const _: () =
+    assert!(core::mem::offset_of!(HyperNativeThreadCreateRequest, affinity_word_count) == 40);
+const _: () = assert!(core::mem::offset_of!(HyperNativeThreadCreateRequest, flags) == 48);
+const _: () = assert!(core::mem::offset_of!(HyperNativeThreadCreateRequest, reserved) == 56);
+
+/// Minimum supported prefix of `rpc_trace_request`, in bytes; individual calls define their buffer lengths.
+pub const HYPER_NATIVE_RPC_TRACE_REQUEST_MIN_SIZE: usize = 64;
+/// Wire layout for `rpc_trace_request`.
+///
+/// Size: 64 bytes; alignment: 8 bytes; supported minimum prefix: 64 bytes.
+/// Scalar widths and member offsets are fixed across supported architectures.
+/// The minimum prefix describes extensibility, not permission to truncate every call's buffer;
+/// the consuming operation defines its accepted length.
+///
+/// Used by: `byte_channel_trace_rpc`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HyperNativeRpcTraceRequest {
+    /// Wire offset 0 bytes; width 8 bytes.
+    pub phase: u64,
+    /// Wire offset 8 bytes; width 8 bytes.
+    pub request: u64,
+    /// Wire offset 16 bytes; width 8 bytes.
+    pub detail: u64,
+    /// Wire offset 24 bytes; width 8 bytes.
+    pub generation: u64,
+    /// Wire offset 32 bytes; width 8 bytes.
+    pub parent_connection: u64,
+    /// Wire offset 40 bytes; width 8 bytes.
+    pub parent_request: u64,
+    /// Wire offset 48 bytes; width 8 bytes.
+    pub flags: u64,
+    /// Wire offset 56 bytes; width 8 bytes.
+    pub reserved: u64,
+}
+const _: () = assert!(core::mem::size_of::<HyperNativeRpcTraceRequest>() == 64);
+const _: () = assert!(core::mem::align_of::<HyperNativeRpcTraceRequest>() == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeRpcTraceRequest, phase) == 0);
+const _: () = assert!(core::mem::offset_of!(HyperNativeRpcTraceRequest, request) == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeRpcTraceRequest, detail) == 16);
+const _: () = assert!(core::mem::offset_of!(HyperNativeRpcTraceRequest, generation) == 24);
+const _: () = assert!(core::mem::offset_of!(HyperNativeRpcTraceRequest, parent_connection) == 32);
+const _: () = assert!(core::mem::offset_of!(HyperNativeRpcTraceRequest, parent_request) == 40);
+const _: () = assert!(core::mem::offset_of!(HyperNativeRpcTraceRequest, flags) == 48);
+const _: () = assert!(core::mem::offset_of!(HyperNativeRpcTraceRequest, reserved) == 56);
+
+/// Minimum supported prefix of `filesystem_mount_request`, in bytes; individual calls define their buffer lengths.
+pub const HYPER_NATIVE_FILESYSTEM_MOUNT_REQUEST_MIN_SIZE: usize = 32;
+/// Wire layout for `filesystem_mount_request`.
+///
+/// Size: 32 bytes; alignment: 8 bytes; supported minimum prefix: 32 bytes.
+/// Scalar widths and member offsets are fixed across supported architectures.
+/// The minimum prefix describes extensibility, not permission to truncate every call's buffer;
+/// the consuming operation defines its accepted length.
+///
+/// Used by: `filesystem_mount`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HyperNativeFilesystemMountRequest {
+    /// Wire offset 0 bytes; width 8 bytes.
+    pub path: u64,
+    /// Wire offset 8 bytes; width 8 bytes.
+    pub path_size: u64,
+    /// Wire offset 16 bytes; width 8 bytes.
+    pub flags: u64,
+    /// Wire offset 24 bytes; width 8 bytes.
+    pub reserved: u64,
+}
+const _: () = assert!(core::mem::size_of::<HyperNativeFilesystemMountRequest>() == 32);
+const _: () = assert!(core::mem::align_of::<HyperNativeFilesystemMountRequest>() == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeFilesystemMountRequest, path) == 0);
+const _: () = assert!(core::mem::offset_of!(HyperNativeFilesystemMountRequest, path_size) == 8);
+const _: () = assert!(core::mem::offset_of!(HyperNativeFilesystemMountRequest, flags) == 16);
+const _: () = assert!(core::mem::offset_of!(HyperNativeFilesystemMountRequest, reserved) == 24);
 
 /// Minimum supported prefix of `trace_config`, in bytes; individual calls define their buffer lengths.
 pub const HYPER_NATIVE_TRACE_CONFIG_MIN_SIZE: usize = 56;

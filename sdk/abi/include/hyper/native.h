@@ -16,7 +16,19 @@
 /**
  * @page hyper_native_contract Native ABI semantic contract
  *
- * - byte_channel_trace_rpc is optional observational instrumentation requiring READ|WRITE on the endpoint; it cannot enable, read or stop a capture. A kernel without kernel-trace returns NOT_SUPPORTED. Query requires five zero arguments. Begin phases require a nonzero protocol request ID and detail is a caller-defined operation; generation/parent_connection/parent_request are either all zero or an explicitly propagated parent context. End phases carry the begin generation, nonzero request ID, caller-defined completion detail and zero parent fields. Success returns the admitted capture generation (zero when inactive or stale) and a boot-local connection identity shared by the endpoints. Contexts grant no authority. Request IDs must be unique among concurrent calls on a connection; clients and servers explicitly annotate their own boundaries. The kernel never parses opaque message payloads, infers parentage from thread adjacency, or retains annotations after the call. Stale generations do not correlate into a replacement capture. Missing boundaries produce incomplete observations rather than fabricated success.
+ * - ABI revision is a major compatibility generation, not a build number: additive operations, supported flags and record tails do not require changing it. Revision zero remains explicitly unstable until release. The receiver and operation are separate from six u64 argument registers and two auxiliary result registers. At least one argument register remains reserved in current signatures. All unused registers and reserved input fields must be zero; unknown option bits are INVALID_ARGUMENT. New operations or selectors unsupported by an older kernel return NOT_SUPPORTED where specified; callers must not infer runtime feature availability solely from ABI revision.
+ *
+ * - Extensible input records carry an explicit byte size bounded by EXTENSIBLE_RECORD_MAX_BYTES. A supported historical prefix remains valid; omitted known trailing fields default to zero and unknown supplied trailing bytes must be zero. Validation and copying precede side effects. Output records report their supported size where specified and never write beyond the caller's accepted prefix. C veneers accept caller-supplied sizes rather than deriving the caller's allocation size inside a shared library. SDK convenience functions may choose default options; they do not define additional machine operations.
+ *
+ * - Task/ObjectInspector scans and DirectoryStream reads take an explicit record_size byte stride, aligned to eight bytes and bounded by EXTENSIBLE_RECORD_MAX_BYTES. It must cover the record's stable minimum prefix. Each returned element starts at index times record_size; known prefixes are clipped to that stride and unknown output tails are zeroed. Capacity remains the documented bounded page capacity, and only the returned count elements are initialized. Input arrays of capability dispositions, wait items and device bundle entries retain their declared fixed element layouts; incompatible element meanings require a new typed format, never a silent stride change.
+ *
+ * - thread_create accepts a thread_create_request plus its size. Entry, initial stack, TLS, argument and optional bounded affinity retain their existing meanings. A zero affinity pointer and zero word count select inheritance; otherwise a nonzero readable pointer and one to PROCESS_AFFINITY_MAX_WORDS u64 words are required. Request flags and reserved are zero. The metadata is copied once before creation; referenced affinity storage remains caller-owned until the call returns.
+ *
+ * - filesystem_mount keeps channel, buffer and optional queue as separately typed capability arguments and takes a filesystem_mount_request plus its size for path and options. The request's path is a bounded readable byte range, flags admit only FILESYSTEM_MOUNT_READ_ONLY, and reserved is zero. No pointer remains borrowed after mounting returns. vmo_create admits VMO_CREATE_CONTIGUOUS for physically contiguous backing; zero options uses ordinary backing. Both retain the same ObjectFactory authority and produced rights.
+ *
+ * - directory_open_file is the only file open/create operation. FILE_OPEN_CREATE permits creation, FILE_OPEN_EXCLUSIVE additionally requires CREATE and rejects an existing entry, and FILE_OPEN_TRUNCATE requires WRITE on the returned File. Creation requires directory WRITE in addition to normal derivation rights, but the resulting File may be read-only. Mode supplies creation permissions and must fit 0777. Directory opens accept DIRECTORY_OPEN_NOFOLLOW to reject a final symbolic link; it does not prohibit traversal of earlier links. Unknown bits fail before namespace or file mutation.
+ *
+ * - byte_channel_trace_rpc is optional observational instrumentation requiring READ|WRITE on the endpoint; it cannot enable, read or stop a capture. A kernel without kernel-trace returns NOT_SUPPORTED. The size-delimited rpc_trace_request is copied once; flags and reserved are zero. Query requires the five fields after phase to be zero. Begin phases require a nonzero protocol request ID and detail is a caller-defined operation; generation/parent_connection/parent_request are either all zero or an explicitly propagated parent context. End phases carry the begin generation, nonzero request ID, caller-defined completion detail and zero parent fields. Success returns the admitted capture generation (zero when inactive or stale) and a boot-local connection identity shared by the endpoints. Contexts grant no authority. Request IDs must be unique among concurrent calls on a connection; clients and servers explicitly annotate their own boundaries. The kernel never parses opaque message payloads, infers parentage from thread adjacency, or retains annotations after the call. Stale generations do not correlate into a replacement capture. Missing boundaries produce incomplete observations rather than fabricated success.
  *
  * - Native invocations carry a process-local target handle in the selector register, a separate object-local operation, and six business argument registers. AArch64 uses x8/x6/x0..x5; RISC-V uses a7/a6/a0..a5. No global syscall number or implicit privileged target exists. Common handle operations use 0..5; object-specific operations start at 256 and may repeat across object kinds. Unknown target handles fail before operation dispatch; unknown operations return NOT_SUPPORTED. The receiver is not duplicated in the business arguments.
  *
@@ -24,7 +36,7 @@
  *
  * - device_dma_fault_info requires INSPECT and ASSIGN_DEVICE on the physical-device handle. It returns the first retained DMA containment report without consuming it; an all-zero record means no report. DMA_FAULT is a persistent level signal observed with WAIT. Claim and claim_matching grant WAIT. Fault evidence follows the device object across handle transfer; querying does not acknowledge or resume DMA. The kernel never selects a userspace process or stops a VM for this notification. The formal I/O runtime queries after adoption and journals each device's first report; bootstrap does not consume it. timestamp_ns is monotonic boot time. source 1 identifies SMMUv3. scope 1 means stream quarantine, with code holding the SMMUv3 event ID; scope 2 means controller containment, with code holding the captured GERROR bits (zero is possible for a software-detected failure). stream_id always identifies this handle's device. ADDRESS_VALID, READ and WRITE describe the address only for translation/access faults; controller reports disclose no other device's address. reserved is zero. A first stream report remains unchanged if the whole controller later fails. Quarantine and backing retention remain independent of observer presence or progress.
  *
- * - Scheduling reads require INSPECT on ExecutionContext, Thread or VirtualCpu. ExecutionContext targets only the invoking Thread; VirtualCpu targets its scheduler Thread. Configuration is a complete 64-byte record with canonical zero inactive/reserved fields. Fair weight is 1..1024 and quantum 1..1000000000 nanoseconds; Fair backend 2 requests the configured default, while reads return concrete backend 0 or 1. Budget Q, P and burst are positive, Q and burst do not exceed P, and P must equal the kernel arbitration period. Disabled policies or malformed parameters return INVALID_ARGUMENT before mutation.
+ * - Scheduling reads require INSPECT on ExecutionContext, Thread or VirtualCpu. ExecutionContext targets only the invoking Thread; VirtualCpu targets its scheduler Thread. Configuration uses an explicit byte size with a 64-byte minimum prefix and canonical zero inactive/reserved fields; unknown input tails must be zero. Reads report the supported record size. Fair weight is 1..1024 and quantum 1..1000000000 nanoseconds; Fair backend 2 requests the configured default, while reads return concrete backend 0 or 1. Budget Q, P and burst are positive, Q and burst do not exceed P, and P must equal the kernel arbitration period. Disabled policies or malformed parameters return INVALID_ARGUMENT before mutation.
  *
  * - Scheduling changes compare old and requested parameters atomically under scheduler ownership. SCHED_LOWER permits lowering band, Fair weight or FIFO priority; SCHED_PRIORITY permits raising those fields and changing quantum; SCHED_CLASS permits policy, arbitration role or Fair-backend changes; SCHED_BUDGET permits any budget change. A compound change may require multiple rights. WRITE, thread ownership, executable names and configuration text confer no elevation. Immutable target ceilings remain enforced after handle attenuation or transfer. Rejection preserves the old parameters.
  *
@@ -62,7 +74,7 @@
  *
  * - Native block creation dedicates one fully resident 1048576-byte guest-memory grant permanently to one kernel virtio-scsi initiator; repeated creation from that grant fails. The backend VM must retain the matching mapping until execution and physical DMA are quiescent. Six standard split queues (control, event, and four request queues) have size 8, descriptor offsets n*4096, available offsets n*4096+256, and used offsets n*4096+512, relative to guest_base. Userspace negotiates VERSION_1 with the backend before activation. Activation enables notifications and issues READ CAPACITY(16), accepting only 512-byte sectors; capacity is never supplied by userspace. The activated block object survives filesystem worker handoff; a clean unmount returns that object rather than activating a replacement. Synchronous native_block_transfer calls use a persistent internal logical queue on the same device engine as explicit BlockQueue submissions, including their overlap ordering and flush fences. The transport has four independent command heads and a shared 512 KiB data pool. A command can use up to four contiguous 128 KiB data spans, so larger merged commands trade command concurrency for transfer size. Requests use shared queues and kernel completion notifications, not per-request userspace RPC. Unretired request failures permanently disconnect the initiator and never recycle its buffer. PEER_CLOSED reports disconnection. The physical pages remain retained by backend mappings until VM/DMA retirement; notification closure alone never proves DMA quiescence.
  *
- * - filesystem_mount borrows a READ|WRITE|WAIT ByteChannel, a READ|WRITE|MAP shared VMO, an optional READ|WAIT BlockQueue bound to the exact volume (also WRITE for writable mounts), and a WRITE|EXECUTE Directory. A zero queue handle selects buffered requests for a provider without block storage; a nonzero queue binds immutable write windows and direct read plans. The kernel retains the transport and buffer, validates the worker root, and publishes a fresh mount and filesystem identity at the capability-relative path. The VMO must satisfy the published filesystem protocol capacity and pinning contract. read_only is exactly zero or one; read-only mounts reject mutating protocol operations in the kernel independently of worker policy. Media discovery, format selection and exclusive NativeBlock ownership belong to the userspace filesystem manager and format worker, not this syscall.
+ * - filesystem_mount borrows a READ|WRITE|WAIT ByteChannel, a READ|WRITE|MAP shared VMO, an optional READ|WAIT BlockQueue bound to the exact volume (also WRITE for writable mounts), and a WRITE|EXECUTE Directory. A zero queue handle selects buffered requests for a provider without block storage; a nonzero queue binds immutable write windows and direct read plans. The kernel retains the transport and buffer, validates the worker root, and publishes a fresh mount and filesystem identity at the capability-relative path. The VMO must satisfy the published filesystem protocol capacity and pinning contract. flags accept only FILESYSTEM_MOUNT_READ_ONLY; read-only mounts reject mutating protocol operations in the kernel independently of worker policy. Media discovery, format selection and exclusive NativeBlock ownership belong to the userspace filesystem manager and format worker, not this syscall.
  *
  * - filesystem_mount_ramfs and filesystem_switch_root require MANAGE_NAMESPACE|WRITE|EXECUTE on the live namespace-root Directory anchor. Ordinary directory opens never confer MANAGE_NAMESPACE; only explicit capability duplication, delegation or root-anchor scope creation preserves it. Ramfs mount does not create or configure block filesystems. switch_root copies its request, at most 16 mount moves and every bounded UTF-8 path before namespace mutation; zero moves requires a null moves pointer. new_root and move sources resolve in the old namespace, while put_old and move targets resolve inside new_root. The root and all requested moves publish atomically. Existing non-anchor Directory and File capabilities retain their opened locations; existing root anchors follow the published root. A rejected transaction preserves all mount edges and the current root. Paths are at most 4096 bytes, nonempty and contain no NUL bytes. Layout, boot stages and the choice of put_old are userspace policy.
  *
@@ -913,6 +925,82 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
 #define HYPER_NATIVE_SIGNAL_BLOCK_QUEUE_PEER_CLOSED (UINT64_C(1) << 2)
 
 /**
+ * @defgroup hyper_native_vmo_create vmo_create (flags)
+ * @ingroup hyper_native
+ * VMO allocation options; zero uses ordinary noncontiguous backing.
+ * @{
+ */
+/**
+ * `vmo_create_contiguous` in the `vmo_create` flags domain.
+ *
+ * VMO allocation options; zero uses ordinary noncontiguous backing.
+ * Independent flag bit; combine permitted members with bitwise OR.
+ */
+#define HYPER_NATIVE_VMO_CREATE_CONTIGUOUS UINT64_C(1)
+/** @} */
+
+/**
+ * @defgroup hyper_native_filesystem_mount filesystem_mount (flags)
+ * @ingroup hyper_native
+ * Filesystem attachment options.
+ * @{
+ */
+/**
+ * `filesystem_mount_read_only` in the `filesystem_mount` flags domain.
+ *
+ * Filesystem attachment options.
+ * Independent flag bit; combine permitted members with bitwise OR.
+ */
+#define HYPER_NATIVE_FILESYSTEM_MOUNT_READ_ONLY UINT64_C(1)
+/** @} */
+
+/**
+ * @defgroup hyper_native_file_open file_open (flags)
+ * @ingroup hyper_native
+ * File-open options; EXCLUSIVE requires CREATE.
+ * @{
+ */
+/**
+ * `file_open_create` in the `file_open` flags domain.
+ *
+ * File-open options; EXCLUSIVE requires CREATE.
+ * Independent flag bit; combine permitted members with bitwise OR.
+ */
+#define HYPER_NATIVE_FILE_OPEN_CREATE UINT64_C(1)
+/**
+ * `file_open_exclusive` in the `file_open` flags domain.
+ *
+ * File-open options; EXCLUSIVE requires CREATE.
+ * Independent flag bit; combine permitted members with bitwise OR.
+ */
+#define HYPER_NATIVE_FILE_OPEN_EXCLUSIVE UINT64_C(2)
+/**
+ * `file_open_truncate` in the `file_open` flags domain.
+ *
+ * File-open options; EXCLUSIVE requires CREATE.
+ * Independent flag bit; combine permitted members with bitwise OR.
+ */
+#define HYPER_NATIVE_FILE_OPEN_TRUNCATE UINT64_C(4)
+/** @} */
+
+/**
+ * @defgroup hyper_native_directory_open directory_open (flags)
+ * @ingroup hyper_native
+ * Directory traversal options.
+ * @{
+ */
+/**
+ * `directory_open_nofollow` in the `directory_open` flags domain.
+ *
+ * Directory traversal options.
+ * Independent flag bit; combine permitted members with bitwise OR.
+ *
+ * Reject a symbolic link in the final path component.
+ */
+#define HYPER_NATIVE_DIRECTORY_OPEN_NOFOLLOW UINT64_C(1)
+/** @} */
+
+/**
  * @defgroup hyper_native_rpc_trace_phase rpc_trace_phase (enum)
  * @ingroup hyper_native
  * Optional, observational `ByteChannel` RPC annotations. Not transport operations.
@@ -924,7 +1012,7 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * Optional, observational `ByteChannel` RPC annotations. Not transport operations.
  * Select one value; this is not a bit mask.
  *
- * Probe support; all other arguments must be zero.
+ * Probe support; all other request fields must be zero.
  */
 #define HYPER_NATIVE_RPC_TRACE_QUERY UINT64_C(0)
 /**
@@ -3670,11 +3758,11 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `receiver: Borrow, kind=byte_channel, rights=0x30` |
  * | Operation | 258 |
  * | Feature | `Core` |
- * | Arguments | `phase: u64`, `request: u64`, `detail: u64`, `generation: u64`, `parent_connection: u64`, `parent_request: u64` |
+ * | Arguments | `request: user_address`, `request_size: byte_count` |
  * | Results | `generation: u64`, `connection: u64` |
  * | Capability effects | `receiver: Borrow, kind=byte_channel, rights=0x30` |
- * | User memory | — |
- * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+ * | User memory | `request: Read, len=request_size bytes, max-bytes=4096, record=rpc_trace_request; order=0` |
+ * | Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Capability` |
  *
  * Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
@@ -3733,7 +3821,7 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `directory: Borrow, kind=directory, rights=0x10` |
  * | Operation | 256 |
  * | Feature | `Core` |
- * | Arguments | `path: user_address`, `path_size: byte_count`, `requested_rights: rights`, `options: u32` |
+ * | Arguments | `path: user_address`, `path_size: byte_count`, `requested_rights: rights`, `options: u32`, `mode: u32` |
  * | Results | `file: handle` |
  * | Capability effects | `directory: Borrow, kind=directory, rights=0x10`, `file: produce, kind=file, exact-from(requested_rights), allowed=0x9800000bb, required-from=directory` |
  * | User memory | `path: Read, len=path_size bytes, max-bytes=4096; order=0` |
@@ -4069,10 +4157,10 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `inspector: Borrow, kind=task_inspector, rights=0x8` |
  * | Operation | 256 |
  * | Feature | `Core` |
- * | Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count` |
+ * | Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count`, `record_size: byte_count` |
  * | Results | `count: element_count`, `next_cursor: u64` |
  * | Capability effects | `inspector: Borrow, kind=task_inspector, rights=0x8` |
- * | User memory | `records: Write, len=capacity elements, max-elements=8, element-size=96, record=task_process; order=0` |
+ * | User memory | `records: Write, len=capacity records, max-elements=8, stride=record_size bytes, max-stride=4096, record=task_process; order=0` |
  * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Task` |
  *
@@ -4090,10 +4178,10 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `inspector: Borrow, kind=task_inspector, rights=0x8` |
  * | Operation | 257 |
  * | Feature | `Core` |
- * | Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count` |
+ * | Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count`, `record_size: byte_count` |
  * | Results | `count: element_count`, `next_cursor: u64` |
  * | Capability effects | `inspector: Borrow, kind=task_inspector, rights=0x8` |
- * | User memory | `records: Write, len=capacity elements, max-elements=8, element-size=104, record=task_thread; order=0` |
+ * | User memory | `records: Write, len=capacity records, max-elements=8, stride=record_size bytes, max-stride=4096, record=task_thread; order=0` |
  * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Task` |
  *
@@ -4132,10 +4220,10 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `inspector: Borrow, kind=object_inspector, rights=0x8` |
  * | Operation | 256 |
  * | Feature | `Core` |
- * | Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count` |
+ * | Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count`, `record_size: byte_count` |
  * | Results | `count: element_count`, `next_cursor: u64` |
  * | Capability effects | `inspector: Borrow, kind=object_inspector, rights=0x8` |
- * | User memory | `records: Write, len=capacity elements, max-elements=8, element-size=104, record=object_inspection; order=0` |
+ * | User memory | `records: Write, len=capacity records, max-elements=8, stride=record_size bytes, max-stride=4096, record=object_inspection; order=0` |
  * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Object` |
  *
@@ -4153,10 +4241,10 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `inspector: Borrow, kind=object_inspector, rights=0x8` |
  * | Operation | 257 |
  * | Feature | `Core` |
- * | Arguments | `process_koid: u64`, `cursor: u64`, `records: user_address`, `capacity: element_count` |
+ * | Arguments | `process_koid: u64`, `cursor: u64`, `records: user_address`, `capacity: element_count`, `record_size: byte_count` |
  * | Results | `count: element_count`, `next_cursor: u64` |
  * | Capability effects | `inspector: Borrow, kind=object_inspector, rights=0x8` |
- * | User memory | `records: Write, len=capacity elements, max-elements=8, element-size=40, record=handle_inspection; order=0` |
+ * | User memory | `records: Write, len=capacity records, max-elements=8, stride=record_size bytes, max-stride=4096, record=handle_inspection; order=0` |
  * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Object` |
  *
@@ -4300,11 +4388,11 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `receiver: Borrow, kind=object_factory, rights=0x8000000000` |
  * | Operation | 259 |
  * | Feature | `Core` |
- * | Arguments | `size: byte_count` |
+ * | Arguments | `size: byte_count`, `options: u64` |
  * | Results | `vmo: handle` |
  * | Capability effects | `receiver: Borrow, kind=object_factory, rights=0x8000000000`, `vmo: produce, kind=vmo, fixed=0x7b` |
  * | User memory | — |
- * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+ * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
  * | Audit | `Object` |
  *
  * Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
@@ -4468,10 +4556,10 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `stream: Borrow, kind=directory_stream, rights=0x10` |
  * | Operation | 256 |
  * | Feature | `Core` |
- * | Arguments | `cookie: u64`, `records: user_address`, `capacity: element_count`, `options: u32` |
+ * | Arguments | `cookie: u64`, `records: user_address`, `capacity: element_count`, `options: u32`, `record_size: byte_count` |
  * | Results | `count: element_count`, `next_cookie: u64` |
  * | Capability effects | `stream: Borrow, kind=directory_stream, rights=0x10` |
- * | User memory | `records: Write, len=capacity elements, max-elements=4, element-size=280, record=directory_entry; order=0` |
+ * | User memory | `records: Write, len=capacity records, max-elements=4, stride=record_size bytes, max-stride=4096, record=directory_entry; order=0` |
  * | Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
  * | Audit | `Capability` |
  *
@@ -4573,10 +4661,10 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `inspector: Borrow, kind=cpu_inspector, rights=0x80000000` |
  * | Operation | 260 |
  * | Feature | `Core` |
- * | Arguments | `configuration: user_address` |
+ * | Arguments | `request: user_address`, `request_size: byte_count` |
  * | Results | `generation: u64` |
  * | Capability effects | `inspector: Borrow, kind=cpu_inspector, rights=0x80000000` |
- * | User memory | `configuration: Read, fixed-bytes=56, record=trace_config; order=0` |
+ * | User memory | `request: Read, len=request_size bytes, max-bytes=4096, record=trace_config; order=0` |
  * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Object` |
  *
@@ -5098,10 +5186,10 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `receiver: Borrow, kind=execution_context, rights=0x200000` |
  * | Operation | 260 |
  * | Feature | `Core` |
- * | Arguments | `entry: u64`, `stack: u64`, `tls: u64`, `argument: u64`, `affinity_words: user_address`, `word_count: element_count` |
+ * | Arguments | `request: user_address`, `request_size: byte_count` |
  * | Results | `thread: handle` |
  * | Capability effects | `receiver: Borrow, kind=execution_context, rights=0x200000`, `thread: produce, kind=thread, fixed=0x10000000c0f, inherited-from(receiver), mask=0xe0000000000` |
- * | User memory | `affinity_words: Read, len=word_count elements, max-elements=4, element-size=8; order=0` |
+ * | User memory | `request: Read, len=request_size bytes, max-bytes=4096, record=thread_create_request; order=0` |
  * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Task` |
  *
@@ -5257,27 +5345,6 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
  */
 #define HYPER_NATIVE_OP_FILE_RESIZE UINT64_C(259)
-
-/**
- * Object-local method `directory_create_file`.
- *
- * | Property | Contract |
- * | --- | --- |
- * | Receiver | `directory: Borrow, kind=directory, rights=0x30` |
- * | Operation | 259 |
- * | Feature | `Core` |
- * | Arguments | `path: user_address`, `path_size: byte_count`, `requested_rights: rights`, `mode: u32` |
- * | Results | `file: handle` |
- * | Capability effects | `directory: Borrow, kind=directory, rights=0x30`, `file: produce, kind=file, exact-from(requested_rights), allowed=0x9800000bb, required-from=directory` |
- * | User memory | `path: Read, len=path_size bytes, max-bytes=4096; order=0` |
- * | Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
- * | Audit | `Capability` |
- *
- * Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
- *
- * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
- */
-#define HYPER_NATIVE_OP_DIRECTORY_CREATE_FILE UINT64_C(259)
 
 /**
  * Object-local method `directory_create_directory`.
@@ -5721,27 +5788,6 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
 #define HYPER_NATIVE_OP_DIRECTORY_REMOVE_IF UINT64_C(271)
 
 /**
- * Object-local method `directory_open_directory_nofollow`.
- *
- * | Property | Contract |
- * | --- | --- |
- * | Receiver | `directory: Borrow, kind=directory, rights=0x10` |
- * | Operation | 272 |
- * | Feature | `Core` |
- * | Arguments | `path: user_address`, `path_length: byte_count`, `rights: rights` |
- * | Results | `directory: handle` |
- * | Capability effects | `directory: Borrow, kind=directory, rights=0x10`, `directory: produce, kind=directory, exact-from(rights), allowed=0x9800000bb, required-from=directory` |
- * | User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0` |
- * | Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
- * | Audit | `Capability` |
- *
- * Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
- *
- * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
- */
-#define HYPER_NATIVE_OP_DIRECTORY_OPEN_DIRECTORY_NOFOLLOW UINT64_C(272)
-
-/**
  * Object-local method `file_sync`.
  *
  * | Property | Contract |
@@ -5824,27 +5870,6 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
  */
 #define HYPER_NATIVE_OP_CLOCK_GET_REALTIME UINT64_C(258)
-
-/**
- * Object-local method `directory_open_file_with_options`.
- *
- * | Property | Contract |
- * | --- | --- |
- * | Receiver | `directory: Borrow, kind=directory, rights=0x10` |
- * | Operation | 273 |
- * | Feature | `Core` |
- * | Arguments | `path: user_address`, `path_length: byte_count`, `rights: rights`, `options: u32`, `mode: u32` |
- * | Results | `file: handle` |
- * | Capability effects | `directory: Borrow, kind=directory, rights=0x10`, `file: produce, kind=file, exact-from(rights), allowed=0x9800000bb, required-from=directory` |
- * | User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0` |
- * | Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
- * | Audit | `Capability` |
- *
- * Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
- *
- * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
- */
-#define HYPER_NATIVE_OP_DIRECTORY_OPEN_FILE_WITH_OPTIONS UINT64_C(273)
 
 /**
  * Object-local method `virtual_machine_creation_lease_get_platform_info`.
@@ -6076,27 +6101,6 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
  */
 #define HYPER_NATIVE_OP_PENDING_VIRTUAL_MACHINE_MAP_MEMORY UINT64_C(262)
-
-/**
- * Object-local method `vmo_create_contiguous`.
- *
- * | Property | Contract |
- * | --- | --- |
- * | Receiver | `receiver: Borrow, kind=object_factory, rights=0x8000000000` |
- * | Operation | 262 |
- * | Feature | `Core` |
- * | Arguments | `size: byte_count` |
- * | Results | `vmo: handle` |
- * | Capability effects | `receiver: Borrow, kind=object_factory, rights=0x8000000000`, `vmo: produce, kind=vmo, fixed=0x7b` |
- * | User memory | — |
- * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
- * | Audit | `Capability` |
- *
- * Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
- *
- * Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
- */
-#define HYPER_NATIVE_OP_VMO_CREATE_CONTIGUOUS UINT64_C(262)
 
 /**
  * Object-local method `device_claim`.
@@ -6337,10 +6341,10 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `directory: Borrow, kind=directory, rights=0xa0` |
  * | Operation | 274 |
  * | Feature | `Core` |
- * | Arguments | `channel: handle`, `buffer: handle`, `path: user_address`, `path_length: byte_count`, `read_only: u64`, `queue: handle` |
+ * | Arguments | `channel: handle`, `buffer: handle`, `queue: handle`, `request: user_address`, `request_size: byte_count` |
  * | Results | — |
  * | Capability effects | `directory: Borrow, kind=directory, rights=0xa0`, `channel: Borrow, kind=byte_channel, rights=0x34`, `buffer: Borrow, kind=vmo, rights=0x70`, `queue: Borrow, kind=block_queue, rights=0x14` |
- * | User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0` |
+ * | User memory | `request: Read, len=request_size bytes, max-bytes=4096, record=filesystem_mount_request; order=0` |
  * | Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Capability` |
  *
@@ -6463,10 +6467,10 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `authority: Borrow, kind=device_assignment_authority, rights=0x8` |
  * | Operation | 259 |
  * | Feature | `Core` |
- * | Arguments | `query: user_address`, `output: user_address`, `capacity: byte_count` |
+ * | Arguments | `query: user_address`, `query_size: byte_count`, `output: user_address`, `capacity: byte_count` |
  * | Results | `value: u64` |
  * | Capability effects | `authority: Borrow, kind=device_assignment_authority, rights=0x8` |
- * | User memory | `query: Read, fixed-bytes=24, record=device_firmware_query; order=0`, `output: Write, len=capacity bytes, max-bytes=65536; order=1` |
+ * | User memory | `query: Read, len=query_size bytes, max-bytes=4096, record=device_firmware_query; order=0`, `output: Write, len=capacity bytes, max-bytes=65536; order=1` |
  * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Capability` |
  *
@@ -6673,10 +6677,10 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `directory: Borrow, kind=directory, rights=0x4000000a0` |
  * | Operation | 277 |
  * | Feature | `Core` |
- * | Arguments | `request: user_address` |
+ * | Arguments | `request: user_address`, `request_size: byte_count` |
  * | Results | — |
  * | Capability effects | `directory: Borrow, kind=directory, rights=0x4000000a0` |
- * | User memory | `request: Read, fixed-bytes=48, record=filesystem_root_switch; order=0` |
+ * | User memory | `request: Read, len=request_size bytes, max-bytes=4096, record=filesystem_root_switch; order=0` |
  * | Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Capability` |
  *
@@ -6946,10 +6950,10 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `directory: Borrow, kind=directory, rights=0x4000000a0` |
  * | Operation | 279 |
  * | Feature | `Core` |
- * | Arguments | `request: user_address` |
+ * | Arguments | `request: user_address`, `request_size: byte_count` |
  * | Results | `transition: handle` |
  * | Capability effects | `directory: Borrow, kind=directory, rights=0x4000000a0`, `transition: produce, kind=root_transition, fixed=0x2a` |
- * | User memory | `request: Read, fixed-bytes=48, record=filesystem_root_switch; order=0` |
+ * | User memory | `request: Read, len=request_size bytes, max-bytes=4096, record=filesystem_root_switch; order=0` |
  * | Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Capability` |
  *
@@ -7345,10 +7349,10 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `receiver: Borrow, kind=execution_context, rights=0x8` |
  * | Operation | 266 |
  * | Feature | `Core` |
- * | Arguments | `configuration: user_address` |
- * | Results | — |
+ * | Arguments | `configuration: user_address`, `configuration_size: byte_count` |
+ * | Results | `supported_size: byte_count` |
  * | Capability effects | `receiver: Borrow, kind=execution_context, rights=0x8` |
- * | User memory | `configuration: Write, fixed-bytes=64, record=scheduling_parameters; order=0` |
+ * | User memory | `configuration: Write, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
  * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Task` |
  *
@@ -7366,10 +7370,10 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `receiver: Borrow, kind=execution_context, rights=0x0` |
  * | Operation | 267 |
  * | Feature | `Core` |
- * | Arguments | `configuration: user_address` |
+ * | Arguments | `configuration: user_address`, `configuration_size: byte_count` |
  * | Results | — |
  * | Capability effects | `receiver: Borrow, kind=execution_context, rights=0x0` |
- * | User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+ * | User memory | `configuration: Read, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
  * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Task` |
  *
@@ -7387,10 +7391,10 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `receiver: Borrow, kind=thread, rights=0x8` |
  * | Operation | 258 |
  * | Feature | `Core` |
- * | Arguments | `configuration: user_address` |
- * | Results | — |
+ * | Arguments | `configuration: user_address`, `configuration_size: byte_count` |
+ * | Results | `supported_size: byte_count` |
  * | Capability effects | `receiver: Borrow, kind=thread, rights=0x8` |
- * | User memory | `configuration: Write, fixed-bytes=64, record=scheduling_parameters; order=0` |
+ * | User memory | `configuration: Write, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
  * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Task` |
  *
@@ -7408,10 +7412,10 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `receiver: Borrow, kind=thread, rights=0x0` |
  * | Operation | 259 |
  * | Feature | `Core` |
- * | Arguments | `configuration: user_address` |
+ * | Arguments | `configuration: user_address`, `configuration_size: byte_count` |
  * | Results | — |
  * | Capability effects | `receiver: Borrow, kind=thread, rights=0x0` |
- * | User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+ * | User memory | `configuration: Read, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
  * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Task` |
  *
@@ -7429,10 +7433,10 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `receiver: Borrow, kind=virtual_cpu, rights=0x8` |
  * | Operation | 261 |
  * | Feature | `Core` |
- * | Arguments | `configuration: user_address` |
- * | Results | — |
+ * | Arguments | `configuration: user_address`, `configuration_size: byte_count` |
+ * | Results | `supported_size: byte_count` |
  * | Capability effects | `receiver: Borrow, kind=virtual_cpu, rights=0x8` |
- * | User memory | `configuration: Write, fixed-bytes=64, record=scheduling_parameters; order=0` |
+ * | User memory | `configuration: Write, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
  * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Task` |
  *
@@ -7450,10 +7454,10 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `receiver: Borrow, kind=virtual_cpu, rights=0x0` |
  * | Operation | 262 |
  * | Feature | `Core` |
- * | Arguments | `configuration: user_address` |
+ * | Arguments | `configuration: user_address`, `configuration_size: byte_count` |
  * | Results | — |
  * | Capability effects | `receiver: Borrow, kind=virtual_cpu, rights=0x0` |
- * | User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+ * | User memory | `configuration: Read, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
  * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Task` |
  *
@@ -7471,10 +7475,10 @@ static inline uint32_t hyper_native_object_transfer_class(uint32_t object_kind) 
  * | Receiver | `receiver: Borrow, kind=process_builder, rights=0x0` |
  * | Operation | 265 |
  * | Feature | `Core` |
- * | Arguments | `configuration: user_address`, `delegated_rights: rights` |
+ * | Arguments | `configuration: user_address`, `configuration_size: byte_count`, `delegated_rights: rights` |
  * | Results | — |
  * | Capability effects | `receiver: Borrow, kind=process_builder, rights=0x0` |
- * | User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+ * | User memory | `configuration: Read, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
  * | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
  * | Audit | `Task` |
  *
@@ -7683,6 +7687,163 @@ static inline uint64_t hyper_native_failure_result_mask(
     }
     return UINT64_C(0);
 }
+
+/**
+ * Minimum supported prefix of `thread_create_request`, in bytes; individual calls define their buffer lengths.
+ */
+#define HYPER_NATIVE_THREAD_CREATE_REQUEST_MIN_SIZE UINT64_C(64)
+/**
+ * Wire layout for `thread_create_request`.
+ *
+ * Size: 64 bytes; alignment: 8 bytes; supported minimum prefix: 64 bytes.
+ * Scalar widths and member offsets are fixed across supported architectures.
+ * The minimum prefix describes extensibility, not permission to truncate every call's buffer;
+ * the consuming operation defines its accepted length.
+ *
+ * Used by: `thread_create`.
+ */
+typedef struct hyper_native_thread_create_request_t {
+    /**
+     * Wire offset 0 bytes; width 8 bytes.
+     */
+    uint64_t entry;
+    /**
+     * Wire offset 8 bytes; width 8 bytes.
+     */
+    uint64_t stack;
+    /**
+     * Wire offset 16 bytes; width 8 bytes.
+     */
+    uint64_t tls;
+    /**
+     * Wire offset 24 bytes; width 8 bytes.
+     */
+    uint64_t argument;
+    /**
+     * Wire offset 32 bytes; width 8 bytes.
+     */
+    uint64_t affinity_words;
+    /**
+     * Wire offset 40 bytes; width 8 bytes.
+     */
+    uint64_t affinity_word_count;
+    /**
+     * Wire offset 48 bytes; width 8 bytes.
+     */
+    uint64_t flags;
+    /**
+     * Wire offset 56 bytes; width 8 bytes.
+     */
+    uint64_t reserved;
+} hyper_native_thread_create_request_t;
+HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_thread_create_request_t) == 64, "thread_create_request size");
+HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_thread_create_request_t) == 8, "thread_create_request alignment");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_thread_create_request_t, entry) == 0, "thread_create_request.entry offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_thread_create_request_t, stack) == 8, "thread_create_request.stack offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_thread_create_request_t, tls) == 16, "thread_create_request.tls offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_thread_create_request_t, argument) == 24, "thread_create_request.argument offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_thread_create_request_t, affinity_words) == 32, "thread_create_request.affinity_words offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_thread_create_request_t, affinity_word_count) == 40, "thread_create_request.affinity_word_count offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_thread_create_request_t, flags) == 48, "thread_create_request.flags offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_thread_create_request_t, reserved) == 56, "thread_create_request.reserved offset");
+
+/**
+ * Minimum supported prefix of `rpc_trace_request`, in bytes; individual calls define their buffer lengths.
+ */
+#define HYPER_NATIVE_RPC_TRACE_REQUEST_MIN_SIZE UINT64_C(64)
+/**
+ * Wire layout for `rpc_trace_request`.
+ *
+ * Size: 64 bytes; alignment: 8 bytes; supported minimum prefix: 64 bytes.
+ * Scalar widths and member offsets are fixed across supported architectures.
+ * The minimum prefix describes extensibility, not permission to truncate every call's buffer;
+ * the consuming operation defines its accepted length.
+ *
+ * Used by: `byte_channel_trace_rpc`.
+ */
+typedef struct hyper_native_rpc_trace_request_t {
+    /**
+     * Wire offset 0 bytes; width 8 bytes.
+     */
+    uint64_t phase;
+    /**
+     * Wire offset 8 bytes; width 8 bytes.
+     */
+    uint64_t request;
+    /**
+     * Wire offset 16 bytes; width 8 bytes.
+     */
+    uint64_t detail;
+    /**
+     * Wire offset 24 bytes; width 8 bytes.
+     */
+    uint64_t generation;
+    /**
+     * Wire offset 32 bytes; width 8 bytes.
+     */
+    uint64_t parent_connection;
+    /**
+     * Wire offset 40 bytes; width 8 bytes.
+     */
+    uint64_t parent_request;
+    /**
+     * Wire offset 48 bytes; width 8 bytes.
+     */
+    uint64_t flags;
+    /**
+     * Wire offset 56 bytes; width 8 bytes.
+     */
+    uint64_t reserved;
+} hyper_native_rpc_trace_request_t;
+HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_rpc_trace_request_t) == 64, "rpc_trace_request size");
+HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_rpc_trace_request_t) == 8, "rpc_trace_request alignment");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_rpc_trace_request_t, phase) == 0, "rpc_trace_request.phase offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_rpc_trace_request_t, request) == 8, "rpc_trace_request.request offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_rpc_trace_request_t, detail) == 16, "rpc_trace_request.detail offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_rpc_trace_request_t, generation) == 24, "rpc_trace_request.generation offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_rpc_trace_request_t, parent_connection) == 32, "rpc_trace_request.parent_connection offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_rpc_trace_request_t, parent_request) == 40, "rpc_trace_request.parent_request offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_rpc_trace_request_t, flags) == 48, "rpc_trace_request.flags offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_rpc_trace_request_t, reserved) == 56, "rpc_trace_request.reserved offset");
+
+/**
+ * Minimum supported prefix of `filesystem_mount_request`, in bytes; individual calls define their buffer lengths.
+ */
+#define HYPER_NATIVE_FILESYSTEM_MOUNT_REQUEST_MIN_SIZE UINT64_C(32)
+/**
+ * Wire layout for `filesystem_mount_request`.
+ *
+ * Size: 32 bytes; alignment: 8 bytes; supported minimum prefix: 32 bytes.
+ * Scalar widths and member offsets are fixed across supported architectures.
+ * The minimum prefix describes extensibility, not permission to truncate every call's buffer;
+ * the consuming operation defines its accepted length.
+ *
+ * Used by: `filesystem_mount`.
+ */
+typedef struct hyper_native_filesystem_mount_request_t {
+    /**
+     * Wire offset 0 bytes; width 8 bytes.
+     */
+    uint64_t path;
+    /**
+     * Wire offset 8 bytes; width 8 bytes.
+     */
+    uint64_t path_size;
+    /**
+     * Wire offset 16 bytes; width 8 bytes.
+     */
+    uint64_t flags;
+    /**
+     * Wire offset 24 bytes; width 8 bytes.
+     */
+    uint64_t reserved;
+} hyper_native_filesystem_mount_request_t;
+HYPER_ABI_STATIC_ASSERT(sizeof(hyper_native_filesystem_mount_request_t) == 32, "filesystem_mount_request size");
+HYPER_ABI_STATIC_ASSERT(HYPER_ABI_ALIGNOF(hyper_native_filesystem_mount_request_t) == 8, "filesystem_mount_request alignment");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_filesystem_mount_request_t, path) == 0, "filesystem_mount_request.path offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_filesystem_mount_request_t, path_size) == 8, "filesystem_mount_request.path_size offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_filesystem_mount_request_t, flags) == 16, "filesystem_mount_request.flags offset");
+HYPER_ABI_STATIC_ASSERT(offsetof(hyper_native_filesystem_mount_request_t, reserved) == 24, "filesystem_mount_request.reserved offset");
 
 /**
  * Minimum supported prefix of `trace_config`, in bytes; individual calls define their buffer lengths.

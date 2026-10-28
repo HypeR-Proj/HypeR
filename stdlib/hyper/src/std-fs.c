@@ -23,7 +23,7 @@ int64_t __hyper_std_fs_open(const char *path, size_t size, uint32_t options, uin
 	if (status)
 		return status;
 	hyper_native_handle_info_t info = {0};
-	status = hyper_handle_get_info(directory, &info).status;
+	status = hyper_handle_get_info(directory, &info, sizeof(hyper_native_handle_info_t)).status;
 	if (!status) {
 		uint64_t rights = HYPER_NATIVE_RIGHT_INSPECT | HYPER_NATIVE_RIGHT_DUPLICATE;
 		rights |= info.rights &
@@ -32,7 +32,7 @@ int64_t __hyper_std_fs_open(const char *path, size_t size, uint32_t options, uin
 			rights |= HYPER_NATIVE_RIGHT_READ;
 		if (options & (WRITE | APPEND))
 			rights |= HYPER_NATIVE_RIGHT_WRITE;
-		uint32_t native_options = options & EXCLUSIVE ? 2 : options & CREATE ? 1 : 0;
+		uint32_t native_options = options & EXCLUSIVE ? 3 : options & CREATE ? 1 : 0;
 		if ((options & TRUNCATE) && !(options & EXCLUSIVE))
 			native_options |= 4;
 		hyper_call_result_t result = hyper_directory_open_file_with_options(
@@ -144,7 +144,8 @@ int64_t __hyper_std_fs_readdir(uint64_t handle, uint64_t cookie,
 			       uint64_t *next)
 {
 	hyper_call_result_t result = hyper_directory_read(
-		handle, cookie, entries, HYPER_NATIVE_DIRECTORY_ENTRY_PAGE_CAPACITY);
+		handle, cookie, entries, HYPER_NATIVE_DIRECTORY_ENTRY_PAGE_CAPACITY,
+		sizeof(hyper_native_directory_entry_t));
 	*count = result.status == 0 ? result.value0 : 0;
 	*next = result.status == 0 ? result.value1 : 0;
 	return result.status;

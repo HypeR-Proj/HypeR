@@ -1128,6 +1128,130 @@ const SCHEDULING_PARAMETERS_FIELDS: &[Field] = &[
 ];
 
 pub const RECORDS: &[Record] = &[
+    Record {
+        name: "thread_create_request",
+        minimum_size: 64,
+        size: 64,
+        alignment: 8,
+        fields: &[
+            Field {
+                name: "entry",
+                kind: FieldKind::U64,
+                offset: 0,
+            },
+            Field {
+                name: "stack",
+                kind: FieldKind::U64,
+                offset: 8,
+            },
+            Field {
+                name: "tls",
+                kind: FieldKind::U64,
+                offset: 16,
+            },
+            Field {
+                name: "argument",
+                kind: FieldKind::U64,
+                offset: 24,
+            },
+            Field {
+                name: "affinity_words",
+                kind: FieldKind::U64,
+                offset: 32,
+            },
+            Field {
+                name: "affinity_word_count",
+                kind: FieldKind::U64,
+                offset: 40,
+            },
+            Field {
+                name: "flags",
+                kind: FieldKind::U64,
+                offset: 48,
+            },
+            Field {
+                name: "reserved",
+                kind: FieldKind::U64,
+                offset: 56,
+            },
+        ],
+    },
+    Record {
+        name: "rpc_trace_request",
+        minimum_size: 64,
+        size: 64,
+        alignment: 8,
+        fields: &[
+            Field {
+                name: "phase",
+                kind: FieldKind::U64,
+                offset: 0,
+            },
+            Field {
+                name: "request",
+                kind: FieldKind::U64,
+                offset: 8,
+            },
+            Field {
+                name: "detail",
+                kind: FieldKind::U64,
+                offset: 16,
+            },
+            Field {
+                name: "generation",
+                kind: FieldKind::U64,
+                offset: 24,
+            },
+            Field {
+                name: "parent_connection",
+                kind: FieldKind::U64,
+                offset: 32,
+            },
+            Field {
+                name: "parent_request",
+                kind: FieldKind::U64,
+                offset: 40,
+            },
+            Field {
+                name: "flags",
+                kind: FieldKind::U64,
+                offset: 48,
+            },
+            Field {
+                name: "reserved",
+                kind: FieldKind::U64,
+                offset: 56,
+            },
+        ],
+    },
+    Record {
+        name: "filesystem_mount_request",
+        minimum_size: 32,
+        size: 32,
+        alignment: 8,
+        fields: &[
+            Field {
+                name: "path",
+                kind: FieldKind::U64,
+                offset: 0,
+            },
+            Field {
+                name: "path_size",
+                kind: FieldKind::U64,
+                offset: 8,
+            },
+            Field {
+                name: "flags",
+                kind: FieldKind::U64,
+                offset: 16,
+            },
+            Field {
+                name: "reserved",
+                kind: FieldKind::U64,
+                offset: 24,
+            },
+        ],
+    },
     // Static tracepoints expose fixed-size scalar records, never kernel pointers.
     Record {
         name: "trace_config",

@@ -146,7 +146,7 @@ fn accepts_trailing_fields_after_the_minimum_prefix() {
 }
 
 #[test]
-fn fixed_query_memory_requires_a_nonzero_complete_record() {
+fn record_queries_require_an_explicit_size_even_for_complete_layouts() {
     for bytes in [0, 16, 24] {
         let mut calls = schema::INVOCATIONS.to_vec();
         let selected = calls
@@ -165,7 +165,7 @@ fn fixed_query_memory_requires_a_nonzero_complete_record() {
             invocations: Box::leak(calls.into_boxed_slice()),
             ..schema::NATIVE_ABI
         };
-        assert_eq!(validate(&candidate).is_ok(), bytes == 24);
+        assert!(validate(&candidate).is_err());
     }
 }
 
@@ -257,12 +257,12 @@ fn receiver_and_business_arguments_have_distinct_register_ownership() {
             "{} duplicates its receiver",
             call.name
         );
-        assert!(call.arguments.len() <= schema::INVOCATION_ARGUMENT_REGISTERS);
+        assert!(call.arguments.len() < schema::INVOCATION_ARGUMENT_REGISTERS);
     }
     let create_thread = schema::INVOCATIONS
         .iter()
         .find(|call| call.name == "thread_create");
-    assert!(matches!(create_thread, Some(call) if call.arguments.len() == 6));
+    assert!(matches!(create_thread, Some(call) if call.arguments.len() == 2));
     let mount = schema::INVOCATIONS
         .iter()
         .find(|call| call.name == "filesystem_mount");
@@ -911,7 +911,7 @@ fn inspector_scan_limits_match_their_published_page_capacities() {
                 .find(|argument| argument.name == "records"))
                 .and_then(|argument| argument.memory),
             Some(schema::UserMemory {
-                length: MemoryLength::Elements {
+                length: MemoryLength::StridedElements {
                     maximum_elements,
                     ..
                 },
@@ -1421,4 +1421,56 @@ fn block_queues_bound_frames_and_separate_completion_from_wait_failure() -> Resu
         })
     );
     Ok(())
+}
+
+#[test]
+fn rejects_signatures_without_reserved_register_space() {
+    let mut calls = schema::INVOCATIONS.to_vec();
+    let mut arguments = Vec::new();
+    for name in ["a", "b", "c", "d", "e", "f"] {
+        arguments.push(schema::Argument {
+            name,
+            kind: ValueKind::U64,
+            handle: None,
+            memory: None,
+        });
+    }
+    calls[0].arguments = Box::leak(arguments.into_boxed_slice());
+    let candidate = AbiSchema {
+        invocations: Box::leak(calls.into_boxed_slice()),
+        ..schema::NATIVE_ABI
+    };
+    assert!(
+        matches!(validate(&candidate), Err(Error::InvalidSchema(message)) if message.contains("reserved argument register"))
+    );
+}
+
+#[test]
+fn rejects_record_stride_without_a_byte_count_parameter() {
+    let mut calls = schema::INVOCATIONS.to_vec();
+    let Some(call) = calls
+        .iter_mut()
+        .find(|call| call.name == "task_inspector_scan_threads")
+    else {
+        assert!(
+            calls
+                .iter()
+                .any(|call| call.name == "task_inspector_scan_threads")
+        );
+        return;
+    };
+    let mut arguments = call.arguments.to_vec();
+    let Some(stride) = arguments.iter_mut().find(|arg| arg.name == "record_size") else {
+        assert!(arguments.iter().any(|arg| arg.name == "record_size"));
+        return;
+    };
+    stride.kind = ValueKind::U32;
+    call.arguments = Box::leak(arguments.into_boxed_slice());
+    let candidate = AbiSchema {
+        invocations: Box::leak(calls.into_boxed_slice()),
+        ..schema::NATIVE_ABI
+    };
+    assert!(
+        matches!(validate(&candidate), Err(Error::InvalidSchema(message)) if message.contains("invalid record stride"))
+    );
 }

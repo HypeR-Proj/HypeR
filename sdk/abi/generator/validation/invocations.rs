@@ -68,9 +68,9 @@ pub(super) fn validate_invocations(schema: &AbiSchema, supported_rights: u64) ->
                 ));
             }
         }
-        if invocation.arguments.len() > schema::INVOCATION_ARGUMENT_REGISTERS {
+        if invocation.arguments.len() >= schema::INVOCATION_ARGUMENT_REGISTERS {
             return invalid(format!(
-                "invocation {} exceeds the machine argument registers",
+                "invocation {} must retain a reserved argument register; use an extensible request for additional fields",
                 invocation.name
             ));
         }
@@ -188,6 +188,31 @@ fn validate_arguments(
                     }
                     (length_name, ValueKind::ByteCount, maximum_bytes, None)
                 }
+                MemoryLength::StridedElements {
+                    argument: length_name,
+                    maximum_elements,
+                    stride_argument,
+                    maximum_stride,
+                } => {
+                    if maximum_elements == 0
+                        || maximum_stride == 0
+                        || memory.record.is_none()
+                        || !invocation
+                            .inputs()
+                            .any(|a| a.name == stride_argument && a.kind == ValueKind::ByteCount)
+                    {
+                        return invalid(format!(
+                            "invocation {} has invalid record stride",
+                            invocation.name
+                        ));
+                    }
+                    let Some(maximum_bytes) =
+                        maximum_elements.checked_mul(u32::from(maximum_stride))
+                    else {
+                        return invalid("strided array extent overflows");
+                    };
+                    (length_name, ValueKind::ElementCount, maximum_bytes, None)
+                }
                 MemoryLength::Elements {
                     argument: length_name,
                     maximum_elements,
@@ -237,6 +262,20 @@ fn validate_arguments(
                         invocation.name, argument.name
                     ));
                 };
+                if matches!(memory.length, MemoryLength::FixedBytes { .. }) {
+                    return invalid(format!(
+                        "invocation {} record {} needs an explicit size argument",
+                        invocation.name, record_name
+                    ));
+                }
+                if let MemoryLength::StridedElements { maximum_stride, .. } = memory.length
+                    && (maximum_stride < record.size || maximum_stride % 8 != 0)
+                {
+                    return invalid(format!(
+                        "invocation {} has an invalid record stride bound",
+                        invocation.name
+                    ));
+                }
                 if u32::from(record.size) > maximum_bytes {
                     return invalid(format!(
                         "invocation {} memory argument {} cannot contain record {record_name}",

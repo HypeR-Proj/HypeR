@@ -405,6 +405,13 @@ pub enum MemoryLength {
         maximum_elements: u32,
         element_size: u16,
     },
+    /// Record array with a caller-selected byte stride and bounded extent.
+    StridedElements {
+        argument: &'static str,
+        maximum_elements: u32,
+        stride_argument: &'static str,
+        maximum_stride: u16,
+    },
 }
 
 /// Authority carried inside a typed buffer, separate from the buffer's address.

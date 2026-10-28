@@ -40,7 +40,7 @@ fn object_local_operations_decode_and_mask_failures_by_receiver_kind() {
             mask
         );
     }
-    assert_eq!(NativeOperation::ThreadCreate.argument_count(), 6);
+    assert_eq!(NativeOperation::ThreadCreate.argument_count(), 2);
     assert_eq!(NativeOperation::FileReadAt.argument_count(), 4);
     assert_eq!(
         NativeOperation::from_raw(u32::MAX, generated::HYPER_NATIVE_OP_HANDLE_CLOSE),
