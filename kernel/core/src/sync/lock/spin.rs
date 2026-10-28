@@ -105,9 +105,9 @@ impl<T> SpinLock<T> {
             return None;
         }
 
-        // SAFETY: The successful transition above gives this caller exclusive
-        // access until the guard's release token is dropped.
         Some(SpinLockGuard {
+            // SAFETY: The successful transition above gives this caller exclusive
+            // access until the guard's release token is dropped.
             value: unsafe { &mut *self.value.get() },
             _release: LockRelease(&self.locked),
             _local: PhantomData,
