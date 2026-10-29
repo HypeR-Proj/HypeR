@@ -93,12 +93,15 @@ case "${1:-}" in
         python3 -B tests/qemu/test-console.py
         python3 -B tests/qemu/test-console-hotplug.py
         python3 -B tests/qemu/test-fleet-config.py
+        python3 -B tests/fs-f2fs/test-sources.py
         python3 -B tests/qemu/test-network.py
         command -v shellcheck >/dev/null 2>&1 || {
             echo "shellcheck is required for the script-quality suite" >&2
             exit 2
         }
-        find tests kernel/tests kernel/tools scripts sdk/toolchain -type f \
+        # Nested Cargo targets can contain fetched upstream test scripts.
+        find tests kernel/tests kernel/tools scripts sdk/toolchain \
+            -type d -name target -prune -o -type f \
             \( -name '*.sh' -o -name hyper-clang -o -name hyper-cargo \) -print0 |
             xargs -0 shellcheck --severity=warning
         ;;

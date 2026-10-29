@@ -466,3 +466,13 @@ rejection of a failed mount retry, and continued root listing, program loading
 and `/tmp` I/O. A worker fault during shutdown must remain observable after
 namespace detach and mount-owner release. This tests supervision and fault
 isolation, not FAT correctness.
+
+## Experimental F2FS worker
+
+`svc/fs-f2fs` adapts the pinned Fuchsia media implementation through a Rust FFI
+boundary and the existing filesystem service and block queue. It is disabled by
+default and does not change ordinary FAT persistence. Only the pinned formatter's
+baseline image layout is admitted; read-only mounts and modern F2FS extensions
+are not currently supported. See the [adapter contract and build instructions](../../../lib/fs-f2fs/README.md)
+for supported operations, durability ordering, source licenses and qualification
+limits.

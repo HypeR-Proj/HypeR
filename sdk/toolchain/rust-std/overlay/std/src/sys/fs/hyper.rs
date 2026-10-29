@@ -694,7 +694,11 @@ pub fn remove_dir_all(path: &Path) -> io::Result<()> {
     }
     let directory = open_directory_at(&parent, name, true)?;
     let opened = directory_info(&directory)?;
-    if !same_location(&opened, &info) {
+    // A stat-only remote node may retire before open. Revalidate while the
+    // opened directory pins its identity; no-follow open prevents traversing
+    // a replacement symlink, and this lookup detects rename after open.
+    let current = stat_at(&parent, name)?;
+    if !same_location(&opened, &current) {
         return Err(io::ErrorKind::ResourceBusy.into());
     }
     let mut stack = Vec::new();
@@ -711,6 +715,10 @@ pub fn remove_dir_all(path: &Path) -> io::Result<()> {
                 Some(frame) => frame,
                 None => break,
             };
+            // Remote volumes reject removal while the target directory has an
+            // open lease. Retain the parent and observed identity for the atomic
+            // remove-if guard, but release our own traversal lease first.
+            drop(frame.directory);
             remove_observed(&frame.parent, &frame.name, &frame.identity)?;
             continue;
         };
@@ -753,7 +761,8 @@ pub fn remove_dir_all(path: &Path) -> io::Result<()> {
         }
         let child = open_directory_at(&frame.directory, name, true)?;
         let opened = directory_info(&child)?;
-        if !same_location(&opened, &info) {
+        let current = stat_at(&frame.directory, name)?;
+        if !same_location(&opened, &current) {
             return Err(io::ErrorKind::ResourceBusy.into());
         }
         // A parent owner for the child frame is opened as '.', avoiding a

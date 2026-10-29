@@ -1,0 +1,18 @@
+{
+  "SPDX-FileCopyrightText": "2026 roolrz",
+  "SPDX-License-Identifier": "Apache-2.0",
+  "archives": [
+    {
+      "path": "libcxx",
+      "url": "https://llvm.googlesource.com/llvm-project/+archive/refs/tags/llvmorg-21.1.8/libcxx.tar.gz",
+      "sha256": "4331876d450ee0b36f0ba4c8e55a3091b3e4f69b61e4379a08f4e614e97de5b5",
+      "strip_components": 0
+    },
+    {
+      "path": "musl",
+      "url": "https://musl.libc.org/releases/musl-1.2.5.tar.gz",
+      "sha256": "a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4",
+      "strip_components": 1
+    }
+  ]
+}

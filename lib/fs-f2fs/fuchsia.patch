@@ -1,0 +1,2500 @@
+# SPDX-FileCopyrightText: 2026 roolrz
+# SPDX-License-Identifier: Apache-2.0
+# Context retains the upstream Fuchsia BSD license; see FUCHSIA-LICENSE.
+
+--- a/src/storage/f2fs/bcache.h
++++ b/src/storage/f2fs/bcache.h
+@@ -2,148 +2,71 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
+-// This file describes the in-memory structures which construct
+-// a F2FS filesystem.
++// HypeR platform adapter for the pinned media core.
++#pragma once
++#include "bridge.h"
++#include "src/storage/f2fs/common.h"
++#include "src/storage/lib/operation/operation.h"
++namespace fuchsia_storage_block::wire {
++struct BlockInfo {
++  uint32_t block_size;
++  uint64_t block_count;
++};
++}  // namespace fuchsia_storage_block::wire
++namespace f2fs {
++using DeviceCallbacks = HyperF2fsDevice;
++class BcacheMapper {
++ public:
++  explicit BcacheMapper(DeviceCallbacks callbacks) : cb_(callbacks) {}
++  bool IsWritable() const { return true; }
++  uint64_t Maxblk() const { return cb_.blocks; }
++  uint32_t BlockSize() const { return 4096; }
++  const uint8_t* Uuid() const { return cb_.uuid; }
++  zx_status_t Readblk(block_t n, void* data) {
++    return n >= Maxblk() ? ZX_ERR_OUT_OF_RANGE
++                         : cb_.read(cb_.context, uint64_t(n) * 4096, data, 4096);
++  }
++  zx_status_t Writeblk(block_t n, const void* data) {
++    return n >= Maxblk() ? ZX_ERR_OUT_OF_RANGE
++                         : cb_.write(cb_.context, uint64_t(n) * 4096, data, 4096);
++  }
++  zx_status_t Flush() { return cb_.flush(cb_.context); }
++  zx_status_t Trim(size_t, size_t) { return ZX_ERR_NOT_SUPPORTED; }
++  zx_status_t BlockGetInfo(fuchsia_storage_block::wire::BlockInfo* out) const {
++    out->block_size = 4096;
++    out->block_count = Maxblk();
++    return ZX_OK;
++  }
+ 
+-#ifndef SRC_STORAGE_F2FS_BCACHE_H_
+-#define SRC_STORAGE_F2FS_BCACHE_H_
+-
+-#include <fidl/fuchsia.storage.block/cpp/wire.h>
+-
+-#include "src/storage/f2fs/common.h"
+-#include "src/storage/lib/block_client/cpp/block_device.h"
+-#include "src/storage/lib/buffer/vmo_buffer.h"
+-#include "src/storage/lib/buffer/vmoid_registry.h"
+-#include "src/storage/lib/vfs/cpp/transaction/device_transaction_handler.h"
+-
+-namespace f2fs {
+-
+-class BcacheMapper;
+-// It actually creates BcacheMapper on underlying |devices|.
+-// It tries to allocate slices on fvm If |allocate| is set.
+-zx::result<std::unique_ptr<BcacheMapper>> CreateBcacheMapper(
+-    std::vector<std::unique_ptr<block_client::BlockDevice>> devices, bool allocate = false);
+-// for the startup service
+-zx::result<std::unique_ptr<BcacheMapper>> CreateBcacheMapper(
+-    fidl::ClientEnd<fuchsia_storage_block::Block> device, bool allocate = false);
+-// for test
+-zx::result<std::unique_ptr<BcacheMapper>> CreateBcacheMapper(
+-    std::unique_ptr<block_client::BlockDevice> device, bool allocate = false);
+-
+-class Bcache : public fs::DeviceTransactionHandler, public storage::VmoidRegistry {
+- public:
+-  Bcache(const Bcache&) = delete;
+-  Bcache& operator=(const Bcache&) = delete;
+-  Bcache(Bcache&&) = delete;
+-  Bcache& operator=(Bcache&&) = delete;
+-
+-  uint64_t Maxblk() const { return max_blocks_; }
+-  block_t BlockSize() const { return block_size_; }
+-
+-  zx_status_t RunRequests(
+-      const std::vector<storage::BufferedOperation>& buffered_operations) override;
+-  static zx::result<std::unique_ptr<Bcache>> Create(
+-      std::unique_ptr<block_client::BlockDevice> device, uint64_t max_blocks, block_t block_size);
+-
+-  zx_status_t Flush() override { return DeviceTransactionHandler::Flush(); }
+-
+-  zx_status_t BlockAttachVmo(const zx::vmo& vmo, storage::Vmoid* out) final;
+-  zx_status_t BlockDetachVmo(storage::Vmoid vmoid) final;
+-
+-  uint64_t BlockNumberToDevice(uint64_t block_num) const final {
+-    return block_num * BlockSize() / info_.block_size;
+-  }
+-  size_t GetFreeSpaceSize() const {
+-    return use_fvm_ ? (max_slice_count_ - current_slice_count_) * slice_size_ : 0;
+-  }
+-  size_t GetSliceSize() const { return slice_size_; }
+-
+-  block_client::BlockDevice* GetDevice() final { return device_.get(); }
+-
+- private:
+-  Bcache(std::unique_ptr<block_client::BlockDevice> device, uint64_t max_blocks,
+-         block_t block_size);
+-
+-  size_t slice_size_ = 0;
+-  bool use_fvm_ = false;
+-  size_t current_slice_count_ = 0;
+-  size_t max_slice_count_ = 0;
+-  const uint64_t max_blocks_;
+-  const block_t block_size_;
+-  fuchsia_storage_block::wire::BlockInfo info_ = {};
+-  std::unique_ptr<block_client::BlockDevice> device_;  // The device, if owned.
+-};
+-
+-class BcacheMapper : public storage::VmoidRegistry {
+- public:
+-  BcacheMapper(const BcacheMapper&) = delete;
+-  BcacheMapper& operator=(const BcacheMapper&) = delete;
+-  BcacheMapper(BcacheMapper&&) = delete;
+-  BcacheMapper& operator=(BcacheMapper&&) = delete;
+-  static zx::result<std::unique_ptr<BcacheMapper>> Create(
+-      std::vector<std::unique_ptr<Bcache>> bcaches);
+-
+-  // Make a read/write operation from/to a 4KiB block at |bno|.
+-  // |buffer_| is used as a block buffer.
+-  zx_status_t Readblk(block_t bno, void* data) __TA_EXCLUDES(buffer_mutex_);
+-  zx_status_t Writeblk(block_t bno, const void* data) __TA_EXCLUDES(buffer_mutex_);
+-
+-  zx_status_t Trim(size_t start, size_t num);
+-  uint64_t Maxblk() const { return max_blocks_; }
+-  block_t BlockSize() const { return block_size_; }
+-  zx_status_t BlockGetInfo(fuchsia_storage_block::wire::BlockInfo* out_info) const;
+-
+-  zx_status_t RunRequests(const std::vector<storage::BufferedOperation>& operations);
+-  zx_status_t Flush();
+-
+-  zx_status_t BlockAttachVmo(const zx::vmo& vmo, storage::Vmoid* out) override;
+-  zx_status_t BlockDetachVmo(storage::Vmoid vmoid) override;
+-
+-  bool IsWritable() const { return !read_only_; }
+-  size_t GetFreeSpaceSize() const {
+-    size_t free = 0;
+-    for (auto& bcache : bcaches_) {
+-      free += bcache->GetFreeSpaceSize();
++  zx_status_t RunRequests(const std::vector<storage::BufferedOperation>& ops) {
++    std::vector<HyperF2fsIo> requests;
++    requests.reserve(ops.size());
++    for (const auto& b : ops) {
++      const auto& op = b.op;
++      if (op.dev_offset > Maxblk() || op.length > Maxblk() - op.dev_offset)
++        return ZX_ERR_OUT_OF_RANGE;
++      uint32_t kind;
++      switch (op.type) {
++        case storage::OperationType::kRead:
++          kind = 0;
++          break;
++        case storage::OperationType::kWrite:
++          kind = 1;
++          break;
++        case storage::OperationType::kWriteFua:
++          kind = 2;
++          break;
++        default:
++          return ZX_ERR_NOT_SUPPORTED;
++      }
++      requests.push_back({op.dev_offset * 4096,
++                          static_cast<uint8_t*>(b.data) + op.vmo_offset * 4096, op.length * 4096,
++                          kind});
+     }
+-    return free;
+-  }
+-  size_t GetSliceSize() const {
+-    size_t slice_size = 0;
+-    for (auto& bcache : bcaches_) {
+-      slice_size = std::max(slice_size, bcache->GetSliceSize());
+-    }
+-    return slice_size;
+-  }
+-  // This function is only used for test and InspectTree purposes.
+-  void ForEachBcache(fit::function<void(Bcache*)> func) {
+-    for (auto& bcache : bcaches_) {
+-      func(bcache.get());
+-    }
++    return cb_.run(cb_.context, requests.data(), requests.size());
+   }
+ 
+  private:
+-  explicit BcacheMapper(std::vector<std::unique_ptr<Bcache>> bcaches, uint64_t max_blocks,
+-                        block_t block_size);
+-
+-  zx::result<vmoid_t> FindFreeVmoId();
+-
+-  const std::vector<std::unique_ptr<Bcache>> bcaches_;
+-
+-  // |vmoid_tree_| is a map between the virtual vmoid seen by F2FS and the vmoid actually registered
+-  // on the underlying device.
+-  std::map<vmoid_t, std::vector<storage::Vmoid>> vmoid_tree_;
+-  vmoid_t last_id_ = fuchsia_storage_block::kVmoidInvalid + 1;
+-
+-  std::mutex buffer_mutex_;
+-  // |buffer_| and |buffer_mutex_| are used in the "Readblk/Writeblk" methods.
+-  storage::VmoBuffer buffer_ __TA_GUARDED(buffer_mutex_);
+-
+-  fuchsia_storage_block::wire::BlockInfo info_ = {};
+-  const block_t block_size_;
+-  const uint64_t max_blocks_;
+-  bool read_only_ = false;
++  DeviceCallbacks cb_;
+ };
+-
+ }  // namespace f2fs
+-
+-#endif  // SRC_STORAGE_F2FS_BCACHE_H_
+--- a/src/storage/f2fs/bitmap.cc
++++ b/src/storage/f2fs/bitmap.cc
+@@ -4,7 +4,6 @@
+ 
+ #include "src/storage/f2fs/bitmap.h"
+ 
+-#include <lib/syslog/cpp/macros.h>
+ 
+ #include "src/storage/f2fs/file_cache.h"
+ 
+--- a/src/storage/f2fs/bitmap.h
++++ b/src/storage/f2fs/bitmap.h
+@@ -18,7 +18,7 @@
+ 
+ constexpr size_t kLastNodeMask = 0x7;
+ 
+-using RawBitmap = bitmap::RawBitmapGeneric<bitmap::VmoStorage>;
++using RawBitmap = bitmap::RawBitmapGeneric<bitmap::DefaultStorage>;
+ using RawBitmapHeap = bitmap::RawBitmapGeneric<bitmap::DefaultStorage>;
+ 
+ class Page;
+--- a/src/storage/f2fs/common.h
++++ b/src/storage/f2fs/common.h
+@@ -6,8 +6,8 @@
+ #define SRC_STORAGE_F2FS_COMMON_H_
+ 
+ #include <lib/fit/function.h>
+-#include <lib/syslog/cpp/macros.h>
+-#include <lib/trace/event.h>
++
++
+ #include <lib/zircon-internal/thread_annotations.h>
+ #include <lib/zx/result.h>
+ #include <sys/types.h>
+@@ -16,6 +16,7 @@
+ #include <zircon/errors.h>
+ #include <zircon/types.h>
+ 
++#include "fs_port.h"
+ #include <limits>
+ 
+ #include <fbl/macros.h>
+@@ -23,10 +24,11 @@
+ #include <fbl/ref_ptr.h>
+ #include <safemath/checked_math.h>
+ 
+-#include "src/storage/lib/vfs/cpp/fuchsia_vfs.h"
+-#include "src/storage/lib/vfs/cpp/paged_vfs.h"
++
++
+ 
+ namespace f2fs {
++
+ 
+ class VnodeF2fs;
+ 
+@@ -37,29 +39,29 @@
+ using pgoff_t = uint64_t;
+ using umode_t = uint16_t;
+ using VnodeCallback = fit::function<zx_status_t(fbl::RefPtr<VnodeF2fs> &)>;
+-using SyncCallback = fs::Vnode::SyncCallback;
++using SyncCallback = fit::function<void(zx_status_t)>;
+ 
+ // A async_dispatcher_t* is needed for some functions on Fuchsia only. In order to avoid ifdefs on
+ // every call that is compiled for host Fuchsia and Host, we define this as a nullptr_t type when
+ // compiling on host where callers should pass null and it's ignored.
+ //
+ // Prefer async_dispatcher_t* for Fuchsia-specific functions since it makes the intent more clear.
+-using FuchsiaDispatcher = async_dispatcher_t *;
++using FuchsiaDispatcher = std::nullptr_t;
+ 
+ // A reference to the vfs is needed for some functions. The specific vfs type is different between
+ // Fuchsia and Host, so define a PlatformVfs which represents the one for our current platform to
+ // avoid ifdefs on every call.
+ //
+ // Prefer using the appropriate vfs when the function is only used for one or the other.
+-using PlatformVfs = fs::PagedVfs;
+-
+-#if BYTE_ORDER == BIG_ENDIAN
+-inline uint16_t LeToCpu(uint16_t x) { return SWAP_16(x); }
+-inline uint32_t LeToCpu(uint32_t x) { return SWAP_32(x); }
+-inline uint64_t LeToCpu(uint64_t x) { return SWAP_64(x); }
+-inline uint16_t CpuToLe(uint16_t x) { return SWAP_16(x); }
+-inline uint32_t CpuToLe(uint32_t x) { return SWAP_32(x); }
+-inline uint64_t CpuToLe(uint64_t x) { return SWAP_64(x); }
++class PlatformVfs {};
++
++#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++inline uint16_t LeToCpu(uint16_t x) { return __builtin_bswap16(x); }
++inline uint32_t LeToCpu(uint32_t x) { return __builtin_bswap32(x); }
++inline uint64_t LeToCpu(uint64_t x) { return __builtin_bswap64(x); }
++inline uint16_t CpuToLe(uint16_t x) { return __builtin_bswap16(x); }
++inline uint32_t CpuToLe(uint32_t x) { return __builtin_bswap32(x); }
++inline uint64_t CpuToLe(uint64_t x) { return __builtin_bswap64(x); }
+ #else
+ inline uint16_t LeToCpu(uint16_t x) { return x; }
+ inline uint32_t LeToCpu(uint32_t x) { return x; }
+--- a/src/storage/f2fs/dir.cc
++++ b/src/storage/f2fs/dir.cc
+@@ -587,11 +587,6 @@
+   return ret;
+ }
+ 
+-void Dir::VmoRead(uint64_t offset, uint64_t length) TA_NO_THREAD_SAFETY_ANALYSIS {
+-  ZX_ASSERT_MSG(0,
+-                "Unexpected ZX_PAGER_VMO_READ request to dir node[%s:%u]. offset: %lu, size: %lu",
+-                GetNameViewUnsafe().data(), GetKey(), offset, length);
+-}
+ 
+ zx::result<PageBitmap> Dir::GetBitmap(fbl::RefPtr<Page> dentry_page) {
+   if (TestFlag(InodeInfoFlag::kInlineDentry)) {
+--- a/src/storage/f2fs/dir.h
++++ b/src/storage/f2fs/dir.h
+@@ -110,10 +110,7 @@
+   zx::result<> RecoverLink(VnodeF2fs &vnode) __TA_EXCLUDES(mutex_)
+       __TA_REQUIRES_SHARED(f2fs::GetGlobalLock());
+ 
+-  zx_status_t GetVmo(fuchsia_io::wire::VmoFlags flags, zx::vmo *out_vmo) final {
+-    return ZX_ERR_NOT_SUPPORTED;
+-  }
+-  void VmoRead(uint64_t offset, uint64_t length) final;
++
+   zx::result<PageBitmap> GetBitmap(fbl::RefPtr<Page> dentry_page) final;
+ 
+   // for data blocks
+--- a/src/storage/f2fs/dir_hash.cc
++++ b/src/storage/f2fs/dir_hash.cc
+@@ -18,7 +18,7 @@
+   int len = safemath::checked_cast<int>(name.length());
+ 
+   if (len <= 2 &&
+-      ((len == 1 && name[0] == '.') || (len == 2 && name[1] == '.' && name[2] == '.'))) {
++      ((len == 1 && name[0] == '.') || (len == 2 && name[0] == '.' && name[1] == '.'))) {
+     return 0;
+   }
+ 
+--- a/src/storage/f2fs/f2fs.cc
++++ b/src/storage/f2fs/f2fs.cc
+@@ -4,11 +4,7 @@
+ 
+ #include "src/storage/f2fs/f2fs.h"
+ 
+-#include <lib/async-loop/cpp/loop.h>
+-#include <lib/async-loop/default.h>
+-#include <lib/async/dispatcher.h>
+-#include <lib/trace-provider/provider.h>
+-#include <lib/zx/event.h>
++
+ #include <sys/stat.h>
+ #include <zircon/assert.h>
+ #include <zircon/errors.h>
+@@ -32,6 +28,7 @@
+ #include "src/storage/lib/vfs/cpp/shared_mutex.h"
+ 
+ namespace f2fs {
++F2fs::~F2fs() = default;
+ 
+ static zx_status_t CheckBlockSize(const Superblock& sb) {
+   if (kF2fsSuperMagic != LeToCpu(sb.magic)) {
+@@ -126,6 +123,11 @@
+     if (status = CheckBlockSize(*superblock); status != ZX_OK) {
+       continue;
+     }
++    if (LeToCpu(superblock->block_count) > bc.Maxblk()) return zx::error(ZX_ERR_OUT_OF_RANGE);
++    const auto* bytes = block.get<uint8_t>();
++    for (size_t offset = kSuperOffset + sizeof(Superblock); offset < kBlockSize; ++offset) {
++      if (bytes[offset]) return zx::error(ZX_ERR_NOT_SUPPORTED);
++    }
+     return zx::ok(std::move(superblock));
+   }
+   FX_LOGS(ERROR) << "failed to read superblock." << status;
+@@ -137,20 +139,10 @@
+     : dispatcher_(dispatcher), vfs_(vfs), bc_(std::move(bc)), mount_options_(mount_options) {
+   inspect_tree_ = std::make_unique<InspectTree>(this);
+   vnode_cache_ = std::make_unique<VnodeCache>();
+-  zx::event::create(0, &fs_id_);
+-}
+-
+-void F2fs::StartMemoryPressureWatcher() {
+-  if (dispatcher_) {
+-    memory_pressure_watcher_ =
+-        std::make_unique<MemoryPressureWatcher>(dispatcher_, [this](MemoryPressure level) {
+-          // release-acquire ordering with GetMemoryStatus()
+-          current_memory_pressure_level_.store(level, std::memory_order_release);
+-          ScheduleWritebackAndReclaimPages();
+-          FX_LOGS(INFO) << "Memory pressure level: " << MemoryPressureWatcher::ToString(level);
+-        });
+-  }
+-}
++
++}
++
++void F2fs::StartMemoryPressureWatcher() {}
+ 
+ zx::result<std::unique_ptr<F2fs>> F2fs::Create(FuchsiaDispatcher dispatcher,
+                                                std::unique_ptr<f2fs::BcacheMapper> bc,
+@@ -175,31 +167,13 @@
+ }
+ 
+ void F2fs::Sync(SyncCallback closure) {
+-  SyncFs(true);
++  auto status = SyncFs(false);
+   if (closure) {
+-    closure(ZX_OK);
+-  }
+-}
+-
+-zx::result<fs::FilesystemInfo> F2fs::GetFilesystemInfo() {
+-  fs::FilesystemInfo info;
+-  info.block_size = kBlockSize;
+-  info.max_filename_size = kMaxNameLen;
+-  info.fs_type = fuchsia_fs::VfsType::kF2Fs;
+-  info.total_bytes =
+-      safemath::CheckMul<uint64_t>(superblock_info_->GetTotalBlockCount(), kBlockSize).ValueOrDie();
+-  info.used_bytes =
+-      safemath::CheckMul<uint64_t>(superblock_info_->GetValidBlockCount(), kBlockSize).ValueOrDie();
+-  info.total_nodes = superblock_info_->GetMaxNodeCount();
+-  info.used_nodes = superblock_info_->GetValidInodeCount();
+-  info.SetFsId(fs_id_);
+-  info.name = "f2fs";
+-  info.free_shared_pool_bytes = fbl::round_down(
+-      std::min(bc_->GetFreeSpaceSize(), superblock_info_->GetFreeBlockCount() * kBlockSize),
+-      bc_->GetSliceSize());
+-
+-  return zx::ok(info);
+-}
++    closure(status);
++  }
++}
++
++
+ 
+ bool F2fs::IsValid() const {
+   if (bc_ == nullptr) {
+@@ -237,19 +211,7 @@
+   return zx::ok();
+ }
+ 
+-zx::result<> F2fs::MakeReadOperations(zx::vmo& vmo, std::vector<block_t>& addrs, PageType type,
+-                                      bool is_sync) {
+-  auto ret = reader_->ReadBlocks(vmo, addrs);
+-  if (ret.is_error()) {
+-    FX_LOGS(WARNING) << "failed to read blocks. " << ret.status_string();
+-    if (ret.status_value() == ZX_ERR_UNAVAILABLE || ret.status_value() == ZX_ERR_PEER_CLOSED) {
+-      // The underlying block device is unavailable. Set kCpErrorFlag for f2fs to enter read-only
+-      // mode.
+-      superblock_info_->SetCpFlags(CpFlag::kCpErrorFlag);
+-    }
+-  }
+-  return ret;
+-}
++
+ 
+ zx::result<> F2fs::MakeReadOperations(std::vector<LockedPage>& pages, std::vector<block_t>& addrs,
+                                       PageType type, bool is_sync) {
+@@ -353,7 +315,9 @@
+           }
+           return ZX_ERR_NEXT;
+         });
+-    // Flush every dirty Pages.
++  }
++  {
++    // Flush dirty data before publishing either a live or shutdown checkpoint.
+     do {
+       // If CpFlag::kCpErrorFlag is set, it cannot be synchronized to disk. So we will drop all
+       // dirty pages.
+--- a/src/storage/f2fs/f2fs.h
++++ b/src/storage/f2fs/f2fs.h
+@@ -39,6 +39,7 @@
+ 
+ class F2fs final {
+  public:
++  ~F2fs();
+   // Not copyable or moveable
+   F2fs(const F2fs &) = delete;
+   F2fs &operator=(const F2fs &) = delete;
+@@ -52,7 +53,6 @@
+                                                   std::unique_ptr<f2fs::BcacheMapper> bc,
+                                                   const MountOptions &options, PlatformVfs *vfs);
+ 
+-  zx::result<fs::FilesystemInfo> GetFilesystemInfo();
+   InspectTree &GetInspectTree() { return *inspect_tree_; }
+ 
+   zx::result<fbl::RefPtr<VnodeF2fs>> GetVnode(ino_t ino, LockedPage *inode_page = nullptr);
+@@ -153,8 +153,7 @@
+                                   PageType type, bool is_sync = true);
+   zx::result<> MakeReadOperation(LockedPage &page, block_t blk_addr, PageType type,
+                                  bool is_sync = true);
+-  zx::result<> MakeReadOperations(zx::vmo &vmo, std::vector<block_t> &addrs, PageType type,
+-                                  bool is_sync = true);
++
+   zx_status_t MakeTrimOperation(block_t blk_addr, block_t nblocks) const;
+   void ScheduleWritebackAndReclaimPages();
+ 
+@@ -236,7 +235,7 @@
+       0,
+   };
+ 
+-  zx::event fs_id_;
++
+   std::unique_ptr<InspectTree> inspect_tree_;
+   std::atomic<MemoryPressure> current_memory_pressure_level_ = MemoryPressure::kUnknown;
+   std::unique_ptr<MemoryPressureWatcher> memory_pressure_watcher_;
+--- a/src/storage/f2fs/file.cc
++++ b/src/storage/f2fs/file.cc
+@@ -4,7 +4,6 @@
+ 
+ #include "src/storage/f2fs/file.h"
+ 
+-#include <zircon/syscalls-next.h>
+ 
+ #include "src/storage/f2fs/bcache.h"
+ #include "src/storage/f2fs/common.h"
+@@ -325,7 +324,7 @@
+ 
+   fs::SharedLock lock(f2fs::GetGlobalLock());
+   if (TestFlag(InodeInfoFlag::kInlineData) && len >= MaxInlineData()) {
+-    ConvertInlineData();
++    if (auto status = ConvertInlineData(); status != ZX_OK) return status;
+   }
+ 
+   if (TestFlag(InodeInfoFlag::kInlineData)) {
+@@ -338,6 +337,17 @@
+ 
+   {
+     std::lock_guard file_lock(mutex_);
++    // Native backing has no Zircon VMO resize to zero a surviving partial page.
++    if (len < GetSize() && len % kBlockSize) {
++      auto addresses = FindAddresses(len / kBlockSize, 1);
++      if (addresses.is_error()) return addresses.error_value();
++      if ((*addresses)[0] != kNullAddr) {
++        auto pages = ReadPagesForNative(len / kBlockSize, 1);
++        if (pages.is_error()) return pages.error_value();
++        (*pages)[0].Zero(len % kBlockSize, kBlockSize);
++        (*pages)[0].SetDirty();
++      }
++    }
+     if (zx_status_t ret = DoTruncate(len); ret != ZX_OK) {
+       return ret;
+     }
+@@ -366,90 +376,16 @@
+   return result;
+ }
+ 
+-zx_status_t File::GetVmo(fuchsia_io::wire::VmoFlags flags, zx::vmo *out_vmo) {
+-  if (flags & fuchsia_io::wire::VmoFlags::kExecute) {
+-    return ZX_ERR_NOT_SUPPORTED;
+-  }
+-
+-  // mmapped vnodes are not allowed to have inline data.
+-  if (TestFlag(InodeInfoFlag::kInlineData)) {
+-    ConvertInlineData();
+-  }
+-  std::lock_guard lock(mutex_);
+-  return VnodeF2fs::GetVmo(flags, out_vmo);
+-}
+-
+-void File::VmoDirty(uint64_t offset, uint64_t length) {
+-  if (unlikely(offset + length > MaxFileSize())) {
+-    return ReportPagerError(ZX_PAGER_OP_DIRTY, offset, length, ZX_ERR_BAD_STATE);
+-  }
+-
+-  uint32_t num_blocks =
+-      CheckedDivRoundUp<uint32_t>(safemath::checked_cast<uint32_t>(length), kBlockSize);
+-  // Touch nothing while |this| is being purged or converting inline data.
+-  if (unlikely(TestFlag(InodeInfoFlag::kNoAlloc) || TestFlag(InodeInfoFlag::kInlineData))) {
+-    fs::SharedLock file_lock(mutex_);
+-    return VnodeF2fs::VmoDirty(offset, length);
+-  }
+-  fs()->BalanceFs(num_blocks);
+-
+-  fs::SharedLock lock(f2fs::GetGlobalLock());
+-  std::lock_guard file_lock(mutex_);
+-  zx::result pages = WriteBegin(offset, length);
+-  if (unlikely(pages.is_error())) {
+-    return ReportPagerErrorUnsafe(ZX_PAGER_OP_DIRTY, offset, length, pages.error_value());
+-  }
+-  SetTime<Timestamps::ModificationTime>();
+-  SetDirty();
+-  return VnodeF2fs::VmoDirty(offset, length);
+-}
+-
+-void File::VmoRead(uint64_t offset, uint64_t length) {
+-  ZX_DEBUG_ASSERT(kBlockSize == zx_system_get_page_size());
+-  ZX_DEBUG_ASSERT(offset % kBlockSize == 0);
+-  ZX_DEBUG_ASSERT(length);
+-  ZX_DEBUG_ASSERT(length % kBlockSize == 0);
+-  fs::SharedLock rlock(mutex_);
+-  return VnodeF2fs::VmoRead(offset, length);
+-}
+-
+-zx::result<zx::stream> File::CreateStream(uint32_t stream_options) {
+-  if (TestFlag(InodeInfoFlag::kInlineData)) {
+-    ConvertInlineData();
+-  }
+-
+-  std::lock_guard lock(mutex_);
+-  zx::stream stream;
+-  if (zx_status_t status = zx::stream::create(stream_options, paged_vmo(), 0u, &stream);
+-      status != ZX_OK) {
+-    return zx::error(status);
+-  }
+-  return zx::ok(std::move(stream));
+-}
++
++
++
++
++
++
++
+ 
+ block_t File::GetBlockAddr(LockedPage &page) { return GetBlockAddrOnDataSegment(page); }
+ 
+-zx::result<LockedPage> File::FindVictimPage(pgoff_t index) {
+-  LockedPage data_page;
+-  if (zx_status_t ret = GrabLockedPage(index, &data_page); ret != ZX_OK) {
+-    return zx::error(ret);
+-  }
+-
+-  // Ask kernel to dirty the vmo area for |data_page|. If the regarding pages are not present, we
+-  // supply a vmo and dirty it again.
+-  zx::result dirty = data_page.SetVmoDirty();
+-  if (dirty.is_ok()) {
+-    return zx::ok(std::move(data_page));
+-  }
+-  if (dirty.error_value() != ZX_ERR_NOT_FOUND) {
+-    return dirty.take_error();
+-  }
+-  pgoff_t offset = safemath::CheckMul(data_page->GetKey(), kBlockSize).ValueOrDie();
+-  VmoRead(offset, Page::Size());
+-  if (zx::result ret = data_page.SetVmoDirty(); ret.is_error()) {
+-    return ret.take_error();
+-  }
+-  return zx::ok(std::move(data_page));
+-}
++zx::result<LockedPage> File::FindVictimPage(pgoff_t index) {return FindDataPageForNative(index);}
+ 
+ }  // namespace f2fs
+--- a/src/storage/f2fs/file.h
++++ b/src/storage/f2fs/file.h
+@@ -18,6 +18,8 @@
+   explicit File(F2fs* fs, ino_t ino, umode_t mode, std::optional<gid_t> gid = std::nullopt);
+   virtual ~File() = default;
+ 
++  zx_status_t ReadNative(void*,size_t,size_t,size_t*);
++  zx_status_t WriteNative(const void*,size_t,size_t,size_t*);
+   // Required for memory management, see the class comment above Vnode for more.
+   void fbl_recycle() { RecycleNode(); }
+ 
+@@ -34,12 +36,7 @@
+ 
+   zx_status_t Truncate(size_t len) final __TA_EXCLUDES(mutex_);
+   zx_status_t RecoverInlineData(NodePage& node_page) final;
+-  zx_status_t GetVmo(fuchsia_io::wire::VmoFlags flags, zx::vmo* out_vmo) final
+-      __TA_EXCLUDES(mutex_);
+-  void VmoDirty(uint64_t offset, uint64_t length) final
+-      __TA_EXCLUDES(mutex_, f2fs::GetGlobalLock());
+-  void VmoRead(uint64_t offset, uint64_t length) final __TA_EXCLUDES(mutex_);
+-  zx::result<zx::stream> CreateStream(uint32_t stream_options) final;
++
+   block_t GetBlockAddr(LockedPage& page) final;
+   zx_status_t ConvertInlineData() __TA_EXCLUDES(mutex_);
+   zx::result<LockedPage> FindVictimPage(pgoff_t index) final;
+@@ -52,6 +49,8 @@
+   zx_status_t WriteInline(const void* data, size_t len, size_t offset, size_t* out_actual);
+ 
+   size_t MaxFileSize();
++  zx::result<LockedPage> FindDataPageForNative(pgoff_t);
++  zx::result<std::vector<LockedPage>> ReadPagesForNative(pgoff_t,size_t);
+ };
+ 
+ }  // namespace f2fs
+--- a/src/storage/f2fs/inline.cc
++++ b/src/storage/f2fs/inline.cc
+@@ -226,7 +226,7 @@
+ 
+       DirEntry &de = InlineDentryArray(ipage.get(), *this)[bit_pos];
+       de.hash_code = name_hash;
+-      de.name_len = static_cast<uint16_t>(CpuToLe(name.length()));
++      de.name_len = static_cast<uint16_t>(CpuToLe(static_cast<uint16_t>(name.length())));
+       std::memcpy(InlineDentryFilenameArray(ipage.get(), *this)[bit_pos], name.data(),
+                   name.length());
+       de.ino = CpuToLe(vnode->Ino());
+--- a/src/storage/f2fs/inspect.h
++++ b/src/storage/f2fs/inspect.h
+@@ -2,52 +2,14 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
+-#ifndef SRC_STORAGE_F2FS_INSPECT_H_
+-#define SRC_STORAGE_F2FS_INSPECT_H_
+-
+-#include "src/storage/lib/vfs/cpp/inspect/inspect_tree.h"
+-
++// HypeR platform adapter for the pinned media core.
++#pragma once
+ namespace f2fs {
+-
+ class F2fs;
+-
+-class InspectTree final {
++class InspectTree {
+  public:
+-  explicit InspectTree(F2fs *fs);
+-
+-  void Initialize();
+-  void OnOutOfSpace();
+-  const inspect::Inspector &GetInspector() { return inspector_; }
+-
+- private:
+-  fs_inspect::NodeCallbacks CreateCallbacks();
+-
+-  F2fs *fs_ = nullptr;
+-
+-  mutable std::mutex info_mutex_{};
+-  fs_inspect::InfoData info_ __TA_GUARDED(info_mutex_){};
+-
+-  mutable std::mutex usage_mutex_{};
+-  fs_inspect::UsageData usage_ __TA_GUARDED(usage_mutex_){};
+-  void UpdateUsage() __TA_REQUIRES(usage_mutex_);
+-
+-  mutable std::mutex fvm_mutex_{};
+-  fs_inspect::FvmData fvm_ __TA_GUARDED(fvm_mutex_){};
+-  void UpdateFvmSizeInfo() __TA_REQUIRES(fvm_mutex_);
+-
+-  // Lasted out of space event within 5 minutes will not be counted.
+-  static constexpr zx::duration kOutOfSpaceDuration = zx::min(5);
+-  zx::time last_out_of_space_time_ __TA_GUARDED(fvm_mutex_){zx::time::infinite_past()};
+-
+-  // The Inspector to which the tree is attached.
+-  inspect::Inspector inspector_;
+-
+-  // Filesystem inspect tree nodes.
+-  // **MUST be declared last**, as the callbacks passed to this object use the above properties.
+-  // This ensures that the callbacks are destroyed before any properties that they may reference.
+-  fs_inspect::FilesystemNodes fs_inspect_nodes_;
++  explicit InspectTree(F2fs*) {}
++  void Initialize() {}
++  void OnOutOfSpace() {}
+ };
+-
+ }  // namespace f2fs
+-
+-#endif  // SRC_STORAGE_F2FS_INSPECT_H_
+--- a/src/storage/f2fs/memory_watcher.h
++++ b/src/storage/f2fs/memory_watcher.h
+@@ -2,62 +2,10 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
+-#ifndef SRC_STORAGE_F2FS_MEMORY_WATCHER_H_
+-#define SRC_STORAGE_F2FS_MEMORY_WATCHER_H_
+-
+-#include <fidl/fuchsia.memorypressure/cpp/fidl.h>
+-#include <lib/async-loop/cpp/loop.h>
+-#include <lib/async-loop/default.h>
+-#include <lib/fidl/cpp/client.h>
+-#include <lib/sys/cpp/component_context.h>
+-#include <lib/zx/result.h>
+-
+-#include <optional>
+-
++// HypeR platform adapter for the pinned media core.
++#pragma once
+ namespace f2fs {
+-
+-enum class MemoryPressure {
+-  kUnknown = 0,
+-  kLow,
+-  kMedium,
+-  kHigh,
+-};
+-
+-enum class MemoryStatus {
+-  kNeedReclaim = 0,
+-  kNeedCheckpoint,
+-  kNeedWriteback,
+-};
+-
+-using MemoryPressureCallback = fit::callback<void(MemoryPressure level)>;
+-constexpr uint32_t kMaxID = std::numeric_limits<uint32_t>::max();
+-
+-// This class is not thread-safe.
+-class MemoryPressureWatcher : public fidl::AsyncEventHandler<fuchsia_memorypressure::Watcher>,
+-                              public fidl::Server<fuchsia_memorypressure::Watcher> {
+- public:
+-  explicit MemoryPressureWatcher(async_dispatcher_t* dispatcher, MemoryPressureCallback callback);
+-  bool IsConnected() const { return is_connected_; }
+-  static std::string_view ToString(MemoryPressure level);
+-
+- private:
+-  zx::result<> Start();
+-
+-  void on_fidl_error(fidl::UnbindInfo error) final;
+-
+-  // |fuchsia::memorypressure::Watcher|
+-  void OnLevelChanged(OnLevelChangedRequest& request,
+-                      OnLevelChangedCompleter::Sync& completer) final;
+-
+-  async_dispatcher_t* dispatcher_ = nullptr;
+-
+-  std::optional<fidl::ServerBindingRef<fuchsia_memorypressure::Watcher>> memory_pressure_server_;
+-
+-  // handling memorypressure events.
+-  MemoryPressureCallback callback_;
+-  bool is_connected_ = false;
+-};
+-
++enum class MemoryPressure { kUnknown, kLow, kMedium, kHigh };
++enum class MemoryStatus { kNeedReclaim, kNeedCheckpoint, kNeedWriteback };
++class MemoryPressureWatcher {};
+ }  // namespace f2fs
+-
+-#endif  // SRC_STORAGE_F2FS_MEMORY_WATCHER_H_
+--- a/src/storage/f2fs/mkfs.cc
++++ b/src/storage/f2fs/mkfs.cc
+@@ -4,18 +4,15 @@
+ 
+ #include "src/storage/f2fs/mkfs.h"
+ 
+-#include <lib/syslog/cpp/macros.h>
+-
+-#include <iostream>
+-
+-#include <fbl/unique_fd.h>
++
++
+ #include <safemath/checked_math.h>
+ 
+-#include "src/lib/uuid/uuid.h"
+ #include "src/storage/f2fs/bcache.h"
+-#include "src/storage/f2fs/bitmap.h"
+ 
+ namespace f2fs {
++inline size_t ToMsbFirst(size_t offset) {return offset + 7 - 2*(offset & 7);}
++template<class T> inline T GetMask(T value,size_t offset) {return value << offset;}
+ 
+ zx::result<std::unique_ptr<BcacheMapper>> MkfsWorker::DoMkfs() {
+   InitGlobalParameters();
+@@ -315,7 +312,7 @@
+     return total_zones.error_value();
+   }
+ 
+-  memcpy(super_block_.uuid, uuid::Uuid::Generate().bytes(), 16);
++  memcpy(super_block_.uuid, bc_->Uuid(), 16);
+ 
+   std::string vol_label(reinterpret_cast<char const *>(params_.vol_label));
+   std::u16string volume_name;
+@@ -411,7 +408,7 @@
+ 
+   checkpoint->cur_node_blkoff[0] = CpuToLe(uint16_t{1});
+   checkpoint->cur_data_blkoff[0] = CpuToLe(uint16_t{1});
+-  checkpoint->valid_block_count = CpuToLe(2UL);
++  checkpoint->valid_block_count = CpuToLe(uint64_t{2});
+   checkpoint->rsvd_segment_count = CpuToLe(params_.reserved_segments);
+   checkpoint->overprov_segment_count = CpuToLe(params_.op_segments);
+   checkpoint->overprov_segment_count = CpuToLe(LeToCpu(checkpoint->overprov_segment_count) +
+@@ -619,19 +616,19 @@
+ 
+   raw_node->footer.nid = super_block_.root_ino;
+   raw_node->footer.ino = super_block_.root_ino;
+-  raw_node->footer.cp_ver = CpuToLe(1UL);
++  raw_node->footer.cp_ver = CpuToLe(uint64_t{1});
+   raw_node->footer.next_blkaddr = CpuToLe(
+       LeToCpu(super_block_.main_blkaddr) +
+       params_.cur_seg[static_cast<int>(CursegType::kCursegHotNode)] * params_.blks_per_seg + 1);
+ 
+   raw_node->i.i_mode = CpuToLe(uint16_t{0x41ed});
+   raw_node->i.i_links = CpuToLe(2U);
+-  raw_node->i.i_uid = CpuToLe(getuid());
+-  raw_node->i.i_gid = CpuToLe(getgid());
++  raw_node->i.i_uid = CpuToLe(uint32_t{0});
++  raw_node->i.i_gid = CpuToLe(uint32_t{0});
+ 
+   uint64_t blk_size_bytes = 1 << LeToCpu(super_block_.log_blocksize);
+   raw_node->i.i_size = CpuToLe(1 * blk_size_bytes);  // dentry
+-  raw_node->i.i_blocks = CpuToLe(2UL);
++  raw_node->i.i_blocks = CpuToLe(uint64_t{2});
+ 
+   timespec cur_time;
+   clock_gettime(CLOCK_REALTIME, &cur_time);
+--- a/src/storage/f2fs/mount.cc
++++ b/src/storage/f2fs/mount.cc
+@@ -4,35 +4,10 @@
+ 
+ #include "src/storage/f2fs/mount.h"
+ 
+-#include <lib/async-loop/cpp/loop.h>
+-#include <lib/async-loop/default.h>
+-#include <lib/async/dispatcher.h>
+-#include <lib/syslog/cpp/macros.h>
+-#include <lib/trace-provider/provider.h>
+ 
+-#include "src/storage/f2fs/component_runner.h"
++
+ 
+ namespace f2fs {
+-
+-zx::result<> StartComponent(fidl::ServerEnd<fuchsia_io::Directory> root,
+-                            fidl::ServerEnd<fuchsia_process_lifecycle::Lifecycle> lifecycle) {
+-  async::Loop loop(&kAsyncLoopConfigAttachToCurrentThread);
+-  trace::TraceProviderWithFdio trace_provider(loop.dispatcher());
+-
+-  std::unique_ptr<ComponentRunner> runner(new ComponentRunner(loop.dispatcher()));
+-  runner->SetUnmountCallback([&loop]() {
+-    loop.Quit();
+-    FX_LOGS(INFO) << "unmounted successfully";
+-  });
+-  auto status = runner->ServeRoot(std::move(root), std::move(lifecycle));
+-  if (status.is_error()) {
+-    return status;
+-  }
+-
+-  // |ZX_ERR_CANCELED| is returned when the loop is cancelled via |loop.Quit()|.
+-  ZX_ASSERT(loop.Run() == ZX_ERR_CANCELED);
+-  return zx::ok();
+-}
+ 
+ zx::result<size_t> MountOptions::GetValue(const MountOption option) const {
+   if (option >= MountOption::kMaxNum)
+--- a/src/storage/f2fs/mount.h
++++ b/src/storage/f2fs/mount.h
+@@ -5,9 +5,8 @@
+ #ifndef SRC_STORAGE_F2FS_MOUNT_H_
+ #define SRC_STORAGE_F2FS_MOUNT_H_
+ 
+-#include <fidl/fuchsia.io/cpp/wire.h>
+-#include <fidl/fuchsia.process.lifecycle/cpp/wire.h>
+ 
++#include "portability.h"
+ namespace f2fs {
+ 
+ enum class MountOption {
+@@ -60,8 +59,6 @@
+   std::array<size_t, kMaxOptionCount> opt_ = {1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 6};
+ };
+ 
+-zx::result<> StartComponent(fidl::ServerEnd<fuchsia_io::Directory> root,
+-                            fidl::ServerEnd<fuchsia_process_lifecycle::Lifecycle> lifecycle);
+ 
+ }  // namespace f2fs
+ 
+--- a/src/storage/f2fs/reader.cc
++++ b/src/storage/f2fs/reader.cc
+@@ -11,13 +11,7 @@
+ 
+ namespace f2fs {
+ 
+-static inline bool CopyReadData(zx::vmo &dst, const void *src, size_t from, size_t size) {
+-  if (!size) {
+-    return false;
+-  }
+-  dst.write(src, from * Page::Size(), size * Page::Size());
+-  return true;
+-}
++
+ 
+ Reader::Reader(std::unique_ptr<StorageBufferPool> pool) : bcache_mapper_(pool->Block()) {
+   pool_ = std::move(pool);
+@@ -45,47 +39,7 @@
+   return builder.TakeOperations();
+ }
+ 
+-zx::result<> Reader::ReadBlocks(zx::vmo &vmo, std::vector<block_t> &addrs) {
+-  // indice for |vmo| and |addrs|.
+-  size_t from, to = 0;
+-  while (to < addrs.size()) {
+-    from = to;
+-    OwnedStorageBuffer buffer = pool_->Get(addrs.size() - from);
+-    auto operations = BuildBufferedOperations(buffer, addrs, to);
+-    // If every addr is either kNullAddr or kNewAddr, |operations| is empty.
+-    if (operations.empty()) {
+-      continue;
+-    }
+-    zx_status_t io_status = bcache_mapper_->RunRequests(operations);
+-    if (io_status != ZX_OK) {
+-      FX_LOGS(ERROR) << "read operations failed" << zx_status_get_string(io_status);
+-      return zx::error(io_status);
+-    }
+-    // index for |buffer|.
+-    size_t buffer_index = 0;
+-    size_t num_pages = to - from;
+-    if (buffer->Size() == num_pages) {
+-      CopyReadData(vmo, buffer->Data(buffer_index), from, num_pages);
+-      continue;
+-    }
+-    // Copy a valid data chunk to |vmo| at once.
+-    num_pages = 0;
+-    for (size_t i = from; i < to; ++i) {
+-      if (IsValidBlockAddr(addrs[i])) {
+-        ++num_pages;
+-        continue;
+-      }
+-      if (CopyReadData(vmo, buffer->Data(buffer_index), from, num_pages)) {
+-        buffer_index += num_pages;
+-        from += num_pages;
+-        num_pages = 0;
+-      }
+-      ++from;
+-    }
+-    CopyReadData(vmo, buffer->Data(buffer_index), from, num_pages);
+-  }
+-  return zx::ok();
+-}
++
+ 
+ zx::result<> Reader::ReadBlocks(std::vector<LockedPage> &pages, std::vector<block_t> &addrs) {
+   // indice for |pages| and |addrs|.
+--- a/src/storage/f2fs/reader.h
++++ b/src/storage/f2fs/reader.h
+@@ -28,7 +28,7 @@
+   // These methods build read operations from |addrs| and request them to underlying storage.
+   // On success, it copy read data to |pages| or |vmo|.
+   zx::result<> ReadBlocks(std::vector<LockedPage> &pages, std::vector<block_t> &addrs);
+-  zx::result<> ReadBlocks(zx::vmo &vmo, std::vector<block_t> &addrs);
++
+ 
+  private:
+   std::vector<storage::BufferedOperation> BuildBufferedOperations(OwnedStorageBuffer &buffer,
+--- a/src/storage/f2fs/third_party/ext2_hash/hash.cc
++++ b/src/storage/f2fs/third_party/ext2_hash/hash.cc
+@@ -1,3 +1,4 @@
++#include <cstdint>
+ /*
+  * SPDX-License-Identifier: (BSD-2-Clause-FreeBSD)
+  *
+--- a/src/storage/f2fs/vmo_manager.h
++++ b/src/storage/f2fs/vmo_manager.h
+@@ -2,162 +2,59 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
+-#ifndef SRC_STORAGE_F2FS_VMO_MANAGER_H_
+-#define SRC_STORAGE_F2FS_VMO_MANAGER_H_
++// HypeR platform adapter for the pinned media core.
++#pragma once
++#include "src/storage/f2fs/common.h"
++namespace f2fs {
++class VmoManager {
++  struct Buffer {
++    std::unique_ptr<uint8_t[]> data = std::make_unique<uint8_t[]>(kBlockSize);
++  };
++  std::mutex mutex_;
++  std::map<pgoff_t, Buffer> pages_;
++  uint64_t size_, checkpointed_;
+ 
+-#include <fbl/intrusive_wavl_tree.h>
+-
+-#include "src/storage/f2fs/common.h"
+-#include "src/storage/f2fs/layout.h"
+-
+-namespace f2fs {
+-
+-constexpr uint64_t kMaxVmoSize = std::numeric_limits<uint64_t>::max();
+-constexpr size_t kBlocksPerVmoNode = kDefaultBlocksPerSegment;
+-constexpr size_t kVmoNodeSize = safemath::CheckMul(kBlocksPerVmoNode, kBlockSize).ValueOrDie();
+-
+-enum class VmoMode {
+-  kDiscardable = 0,
+-  kPaged,
++ public:
++  explicit VmoManager(uint64_t n) : size_(n), checkpointed_(n) {}
++  bool IsPaged() const { return false; }
++  zx::result<bool> CreateAndLockVmo(pgoff_t n, void** out = nullptr) {
++    std::lock_guard l(mutex_);
++    auto [it, inserted] = pages_.try_emplace(n);
++    if (out) *out = it->second.data.get();
++    return zx::ok(!inserted);
++  }
++  zx_status_t UnlockVmo(pgoff_t n) {
++    std::lock_guard l(mutex_);
++    pages_.erase(n);
++    return ZX_OK;
++  }
++  void ZeroBlocks(PlatformVfs&, pgoff_t a, pgoff_t b) {
++    std::lock_guard l(mutex_);
++    for (auto i = pages_.lower_bound(a); i != pages_.end() && i->first < b; ++i)
++      memset(i->second.data.get(), 0, kBlockSize);
++  }
++  zx::result<> WritebackBegin(PlatformVfs&, size_t, size_t) { return zx::ok(); }
++  zx_status_t WritebackEnd(PlatformVfs&, size_t, size_t) { return ZX_OK; }
++  zx::result<> DirtyPages(PlatformVfs&, size_t, size_t) { return zx::error(ZX_ERR_NOT_SUPPORTED); }
++  void AllowEviction(PlatformVfs&) {}
++  void Reset(bool = false) {
++    std::lock_guard l(mutex_);
++    pages_.clear();
++  }
++  void SetContentSize(size_t n) {
++    std::lock_guard l(mutex_);
++    size_ = n;
++  }
++  uint64_t GetContentSize(bool checkpoint = false, bool round = false) {
++    std::lock_guard l(mutex_);
++    if (checkpoint) checkpointed_ = size_;
++    return round ? fbl::round_up(size_, uint64_t(kBlockSize)) : size_;
++  }
++  bool SizeIsChanged() {
++    std::lock_guard l(mutex_);
++    return size_ != checkpointed_;
++  }
++  zx_status_t Read(void*, uint64_t, size_t) { return ZX_ERR_NOT_SUPPORTED; }
++  zx_status_t Write(const void*, uint64_t, size_t) { return ZX_ERR_NOT_SUPPORTED; }
+ };
+-
+-class VmoMapping : public fbl::WAVLTreeContainable<std::unique_ptr<VmoMapping>> {
+- public:
+-  VmoMapping() = delete;
+-  explicit VmoMapping(pgoff_t index, size_t size);
+-  virtual ~VmoMapping();
+-
+-  virtual zx::result<bool> Lock(pgoff_t offset) = 0;
+-  virtual zx_status_t Unlock(pgoff_t offset) = 0;
+-  virtual zx_status_t Zero(pgoff_t start, pgoff_t len) = 0;
+-
+-  zx::result<zx_vaddr_t> GetAddress(pgoff_t offset) const;
+-  pgoff_t GetKey() const { return index(); }
+-  uint64_t GetActivePages() const { return active_pages(); }
+-
+- protected:
+-  zx::vmo &vmo() { return owned_vmo_; }
+-  zx_vaddr_t address() const { return address_; }
+-  size_t get_size() const { return size_in_blocks_; }
+-  pgoff_t index() const { return index_; }
+-  uint64_t increase_active_pages() { return ++active_pages_; }
+-  uint64_t decrease_active_pages() { return --active_pages_; }
+-  uint64_t active_pages() const { return active_pages_.load(std::memory_order_acquire); }
+-
+- private:
+-  // A va mapping to |this|.
+-  zx_vaddr_t address_ = 0;
+-  // The number of active pages to |vmo_|.
+-  std::atomic<uint64_t> active_pages_ = 0;
+-  const size_t size_in_blocks_ = 0;
+-  const pgoff_t index_;
+-  zx::vmo owned_vmo_;
+-};
+-
+-// It manages the lifecycle of a discardable Vmo that Pages use in each vnode.
+-class VmoDiscardable : public VmoMapping {
+- public:
+-  VmoDiscardable() = delete;
+-  VmoDiscardable(const VmoDiscardable &) = delete;
+-  VmoDiscardable &operator=(const VmoDiscardable &) = delete;
+-  VmoDiscardable(const VmoDiscardable &&) = delete;
+-  VmoDiscardable &operator=(const VmoDiscardable &&) = delete;
+-  explicit VmoDiscardable(pgoff_t index, size_t size);
+-
+-  ~VmoDiscardable();
+-
+-  // It ensures that |vmo_| keeps VMO_OP_LOCK as long as any Pages refer to it
+-  // by calling Page::GetVmo(). When a valid page gets a new access to a |this|,
+-  // it increases VmoMapping::active_pages_, and then decreases VmoMapping::active_pages_
+-  // in Unlock() as a active page is truncated. When VmoMapping::active_pages_ reaches
+-  // zero, Unlock() does VMO_OP_UNLOCK for page reclaim.
+-  // When VmoMapping::active_pages is zero with new page access, it tries VMO_OP_TRY_LOCK
+-  // to check which pages kernel has reclaimed.
+-  zx::result<bool> Lock(pgoff_t offset) final;
+-  // It unlocks |vmo_| when there is no Page using it.
+-  zx_status_t Unlock(pgoff_t offset) final;
+-  zx_status_t Zero(pgoff_t start, pgoff_t len) final;
+-
+- private:
+-  // It tracks which Page has been decommitted by kernel during |vmo_| unlocked.
+-  // When a bit is 0, a caller (i.e., Page::GetVmo()) clears the kUptodate flag of the
+-  // corresponding Page and fill the Page with data read from disk.
+-  std::vector<bool> page_bitmap_;
+-};
+-
+-// It provides vmo service to Filecache of a vnode.
+-// When the cache is backed with discardable VMO, it divides the range of a vnode into a fixed size
+-// of vmo nodes and keeps them in |vmo_tree_|. From this way, it covers the full range of a vnode
+-// and saves va mapping resource. A vmo node represents a range between VmoMapping::index_ and
+-// VmoMapping::index_ + VmoMapping::size_in_blocks within the range of a vnode. The size of a vmo
+-// node is set to VmoManager::node_size_in_blocks_, and the va mapping of a vmo node keeps as long
+-// as the vmo node is kept in |vmo_tree_|.
+-// When the cache is backed with paged VMO, it does not use the tree and manages its content and vmo
+-// sizes.
+-class VmoManager {
+- public:
+-  VmoManager() = delete;
+-  VmoManager(VmoMode mode, size_t content_size, size_t node_size, zx::vmo vmo = {});
+-  VmoManager(const VmoManager &) = delete;
+-  VmoManager &operator=(const VmoManager &) = delete;
+-  VmoManager(const VmoManager &&) = delete;
+-  VmoManager &operator=(const VmoManager &&) = delete;
+-  ~VmoManager() { Reset(true); }
+-
+-  zx::result<bool> CreateAndLockVmo(pgoff_t index, void **out = nullptr) __TA_EXCLUDES(mutex_);
+-  zx_status_t UnlockVmo(pgoff_t index) __TA_EXCLUDES(mutex_);
+-  void ZeroBlocks(fs::PagedVfs &vfs, pgoff_t start, pgoff_t end) __TA_EXCLUDES(mutex_);
+-  zx::result<> WritebackBegin(fs::PagedVfs &vfs, const size_t start = 0,
+-                              const size_t end = kMaxVmoSize) __TA_EXCLUDES(mutex_);
+-  zx_status_t WritebackEnd(fs::PagedVfs &vfs, const size_t start = 0,
+-                           const size_t end = kMaxVmoSize) __TA_EXCLUDES(mutex_);
+-  zx::result<> DirtyPages(fs::PagedVfs &vfs, const size_t start = 0, const size_t end = kMaxVmoSize)
+-      __TA_EXCLUDES(mutex_);
+-  void AllowEviction(fs::PagedVfs &vfs, const size_t start = 0, const size_t end = kMaxVmoSize)
+-      __TA_EXCLUDES(mutex_);
+-
+-  zx_status_t Write(const void *data, uint64_t offset, size_t len) __TA_EXCLUDES(mutex_);
+-  zx_status_t Read(void *data, uint64_t offset, size_t len) __TA_EXCLUDES(mutex_);
+-
+-  void UpdateSizeUnsafe() __TA_REQUIRES(mutex_);
+-  void SetContentSize(const size_t nbytes) __TA_EXCLUDES(mutex_);
+-  uint64_t GetContentSize(bool update_checkpointed_size = false, bool round_up = false)
+-      __TA_EXCLUDES(mutex_);
+-  uint64_t GetContentSizeUnsafe(bool round_up) __TA_REQUIRES_SHARED(mutex_);
+-  bool SizeIsChanged() __TA_EXCLUDES(mutex_);
+-
+-  void Reset(bool shutdown = false) __TA_EXCLUDES(mutex_);
+-  bool IsPaged() const { return mode_ == VmoMode::kPaged; }
+-
+- private:
+-  zx::result<> DirtyPagesUnsafe(fs::PagedVfs &vfs, const size_t start = 0,
+-                                const size_t end = kMaxVmoSize) __TA_REQUIRES_SHARED(mutex_);
+-  zx::result<> WritebackBeginUnsafe(fs::PagedVfs &vfs, const size_t start = 0,
+-                                    const size_t end = kMaxVmoSize) __TA_REQUIRES_SHARED(mutex_);
+-  zx_status_t WritebackEndUnsafe(fs::PagedVfs &vfs, const size_t start = 0,
+-                                 const size_t end = kMaxVmoSize) __TA_REQUIRES_SHARED(mutex_);
+-
+-  pgoff_t GetOffsetInVmoNode(pgoff_t page_index) const;
+-  pgoff_t GetVmoNodeKey(pgoff_t page_index) const;
+-
+-  using VmoTreeTraits = fbl::DefaultKeyedObjectTraits<pgoff_t, VmoMapping>;
+-  using VmoTree = fbl::WAVLTree<pgoff_t, std::unique_ptr<VmoMapping>, VmoTreeTraits>;
+-  zx::result<VmoMapping *> FindVmoNodeUnsafe(pgoff_t index) __TA_REQUIRES_SHARED(mutex_);
+-  zx::result<VmoMapping *> GetVmoNodeUnsafe(pgoff_t index) __TA_REQUIRES(mutex_);
+-
+-  std::shared_mutex mutex_;
+-  VmoTree vmo_tree_ __TA_GUARDED(mutex_);
+-  const VmoMode mode_;
+-
+-  size_t size_in_blocks_ __TA_GUARDED(mutex_) = 0;
+-  uint64_t content_size_ __TA_GUARDED(mutex_) = 0;
+-  uint64_t checkpointed_size_ __TA_GUARDED(mutex_) = 0;
+-  const size_t node_size_in_blocks_ = 0;
+-  const size_t node_size_ = 0;
+-  // a copy of paged vmo
+-  zx::vmo vmo_ __TA_GUARDED(mutex_);
+-};
+-
+ }  // namespace f2fs
+-
+-#endif  // SRC_STORAGE_F2FS_VMO_MANAGER_H_
+--- a/src/storage/f2fs/vnode.cc
++++ b/src/storage/f2fs/vnode.cc
+@@ -5,7 +5,6 @@
+ #include "src/storage/f2fs/vnode.h"
+ 
+ #include <sys/stat.h>
+-#include <zircon/syscalls-next.h>
+ 
+ #include <span>
+ 
+@@ -27,7 +26,7 @@
+ namespace f2fs {
+ 
+ VnodeF2fs::VnodeF2fs(F2fs* fs, ino_t ino, umode_t mode, LockedPage node_page)
+-    : PagedVnode(*fs->vfs()),
++    :
+       superblock_info_(fs->GetSuperblockInfo()),
+       ino_(ino),
+       fs_(fs),
+@@ -46,7 +45,7 @@
+ 
+   SetFlag(InodeInfoFlag::kNewInode);
+   nlink_ = 1;
+-  uid_ = getuid();
++  uid_ = uint32_t{0};
+ 
+   timespec cur;
+   clock_gettime(CLOCK_REALTIME, &cur);
+@@ -66,7 +65,7 @@
+   CreateFileCacheUnsafe();
+ }
+ 
+-VnodeF2fs::~VnodeF2fs() { ReleasePagedVmo(); }
++VnodeF2fs::~VnodeF2fs() = default;
+ 
+ fuchsia_io::NodeProtocolKinds VnodeF2fs::GetProtocols() const {
+   return fuchsia_io::NodeProtocolKinds::kFile;
+@@ -96,209 +95,25 @@
+ 
+ bool VnodeF2fs::IsMeta() const { return ino_ == superblock_info_.GetMetaIno(); }
+ 
+-zx_status_t VnodeF2fs::GetVmo(fuchsia_io::wire::VmoFlags flags, zx::vmo* out_vmo) {
+-  zx::result size = CreatePagedVmo(GetSize());
+-  if (size.is_error()) {
+-    return size.error_value();
+-  }
+-  return ClonePagedVmo(flags, *size, out_vmo);
+-}
+-
+-zx::result<size_t> VnodeF2fs::CreatePagedVmo(size_t size) {
+-  if (!paged_vmo().is_valid()) {
+-    if (zx::result status = EnsureCreatePagedVmo(size, ZX_VMO_UNBOUNDED | ZX_VMO_TRAP_DIRTY);
+-        status.is_error()) {
+-      return status.take_error();
+-    }
+-    SetPagedVmoName();
+-  }
+-  return zx::ok(size);
+-}
+-
+-void VnodeF2fs::SetPagedVmoName() {
+-  fbl::StringBuffer<ZX_MAX_NAME_LEN> name;
+-  name.Clear();
+-  name.AppendPrintf("%s-%.8s-%u", "f2fs", name_.data(), GetKey());
+-  paged_vmo().set_property(ZX_PROP_NAME, name.data(), name.size());
+-}
+-
+-zx_status_t VnodeF2fs::ClonePagedVmo(fuchsia_io::wire::VmoFlags flags, size_t size,
+-                                     zx::vmo* out_vmo) {
+-  if (!paged_vmo()) {
+-    return ZX_ERR_NOT_FOUND;
+-  }
+-
+-  zx_rights_t rights = ZX_RIGHTS_BASIC | ZX_RIGHT_MAP | ZX_RIGHT_GET_PROPERTY;
+-  rights |= (flags & fuchsia_io::wire::VmoFlags::kRead) ? ZX_RIGHT_READ : 0;
+-  rights |= (flags & fuchsia_io::wire::VmoFlags::kWrite) ? ZX_RIGHT_WRITE : 0;
+-
+-  uint32_t options = 0;
+-  if (flags & fuchsia_io::wire::VmoFlags::kPrivateClone) {
+-    options = ZX_VMO_CHILD_SNAPSHOT_AT_LEAST_ON_WRITE;
+-    // Allowed only on private vmo.
+-    rights |= ZX_RIGHT_SET_PROPERTY;
+-  } else if (flags & fuchsia_io::wire::VmoFlags::kWrite) {
+-    // Shared writable VMOs use child slices rather than child references: a child slice
+-    // directly shares pager pages with the parent VMO for writable mmap mappings, but
+-    // maintains an independent StreamSizeManager. This prevents out-of-band stream size
+-    // modifications via zx_vmo_set_stream_size from affecting the parent VMO or bypassing
+-    // filesystem truncate locking and metadata consistency checks.
+-    options = ZX_VMO_CHILD_SLICE;
+-    size = fbl::round_up(size, zx_system_get_page_size());
+-  } else {
+-    // |size| should be 0 with ZX_VMO_CHILD_REFERENCE.
+-    size = 0;
+-    options = ZX_VMO_CHILD_REFERENCE;
+-  }
+-
+-  if (!(flags & fuchsia_io::wire::VmoFlags::kWrite)) {
+-    options |= ZX_VMO_CHILD_NO_WRITE;
+-  }
+-
+-  zx::vmo vmo;
+-  if (auto status = paged_vmo().create_child(options, 0, size, &vmo); status != ZX_OK) {
+-    FX_LOGS(ERROR) << "Failed to duplicate VMO: " << zx_status_get_string(status);
+-    return status;
+-  }
+-  DidClonePagedVmo();
+-
+-  if (auto status = vmo.replace(rights, &vmo); status != ZX_OK) {
+-    return status;
+-  }
+-  *out_vmo = std::move(vmo);
+-  return ZX_OK;
+-}
+-
+-void VnodeF2fs::VmoRead(uint64_t offset, uint64_t length) {
+-  zx::vmo vmo;
+-  zx::result size = CreateAndPopulateVmo(vmo, offset, length);
+-  if (unlikely(!paged_vmo())) {
+-    // Races with calling FreePagedVmo() on another thread can result in stale read requests. Ignore
+-    // them if the VMO is gone.
+-    FX_LOGS(WARNING) << "A pager-backed VMO is already freed: " << ZX_ERR_NOT_FOUND;
+-    return;
+-  }
+-  if (unlikely(size.is_error())) {
+-    return ReportPagerErrorUnsafe(ZX_PAGER_VMO_READ, offset, length, size.error_value());
+-  }
+-  std::optional vfs = this->vfs();
+-  ZX_DEBUG_ASSERT(vfs.has_value());
+-  if (auto ret = vfs.value().get().SupplyPages(paged_vmo(), offset, *size, std::move(vmo), 0);
+-      ret.is_error()) {
+-    ReportPagerErrorUnsafe(ZX_PAGER_VMO_READ, offset, length, ret.error_value());
+-  }
+-}
+-
+-zx::result<size_t> VnodeF2fs::CreateAndPopulateVmo(zx::vmo& vmo, const size_t offset,
+-                                                   const size_t length) {
+-  const size_t file_size = GetSize();
+-  const size_t max_bytes = fbl::round_up(file_size, kBlockSize);
+-  const size_t max_block = max_bytes / kBlockSize;
+-  const size_t start_block = offset / kBlockSize;
+-  if (start_block >= max_block) {
+-    return zx::error(ZX_ERR_OUT_OF_RANGE);
+-  }
+-
+-  size_t end_offset;
+-  if (!safemath::CheckAdd(offset, length).AssignIfValid(&end_offset) || length == 0) {
+-    return zx::error(ZX_ERR_OUT_OF_RANGE);
+-  }
+-
+-  const size_t end_block =
+-      end_offset >= max_bytes ? max_block : fbl::round_up(end_offset, kBlockSize) / kBlockSize;
+-  ZX_DEBUG_ASSERT(start_block < end_block);
+-  const size_t request_blocks = end_block - start_block;
+-  size_t num_read_blocks = 0;
+-
+-  // Do not readahead if it has inline data or memory pressure is high.
+-  if (!TestFlag(InodeInfoFlag::kInlineData) && !TestFlag(InodeInfoFlag::kNoAlloc) &&
+-      offset < file_size) {
+-    size_t num_readahead_blocks = std::min(max_block, end_block + kMaxReadaheadSize) - start_block;
+-    num_read_blocks = file_cache_->GetReadHint(start_block, request_blocks, num_readahead_blocks,
+-                                               fs()->GetMemoryStatus(MemoryStatus::kNeedReclaim));
+-  }
+-
+-  zx::result addrs = FindAddresses(start_block, num_read_blocks);
+-  if (addrs.is_error()) {
+-    return addrs.take_error();
+-  }
+-
+-  // Read blocks only for valid block addrs.
+-  num_read_blocks = 0;
+-  uint32_t num_checked_addrs = 0;
+-  for (auto& addr : *addrs) {
+-    ++num_checked_addrs;
+-    if (addr != kNewAddr && addr != kNullAddr) {
+-      num_read_blocks = num_checked_addrs;
+-    }
+-    if (num_checked_addrs == request_blocks && !num_read_blocks) {
+-      // We can skip disk I/Os as well as readahead.
+-      break;
+-    }
+-  }
+-
+-  // Create vmo to feed paged vmo.
+-  size_t vmo_size = std::max(request_blocks, num_read_blocks) * kBlockSize;
+-  if (auto status = zx::vmo::create(vmo_size, 0, &vmo); status != ZX_OK) {
+-    return zx::error(status);
+-  }
+-
+-  if (num_read_blocks) {
+-    addrs->resize(num_read_blocks, kNullAddr);
+-    if (auto status = fs()->MakeReadOperations(vmo, *addrs, PageType::kData); status.is_error()) {
+-      return status.take_error();
+-    }
+-    // Load read pages on FileCache as hints of readahead. It's okay to fail because the failure
+-    // doesn't affect read operations but only readahead.
+-    [[maybe_unused]] zx::result ret = GrabPages(start_block, start_block + num_read_blocks);
+-  }
+-  return zx::ok(vmo_size);
+-}
+-
+-void VnodeF2fs::VmoDirty(uint64_t offset, uint64_t length) {
+-  std::optional vfs = this->vfs();
+-  ZX_DEBUG_ASSERT(vfs.has_value());
+-  auto ret = vfs.value().get().DirtyPages(paged_vmo(), offset, length);
+-  if (ret.is_error()) {
+-    // If someone has already dirtied or truncated these pages, do nothing.
+-    if (ret.error_value() == ZX_ERR_NOT_FOUND) {
+-      return;
+-    }
+-    ReportPagerErrorUnsafe(ZX_PAGER_OP_DIRTY, offset, length, ret.error_value());
+-  }
+-}
+-
+-void VnodeF2fs::OnNoPagedVmoClones() {
+-  // Override PagedVnode::OnNoPagedVmoClones().
+-  // We intend to keep PagedVnode::paged_vmo alive while this vnode has any reference.
+-  ZX_DEBUG_ASSERT(!has_clones());
+-}
+-
+-void VnodeF2fs::ReportPagerError(const uint32_t op, const uint64_t offset, const uint64_t length,
+-                                 const zx_status_t err) {
+-  fs::SharedLock lock(mutex_);
+-  return ReportPagerErrorUnsafe(op, offset, length, err);
+-}
+-
+-void VnodeF2fs::ReportPagerErrorUnsafe(const uint32_t op, const uint64_t offset,
+-                                       const uint64_t length, const zx_status_t err) {
+-  std::optional vfs = this->vfs();
+-  ZX_DEBUG_ASSERT(vfs.has_value());
+-  zx_status_t pager_err = err;
+-  // Notifies the kernel that a page request for the given `range` has failed. Sent in response
+-  // to a `ZX_PAGER_VMO_READ` or `ZX_PAGER_VMO_DIRTY` page request. See `ZX_PAGER_OP_FAIL` for
+-  // more information.
+-  if (err != ZX_ERR_IO && err != ZX_ERR_IO_DATA_INTEGRITY && err != ZX_ERR_BAD_STATE &&
+-      err != ZX_ERR_NO_SPACE && err != ZX_ERR_BUFFER_TOO_SMALL) {
+-    pager_err = ZX_ERR_BAD_STATE;
+-  }
+-  FX_LOGS(WARNING) << "Failed to handle a pager request(" << std::hex << op << "). "
+-                   << zx_status_get_string(err);
+-  if (auto result = vfs.value().get().ReportPagerError(paged_vmo(), offset, length, pager_err);
+-      result.is_error()) {
+-    FX_LOGS(ERROR) << "Failed to report a pager error. " << result.status_string();
+-  }
+-}
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
+ 
+ void VnodeF2fs::RecycleNode() {
+   do {
+@@ -370,6 +185,10 @@
+         zx_timespec_from_duration(safemath::checked_cast<zx_duration_t>(*attr.creation_time)));
+     need_inode_sync = true;
+   }
++  if (attr.access_time) {
++    SetTime<Timestamps::AccessTime>(zx_timespec_from_duration(static_cast<zx_duration_t>(*attr.access_time)));
++    need_inode_sync = true;
++  }
+   if (attr.modification_time) {
+     SetTime<Timestamps::ModificationTime>(
+         zx_timespec_from_duration(safemath::checked_cast<zx_duration_t>(*attr.modification_time)));
+@@ -586,12 +405,7 @@
+   return ZX_OK;
+ }
+ 
+-void VnodeF2fs::ReleasePagedVmo() {
+-  if (paged_vmo()) {
+-    fbl::RefPtr<fs::Vnode> pager_reference = FreePagedVmo();
+-    ZX_DEBUG_ASSERT(!pager_reference);
+-  }
+-}
++
+ 
+ void VnodeF2fs::PurgeDataBlocks() {
+   if (ino_ == superblock_info_.GetNodeIno() || ino_ == superblock_info_.GetMetaIno()) {
+@@ -647,31 +461,10 @@
+ }
+ 
+ zx_status_t VnodeF2fs::CreateFileCacheUnsafe(uint64_t nbytes) {
+-  zx::vmo vmo;
+-  VmoMode mode;
+-  size_t vmo_node_size = 0;
+-
+-  if (file_cache_) {
+-    return ZX_ERR_ALREADY_EXISTS;
+-  }
+-  if (IsReg()) {
+-    if (zx::result size = CreatePagedVmo(nbytes); size.is_ok()) {
+-      zx_rights_t right =
+-          ZX_RIGHTS_BASIC | ZX_RIGHT_MAP | ZX_RIGHTS_PROPERTY | ZX_RIGHT_READ | ZX_RIGHT_WRITE;
+-      ZX_ASSERT(paged_vmo().duplicate(right, &vmo) == ZX_OK);
+-      mode = VmoMode::kPaged;
+-      vmo_node_size = zx_system_get_page_size();
+-    }
+-  } else {
+-    mode = VmoMode::kDiscardable;
+-    vmo_node_size = kVmoNodeSize;
+-  }
+-  ZX_ASSERT(!(zx_system_get_page_size() % kBlockSize));
+-  ZX_ASSERT(!(vmo_node_size % zx_system_get_page_size()));
+-  vmo_manager_ = std::make_unique<VmoManager>(mode, nbytes, vmo_node_size, std::move(vmo));
+-  file_cache_ = std::make_unique<FileCache>(this, vmo_manager_.get());
+-  return ZX_OK;
+-}
++if(file_cache_) return ZX_ERR_ALREADY_EXISTS;
++vmo_manager_=std::make_unique<VmoManager>(nbytes);
++file_cache_=std::make_unique<FileCache>(this,vmo_manager_.get());
++return ZX_OK;}
+ 
+ void VnodeF2fs::InitializeFromPage(LockedPage& node_page) {
+   Inode& inode = node_page->GetAddress<Node>()->i;
+@@ -843,15 +636,9 @@
+   return !fs()->GetNodeManager().IsCheckpointedNode(GetParentNid());
+ }
+ 
+-void VnodeF2fs::Notify(std::string_view name, fuchsia_io::wire::WatchEvent event) {
+-  watcher_.Notify(name, event);
+-}
+-
+-zx_status_t VnodeF2fs::WatchDir(fs::FuchsiaVfs* vfs, fuchsia_io::wire::WatchMask mask,
+-                                uint32_t options,
+-                                fidl::ServerEnd<fuchsia_io::DirectoryWatcher> watcher) {
+-  return watcher_.WatchDir(vfs, this, mask, options, std::move(watcher));
+-}
++void VnodeF2fs::Notify(std::string_view name, fuchsia_io::wire::WatchEvent event) {}
++
++
+ 
+ bool VnodeF2fs::ExtentCacheAvailable() {
+   return superblock_info_.TestOpt(MountOption::kReadExtentCache) && IsReg() &&
+--- a/src/storage/f2fs/vnode.h
++++ b/src/storage/f2fs/vnode.h
+@@ -14,10 +14,8 @@
+ #include "src/storage/f2fs/file_cache.h"
+ #include "src/storage/f2fs/timestamp.h"
+ #include "src/storage/f2fs/xattr.h"
+-#include "src/storage/lib/vfs/cpp/paged_vnode.h"
+ #include "src/storage/lib/vfs/cpp/shared_mutex.h"
+ #include "src/storage/lib/vfs/cpp/vnode.h"
+-#include "src/storage/lib/vfs/cpp/watcher.h"
+ 
+ namespace f2fs {
+ constexpr uint32_t kNullIno = std::numeric_limits<uint32_t>::max();
+@@ -59,7 +57,7 @@
+ 
+ inline bool IsValidNameLength(std::string_view name) { return name.length() <= kMaxNameLen; }
+ 
+-class VnodeF2fs : public fs::PagedVnode,
++class VnodeF2fs : public fs::Vnode,
+                   public fbl::Recyclable<VnodeF2fs>,
+                   public fbl::WAVLTreeContainable<VnodeF2fs*>,
+                   public fbl::DoublyLinkedListable<fbl::RefPtr<VnodeF2fs>> {
+@@ -105,14 +103,7 @@
+   fuchsia_io::NodeProtocolKinds GetProtocols() const override;
+ 
+   // For fs::PagedVnode
+-  zx_status_t GetVmo(fuchsia_io::wire::VmoFlags flags, zx::vmo* out_vmo) override
+-      __TA_REQUIRES(mutex_);
+-  void VmoRead(uint64_t offset, uint64_t length) override __TA_REQUIRES_SHARED(mutex_);
+-  void VmoDirty(uint64_t offset, uint64_t length) override __TA_REQUIRES_SHARED(mutex_);
+-  zx::result<size_t> CreateAndPopulateVmo(zx::vmo& vmo, const size_t offset, const size_t length)
+-      __TA_REQUIRES_SHARED(mutex_);
+-  void OnNoPagedVmoClones() final __TA_REQUIRES(mutex_);
+-  void ReleasePagedVmo() __TA_REQUIRES(mutex_);
++
+ 
+   virtual zx_status_t InitInodeMetadata() __TA_EXCLUDES(mutex_)
+       __TA_REQUIRES_SHARED(f2fs::GetGlobalLock());
+@@ -178,8 +169,7 @@
+   virtual zx::result<PageBitmap> GetBitmap(fbl::RefPtr<Page> dentry_page);
+ 
+   void Notify(std::string_view name, fuchsia_io::wire::WatchEvent event) final;
+-  zx_status_t WatchDir(fs::FuchsiaVfs* vfs, fuchsia_io::wire::WatchMask mask, uint32_t options,
+-                       fidl::ServerEnd<fuchsia_io::DirectoryWatcher> watcher) final;
++
+ 
+   bool ExtentCacheAvailable();
+   void InitExtentTree();
+@@ -244,9 +234,8 @@
+   }
+ 
+   // It adjusts both the size and the contents of its VMO.
+-  // If the vnode uses a paged VMO, it can invoke VmoDirty() as needed, and the kernel then
+-  // guarantees that the VMO’s contents beyond |len| are zero-initialized.
+-  virtual void SetSize(const size_t nbytes) __TA_EXCLUDES(mutex_);
++
++  virtual void SetSize(size_t nbytes);
+   uint64_t GetSize(bool update_checkpointed_size = false) const;
+ 
+   void SetParentNid(const ino_t pino) { parent_ino_.store(pino, std::memory_order_release); }
+@@ -368,7 +357,7 @@
+   FileCache& GetFileCache() { return *file_cache_; }
+   void ResetFileCache() { file_cache_->Reset(); }
+   ExtentTree& GetExtentTree() { return *extent_tree_; }
+-  bool HasPagedVmo() TA_NO_THREAD_SAFETY_ANALYSIS { return paged_vmo().is_valid(); }
++  bool HasPagedVmo() TA_NO_THREAD_SAFETY_ANALYSIS { return false; }
+   void ClearAdvise(const FAdvise bit) { advise_ &= ~GetMask(1, static_cast<size_t>(bit)); }
+   void SetDirLevel(const uint8_t level) { dir_level_ = level; }
+   pgoff_t Writeback(bool is_sync = false, bool is_reclaim = false)
+@@ -414,19 +403,12 @@
+   zx_status_t CloseNode() override __TA_EXCLUDES(f2fs::GetGlobalLock(), mutex_);
+   void RecycleNode() override;
+   VmoManager& vmo_manager() const { return *vmo_manager_; }
+-  void ReportPagerError(const uint32_t op, const uint64_t offset, const uint64_t length,
+-                        const zx_status_t err) __TA_EXCLUDES(mutex_);
+-  void ReportPagerErrorUnsafe(const uint32_t op, const uint64_t offset, const uint64_t length,
+-                              const zx_status_t err) __TA_REQUIRES_SHARED(mutex_);
++
+ 
+   bool NeedToSyncDir() const;
+   bool NeedToCheckpoint();
+   bool NeedToLogInode() const;
+ 
+-  zx::result<size_t> CreatePagedVmo(uint64_t size) __TA_REQUIRES(mutex_);
+-  zx_status_t ClonePagedVmo(fuchsia_io::wire::VmoFlags flags, size_t size, zx::vmo* out_vmo)
+-      __TA_REQUIRES(mutex_);
+-  void SetPagedVmoName() __TA_REQUIRES(mutex_);
+   const SuperblockInfo& GetSuperblockInfo() const { return superblock_info_; }
+   uint16_t GetExtraSize() const { return extra_isize_; }
+   uint64_t GetCurrentDepth() const __TA_REQUIRES_SHARED(mutex_) { return current_depth_; }
+@@ -471,7 +453,7 @@
+   const ino_t ino_ = 0;
+   F2fs* const fs_ = nullptr;
+   umode_t mode_ = 0;
+-  fs::WatcherContainer watcher_{};
++
+ };
+ 
+ }  // namespace f2fs
+--- a/src/storage/f2fs/writeback.cc
++++ b/src/storage/f2fs/writeback.cc
+@@ -117,21 +117,9 @@
+         auto page = submitted.pop_front();
+         // The instance of page->GetVnode() is alive as long as it has any writeback pages.
+         if (io_status != ZX_OK) {
+-          if (page->GetVnode().IsMeta() || io_status == ZX_ERR_UNAVAILABLE ||
+-              io_status == ZX_ERR_PEER_CLOSED) {
+-            // When it fails to write metadata or the block device is not available,
+-            // set kCpErrorFlag to enter read-only mode.
+-            page->fs()->GetSuperblockInfo().SetCpFlags(CpFlag::kCpErrorFlag);
+-          } else {
+-            // When IO errors occur with node and data Pages, just set a dirty flag
+-            // to retry it with another LBA.
+-            LockedPage locked_page = LockedPage(page, std::try_to_lock);
+-            if (locked_page) {
+-              locked_page.SetDirty();
+-            } else {
+-              page->SetDirty();
+-            }
+-          }
++          // The Native adapter reports completed aggregate I/O failures. Do not
++          // retry indefinitely or publish a checkpoint that lost payload writes.
++          page->fs()->GetSuperblockInfo().SetCpFlags(CpFlag::kCpErrorFlag);
+         }
+         if (page->GetVnode().IsNode()) {
+           fbl::RefPtr<NodePage>::Downcast(page)->SetFsyncMark(false);
+--- a/src/storage/f2fs/writeback.h
++++ b/src/storage/f2fs/writeback.h
+@@ -20,7 +20,7 @@
+ 
+ // F2fs flushes dirty pages when the number of dirty pages >= |kMaxDirtyDataPages| if memorypressure
+ // is unavailable.
+-constexpr int kMaxDirtyDataPages = 51200;
++constexpr int kMaxDirtyDataPages = 2048;
+ 
+ // This class is final because there might be background threads running when its destructor runs
+ // and that would be unsafe if this class had overridden virtual methods that might get called from
+--- a/src/storage/lib/buffer/vmo_buffer.h
++++ b/src/storage/lib/buffer/vmo_buffer.h
+@@ -2,80 +2,27 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
+-#ifndef SRC_STORAGE_LIB_BUFFER_VMO_BUFFER_H_
+-#define SRC_STORAGE_LIB_BUFFER_VMO_BUFFER_H_
++// HypeR platform adapter for the pinned media core.
++#pragma once
++#include "portability.h"
++#include "src/storage/lib/buffer/block_buffer.h"
++namespace storage {
++class VmoBuffer : public BlockBuffer {
++  std::unique_ptr<uint8_t[]> bytes_;
++  size_t blocks_ = 0;
++  uint32_t size_ = 0;
+ 
+-#include <lib/fzl/owned-vmo-mapper.h>
+-
+-#include "src/storage/lib/buffer/block_buffer.h"
+-#include "src/storage/lib/buffer/vmoid_registry.h"
+-
+-namespace storage {
+-
+-// Block-aligned VMO-backed buffer registered with the underlying device.
+-//
+-// This class is movable but not copyable.
+-// This class is thread-compatible.
+-class VmoBuffer final : public BlockBuffer {
+  public:
+-  VmoBuffer() = default;
+-  // Constructor for a pre-registered VMO.
+-  //
+-  // Prefer using |VmoBuffer.Initialize|.
+-  VmoBuffer(VmoidRegistry* registry, fzl::OwnedVmoMapper mapper, vmoid_t vmoid, size_t capacity,
+-            uint32_t block_size)
+-      : vmoid_registry_(registry),
+-        mapper_(std::move(mapper)),
+-        vmoid_(vmoid),
+-        block_size_(block_size),
+-        capacity_(capacity) {}
+-
+-  VmoBuffer(const VmoBuffer&) = delete;
+-  VmoBuffer& operator=(const VmoBuffer&) = delete;
+-  VmoBuffer(VmoBuffer&& other);
+-  VmoBuffer& operator=(VmoBuffer&& other);
+-  ~VmoBuffer();
+-
+-  // Initializes the buffer VMO with |blocks| blocks of size |block_size|.
+-  //
+-  // Returns an error if the VMO cannot be created, mapped, or attached to the
+-  // underlying storage device.
+-  //
+-  // Should only be called on VmoBuffers which have not been initialized already.
+-  zx_status_t Initialize(VmoidRegistry* vmoid_registry, size_t blocks, uint32_t block_size,
+-                         const char* label);
+-
+-  // Returns a const view of the underlying VMO.
+-  const zx::vmo& vmo() const { return mapper_.vmo(); }
+-
+-  // BlockBuffer interface:
+-
+-  size_t capacity() const final { return capacity_; }
+-
+-  uint32_t BlockSize() const final { return block_size_; }
+-
+-  vmoid_t vmoid() const final { return vmoid_.get(); }
+-
+-  // Expected callers should access this object through the vmoid (registered
+-  // with a block device).
+-  zx_handle_t Vmo() const final { return ZX_HANDLE_INVALID; }
+-
+-  void* Data(size_t index) final;
+-
+-  const void* Data(size_t index) const final;
+-
+-  zx_status_t Zero(size_t index, size_t count) final;
+-
+- private:
+-  void Reset();
+-
+-  VmoidRegistry* vmoid_registry_ = nullptr;
+-  fzl::OwnedVmoMapper mapper_;
+-  Vmoid vmoid_;
+-  uint32_t block_size_ = 0;
+-  size_t capacity_ = 0;
++  template <class D>
++  zx_status_t Initialize(D*, size_t n, uint32_t size, const char*) {
++    blocks_ = n;
++    size_ = size;
++    bytes_ = std::make_unique<uint8_t[]>(n * size);
++    return ZX_OK;
++  }
++  void* Data(size_t i) override { return bytes_.get() + i * size_; }
++  const void* Data(size_t i) const override { return bytes_.get() + i * size_; }
++  size_t capacity() const override { return blocks_; }
++  uint32_t BlockSize() const override { return size_; }
+ };
+-
+ }  // namespace storage
+-
+-#endif  // SRC_STORAGE_LIB_BUFFER_VMO_BUFFER_H_
+--- a/src/storage/lib/vfs/cpp/journal/background_executor.cc
++++ b/src/storage/lib/vfs/cpp/journal/background_executor.cc
+@@ -6,8 +6,8 @@
+ 
+ #include <lib/fpromise/promise.h>
+ #include <lib/fpromise/result.h>
+-#include <lib/zx/thread.h>
+-#include <zircon/syscalls/object.h>
++
++
+ 
+ #include <mutex>
+ #include <string_view>
+@@ -41,7 +41,7 @@
+   executor_.schedule_task(std::move(work));
+   thread_ = std::thread([this] {
+     constexpr std::string_view thread_name = "journal-thread";
+-    zx::thread::self()->set_property(ZX_PROP_NAME, thread_name.data(), thread_name.size());
++
+     executor_.run();
+   });
+ }
+--- a/src/storage/lib/vfs/cpp/pseudo_dir.h
++++ b/src/storage/lib/vfs/cpp/pseudo_dir.h
+@@ -1,147 +1,2 @@
+-// Copyright 2017 The Fuchsia Authors. All rights reserved.
+-// Use of this source code is governed by a BSD-style license that can be
+-// found in the LICENSE file.
+-
+-#ifndef SRC_STORAGE_LIB_VFS_CPP_PSEUDO_DIR_H_
+-#define SRC_STORAGE_LIB_VFS_CPP_PSEUDO_DIR_H_
+-
+-#include <fidl/fuchsia.io/cpp/common_types.h>
+-#include <fidl/fuchsia.io/cpp/natural_types.h>
+-#include <fidl/fuchsia.io/cpp/wire.h>
+-#include <lib/fidl/cpp/wire/channel.h>
+-#include <zircon/compiler.h>
+-#include <zircon/types.h>
+-
+-#include <cstddef>
+-#include <cstdint>
+-#include <memory>
+-#include <string_view>
+-
+-#include <fbl/intrusive_container_utils.h>
+-#include <fbl/intrusive_wavl_tree.h>
+-#include <fbl/macros.h>
+-#include <fbl/ref_ptr.h>
+-#include <fbl/string.h>
+-
+-#include "src/storage/lib/vfs/cpp/vfs_types.h"
+-#include "src/storage/lib/vfs/cpp/vnode.h"
+-#include "src/storage/lib/vfs/cpp/watcher.h"
+-
+-namespace fs {
+-
+-// A pseudo-directory is a directory-like object whose entries are constructed by a program at
+-// runtime.  The client can lookup, enumerate, and watch these directory entries but it cannot
+-// create, remove, or rename them.
+-//
+-// This class is designed to allow programs to publish a relatively small number of entries (up to a
+-// few dozen) such as services, file-system roots, debugging pseudo-files, or other vnodes.  It is
+-// not suitable for very large directories (hundreds of entries).
+-//
+-// This class is thread-safe.
+-class PseudoDir : public Vnode {
+- public:
+-  // Construct with fbl::MakeRefCounted.
+-
+-  // Adds a directory entry associating the given |name| with |vn|. It is ok to add the same Vnode
+-  // multiple times with different names.
+-  //
+-  // Returns |ZX_OK| on success.
+-  // Returns |ZX_ERR_ALREADY_EXISTS| if there is already a node with the given name.
+-  zx_status_t AddEntry(fbl::String name, fbl::RefPtr<fs::Vnode> vn);
+-
+-  // Removes a directory entry with the given |name|.
+-  //
+-  // Returns |ZX_OK| on success.
+-  // Returns |ZX_ERR_NOT_FOUND| if there is no node with the given name.
+-  zx_status_t RemoveEntry(std::string_view name);
+-
+-  // An extension of |RemoveEntry| which additionally verifies
+-  // that the target vnode is |vn|.
+-  //
+-  // Returns |ZX_OK| on success.
+-  // Returns |ZX_ERR_NOT_FOUND| if there is no node with the given name/vn pair.
+-  zx_status_t RemoveEntry(std::string_view name, fs::Vnode* vn);
+-
+-  // Removes all directory entries.
+-  void RemoveAllEntries();
+-
+-  // Checks if directory is empty. Be careful while using this function if using this Dir in
+-  // multiple threads.
+-  bool IsEmpty() const;
+-
+-  // Returns true if there are watchers.
+-  bool HasWatchers() const { return watcher_.HasWatchers(); }
+-
+-  // |Vnode| implementation:
+-  fuchsia_io::NodeProtocolKinds GetProtocols() const final;
+-  fuchsia_io::Abilities GetAbilities() const final;
+-  zx_status_t Lookup(std::string_view name, fbl::RefPtr<fs::Vnode>* out) override;
+-  void Notify(std::string_view name, fuchsia_io::wire::WatchEvent event) final;
+-  zx_status_t WatchDir(fs::FuchsiaVfs* vfs, fuchsia_io::wire::WatchMask mask, uint32_t options,
+-                       fidl::ServerEnd<fuchsia_io::DirectoryWatcher> watcher) final;
+-  zx_status_t Readdir(VdirCookie* cookie, void* dirents, size_t len, size_t* out_actual) final;
+-
+- private:
+-  friend fbl::internal::MakeRefCountedHelper<PseudoDir>;
+-  friend fbl::RefPtr<PseudoDir>;
+-
+-  static constexpr uint64_t kDotId = 1u;
+-
+-  struct IdTreeTag {};
+-  struct NameTreeTag {};
+-
+-  class Entry : public fbl::ContainableBaseClasses<
+-                    fbl::TaggedWAVLTreeContainable<std::unique_ptr<Entry>, IdTreeTag,
+-                                                   fbl::NodeOptions::AllowMultiContainerUptr>,
+-                    fbl::TaggedWAVLTreeContainable<Entry*, NameTreeTag,
+-                                                   fbl::NodeOptions::AllowClearUnsafe>> {
+-   public:
+-    Entry(uint64_t id, fbl::String name, fbl::RefPtr<fs::Vnode> node);
+-    ~Entry();
+-
+-    uint64_t id() const { return id_; }
+-    const fbl::String& name() const { return name_; }
+-    const fbl::RefPtr<fs::Vnode>& node() const { return node_; }
+-
+-   private:
+-    uint64_t const id_;
+-    fbl::String name_;
+-    fbl::RefPtr<fs::Vnode> node_;
+-  };
+-
+-  struct KeyByIdTraits {
+-    static uint64_t GetKey(const Entry& entry) { return entry.id(); }
+-    static bool LessThan(uint64_t key1, uint64_t key2) { return key1 < key2; }
+-    static bool EqualTo(uint64_t key1, uint64_t key2) { return key1 == key2; }
+-  };
+-
+-  struct KeyByNameTraits {
+-    static fbl::String GetKey(const Entry& entry) { return entry.name(); }
+-    static bool LessThan(const fbl::String& key1, const fbl::String& key2) { return key1 < key2; }
+-    static bool EqualTo(const fbl::String& key1, const fbl::String& key2) { return key1 == key2; }
+-  };
+-
+-  using EntryByIdMap =
+-      fbl::TaggedWAVLTree<uint64_t, std::unique_ptr<Entry>, IdTreeTag, KeyByIdTraits>;
+-  using EntryByNameMap = fbl::TaggedWAVLTree<fbl::String, Entry*, NameTreeTag, KeyByNameTraits>;
+-
+- protected:
+-  // Creates a directory which is initially empty.
+-  PseudoDir();
+-
+-  // Destroys the directory and releases the nodes it contains.
+-  ~PseudoDir() override;
+-
+- private:
+-  uint64_t next_node_id_ __TA_GUARDED(mutex_) = kDotId + 1;
+-  EntryByIdMap entries_by_id_ __TA_GUARDED(mutex_);
+-  EntryByNameMap entries_by_name_ __TA_GUARDED(mutex_);
+-
+-  fs::WatcherContainer watcher_;  // note: uses its own internal mutex
+-
+-  DISALLOW_COPY_ASSIGN_AND_MOVE(PseudoDir);
+-};
+-
+-}  // namespace fs
+-
+-#endif  // SRC_STORAGE_LIB_VFS_CPP_PSEUDO_DIR_H_
++#pragma once
++#include "fs_port.h"
+--- a/src/storage/lib/vfs/cpp/remote_dir.h
++++ b/src/storage/lib/vfs/cpp/remote_dir.h
+@@ -1,69 +1,2 @@
+-// Copyright 2017 The Fuchsia Authors. All rights reserved.
+-// Use of this source code is governed by a BSD-style license that can be
+-// found in the LICENSE file.
+-
+-#ifndef SRC_STORAGE_LIB_VFS_CPP_REMOTE_DIR_H_
+-#define SRC_STORAGE_LIB_VFS_CPP_REMOTE_DIR_H_
+-
+-#include <fidl/fuchsia.io/cpp/common_types.h>
+-#include <fidl/fuchsia.io/cpp/wire.h>
+-#include <lib/fidl/cpp/wire/channel.h>
+-#include <lib/fidl/cpp/wire/string_view.h>
+-#include <zircon/availability.h>
+-
+-#include <fbl/macros.h>
+-#include <fbl/ref_ptr.h>
+-
+-#include "src/storage/lib/vfs/cpp/vnode.h"
+-
+-namespace fs {
+-
+-// A remote directory holds a channel to a remotely hosted directory to which requests are delegated
+-// when opened.
+-//
+-// This class is designed to allow programs to publish remote filesystems as directories without
+-// requiring a separate "mount" step.  In effect, a remote directory is "mounted" at creation time.
+-//
+-// It is not possible for the client to detach the remote directory or to mount a new one in its
+-// place.
+-//
+-// This class is thread-safe.
+-class RemoteDir : public Vnode {
+- public:
+-  // Construct with fbl::MakeRefCounted.
+-
+-  fidl::UnownedClientEnd<fuchsia_io::Directory> client_end() const { return remote_client_; }
+-
+-  // |Vnode| implementation:
+-  fuchsia_io::NodeProtocolKinds GetProtocols() const final;
+-  bool IsRemote() const final;
+-#if FUCHSIA_API_LEVEL_LESS_THAN(32) || FUCHSIA_API_LEVEL_AT_LEAST(PLATFORM)
+-  void DeprecatedOpenRemote(fuchsia_io::OpenFlags, fuchsia_io::ModeType, fidl::StringView,
+-                            fidl::ServerEnd<fuchsia_io::Node>) const final;
+-#endif
+-#if FUCHSIA_API_LEVEL_AT_LEAST(31)
+-  void OpenRemote(fuchsia_io::wire::OpenableOpenRequest request) const final;
+-#else
+-  void OpenRemote(fuchsia_io::wire::DirectoryOpenRequest request) const final;
+-#endif
+-
+- protected:
+-  friend fbl::internal::MakeRefCountedHelper<RemoteDir>;
+-  friend fbl::RefPtr<RemoteDir>;
+-
+-  // Binds to a remotely hosted directory using the specified FIDL client channel endpoint.  The
+-  // channel must be valid.
+-  explicit RemoteDir(fidl::ClientEnd<fuchsia_io::Directory> remote_dir_client);
+-
+-  // Releases the remotely hosted directory.
+-  ~RemoteDir() override;
+-
+- private:
+-  fidl::ClientEnd<fuchsia_io::Directory> const remote_client_;
+-
+-  DISALLOW_COPY_ASSIGN_AND_MOVE(RemoteDir);
+-};
+-
+-}  // namespace fs
+-
+-#endif  // SRC_STORAGE_LIB_VFS_CPP_REMOTE_DIR_H_
++#pragma once
++#include "fs_port.h"
+--- a/src/storage/lib/vfs/cpp/vnode.h
++++ b/src/storage/lib/vfs/cpp/vnode.h
+@@ -1,400 +1,2 @@
+-// Copyright 2017 The Fuchsia Authors. All rights reserved.
+-// Use of this source code is governed by a BSD-style license that can be
+-// found in the LICENSE file.
+-
+-#ifndef SRC_STORAGE_LIB_VFS_CPP_VNODE_H_
+-#define SRC_STORAGE_LIB_VFS_CPP_VNODE_H_
+-
+-#include <fidl/fuchsia.io/cpp/common_types.h>
+-#include <fidl/fuchsia.io/cpp/natural_types.h>
+-#include <lib/fit/function.h>
+-#include <lib/stdcompat/string_view.h>
+-#include <lib/zx/result.h>
+-#include <limits.h>
+-#include <stdint.h>
+-#include <stdlib.h>
+-#include <zircon/assert.h>
+-#include <zircon/availability.h>
+-#include <zircon/compiler.h>
+-#include <zircon/errors.h>
+-#include <zircon/types.h>
+-
+-#include <map>
+-#include <memory>
+-#include <mutex>
+-#include <shared_mutex>
+-#include <string>
+-#include <string_view>
+-#include <utility>
+-
+-#include <fbl/intrusive_single_list.h>
+-#include <fbl/macros.h>
+-#include <fbl/recycler.h>
+-#include <fbl/ref_ptr.h>
+-
+-#include "src/storage/lib/vfs/cpp/ref_counted.h"
+-#include "src/storage/lib/vfs/cpp/vfs_types.h"
+-
+-#ifdef __Fuchsia__
+-#include <fidl/fuchsia.io/cpp/wire.h>
+-#include <lib/fidl/cpp/wire/channel.h>
+-#include <lib/fidl/cpp/wire/string_view.h>
+-#include <lib/file-lock/file-lock.h>
+-#include <lib/zx/channel.h>
+-#include <lib/zx/event.h>
+-#include <lib/zx/stream.h>
+-#include <lib/zx/vmo.h>
+-#endif  // __Fuchsia__
+-
+-namespace fs {
+-
+-class Vfs;
+-struct VdirCookie;
+-
+-#ifdef __Fuchsia__
+-class FuchsiaVfs;
+-#endif
+-
+-inline bool IsValidName(std::string_view name) {
+-  return !name.empty() && name != "." && name != ".." && name.length() <= NAME_MAX &&
+-         !cpp23::contains(name, '/');
+-}
+-
+-// The VFS interface declares a default abstract Vnode class with common operations that may be
+-// overridden.
+-//
+-// The ops are used for dispatch and the lifecycle of Vnodes are owned by RefPtrs.
+-//
+-// All names passed to the Vnode class are valid according to "IsValidName".
+-//
+-// Memory management
+-// -----------------
+-// The Vnode uses the fbl::Recyclable system to allow caching. This kicks in when the reference
+-// count of the node goes to zero.
+-//
+-// fbl::RefPtr uses fbl::internal::has_fbl_recycle_v which checks whether there is an fbl_recycle()
+-// implementation on the class being pointed to. This does not catch base class implementations!
+-//
+-// Each derived class must inherit from fbl::Recyclable<class_name> and implement an fbl_recycle()
+-// function. These implementations should call the protected virtual function RecycleNode().
+-//
+-// Derived classes should override RecycleNode() to implement the desired caching behavior.
+-class Vnode : public VnodeRefCounted<Vnode>, public fbl::Recyclable<Vnode> {
+- public:
+-  // Define the current Vfs type so Fuchsia-ifdefed code can assume a FuchsiaVfs associated
+-  // class if vfs_ is non-null.
+-#ifdef __Fuchsia__
+-  using PlatformVfs = FuchsiaVfs;
+-#else
+-  using PlatformVfs = Vfs;
+-#endif
+-
+-  virtual ~Vnode();
+-
+-  // See class comment above about memory management.
+-  void fbl_recycle() { RecycleNode(); }
+-
+-  // METHODS FOR OPTION VALIDATION AND PROTOCOL NEGOTIATION
+-  //
+-  // Implementations should override |GetProtocols| to express which representation(s) are supported
+-  // by the vnode. Implementations may optionally override |Negotiate| to insert custom tie-breaking
+-  // behavior when the vnode supports multiple protocols, and the client requested multiple at open
+-  // time.
+-
+-  // Returns the set of all protocols supported by the vnode.
+-  virtual fuchsia_io::NodeProtocolKinds GetProtocols() const = 0;
+-
+-  // Returns the set of operations the vnode supports. The default implementation assumes files are
+-  // readable/writable, and directories are mutable.
+-  virtual fuchsia_io::Abilities GetAbilities() const;
+-
+-  // Returns true if the vnode supports at least one protocol specified in |protocols|.
+-  bool Supports(fuchsia_io::NodeProtocolKinds protocols) const {
+-    return static_cast<bool>(GetProtocols() & protocols);
+-  }
+-  // To be overridden by implementations to check that it is valid to access the vnode with the
+-  // given |rights|. The default implementation always returns true. The vnode will only be opened
+-  // for a particular request if the validation passes.
+-  virtual bool ValidateRights(fuchsia_io::Rights rights) const;
+-
+-  // Ensures that it is valid to access the vnode with given io1 connection options.
+-  zx::result<> DeprecatedValidateOptions(DeprecatedOptions options) const;
+-
+-  // Opens the vnode. This is a callback to signal that a new connection is about to be created and
+-  // I/O operations will follow. In addition, it provides an opportunity to redirect subsequent I/O.
+-  // If the open fails, the file will be deemed to be not opened and Close() will not be called.
+-  //
+-  // Vnode implementations should override OpenNode() which this function calls after some
+-  // bookkeeping.
+-  //
+-  // Open will never be invoked when a node reference connection is created. This corresponds
+-  // to Posix open()'s O_PATH flag which will create a thing representing the path to the file
+-  // without giving the ability to do most operations like read or write. In the future, we may want
+-  // the ability to track these connections, in which case we should add a Connect()/Disconnect()
+-  // pair that would surround the Open()/Close() for the normal case, but would be called regardless
+-  // of the flags to cover the node-reference case.
+-  //
+-  // If the implementation of |Open()| sets |out_redirect| to a non-null value, all following I/O
+-  // operations on the opened object will be redirected to the indicated vnode instead of being
+-  // handled by this instance. This is useful when implementing lazy files/pseudo files, where a
+-  // different vnode may be used for each new connection to a file. Note that the |out_redirect|
+-  // vnode is not |Open()|ed further for the purpose of creating this connection. Furthermore, the
+-  // redirected vnode must support the same set of protocols as the original vnode.
+-  zx_status_t Open(fbl::RefPtr<Vnode>* out_redirect) __TA_EXCLUDES(mutex_);
+-
+-  // METHODS FOR OPENED NODES
+-  //
+-  // The following operations will not be invoked unless the Vnode has been "Open()"-ed
+-  // successfully.
+-  //
+-  // For files opened with O_PATH (as a file descriptor only) the base classes' implementation of
+-  // some of these functions may be invoked anyway.
+-
+-  // Invoked by the VFS layer whenever files are added or removed.
+-  virtual void Notify(std::string_view name, fuchsia_io::wire::WatchEvent event) {}
+-
+-#ifdef __Fuchsia__
+-  // Serves a custom FIDL protocol over the specified |channel|, when the node protocol is
+-  // |VnodeProtocol::kService|.
+-  //
+-  // The default implementation returns |ZX_ERR_NOT_SUPPORTED|.
+-  // Subclasses may override this behavior to serve custom protocols over the channel.
+-  virtual zx_status_t ConnectService(zx::channel channel);
+-
+-  virtual zx_status_t WatchDir(FuchsiaVfs* vfs, fuchsia_io::wire::WatchMask mask, uint32_t options,
+-                               fidl::ServerEnd<fuchsia_io::DirectoryWatcher> watcher);
+-
+-  // Create a |zx::stream| for reading and writing to this vnode.
+-  //
+-  // On success, all |Read|, |Write|, and |Append| operations will be directed to the returned
+-  // stream rather than to the |Read|, |Write|, and |Append| methods on the vnode.
+-  //
+-  // The |zx::stream| will be duplicated and transported to a remote process to improve performance.
+-  // The |zx::vmo| backing the |zx::stream| will itself need to be |zx::pager| backed in order to
+-  // detect writes made to the |zx::stream|.
+-  //
+-  // Implementations should pass the given |stream_options| as the options to |zx::stream::create|.
+-  // These options ensure that the created |zx::stream| object has the appropriate rights for the
+-  // given connection.
+-  //
+-  // If the vnode does not support reading and writing using a |zx::stream|, return
+-  // ZX_ERR_NOT_SUPPORTED, which will cause |Read|, |Write|, and |Append| operations to be called as
+-  // methods on the vnode. Other errors are considered fatal and will terminate the connection.
+-  virtual zx::result<zx::stream> CreateStream(uint32_t stream_options);
+-
+-  // Acquire a vmo from a vnode.
+-  //
+-  // At the moment, mmap can only map files from read-only filesystems, since (without paging) there
+-  // is no mechanism to update either
+-  // 1) The file by writing to the mapping, or
+-  // 2) The mapping by writing to the underlying file.
+-  virtual zx_status_t GetVmo(fuchsia_io::wire::VmoFlags flags, zx::vmo* out_vmo);
+-
+-  // If |IsRemote()| returns true, requests to open this Vnode using
+-  // fuchsia.io/Directory.DeprecatedOpen will be forwarded to this function.
+-  // TODO(https://fxbug.dev/324080864): This should be removed when we drop support for the
+-  // fuchsia.io/Directory.DeprecatedOpen method.
+-#if FUCHSIA_API_LEVEL_LESS_THAN(32) || FUCHSIA_API_LEVEL_AT_LEAST(PLATFORM)
+-  virtual void DeprecatedOpenRemote(fuchsia_io::OpenFlags, fuchsia_io::ModeType, fidl::StringView,
+-                                    fidl::ServerEnd<fuchsia_io::Node>) const;
+-#endif
+-
+-  // If |IsRemote()| returns true, requests to open this Vnode via fuchsia.io/Directory.Open will
+-  // be forwarded to this function.
+-#if FUCHSIA_API_LEVEL_AT_LEAST(31)
+-  virtual void OpenRemote(fuchsia_io::wire::OpenableOpenRequest request) const;
+-#else
+-  virtual void OpenRemote(fuchsia_io::wire::DirectoryOpenRequest request) const;
+-#endif
+-
+-  // Instead of adding a |file_lock::FileLock| member variable to |Vnode|,
+-  // maintain a map from |this| to the lock objects. This is done, because
+-  // file locking only applies to regular files, so we want to avoid the
+-  // memory overhead for all other |Vnode| types.
+-  std::shared_ptr<file_lock::FileLock> GetVnodeFileLock();
+-
+-  // Removes any locks held by |owner|. This should only be called when tearing down a connection
+-  // and |owner| should be the koid of the connection.
+-  void DeleteFileLockInConnectionTeardown(zx_koid_t owner);
+-#endif  // __Fuchsia__
+-
+-  // Closes the vnode. Will be called once for each successful Open().
+-  //
+-  // Vnode implementations should override CloseNode() which this function calls after some
+-  // bookkeeping.
+-  zx_status_t Close() __TA_EXCLUDES(mutex_);
+-
+-  // Read data from the vnode at offset.
+-  //
+-  // If successful, returns the number of bytes read in |out_actual|. This must be less than or
+-  // equal to |len|.
+-  //
+-  // See |CreateStream| for a mechanism to offload |Read| to a |zx::stream| object.
+-  virtual zx_status_t Read(void* data, size_t len, size_t off, size_t* out_actual);
+-
+-  // Write |len| bytes of |data| to the file, starting at |offset|.
+-  //
+-  // If successful, returns the number of bytes written in |out_actual|. This must be less than or
+-  // equal to |len|.
+-  //
+-  // See |CreateStream| for a mechanism to offload |Write| to a |zx::stream| object.
+-  virtual zx_status_t Write(const void* data, size_t len, size_t offset, size_t* out_actual);
+-
+-  // Write |len| bytes of |data| to the end of the file.
+-  //
+-  // If successful, returns the number of bytes written in |out_actual|, and
+-  // returns the new end of file offset in |out_end|.
+-  //
+-  // See |CreateStream| for a mechanism to offload |Append| to a |zx::stream| object.
+-  virtual zx_status_t Append(const void* data, size_t len, size_t* out_end, size_t* out_actual);
+-
+-  // Change the size of the vnode.
+-  virtual zx_status_t Truncate(size_t len);
+-
+-  // Syncs the vnode with its underlying storage.
+-  //
+-  // Returns the result status through a closure. The closure may be executed on a different thread
+-  // than called the Sync() function, or reentrantly from the same thread.
+-  using SyncCallback = fit::callback<void(zx_status_t status)>;
+-  virtual void Sync(SyncCallback closure);
+-
+-  // Read directory entries of vn, error if not a directory. FS-specific Cookie must be a buffer of
+-  // VdirCookie size or smaller. Cookie must be zero'd before first call and will be used by the
+-  // readdir implementation to maintain state across calls. To "rewind" and start from the
+-  // beginning, cookie may be zero'd.
+-  virtual zx_status_t Readdir(VdirCookie* cookie, void* dirents, size_t len, size_t* out_actual);
+-
+-  // METHODS FOR OPENED OR UNOPENED NODES
+-  //
+-  // The following operations may be invoked on a Vnode, even if it has not been "Open()"-ed.
+-
+-  // Attempt to find child of vn, child returned on success.
+-  virtual zx_status_t Lookup(std::string_view name, fbl::RefPtr<Vnode>* out);
+-
+-  // Get attributes of the vnode.
+-  virtual zx::result<fs::VnodeAttributes> GetAttributes() const;
+-
+-  // Returns the set of attributes this vnode supports. Requests to update attributes which the
+-  // vnode does not support will be rejected.
+-  virtual VnodeAttributesQuery SupportedMutableAttributes() const { return {}; }
+-
+-  // Update attributes of the vnode. Only those attributes specified by
+-  // |SupportedMutableAttributes()| will be specified in |attributes|.
+-  virtual zx::result<> UpdateAttributes(const VnodeAttributesUpdate& attributes);
+-
+-  // Create a new object with specified |name| and |type| under this Vnode. On success, the newly
+-  // created Vnode must already be opened (i.e. |Open()| will not be called on the result).
+-  virtual zx::result<fbl::RefPtr<Vnode>> Create(std::string_view name, CreationType type);
+-
+-  // Removes name from directory vn
+-  virtual zx_status_t Unlink(std::string_view name, bool must_be_dir);
+-
+-  // Renames the path at oldname in olddir to the path at newname in newdir. Called on the "olddir"
+-  // vnode.
+-  //
+-  // Unlinks any prior newname if it already exists.
+-  virtual zx_status_t Rename(fbl::RefPtr<Vnode> newdir, std::string_view oldname,
+-                             std::string_view newname, bool src_must_be_dir, bool dst_must_be_dir);
+-
+-  // Creates a hard link to the 'target' vnode with a provided name in vndir
+-  virtual zx_status_t Link(std::string_view name, fbl::RefPtr<Vnode> target);
+-
+-  // Returns true if this is a remote filesystem mount point. This is only relevant on Fuchsia
+-  // builds (the remote handling below is all Fuchsia-only) but this can exist and just return false
+-  // on host builds to simplify platform handling.
+-  virtual bool IsRemote() const;
+-
+- protected:
+-  DISALLOW_COPY_ASSIGN_AND_MOVE(Vnode);
+-
+-  // Implementation of fbl_recycle(). Normal fbl_recycle() use is non-virtual and requires different
+-  // inheritance paths to fbl::Recyclable. This virtual implementation allows there to be one
+-  // implementation.
+-  //
+-  // This function is called when the object reference count drops to 0. This default implementation
+-  // just deletes the object to get "normal" reference counting. Derived classes can override to
+-  // implement caching if desired.
+-  //
+-  // See the class comment above on recycling, this is subtle.
+-  virtual void RecycleNode() { delete this; }
+-
+-  // Opens/Closes the vnode. These are the callbacks that the Vnode implementation overrides to do
+-  // the open and close work. They are called by the public Open() and Close() functions which
+-  // handles bookkeeping for the base class.
+-  //
+-  // The open_count() will be updated BEFORE each call. If OpenNode fails, the open count will be
+-  // rolled back.
+-  //
+-  // See Open() above for documentation.
+-  virtual zx_status_t OpenNode(fbl::RefPtr<Vnode>* out_redirect) __TA_EXCLUDES(mutex_) {
+-    return ZX_OK;
+-  }
+-  virtual zx_status_t CloseNode() __TA_EXCLUDES(mutex_) { return ZX_OK; }
+-
+-  Vnode() = default;
+-
+-  // Mutex for the data of this vnode. This is a shared mutex to support derived classes
+-  // implementing multiple simultaneous readers if desired.
+-  mutable std::shared_mutex mutex_;
+-
+-  // Returns the number of open connections, not counting node_reference connections. See Open().
+-  size_t open_count() const __TA_REQUIRES_SHARED(mutex_) { return open_count_; }
+-
+- private:
+-  size_t open_count_ __TA_GUARDED(mutex_) = 0;
+-};
+-
+-// Opens a vnode by reference.
+-// The |vnode| reference is updated in-place if redirection occurs.
+-inline zx_status_t OpenVnode(fbl::RefPtr<Vnode>* vnode) {
+-  fbl::RefPtr<Vnode> redirect;
+-  zx_status_t status = (*vnode)->Open(&redirect);
+-  if (status == ZX_OK && redirect != nullptr) {
+-    ZX_DEBUG_ASSERT((*vnode)->GetProtocols() == redirect->GetProtocols());
+-    *vnode = std::move(redirect);
+-  }
+-  return status;
+-}
+-
+-// Helper class used to fill direntries during calls to Readdir.
+-class DirentFiller {
+- public:
+-  DISALLOW_COPY_ASSIGN_AND_MOVE(DirentFiller);
+-
+-  DirentFiller(void* ptr, size_t len);
+-
+-  // Attempts to add the name to the end of the dirent buffer which is returned by readdir.
+-  //  - Returns true if the name was added to the buffer.
+-  //  - Returns false if the name was not added to the buffer because it did not fit.
+-  //  - Panics if the name is longer than |NAME_MAX|.
+-  bool Next(std::string_view name, fuchsia_io::DirentType type, uint64_t ino);
+-
+-  size_t BytesFilled() const { return pos_; }
+-
+- private:
+-  char* ptr_;
+-  size_t pos_;
+-  const size_t len_;
+-};
+-
+-// Helper class to track outstanding operations associated to a
+-// particular Vnode.
+-class VnodeToken : public fbl::SinglyLinkedListable<std::unique_ptr<VnodeToken>> {
+- public:
+-  VnodeToken(zx_koid_t koid, fbl::RefPtr<Vnode> vnode) : koid_(koid), vnode_(std::move(vnode)) {}
+-
+-  zx_koid_t get_koid() const { return koid_; }
+-  fbl::RefPtr<Vnode> get_vnode() const { return vnode_; }
+-
+-  // Trait implementation for fbl::HashTable
+-  zx_koid_t GetKey() const { return koid_; }
+-  static size_t GetHash(zx_koid_t koid) { return koid; }
+-
+- private:
+-  zx_koid_t koid_;
+-  fbl::RefPtr<Vnode> vnode_;
+-};
+-
+-}  // namespace fs
+-
+-#endif  // SRC_STORAGE_LIB_VFS_CPP_VNODE_H_
++#pragma once
++#include "fs_port.h"

@@ -1,0 +1,77 @@
+{
+  "SPDX-FileCopyrightText": "2026 roolrz",
+  "SPDX-License-Identifier": "Apache-2.0",
+  "revision": "fff7033e9cc337f2ab4fe8629a61c0c66bdb5cff",
+  "archives": [
+    {
+      "path": "src/storage/f2fs",
+      "url": "https://fuchsia.googlesource.com/fuchsia/+archive/fff7033e9cc337f2ab4fe8629a61c0c66bdb5cff/src/storage/f2fs.tar.gz",
+      "sha256": "2a81863da4aea0a5c610278935b3f3c8f00aa13e1dc0e9911dc0cab112c14105"
+    },
+    {
+      "path": "src/storage/lib/buffer",
+      "url": "https://fuchsia.googlesource.com/fuchsia/+archive/fff7033e9cc337f2ab4fe8629a61c0c66bdb5cff/src/storage/lib/buffer.tar.gz",
+      "sha256": "664891401f886ff02db3e80d56fc2298316504ad0e2e1820b0e9080cea78e69f"
+    },
+    {
+      "path": "src/storage/lib/operation",
+      "url": "https://fuchsia.googlesource.com/fuchsia/+archive/fff7033e9cc337f2ab4fe8629a61c0c66bdb5cff/src/storage/lib/operation.tar.gz",
+      "sha256": "2a95e750e36d35ed8b61d274d982608856178d9962b76350d9f8f9a04561459c"
+    },
+    {
+      "path": "src/storage/lib/vfs/cpp",
+      "url": "https://fuchsia.googlesource.com/fuchsia/+archive/fff7033e9cc337f2ab4fe8629a61c0c66bdb5cff/src/storage/lib/vfs/cpp.tar.gz",
+      "sha256": "01c5351a8096894436c7f967cc3305afb91ff6869c61ea02e1dc33c076082afd"
+    },
+    {
+      "path": "zircon/system/ulib/fbl",
+      "url": "https://fuchsia.googlesource.com/fuchsia/+archive/fff7033e9cc337f2ab4fe8629a61c0c66bdb5cff/zircon/system/ulib/fbl.tar.gz",
+      "sha256": "1d1e53906e15b5ea2d33e8580abfda0c9f4a2965a7ba3c763e07c334382a0bb8"
+    },
+    {
+      "path": "zircon/system/ulib/bitmap",
+      "url": "https://fuchsia.googlesource.com/fuchsia/+archive/fff7033e9cc337f2ab4fe8629a61c0c66bdb5cff/zircon/system/ulib/bitmap.tar.gz",
+      "sha256": "8c75499330d73058874f13dcf00b74d53e65861e123fcd6796e7661991e67ccd"
+    },
+    {
+      "path": "zircon/system/ulib/zx",
+      "url": "https://fuchsia.googlesource.com/fuchsia/+archive/fff7033e9cc337f2ab4fe8629a61c0c66bdb5cff/zircon/system/ulib/zx.tar.gz",
+      "sha256": "d453bb53d3068b563fda33f09ac8c1530971ea48aa40475da267a8fa77a89ae2"
+    },
+    {
+      "path": "zircon/system/ulib/zircon-internal",
+      "url": "https://fuchsia.googlesource.com/fuchsia/+archive/fff7033e9cc337f2ab4fe8629a61c0c66bdb5cff/zircon/system/ulib/zircon-internal.tar.gz",
+      "sha256": "d5bbd93b5481b624c73b5af76e140e9eb7ac0611cc86c4fea2e3e66ed1c67305"
+    },
+    {
+      "path": "zircon/third_party/ulib/safemath",
+      "url": "https://fuchsia.googlesource.com/fuchsia/+archive/fff7033e9cc337f2ab4fe8629a61c0c66bdb5cff/zircon/third_party/ulib/safemath.tar.gz",
+      "sha256": "186b14498a29aa781be9f4a3c0f5d35568a0e9aee0c0be1821118ecff6d7d15b"
+    },
+    {
+      "path": "zircon/system/public",
+      "url": "https://fuchsia.googlesource.com/fuchsia/+archive/fff7033e9cc337f2ab4fe8629a61c0c66bdb5cff/zircon/system/public.tar.gz",
+      "sha256": "c33795766cc14db96fbabc1204763f53db21752e2974a8010069b4ec9fc9320f"
+    },
+    {
+      "path": "sdk/lib/fit",
+      "url": "https://fuchsia.googlesource.com/fuchsia/+archive/fff7033e9cc337f2ab4fe8629a61c0c66bdb5cff/sdk/lib/fit.tar.gz",
+      "sha256": "4bba7ba1771e28cc68e31441d13405f6f4d61aba05374d0dfd880b84b814edf1"
+    },
+    {
+      "path": "sdk/lib/fit-promise",
+      "url": "https://fuchsia.googlesource.com/fuchsia/+archive/fff7033e9cc337f2ab4fe8629a61c0c66bdb5cff/sdk/lib/fit-promise.tar.gz",
+      "sha256": "dbd29dec2477c0737e258a6e1cd4094d15a14cf557bfa6bd0d3b6376eae6332e"
+    },
+    {
+      "path": "sdk/lib/stdcompat",
+      "url": "https://fuchsia.googlesource.com/fuchsia/+archive/fff7033e9cc337f2ab4fe8629a61c0c66bdb5cff/sdk/lib/stdcompat.tar.gz",
+      "sha256": "75b3849e102b6e6dae96286824430cba039423147d1c94dd4d2f4d19d7811d54"
+    },
+    {
+      "path": "sdk/lib/zircon-assert",
+      "url": "https://fuchsia.googlesource.com/fuchsia/+archive/fff7033e9cc337f2ab4fe8629a61c0c66bdb5cff/sdk/lib/zircon-assert.tar.gz",
+      "sha256": "a554fcdd03a9073fe915457c2739d92e19642ea3d78f2a6d350915f665ead3f6"
+    }
+  ]
+}

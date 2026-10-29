@@ -97,6 +97,7 @@ def native_documentation(api):
                        f'{workspace}/Cargo.toml', '--no-deps', '--document-private-items', '--locked']
             environment = {
                 'RUSTC_BOOTSTRAP': '1', 'HYPER_LINK_MODE': mode,
+                'HYPER_DOCUMENTATION': '1',
                 'CARGO_TARGET_DIR': str(cargo_output),
                 'RUSTDOCFLAGS': reference_doc_flags(documented_crates(selected), '..'),
             }

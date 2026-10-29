@@ -27,6 +27,7 @@ the bootstrap or formal loader explicitly through an executable capability.
 
 | Library | Consumers | Responsibility |
 | --- | --- | --- |
+| [`hyper-fs-f2fs`](fs-f2fs/README.md) | Experimental F2FS worker | Rust media API and pinned Fuchsia C++ core; disabled by default. |
 | `hyper-clap-shared` | All clap-based Native tools | Own the common clap parser, validation and help code; applications retain their argument types and derive expansions. |
 | `hyper-tool-args` | `handle`, `ps`, `top`, `free` | Parse complete generation-bearing IDs and sampling intervals; combine process-ID and name selectors. Shared argument types live here; command-specific clap declarations remain in each tool. |
 | `hyper-vm-policy` | System-startup, `vmm`, VM manager and runtime | VM resource limits, fleet configuration/control records, affinity policy and image validation. |

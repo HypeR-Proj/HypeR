@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 roolrz
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "hyper-f2fs-smoke"
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[workspace]
+
+[dependencies]
+hyper-os = { version = "=0.0.0", features = ["std"] }
+hyper-rt = { version = "=0.0.0", features = ["std"] }
+hyper-fs-f2fs = { path = "../../../lib/fs-f2fs" }
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+debug = 1

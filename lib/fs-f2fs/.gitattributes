@@ -1,0 +1,5 @@
+# SPDX-FileCopyrightText: 2026 roolrz
+# SPDX-License-Identifier: Apache-2.0
+
+# Unified diff represents an empty context line with a single space.
+fuchsia.patch whitespace=-blank-at-eol

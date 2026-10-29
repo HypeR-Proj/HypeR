@@ -13,6 +13,7 @@ installed SDK. It must not depend on either environment's service policy.
 | --- | --- |
 | [`hyper/`](hyper/README.md) | Native C ABI wrappers, startup, heap/thread support and the Rust std C adapter |
 | [`rust/`](rust/README.md) | Raw and safe Native bindings, Rust entry, and the kernel filesystem-service wire protocol |
+| [`cxx/`](cxx/README.md) | Experimental Native libc++ subset for the F2FS adapter; consumes the installed C substrate |
 | `rust-std/` | Formal-system dylib delivery of the SDK's Rust std port; bootstrap still links std statically |
 
 ABI definitions remain in `sdk/abi/`. Compiler drivers and assembly of an

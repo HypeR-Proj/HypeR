@@ -59,3 +59,21 @@ if check >/dev/null 2>&1; then
     echo 'image with incomplete sidecar accepted' >&2
     exit 1
 fi
+
+# Dependency exceptions must retain both the notice and the complete manifest.
+rm "$fixture/Test Logo.png" "$fixture/Test Logo.png.license"
+mkdir -p "$fixture/lib/fs-f2fs/licenses"
+cp "$root/lib/fs-f2fs/FUCHSIA-LICENSE" "$root/lib/fs-f2fs/FUCHSIA-PATENTS" "$fixture/lib/fs-f2fs/"
+cp "$root/lib/fs-f2fs/licenses/"* "$fixture/lib/fs-f2fs/licenses/"
+check
+printf 'changed\n' >>"$fixture/lib/fs-f2fs/FUCHSIA-LICENSE"
+if check >/dev/null 2>&1; then
+    echo 'changed F2FS dependency notice accepted' >&2
+    exit 1
+fi
+cp "$root/lib/fs-f2fs/FUCHSIA-LICENSE" "$fixture/lib/fs-f2fs/"
+rm "$fixture/lib/fs-f2fs/licenses/manifest.json"
+if check >/dev/null 2>&1; then
+    echo 'F2FS dependency notice without manifest accepted' >&2
+    exit 1
+fi

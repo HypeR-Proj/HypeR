@@ -1,0 +1,12 @@
+{
+  "SPDX-FileCopyrightText": "2026 roolrz",
+  "SPDX-License-Identifier": "Apache-2.0",
+  "files": {
+    "lib/fs-f2fs/FUCHSIA-LICENSE": "83c1763356e822adde0a2cae748d938a73fdc263849ccff6b27776dff213bd32",
+    "lib/fs-f2fs/FUCHSIA-PATENTS": "52beb3ac72a0e7f5060384d16e4e6f91573016448fbff363c0b01a66fe99f547",
+    "lib/fs-f2fs/licenses/ext2-hash": "139c596822e99a4863ca239753047700d63978544ccb804e10ecaac0ddfda95c",
+    "lib/fs-f2fs/licenses/libcxx": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b",
+    "lib/fs-f2fs/licenses/musl-headers": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
+    "lib/fs-f2fs/licenses/safemath": "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308"
+  }
+}

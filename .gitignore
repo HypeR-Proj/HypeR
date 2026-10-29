@@ -3,6 +3,7 @@
 
 /target/
 /app/target/
+/tests/native/f2fs-smoke/target/
 /bootstrap/stage1/target/
 /kernel/target/
 /sdk/abi/target/

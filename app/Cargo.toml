@@ -20,6 +20,7 @@ members = [
     "../lib/text-ui/shared",
     "../lib/block",
     "../lib/fs-service",
+    "../lib/fs-f2fs",
     "../lib/vm-image",
     "../lib/tool-args",
     "../lib/tool-args/shared",
