@@ -132,8 +132,8 @@ flowchart TB
 2. [vm-runtime `run`](https://github.com/HypeR-Proj/vm-runtime/blob/main/src/runtime.rs) validates the image, prepares
    its memory and serial channel, creates a pending VM, attaches memory and
    bootstrap information, seals it, installs it and starts the boot vCPU.
-   [vm-support](https://github.com/HypeR-Proj/vm-support/blob/main/src/lib.rs) contains shared loading/device
-   mechanisms; [SDK VM bindings](https://github.com/HypeR-Proj/rust-lib/blob/main/hyper-os/src/vm.rs) expose the Native
+   [vm-support](https://github.com/HypeR-Proj/lib-vm-support/blob/main/src/lib.rs) contains shared loading/device
+   mechanisms; [SDK VM bindings](https://github.com/HypeR-Proj/lib-rust/blob/main/hyper-os/src/vm.rs) expose the Native
    operations used here.
 3. [VM services](https://github.com/HypeR-Proj/kernel/blob/main/src/vm/service.rs) resolve capabilities and
    implement `create_pending`, `seal`, `install` and `start_vcpu`.
@@ -265,9 +265,9 @@ A new Process and a new Thread in an existing Process are different operations.
 Both eventually publish scheduler-owned Threads, but only Process creation
 loads a new image and address space.
 
-- **Process:** [std process adapter](https://github.com/HypeR-Proj/rust-std/blob/main/pal/overlay/std/src/sys/process/hyper.rs)
-  and [libhyper process adapter](https://github.com/HypeR-Proj/rust-std/blob/main/shim/src/std-process.c), or an explicit
-  [SDK ProcessBuilder](https://github.com/HypeR-Proj/rust-lib/blob/main/hyper-os/src/task.rs), lead through Native
+- **Process:** [std process adapter](https://github.com/HypeR-Proj/lib-std/blob/main/pal/overlay/std/src/sys/process/hyper.rs)
+  and [libhyper process adapter](https://github.com/HypeR-Proj/lib-std/blob/main/shim/src/std-process.c), or an explicit
+  [SDK ProcessBuilder](https://github.com/HypeR-Proj/lib-rust/blob/main/hyper-os/src/task.rs), lead through Native
   dispatch to [the kernel builder](https://github.com/HypeR-Proj/kernel/blob/main/src/process/builder.rs).
   Follow `start_process_builder`, [bootstrap mapping](https://github.com/HypeR-Proj/kernel/blob/main/src/process/loader.rs),
   [Process owner](https://github.com/HypeR-Proj/kernel/blob/main/src/process/owner/mod.rs) and
@@ -276,28 +276,28 @@ loads a new image and address space.
   The selected userspace loader maps the application and constructs its startup
   vector. The [bootstrap loader](https://github.com/HypeR-Proj/bootstrap/blob/main/userspace-loader/README.md)
   accepts static core programs; the
-  [formal loader](https://github.com/HypeR-Proj/dynamic-loader/blob/main/README.md) handles both static and dynamic
+  [formal loader](https://github.com/HypeR-Proj/lib-dynamic-loader/blob/main/README.md) handles both static and dynamic
   system programs, including dependency loading and relocation.
   SDK start waits for runtime readiness, before constructors and `main`.
   A loader failure after kernel commit
   stops and joins the child rather than returning a retryable builder.
-- **Additional Thread:** [std thread adapter](https://github.com/HypeR-Proj/rust-std/blob/main/pal/overlay/std/src/sys/thread/hyper.rs)
-  uses [thread_spawn.c](https://github.com/HypeR-Proj/lib/blob/main/src/thread_spawn.c). Native `thread_create`
+- **Additional Thread:** [std thread adapter](https://github.com/HypeR-Proj/lib-std/blob/main/pal/overlay/std/src/sys/thread/hyper.rs)
+  uses [thread_spawn.c](https://github.com/HypeR-Proj/libc/blob/main/src/thread_spawn.c). Native `thread_create`
   reaches `create_thread` in [task services](https://github.com/HypeR-Proj/kernel/blob/main/src/entry/services/task.rs),
   which validates start information and affinity and asks the Process owner to
   prepare the user Thread. Creation and `thread_start` are separate operations.
   [UserThread](https://github.com/HypeR-Proj/kernel/blob/main/src/process/user_thread.rs) and
   [scheduler Thread](https://github.com/HypeR-Proj/kernel/blob/main/src/task/thread.rs) serve different ownership roles.
-- **Stack:** [stack.c](https://github.com/HypeR-Proj/lib/blob/main/src/stack.c) manages guarded reservations and
+- **Stack:** [stack.c](https://github.com/HypeR-Proj/libc/blob/main/src/stack.c) manages guarded reservations and
   explicit growth for both the runtime-created main stack and SDK-created worker stacks.
-  [Runtime initialization](https://github.com/HypeR-Proj/lib/blob/main/src/runtime.c) copies startup data;
-  [bootstrap handoff](https://github.com/HypeR-Proj/lib/blob/main/src/bootstrap.c) builds the final entry vector,
+  [Runtime initialization](https://github.com/HypeR-Proj/libc/blob/main/src/runtime.c) copies startup data;
+  [bootstrap handoff](https://github.com/HypeR-Proj/libc/blob/main/src/bootstrap.c) builds the final entry vector,
   switches to the final stack and only then releases the kernel bootstrap
   reservation. Static programs also retire the loader mapping; dynamic programs
   retain their formal loader for runtime linking. The
-  [address-layout table](https://github.com/HypeR-Proj/dynamic-loader/blob/main/elf/README.md#address-layout)
+  [address-layout table](https://github.com/HypeR-Proj/lib-dynamic-loader/blob/main/elf/README.md#address-layout)
   separates current placement policy from the kernel entry contract.
-  See [stack APIs](https://github.com/HypeR-Proj/lib/blob/main/README.md#guarded-growable-stacks) before changing
+  See [stack APIs](https://github.com/HypeR-Proj/libc/blob/main/README.md#guarded-growable-stacks) before changing
   stack size or cleanup. A userspace stack is separate from its kernel stack.
 
 **Where the new Thread's SP comes from:** `hyper_runtime_thread_spawn_with_stack`
@@ -313,7 +313,7 @@ userspace, `aarch64_run_native_user` in
 writes `SP_EL0`, and executes `eret` after restoring the remaining user state.
 `worker` therefore starts on its final stack; it does not perform another stack
 switch. Its `hyper_runtime_thread_attach_stack` call only associates the stack
-descriptor with the per-thread SDK state in [thread.c](https://github.com/HypeR-Proj/lib/blob/main/src/thread.c).
+descriptor with the per-thread SDK state in [thread.c](https://github.com/HypeR-Proj/libc/blob/main/src/thread.c).
 
 **Who reclaims it:** the SDK starts one process-lifetime reaper lazily on the
 first runtime thread spawn. It waits for kernel `THREAD_TERMINATED` events,
@@ -327,8 +327,8 @@ and bounded by the capacity reserved at creation, not automatic fault-driven gro
 
 ## 6. Native file access: ramfs versus `/data`
 
-Start with [std fs](https://github.com/HypeR-Proj/rust-std/blob/main/pal/overlay/std/src/sys/fs/hyper.rs),
-[std-fs.c](https://github.com/HypeR-Proj/rust-std/blob/main/shim/src/std-fs.c), then Native filesystem dispatch.
+Start with [std fs](https://github.com/HypeR-Proj/lib-std/blob/main/pal/overlay/std/src/sys/fs/hyper.rs),
+[std-fs.c](https://github.com/HypeR-Proj/lib-std/blob/main/shim/src/std-fs.c), then Native filesystem dispatch.
 [Kernel VFS services](https://github.com/HypeR-Proj/kernel/blob/main/src/fs/vfs/service.rs) and
 [entry adapters](https://github.com/HypeR-Proj/kernel/blob/main/src/entry/services/vfs.rs) enforce capability
 rights, copy payloads and invoke the VFS objects.
@@ -419,17 +419,17 @@ flowchart TB
 ```
 
 Read [vm-runtime I/O setup](https://github.com/HypeR-Proj/vm-runtime/blob/main/src/io_devices.rs),
-[shared virtio state](https://github.com/HypeR-Proj/vm-support/blob/main/src/virtio.rs),
-[MMIO registers](https://github.com/HypeR-Proj/vm-support/blob/main/src/virtio_mmio.rs),
-[modern PCI registers](https://github.com/HypeR-Proj/vm-support/blob/main/src/virtio_pci.rs),
-[network configuration](https://github.com/HypeR-Proj/vm-support/blob/main/src/virtio_net.rs), and
-[asynchronous backend control](https://github.com/HypeR-Proj/vm-support/blob/main/src/io_backend.rs).
+[shared virtio state](https://github.com/HypeR-Proj/lib-vm-support/blob/main/src/virtio.rs),
+[MMIO registers](https://github.com/HypeR-Proj/lib-vm-support/blob/main/src/virtio_mmio.rs),
+[modern PCI registers](https://github.com/HypeR-Proj/lib-vm-support/blob/main/src/virtio_pci.rs),
+[network configuration](https://github.com/HypeR-Proj/lib-vm-support/blob/main/src/virtio_net.rs), and
+[asynchronous backend control](https://github.com/HypeR-Proj/lib-vm-support/blob/main/src/io_backend.rs).
 [The runtime supervisor](https://github.com/HypeR-Proj/vm-runtime/blob/main/src/supervisor.rs) services deferred
 MMIO and backend replies without holding the vCPU in a synchronous RPC.
 The [I/O broker](https://github.com/HypeR-Proj/io-runtime/blob/main/src/runtime/broker/mod.rs) authorizes client sessions;
 [client bindings](https://github.com/HypeR-Proj/io-runtime/blob/main/src/runtime/broker/client.rs) own their admission and retirement;
 [broker exchange](https://github.com/HypeR-Proj/io-runtime/blob/main/src/broker_exchange.rs) handles their control
-traffic. [The protocol](https://github.com/HypeR-Proj/vm-support/blob/main/src/io_protocol.rs) defines the
+traffic. [The protocol](https://github.com/HypeR-Proj/lib-vm-support/blob/main/src/io_protocol.rs) defines the
 negotiation records.
 
 Inside HypeR, [VM I/O services](https://github.com/HypeR-Proj/kernel/blob/main/src/vm/io/service.rs),
@@ -468,7 +468,7 @@ Useful checks to read beside these paths:
 | VM ownership and trapped device operations | [vm-smoke](https://github.com/HypeR-Proj/ci/blob/main/tests/app/vm-smoke/src/main.rs), [QEMU harness](https://github.com/HypeR-Proj/ci/blob/main/tests/qemu/verify-vm-smoke.py) |
 | Guest SMP and power | [guest SMP harness](https://github.com/HypeR-Proj/ci/blob/main/tests/qemu/verify-guest-smp.py) |
 | Native file and guest disk integration | [CI entry points](https://github.com/HypeR-Proj/ci/blob/main/tests/ci/run.sh): `board-storage` and `io-vm` |
-| SDK stacks and thread cleanup | [stack tests](https://github.com/HypeR-Proj/lib/blob/main/tests/unit/stack.c), [spawn tests](https://github.com/HypeR-Proj/lib/blob/main/tests/unit/thread-spawn.c) |
+| SDK stacks and thread cleanup | [stack tests](https://github.com/HypeR-Proj/libc/blob/main/tests/unit/stack.c), [spawn tests](https://github.com/HypeR-Proj/libc/blob/main/tests/unit/thread-spawn.c) |
 
 Use [development](../usage/development/development.md) for commands and test prerequisites. A model
 test can establish a transition invariant; QEMU checks integration. Neither
@@ -542,7 +542,7 @@ These facilities share scheduler machinery but answer different questions:
 | WaitSet | Which registered object subscription became ready? | [WaitSet](https://github.com/HypeR-Proj/kernel/blob/main/src/object/wait_set.rs) |
 | Atomic wait | Does this userspace word still have the expected value before sleeping? | [atomic waits](https://github.com/HypeR-Proj/kernel/blob/main/src/process/atomic_wait.rs) |
 
-[SDK wait bindings](https://github.com/HypeR-Proj/rust-lib/blob/main/hyper-os/src/wait.rs) show how applications
+[SDK wait bindings](https://github.com/HypeR-Proj/lib-rust/blob/main/hyper-os/src/wait.rs) show how applications
 consume object readiness. WaitSet registrations are persistent, with one-shot
 delivery and explicit `rearm`; read `add`, `wait`, delivery completion and
 `remove` together. Readiness is an observation, not a reservation of all the
@@ -713,7 +713,7 @@ reception/IRQ problems from the request-sized byte-stream transport.
 
 [Terminal-service](https://github.com/HypeR-Proj/terminal-service/blob/main/src/main.rs) owns formal input/output
 policy in its private [line discipline](https://github.com/HypeR-Proj/terminal-service/blob/main/src/discipline.rs)
-and reactor. The [terminal library](https://github.com/HypeR-Proj/terminal/blob/main/src/lib.rs) supplies settings,
+and reactor. The [terminal library](https://github.com/HypeR-Proj/lib-terminal/blob/main/src/lib.rs) supplies settings,
 events and control clients; ordinary byte-stream applications use `std::io`.
 [Session-manager](https://github.com/HypeR-Proj/session-manager/blob/main/src/main.rs) creates the terminal and
 shell, holds their Process supervisors, and retires their task groups on failure.
@@ -745,7 +745,7 @@ with the same handoff wire contract and an independent dependency graph.
 | Question | Follow this path |
 | --- | --- |
 | Which executable is deployed, and where? | [component declarations](https://github.com/HypeR-Proj/build/blob/main/mk/README.md) → [deployment tool](https://github.com/HypeR-Proj/build/blob/main/scripts/app-deployment.py) |
-| Are instances and capabilities valid? | [component declarations](https://github.com/HypeR-Proj/component-config/blob/main/src/model.rs) → [realm route validation](https://github.com/HypeR-Proj/component-config/blob/main/src/topology.rs) |
+| Are instances and capabilities valid? | [component declarations](https://github.com/HypeR-Proj/lib-component-config/blob/main/src/model.rs) → [realm route validation](https://github.com/HypeR-Proj/lib-component-config/blob/main/src/topology.rs) |
 | Who supplies capabilities? | [startup migration](https://github.com/HypeR-Proj/system-startup/blob/main/src/runtime/sequence.rs) → [component launch](https://github.com/HypeR-Proj/component-manager/blob/main/src/runtime/launch.rs) and [connection routing](https://github.com/HypeR-Proj/component-manager/blob/main/src/runtime/routing.rs) |
 | What happens when it exits? | [lifecycle reactor](https://github.com/HypeR-Proj/component-manager/blob/main/src/runtime/mod.rs) joins the process/group, then applies [restart policy](https://github.com/HypeR-Proj/component-manager/blob/main/src/lifecycle.rs) |
 | Which files and volumes go into a board image? | [board configuration](https://github.com/HypeR-Proj/build/blob/main/scripts/board_config.py) → [bootstrap generation](https://github.com/HypeR-Proj/build/blob/main/scripts/board_bootstrap.py) → [disk packer](https://github.com/HypeR-Proj/build/blob/main/scripts/pack-board-image.py) |

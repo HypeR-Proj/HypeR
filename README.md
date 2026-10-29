@@ -5,62 +5,48 @@ SPDX-License-Identifier: Apache-2.0
 
 # HypeR
 
-An experimental virtualization host with a Rust kernel and capability-based Native userspace.
-AArch64 is the primary platform; RISC-V remains a supported development target.
+HypeR is a capability-oriented operating system with a Rust kernel, Native
+userspace and isolated I/O services. This repository contains project documentation
+and the workspace setup helper. System implementation lives in separate
+[HypeR-Proj repositories](https://github.com/HypeR-Proj).
 
-This repository contains project documentation, product configurations and the workspace helper.
-Source components live in their own repositories in [HypeR-Proj](https://github.com/HypeR-Proj).
+## Quick start
 
-## Get the workspace
-
-Install Git, Python 3.11 or newer, and the Android `repo` tool, then run:
-
-```sh
-mkdir hyper-workspace
-cd hyper-workspace
-repo init -u https://github.com/HypeR-Proj/manifest.git -b main
-repo sync
-./HypeR/hyper prepare
-./HypeR/hyper make native-initramfs ARCH=aarch64
-```
-
-The manifest follows each component's `main`; there are no component revisions to advance manually.
-It is stored by `repo` under `.repo/manifests`.
-
-Edit the component repositories. `out/system` is a generated build view and may be replaced.
-The build records the actual component commits and file hashes in `out/system/source-inventory.json`.
-Rust target selection, shared runtime profiles and SDK installation remain coordinated by `build`.
+Install Git, Python 3.11 or newer, the Android `repo` tool, Rust, Clang/LLVM, Make
+and CMake. See the [build guide](docs/learn/getting-started.md) for host dependencies.
 
 ```sh
-./HypeR/hyper test top          # top's tests with workspace dependencies
-./HypeR/hyper make test-native ARCH=aarch64
-./HypeR/hyper sync
+git clone https://github.com/HypeR-Proj/HypeR.git
+cd HypeR
+./setup.sh
+cd workspace
+make native-initramfs ARCH=aarch64
 ```
 
-See [workspace development](docs/usage/development/workspace.md) for repository ownership,
-configuration, editors and cross-repository changes. The [usage documentation](docs/usage/README.md)
-contains build prerequisites and system commands.
+`setup.sh` initializes and synchronizes `workspace/` using
+[the manifest](https://github.com/HypeR-Proj/manifest). To use another directory or
+manifest branch, run `./setup.sh --branch BRANCH DIRECTORY`. Sources track each
+repository's `main`; updating the workspace is `repo sync` from its root.
 
-## Repositories
+The manifest owns directory layout, product configuration and shared workspace
+files. [build](https://github.com/HypeR-Proj/build) supplies build tools at the
+workspace root. Edit the component checkouts directly; builds use those files.
+Library repository names start with `lib`, including `libc`, `lib-rust` and
+`lib-std`. I/O VM packages and Pi5 images have separate publication repositories.
 
-| Area | Repositories |
-| --- | --- |
-| Kernel and public contracts | [kernel](https://github.com/HypeR-Proj/kernel), [abi](https://github.com/HypeR-Proj/abi) |
-| SDK and runtimes | [toolchain](https://github.com/HypeR-Proj/toolchain), [lib](https://github.com/HypeR-Proj/lib), [rust-lib](https://github.com/HypeR-Proj/rust-lib), [rust-std](https://github.com/HypeR-Proj/rust-std) |
-| Early userspace | [bootstrap](https://github.com/HypeR-Proj/bootstrap), [dynamic-loader](https://github.com/HypeR-Proj/dynamic-loader) |
-| Applications and services | [coreutils](https://github.com/HypeR-Proj/coreutils) and one repository per other application, service or library |
-| Integration | [build](https://github.com/HypeR-Proj/build), [manifest](https://github.com/HypeR-Proj/manifest), [ci](https://github.com/HypeR-Proj/ci) |
-| External appliance and distribution | [io-vm](https://github.com/HypeR-Proj/io-vm), [pi5-images](https://github.com/HypeR-Proj/pi5-images) |
+## Development
 
-## Verification and contributions
+Each repository owns its license, CODEOWNERS, module configuration and tests.
+Pull requests run module tests automatically. Related PRs can share a `topic:`
+label; system tests are manually dispatched in
+[ci](https://github.com/HypeR-Proj/ci/actions/workflows/system.yml).
 
-PRs automatically run the affected repository's `module` tests. Run the `System verification`
-workflow manually in `ci` with `repository#PR`, or give related PRs one common `topic:name` label
-and dispatch that topic. System checks apply to the exact commits and dependency combination tested.
+```sh
+cd workspace
+python3 project.py test kernel
+repo status
+```
 
-Ordinary merges require code-owner approval and both `module` and `system` checks.
-Administrators can bypass these requirements through a PR. Everyone, including administrators,
-is prohibited from directly pushing, force-pushing or deleting the default branch.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
-HypeR code is Apache-2.0; components retain their applicable upstream licenses.
+See [documentation](docs/README.md), [architecture](docs/architecture/overview.md),
+[project status](docs/project/status.md), [contribution guidelines](CONTRIBUTING.md)
+and [security policy](SECURITY.md).

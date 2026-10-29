@@ -20,4 +20,4 @@ These are the contracts used to change an implementation safely. Start with
 
 Source-owner references document the [SDK](https://github.com/HypeR-Proj/build/blob/main/sdk/README.md),
 [Native substrate](https://github.com/HypeR-Proj/build/blob/main/stdlib/README.md), [bootstrap loader](https://github.com/HypeR-Proj/bootstrap/blob/main/userspace-loader/README.md)
-and [formal dynamic loader](https://github.com/HypeR-Proj/dynamic-loader/blob/main/README.md).
+and [formal dynamic loader](https://github.com/HypeR-Proj/lib-dynamic-loader/blob/main/README.md).

@@ -20,6 +20,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: HypeR-Proj/ci/.github/actions/module@main
-        with:
-          component: ${{ github.event.repository.name }}
+      - name: Check workspace setup helper
+        run: |
+          sh -n setup.sh
+          shellcheck setup.sh
+          ./setup.sh --help

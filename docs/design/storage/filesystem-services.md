@@ -421,7 +421,7 @@ reclamation, so a backend waiting for memory cannot deadlock the reclaim path.
 
 Implementation entry points: [formal manager](https://github.com/HypeR-Proj/fs-backend/blob/main/src/main.rs),
 [bootstrap transfer](https://github.com/HypeR-Proj/bootstrap/blob/main/fs-backend/src/migration.rs),
-[formal worker transport](https://github.com/HypeR-Proj/fs-service/blob/main/src/lib.rs),
+[formal worker transport](https://github.com/HypeR-Proj/lib-fs-service/blob/main/src/lib.rs),
 [FAT worker](https://github.com/HypeR-Proj/fs-fat/blob/main/src/main.rs), [EROFS worker](https://github.com/HypeR-Proj/fs-erofs/blob/main/src/main.rs),
 [wire protocol](https://github.com/HypeR-Proj/abi/blob/main/filesystem/src/protocol/mod.rs),
 [kernel adapter](https://github.com/HypeR-Proj/kernel/blob/main/src/fs/vfs/remote/mod.rs), and
