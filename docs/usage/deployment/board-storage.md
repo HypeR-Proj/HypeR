@@ -154,12 +154,10 @@ see [MacPorts setup](../../learn/getting-started.md#macos-with-macports).
 Run `make test-alpine-rootfs` for a disposable
 root-disk boot and persistence test.
 
-The build imports a protocol version 3 appliance from the platform's
-immutable GHCR reference in `scripts/io-vm.lock.json`;
+The build resolves the platform's qualified main channel to an immutable GHCR digest;
 see [appliance requirements](../../design/virtualization/io-vm.md#protocol-version-3-appliance-requirement).
-The new owner-only block-management feature additionally requires a matching
-appliance supplied through `IO_VM_PACKAGE` until its release is pinned. The
-current lock does not advertise that feature; version 3 alone is not sufficient.
+Board deployment validates the v5 client-table resource contract. Use `IO_VM_PACKAGE`
+when testing a local appliance before qualified publication.
 When importing an uncached package, the fetcher uses ORAS from `PATH` or
 automatically downloads ORAS 1.3.0 into `target/tools` for macOS/Linux on
 ARM64/x86-64. Downloads require `curl` and are checked against pinned SHA-256
@@ -315,7 +313,7 @@ preallocated RAM or a guarantee that all eight guests fit the host.
 For Pi 5, use `make rpi5-sd`
 with the pinned official prebuilt DTBs/overlays. The boot chain uses the official
 EEPROM firmware and its built-in BL31; no custom TF-A artifact is required.
-QEMU and Pi 5 package selections live in `scripts/io-vm.lock.json`. Recorded
+QEMU and Pi 5 package channels advance automatically after qualified main builds. Recorded
 Pi 5 development runs established SD-backed reads and basic guest persistence.
 The 2026-10-06 [performance survey](../../../README.md#exploratory-pi-5-io-measurements)
 also exercised Native and guest SD writes with full readback and physical guest

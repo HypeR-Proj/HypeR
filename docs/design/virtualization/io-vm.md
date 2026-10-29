@@ -115,33 +115,23 @@ materials and notices regardless of which repository contains the build scripts.
 The delivery boundary is an OCI artifact in GitHub Container Registry (GHCR),
 not a container to execute. A boot package contains `Image`, a complete
 `initramfs.cpio.gz`, a versioned manifest, and corresponding source materials.
-HypeR downloads the runtime payload by immutable `sha256` digest; tags are
-human-facing release names and must never select an implicit moving upgrade.
-Source materials remain available with the same package generation, but are
-not included in the HypeR boot ramdisk.
+Ordinary builds resolve `ghcr.io/hyper-proj/io-vm:main-aarch64-qemu` or
+`main-aarch64-rpi5` to an immutable SHA-256 digest, then verify and cache that
+exact generation. Qualified main publication advances these channels automatically;
+contributors do not update package-version files. Explicit `IO_VM_REFERENCE`
+digests remain available for reproduction, and `IO_VM_PACKAGE` selects a local build.
+Source materials remain available with the same package generation, outside the boot ramdisk.
 
-Release adoption requires an explicit digest update. An incompatible package format, wrong
-architecture/platform, missing artifact, or failed checksum aborts import.
-Download and verification finish before a new generation becomes visible;
-failed updates leave the previously selected generation intact.
-Separate QEMU and Pi 5 AArch64 appliances are published as prereleases in GHCR.
-Each entry in [io-vm.lock.json](https://github.com/HypeR-Proj/build/blob/main/scripts/io-vm.lock.json) pins its platform's
-immutable reference, source revision and successful qualification/publication
-runs. Platform metadata identifies the build profile; it does not certify Pi
-hardware operation. The development image with the combined SDIO1/RP1
-deployment passed a physical Pi 5 smoke test before publication. A published
-Pi 5 pin was then used for the 2026-10-06 physical storage and guest TCP
-[performance survey](../../../README.md#exploratory-pi-5-io-measurements). This is basic
-functional/reference evidence, not full stress, durability and DMA retirement
-qualification; the lock entry therefore retains `hardware_qualified: false`.
+An incompatible package format, wrong architecture/platform, missing artifact or failed
+checksum aborts import. Download and verification finish before a new generation becomes
+visible. A failed update leaves existing cached generations intact and reports the failure.
+Channel lookup requires registry access; an explicit already-cached digest works offline.
+`make run` starts the last packaged image without fetching or rebuilding its appliance.
+
+System topic tests build the selected I/O VM source directly. Pi image publication also
+requires source-matching appliance materials. Platform qualification in Linux/QEMU does
+not certify physical Pi operation; retain separate hardware evidence in release inventories.
 Final boot images follow the [image release contract](../../usage/deployment/image-distribution.md).
-The import command also accepts `IO_VM_REFERENCE` explicitly. The qualified QEMU
-fixture consumes the imported generation. Without an override, the ordinary
-AArch64 `make` build also selects the committed protocol version 3 lock.
-The committed package also provides the owner block-management extension and
-the v5 client table for per-client SCSI/network resources required by board
-deployment (see below). `make run` starts the artifacts from the last build and
-does not fetch or rebuild the appliance.
 
 The I/O VM repository owns the pinned upstream LTS version and builds each
 external module against the exact kernel configuration and release. HypeR
@@ -413,8 +403,8 @@ or Linux can fall back to software. `VHOST_NET_F_VIRTIO_NET_HDR` stays clear in
 this mode. TAP's `TUNSETOFFLOAD` flags remain zero: those describe packets sent
 *to* the guest, whose receive path still requires ordinary MTU-sized frames.
 
-The pinned QEMU and Pi 5 appliances support these optional TX offloads. They
-are imported by immutable upstream OCI digest from `scripts/io-vm.lock.json`.
+The qualified QEMU and Pi 5 appliances support these optional TX offloads.
+The fetcher resolves the selected platform channel and imports its immutable OCI digest.
 TX offloads themselves need no local override; the new owner block-management
 feature has the separate appliance requirement described below. The pinned Linux build also orders vhost
 work-node reuse before concurrent requeue, preventing pending work from being
@@ -641,26 +631,17 @@ to reuse them.
 
 ### Protocol version 3 appliance requirement
 
-The [package lock](https://github.com/HypeR-Proj/build/blob/main/scripts/io-vm.lock.json) selects separate protocol version 3
-QEMU and Pi 5 appliances published from the merged HypeR-io-vm source. Default
-builds and I/O VM acceptance import and verify these immutable GHCR digests.
-The appliance boot banner and `/etc/hyper-io-version` identify the source
-revision, dirty state, build profile and UTC build time.
+The qualified main channels select protocol version 3 QEMU and Pi 5 appliances.
+Default builds resolve and verify immutable GHCR digests. The appliance boot banner and
+`/etc/hyper-io-version` identify source revision, dirty state, build profile and UTC time.
+A completed SD image includes its appliance and needs no registry access at boot.
 
-`IO_VM_PACKAGE` remains an explicit development override for a complete boot
-generation; ordinary builds do not need it. A completed SD image already
-contains its appliance and does not need access to GHCR when booting.
-
-Adopt future generations in this order:
-
-1. Land the I/O VM changes in HypeR-io-vm and pass its appliance build/tests.
-   The successful main build publishes separate QEMU and Pi 5 prerelease packages.
-2. Import and test those exact immutable digests with the matching HypeR
-   control plane. Keep physical Pi 5 results separate from Linux/QEMU checks.
-3. Update both entries in `scripts/io-vm.lock.json`, including their source and
-   workflow identities, and pass HypeR integration checks using those pins.
-4. After HypeR merges, advance the image-distribution repository's HypeR pin;
-   it inherits the dependency locks from that revision.
+For coordinated changes, open topic PRs and run manual system verification against the
+combined sources before merging. The I/O VM main build then publishes qualified platform
+channels automatically; `pi5-images` resolves source inputs and builds matching appliance
+materials without a HypeR commit bump. Keep physical Pi results separate from Linux/QEMU
+checks. Use `IO_VM_PACKAGE` for local appliance changes and `IO_VM_REFERENCE` for an
+explicit previously published digest.
 
 The default QEMU board includes storage and networking for Alpine:
 
@@ -755,7 +736,7 @@ exercise shared memory ownership and device epochs.
 
 ### Package import and storage acceptance
 
-Import the pinned, anonymously downloadable QEMU package (ORAS is discovered
+Import the latest qualified QEMU package (ORAS is discovered
 or downloaded automatically):
 
 ```sh
@@ -768,19 +749,19 @@ executable for this step, run
 Board and I/O initramfs composition targets accept `IO_VM_ORAS`.
 
 The command prints the verified generation directory under
-`target/io-vm/packages/`. Repeating it verifies and reuses that directory without
-network access. A private GHCR package requires `oras login ghcr.io` first;
+`target/io-vm/packages/`. Channel resolution uses the registry; an explicit cached
+digest verifies and reuses that directory without network access. A private GHCR package requires `oras login ghcr.io` first;
 credentials belong to the local registry configuration, never to the repository.
 Only the runtime payload is fetched. The OCI manifest also identifies the
 matching configuration and corresponding-source archive for redistribution.
 To qualify another generation, pass
 `IO_VM_REFERENCE=ghcr.io/OWNER/PACKAGE@sha256:DIGEST` explicitly.
 `make io-vm-fetch IO_VM_PLATFORM=rpi5` downloads and verifies the separately
-built Pi package against its platform metadata. The lock explicitly records `hardware_qualified: false`.
+built Pi package against its platform metadata. Platform metadata is not a hardware qualification claim.
 
 Linux build instructions and the vhost-scsi reserved-page acceptance test live
 in [HypeR-io-vm](https://github.com/HypeR-Proj/io-vm). They run in that
-repository. The HypeR fixture defaults to the pinned QEMU package:
+repository. The HypeR fixture defaults to the qualified QEMU channel:
 
 ```sh
 make test-io-vm ARCH=aarch64
@@ -803,15 +784,12 @@ sector and all untouched bytes after stopping its QEMU process, retaining the
 disk and `result.json` beside the log. This uses LIO iblock, not a RAM disk.
 A Linux-only successful appliance test is a separate prerequisite.
 
-The **HypeR / I/O VM integration** GitHub workflow runs both reset
-configurations on pull requests and main pushes using the pinned package.
-Manual dispatch can override the public immutable reference. Its local
-equivalent is `sh tests/ci/run.sh io-vm`; set `IO_VM_REFERENCE` to qualify
-another generation explicitly.
-The locked version 3 packages passed the upstream appliance build/tests and
-publication verification. The board-managed Native FAT and business-client tests
-are additional HypeR acceptance paths, documented in [board storage](../../usage/deployment/board-storage.md).
-Updating the lock requires qualifying the exact new build.
+System integration runs manually in `HypeR-Proj/ci` against resolved source candidates.
+Its I/O appliance is built from the selected source instead of a floating package channel.
+The local I/O reset suite remains `sh tests/ci/run.sh io-vm`; set `IO_VM_PACKAGE`
+for a local appliance or `IO_VM_REFERENCE` for an exact published generation.
+Board-managed Native FAT and business-client acceptance paths are documented in
+[board storage](../../usage/deployment/board-storage.md).
 
 Physical virtio discovery accepts the trigger declared by firmware, including
 QEMU's edge-triggered SPIs. Active physical edge sources remain enabled;

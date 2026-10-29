@@ -3,25 +3,21 @@
 
 # Pi 5 image distribution
 
-The selected distribution model separates HypeR development, Linux appliance
-publication and final SD-image releases. The
-[image-distribution repository](https://github.com/HypeR-Proj/pi5-images) builds
-compressed images and creates draft releases on updates to its main branch.
-Public release publication is manual. Users only need a HypeR checkout: its Make
-targets download pinned external inputs and compose images once matching
-appliance pins are available. The optional
-distribution repository publishes versioned outputs using these same targets;
-it is not a build prerequisite.
+The [image-distribution repository](https://github.com/HypeR-Proj/pi5-images) builds
+compressed images and optional draft releases through manual workflow dispatch.
+It resolves the current repo manifest and records exact source inputs. Public release
+publication is manual. A developer workspace can also compose images through its Make
+targets; ordinary builds resolve the latest qualified appliance channel automatically.
 
 ## Ownership
 
 - HypeR owns its Apache-2.0 kernel, Native applications, board policy, guest
   device trees, external-input download locks and reusable image composition tools.
-- HypeR-io-vm owns Linux/BusyBox builds, Linux modules, appliance startup policy
+- `io-vm` owns Linux/BusyBox builds, Linux modules, appliance startup policy
   and publication with matching corresponding sources.
-- The distribution repository pins a HypeR commit, inherits its dependency locks,
-  includes the official Pi
-  DTBs/overlays and optional Alpine payloads, and releases the assembled image.
+- The distribution repository resolves the component main branches, records their
+  exact commits, includes official Pi DTBs/overlays and optional Alpine payloads,
+  and releases the assembled image.
   It does not update the board's EEPROM.
 
 The combined image contains independently licensed components; it is not
@@ -33,22 +29,19 @@ these obligations.
 
 ## Release inputs and outputs
 
-The distribution repository pins the HypeR commit and records the selected board
-profile and build configuration. It must consume the I/O VM, official Pi boot
-inputs and Alpine versions selected by that HypeR revision, rather than maintain
-independent dependency pins or silently override them. Dependency upgrades land
-in HypeR first; the distribution repository then advances its HypeR pin.
+The distribution repository resolves component sources once per run and records the
+board profile and build configuration. It builds the matching I/O appliance and preserves
+its source materials. Official Pi boot inputs and Alpine versions remain selected by the
+shared build configuration. No contributor advances an internal source or appliance lock.
 
-For a control-plane change that requires a new Linux appliance, publish the
-QEMU and Pi 5 packages from HypeR-io-vm first. Qualify those exact digests with
-the matching HypeR changes, update `scripts/io-vm.lock.json`, and pass HypeR CI.
-The distribution repository can then select that merged HypeR revision.
-See [appliance adoption](../../design/virtualization/io-vm.md#protocol-version-3-appliance-requirement) for
-the pinned protocol version 3 packages. A local `IO_VM_PACKAGE` override supports
-development images; it does not update any published package or release pin.
+For coupled control-plane and Linux appliance changes, use topic PRs and manually test
+the combined source candidate in `HypeR-Proj/ci` before merging. Image builds consume the
+same source inventory and source-matching appliance. See
+[appliance adoption](../../design/virtualization/io-vm.md#protocol-version-3-appliance-requirement).
+An explicit `IO_VM_PACKAGE` selects a development appliance without publishing a release.
 
 Generate a resolved release inventory containing the HypeR binary checksums,
-I/O VM OCI digest and matching source artifact, official Pi firmware revision
+I/O VM payload checksums (and OCI digest when imported) and matching source artifact, official Pi firmware revision
 and DTB/overlay checksums, and Alpine checksums and required source materials.
 Record qualification results. This inventory records what was assembled; it
 is not a second set of dependency selections. Board EEPROM remains an external
@@ -59,7 +52,7 @@ checks. Local working trees and development reassemblies remain development
 inputs, not release identities.
 
 Release assets contain compressed whole-disk images (`.img.xz`), checksums,
-input locks, component inventories, notices and companion source archives.
+resolved input records, component inventories, notices and companion source archives.
 The distribution pipeline collects Rust dependency/std sources for every
 profile, matching libc materials for I/O profiles, and Alpine package/kernel
 sources for the full SD profile. See the

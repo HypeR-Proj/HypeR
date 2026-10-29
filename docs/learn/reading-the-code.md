@@ -442,7 +442,7 @@ than copied through a vm-runtime bounce buffer.
 
 The Linux kernel, modules and appliance services live in the separate
 [HypeR-io-vm repository](https://github.com/HypeR-Proj/io-vm), not this tree.
-[io-vm.lock.json](https://github.com/HypeR-Proj/build/blob/main/scripts/io-vm.lock.json) selects the imported generation;
+The imported OCI manifest records the selected generation;
 use its source revision when tracing the other side, rather than assuming the
 other repository's latest main matches a local image.
 [The I/O VM design](../design/virtualization/io-vm.md) explains queue ownership, eager shared-memory
@@ -749,7 +749,7 @@ with the same handoff wire contract and an independent dependency graph.
 | Who supplies capabilities? | [startup migration](https://github.com/HypeR-Proj/system-startup/blob/main/src/runtime/sequence.rs) → [component launch](https://github.com/HypeR-Proj/component-manager/blob/main/src/runtime/launch.rs) and [connection routing](https://github.com/HypeR-Proj/component-manager/blob/main/src/runtime/routing.rs) |
 | What happens when it exits? | [lifecycle reactor](https://github.com/HypeR-Proj/component-manager/blob/main/src/runtime/mod.rs) joins the process/group, then applies [restart policy](https://github.com/HypeR-Proj/component-manager/blob/main/src/lifecycle.rs) |
 | Which files and volumes go into a board image? | [board configuration](https://github.com/HypeR-Proj/build/blob/main/scripts/board_config.py) → [bootstrap generation](https://github.com/HypeR-Proj/build/blob/main/scripts/board_bootstrap.py) → [disk packer](https://github.com/HypeR-Proj/build/blob/main/scripts/pack-board-image.py) |
-| Which I/O VM build is imported? | [package lock](https://github.com/HypeR-Proj/build/blob/main/scripts/io-vm.lock.json) and [I/O VM documentation](../design/virtualization/io-vm.md) |
+| Which I/O VM build is imported? | [package resolver](https://github.com/HypeR-Proj/build/blob/main/scripts/fetch-io-vm.py) and [I/O VM documentation](../design/virtualization/io-vm.md) |
 
 The [root Makefile](https://github.com/HypeR-Proj/build/blob/main/Makefile) connects those operations. `make` builds and
 updates boot artifacts while preserving existing persistent disk content;

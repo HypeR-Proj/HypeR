@@ -60,7 +60,7 @@ make run
 ```
 
 The build imports the matching protocol version 3 appliance from
-[`scripts/io-vm.lock.json`](https://github.com/HypeR-Proj/build/blob/main/scripts/io-vm.lock.json), verifies its immutable
+[the qualified platform channel](../design/virtualization/io-vm.md#protocol-version-3-appliance-requirement), verifies its immutable
 GHCR digest and caches it locally. See [appliance requirements](../design/virtualization/io-vm.md#protocol-version-3-appliance-requirement)
 for the package boundary and default QEMU deployment.
 `make run` uses the already packaged appliance and needs no package argument.

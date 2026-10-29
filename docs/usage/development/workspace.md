@@ -79,3 +79,9 @@ builds the selected I/O VM source for QEMU and RPi5, then uses those exact packa
 image workflow resolves current sources automatically; source inventories accompany released images.
 Libc materials are collected from the cross compiler's installed packages during appliance builds.
 Old records under `pi5-images/materials/legacy` are retained only as historical provenance.
+
+Ordinary Make builds resolve the platform main appliance channel to an immutable OCI digest.
+Qualified publication advances that channel automatically. This is distinct from source-based
+system verification and image publication, which build matching appliance inputs. Set
+`IO_VM_PACKAGE` for local I/O VM changes or `IO_VM_REFERENCE` for an explicit published digest;
+only the explicit cached-digest path works without registry access.
