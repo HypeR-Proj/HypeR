@@ -35,9 +35,8 @@ on the Thread's kernel stack with ordinary IRQ delivery, including blocking call
 
 File open, create and truncate share one option-bearing operation. Directory
 no-follow opening and contiguous VMO allocation likewise use options on their
-canonical open/create operations. See the
-[pre-freeze audit](../../../docs/design/native-abi-evolution.md) for parameter and record
-extension rules.
+canonical open/create operations. Their arguments, flags and records are defined
+in the [Native ABI reference](../../../sdk/abi/docs/native.md).
 
 Directory open options remain a path-resolution policy; they do not define a new
 object kind. `directory_remove_if` additionally checks expected node identity and

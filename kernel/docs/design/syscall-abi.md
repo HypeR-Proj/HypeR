@@ -260,8 +260,8 @@ used for a syscall number carries the receiver handle; a separate register
 carries an operation local to that receiver's object kind. The six argument
 registers contain business arguments only, without repeating the receiver.
 Every operation leaves at least one register reserved and zero. Sized request
-records and output strides follow the
-[ABI extension policy](../../../docs/design/native-abi-evolution.md).
+records and output strides are specified in the
+[Native ABI reference](../../../sdk/abi/docs/native.md).
 
 | Architecture | Receiver handle | Operation | Arguments | Result |
 | --- | --- | --- | --- | --- |
@@ -1163,9 +1163,6 @@ contracts and validation are reviewed:
 - whether the initial surface includes a dedicated SharedQueue or BackendSession
   for large asynchronous workloads;
 - the complete priority-inheritance atomic-wait contract.
-
-The [compatibility policy](../../../docs/design/native-abi-evolution.md) is recorded ahead
-of the explicit v1 release; the current revision remains zero.
 
 These questions remain outside the current ABI design until resolved.
 
