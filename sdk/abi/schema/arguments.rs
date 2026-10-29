@@ -668,7 +668,7 @@ pub(super) const CONSOLE_IO_FAILURE_RESULTS: &[FailureResults] = &[FailureResult
     results: CONSOLE_IO_WOULD_BLOCK_RESULTS,
 }];
 
-pub(super) const DIRECTORY_OPEN_FILE_RECEIVER: Argument = Argument {
+pub(super) const DIRECTORY_OPEN_RECEIVER: Argument = Argument {
     name: "directory",
     kind: ValueKind::Handle,
     handle: Some(HandleArgument {
@@ -678,7 +678,7 @@ pub(super) const DIRECTORY_OPEN_FILE_RECEIVER: Argument = Argument {
     }),
     memory: None,
 };
-pub(super) const DIRECTORY_OPEN_FILE_ARGUMENTS: &[Argument] = &[
+pub(super) const DIRECTORY_OPEN_ARGUMENTS: &[Argument] = &[
     Argument {
         name: "path",
         kind: ValueKind::UserAddress,
@@ -712,6 +712,13 @@ pub(super) const DIRECTORY_OPEN_FILE_ARGUMENTS: &[Argument] = &[
         handle: None,
         memory: None,
     },
+];
+pub(super) const DIRECTORY_OPEN_FILE_ARGUMENTS: &[Argument] = &[
+    DIRECTORY_OPEN_ARGUMENTS[0],
+    DIRECTORY_OPEN_ARGUMENTS[1],
+    DIRECTORY_OPEN_ARGUMENTS[2],
+    DIRECTORY_OPEN_ARGUMENTS[3],
+    scalar_argument("mode", ValueKind::U32),
 ];
 pub(super) const DIRECTORY_OPEN_FILE_RESULTS: &[ResultValue] = &[ResultValue {
     name: "file",
@@ -764,10 +771,11 @@ pub(super) const DIRECTORY_READ_ARGUMENTS: &[Argument] = &[
         handle: None,
         memory: Some(UserMemory {
             direction: MemoryDirection::Write,
-            length: MemoryLength::Elements {
+            length: MemoryLength::StridedElements {
                 argument: "capacity",
                 maximum_elements: DIRECTORY_ENTRY_PAGE_CAPACITY,
-                element_size: DIRECTORY_ENTRY_RECORD_SIZE,
+                stride_argument: "record_size",
+                maximum_stride: EXTENSIBLE_RECORD_MAX_BYTES as u16,
             },
             record: Some("directory_entry"),
             handles: None,
@@ -786,6 +794,7 @@ pub(super) const DIRECTORY_READ_ARGUMENTS: &[Argument] = &[
         handle: None,
         memory: None,
     },
+    scalar_argument("record_size", ValueKind::ByteCount),
 ];
 
 pub(super) const DIRECTORY_READ_RESULTS: &[ResultValue] = &[
@@ -1438,10 +1447,11 @@ pub(super) const TASK_INSPECTOR_SCAN_PROCESSES_ARGUMENTS: &[Argument] = &[
         handle: None,
         memory: Some(UserMemory {
             direction: MemoryDirection::Write,
-            length: MemoryLength::Elements {
+            length: MemoryLength::StridedElements {
                 argument: "capacity",
                 maximum_elements: 8,
-                element_size: 96,
+                stride_argument: "record_size",
+                maximum_stride: EXTENSIBLE_RECORD_MAX_BYTES as u16,
             },
             record: Some("task_process"),
             handles: None,
@@ -1454,6 +1464,7 @@ pub(super) const TASK_INSPECTOR_SCAN_PROCESSES_ARGUMENTS: &[Argument] = &[
         handle: None,
         memory: None,
     },
+    scalar_argument("record_size", ValueKind::ByteCount),
 ];
 
 pub(super) const TASK_INSPECTOR_SCAN_THREADS_RECEIVER: Argument = Argument {
@@ -1479,10 +1490,11 @@ pub(super) const TASK_INSPECTOR_SCAN_THREADS_ARGUMENTS: &[Argument] = &[
         handle: None,
         memory: Some(UserMemory {
             direction: MemoryDirection::Write,
-            length: MemoryLength::Elements {
+            length: MemoryLength::StridedElements {
                 argument: "capacity",
                 maximum_elements: 8,
-                element_size: 104,
+                stride_argument: "record_size",
+                maximum_stride: EXTENSIBLE_RECORD_MAX_BYTES as u16,
             },
             record: Some("task_thread"),
             handles: None,
@@ -1495,6 +1507,7 @@ pub(super) const TASK_INSPECTOR_SCAN_THREADS_ARGUMENTS: &[Argument] = &[
         handle: None,
         memory: None,
     },
+    scalar_argument("record_size", ValueKind::ByteCount),
 ];
 
 pub(super) const OBJECT_INSPECTOR_SCAN_OBJECTS_RECEIVER: Argument = Argument {
@@ -1520,10 +1533,11 @@ pub(super) const OBJECT_INSPECTOR_SCAN_OBJECTS_ARGUMENTS: &[Argument] = &[
         handle: None,
         memory: Some(UserMemory {
             direction: MemoryDirection::Write,
-            length: MemoryLength::Elements {
+            length: MemoryLength::StridedElements {
                 argument: "capacity",
                 maximum_elements: 8,
-                element_size: 104,
+                stride_argument: "record_size",
+                maximum_stride: EXTENSIBLE_RECORD_MAX_BYTES as u16,
             },
             record: Some("object_inspection"),
             handles: None,
@@ -1536,6 +1550,7 @@ pub(super) const OBJECT_INSPECTOR_SCAN_OBJECTS_ARGUMENTS: &[Argument] = &[
         handle: None,
         memory: None,
     },
+    scalar_argument("record_size", ValueKind::ByteCount),
 ];
 
 pub(super) const OBJECT_INSPECTOR_SCAN_HANDLES_RECEIVER: Argument = Argument {
@@ -1567,10 +1582,11 @@ pub(super) const OBJECT_INSPECTOR_SCAN_HANDLES_ARGUMENTS: &[Argument] = &[
         handle: None,
         memory: Some(UserMemory {
             direction: MemoryDirection::Write,
-            length: MemoryLength::Elements {
+            length: MemoryLength::StridedElements {
                 argument: "capacity",
                 maximum_elements: 8,
-                element_size: 40,
+                stride_argument: "record_size",
+                maximum_stride: EXTENSIBLE_RECORD_MAX_BYTES as u16,
             },
             record: Some("handle_inspection"),
             handles: None,
@@ -1583,6 +1599,7 @@ pub(super) const OBJECT_INSPECTOR_SCAN_HANDLES_ARGUMENTS: &[Argument] = &[
         handle: None,
         memory: None,
     },
+    scalar_argument("record_size", ValueKind::ByteCount),
 ];
 
 pub(super) const OBJECT_INSPECTOR_READ_DETAILS_RECEIVER: Argument = Argument {
@@ -2370,12 +2387,8 @@ pub(super) const VIRTUAL_CPU_START_RECEIVER: Argument = Argument {
 };
 
 pub(super) const THREAD_CREATE_ARGUMENTS: &[Argument] = &[
-    scalar_argument("entry", ValueKind::U64),
-    scalar_argument("stack", ValueKind::U64),
-    scalar_argument("tls", ValueKind::U64),
-    scalar_argument("argument", ValueKind::U64),
-    PROCESS_BUILDER_SET_AFFINITY_ARGUMENTS[0],
-    PROCESS_BUILDER_SET_AFFINITY_ARGUMENTS[1],
+    input_record("thread_create_request"),
+    scalar_argument("request_size", ValueKind::ByteCount),
 ];
 pub(super) const THREAD_CREATE_RESULTS: &[ResultValue] = &[ResultValue {
     name: "thread",
@@ -2461,30 +2474,34 @@ const fn scheduling_record(direction: MemoryDirection) -> Argument {
         handle: None,
         memory: Some(UserMemory {
             direction,
-            length: MemoryLength::FixedBytes { bytes: 64 },
+            length: MemoryLength::Bytes {
+                argument: "configuration_size",
+                maximum_bytes: EXTENSIBLE_RECORD_MAX_BYTES,
+            },
             record: Some("scheduling_parameters"),
             handles: None,
             validation_order: 0,
         }),
     }
 }
-pub(super) const SCHEDULING_INPUT_ARGUMENTS: &[Argument] =
-    &[scheduling_record(MemoryDirection::Read)];
-pub(super) const SCHEDULING_OUTPUT_ARGUMENTS: &[Argument] =
-    &[scheduling_record(MemoryDirection::Write)];
+pub(super) const SCHEDULING_INPUT_ARGUMENTS: &[Argument] = &[
+    scheduling_record(MemoryDirection::Read),
+    scalar_argument("configuration_size", ValueKind::ByteCount),
+];
+pub(super) const SCHEDULING_OUTPUT_ARGUMENTS: &[Argument] = &[
+    scheduling_record(MemoryDirection::Write),
+    scalar_argument("configuration_size", ValueKind::ByteCount),
+];
 pub(super) const SCHEDULING_BUILDER_ARGUMENTS: &[Argument] = &[
     scheduling_record(MemoryDirection::Read),
+    scalar_argument("configuration_size", ValueKind::ByteCount),
     scalar_argument("delegated_rights", ValueKind::Rights),
 ];
 
 /// Explicit RPC correlation; no message bytes or user pointers are interpreted.
 pub(super) const BYTE_CHANNEL_TRACE_RPC_ARGUMENTS: &[Argument] = &[
-    scalar_argument("phase", ValueKind::U64),
-    scalar_argument("request", ValueKind::U64),
-    scalar_argument("detail", ValueKind::U64),
-    scalar_argument("generation", ValueKind::U64),
-    scalar_argument("parent_connection", ValueKind::U64),
-    scalar_argument("parent_request", ValueKind::U64),
+    input_record("rpc_trace_request"),
+    scalar_argument("request_size", ValueKind::ByteCount),
 ];
 pub(super) const BYTE_CHANNEL_TRACE_RPC_RESULTS: &[ResultValue] = &[
     ResultValue {
@@ -2498,3 +2515,22 @@ pub(super) const BYTE_CHANNEL_TRACE_RPC_RESULTS: &[ResultValue] = &[
         handle: None,
     },
 ];
+
+/// Bounded, prefix-extensible input; unknown trailing bytes must be zero.
+pub(super) const fn input_record(record: &'static str) -> Argument {
+    Argument {
+        name: "request",
+        kind: ValueKind::UserAddress,
+        handle: None,
+        memory: Some(UserMemory {
+            direction: MemoryDirection::Read,
+            length: MemoryLength::Bytes {
+                argument: "request_size",
+                maximum_bytes: EXTENSIBLE_RECORD_MAX_BYTES,
+            },
+            record: Some(record),
+            handles: None,
+            validation_order: 0,
+        }),
+    }
+}

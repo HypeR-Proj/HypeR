@@ -268,6 +268,14 @@ fn describe_user_memory(name: &str, memory: schema::UserMemory) -> String {
             argument,
             maximum_bytes,
         } => format!("len={argument} bytes, max-bytes={maximum_bytes}"),
+        MemoryLength::StridedElements {
+            argument,
+            maximum_elements,
+            stride_argument,
+            maximum_stride,
+        } => format!(
+            "len={argument} records, max-elements={maximum_elements}, stride={stride_argument} bytes, max-stride={maximum_stride}"
+        ),
         MemoryLength::Elements {
             argument,
             maximum_elements,

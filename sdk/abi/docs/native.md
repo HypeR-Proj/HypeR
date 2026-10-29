@@ -134,13 +134,47 @@ Enum domains contain mutually exclusive values; flags contain independent bits.
 Constants contain bounds, sizes, addresses and sentinels. All are exported as
 fixed-width integer constants; grouping does not change wire field types.
 
+### `vmo_create` (flags)
+
+VMO allocation options; zero uses ordinary noncontiguous backing.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `vmo_create_contiguous` | `1` |  |
+
+### `filesystem_mount` (flags)
+
+Filesystem attachment options.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `filesystem_mount_read_only` | `1` |  |
+
+### `file_open` (flags)
+
+File-open options; EXCLUSIVE requires CREATE.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `file_open_create` | `1` |  |
+| `file_open_exclusive` | `2` |  |
+| `file_open_truncate` | `4` |  |
+
+### `directory_open` (flags)
+
+Directory traversal options.
+
+| Name | Value | Meaning |
+| --- | ---: | --- |
+| `directory_open_nofollow` | `1` | Reject a symbolic link in the final path component. |
+
 ### `rpc_trace_phase` (enum)
 
 Optional, observational `ByteChannel` RPC annotations. Not transport operations.
 
 | Name | Value | Meaning |
 | --- | ---: | --- |
-| `rpc_trace_query` | `0` | Probe support; all other arguments must be zero. |
+| `rpc_trace_query` | `0` | Probe support; all other request fields must be zero. |
 | `rpc_trace_client_begin` | `1` |  |
 | `rpc_trace_client_end` | `2` |  |
 | `rpc_trace_server_begin` | `3` |  |
@@ -821,11 +855,17 @@ RISC-V ISA extensions accepted in guest configuration.
 
 ## Semantic rules
 
-- byte_channel_trace_rpc is optional observational instrumentation requiring READ|WRITE on the endpoint; it cannot enable, read or stop a capture. A kernel without kernel-trace returns NOT_SUPPORTED. Query requires five zero arguments. Begin phases require a nonzero protocol request ID and detail is a caller-defined operation; generation/parent_connection/parent_request are either all zero or an explicitly propagated parent context. End phases carry the begin generation, nonzero request ID, caller-defined completion detail and zero parent fields. Success returns the admitted capture generation (zero when inactive or stale) and a boot-local connection identity shared by the endpoints. Contexts grant no authority. Request IDs must be unique among concurrent calls on a connection; clients and servers explicitly annotate their own boundaries. The kernel never parses opaque message payloads, infers parentage from thread adjacency, or retains annotations after the call. Stale generations do not correlate into a replacement capture. Missing boundaries produce incomplete observations rather than fabricated success.
+- ABI revision is a major compatibility generation, not a build number: additive operations, supported flags and record tails do not require changing it. Revision zero remains explicitly unstable until release. The receiver and operation are separate from six u64 argument registers and two auxiliary result registers. At least one argument register remains reserved in current signatures. All unused registers and reserved input fields must be zero; unknown option bits are INVALID_ARGUMENT. New operations or selectors unsupported by an older kernel return NOT_SUPPORTED where specified; callers must not infer runtime feature availability solely from ABI revision.
+- Extensible input records carry an explicit byte size bounded by EXTENSIBLE_RECORD_MAX_BYTES. A supported historical prefix remains valid; omitted known trailing fields default to zero and unknown supplied trailing bytes must be zero. Validation and copying precede side effects. Output records report their supported size where specified and never write beyond the caller's accepted prefix. C veneers accept caller-supplied sizes rather than deriving the caller's allocation size inside a shared library. SDK convenience functions may choose default options; they do not define additional machine operations.
+- Task/ObjectInspector scans and DirectoryStream reads take an explicit record_size byte stride, aligned to eight bytes and bounded by EXTENSIBLE_RECORD_MAX_BYTES. It must cover the record's stable minimum prefix. Each returned element starts at index times record_size; known prefixes are clipped to that stride and unknown output tails are zeroed. Capacity remains the documented bounded page capacity, and only the returned count elements are initialized. Input arrays of capability dispositions, wait items and device bundle entries retain their declared fixed element layouts; incompatible element meanings require a new typed format, never a silent stride change.
+- thread_create accepts a thread_create_request plus its size. Entry, initial stack, TLS, argument and optional bounded affinity retain their existing meanings. A zero affinity pointer and zero word count select inheritance; otherwise a nonzero readable pointer and one to PROCESS_AFFINITY_MAX_WORDS u64 words are required. Request flags and reserved are zero. The metadata is copied once before creation; referenced affinity storage remains caller-owned until the call returns.
+- filesystem_mount keeps channel, buffer and optional queue as separately typed capability arguments and takes a filesystem_mount_request plus its size for path and options. The request's path is a bounded readable byte range, flags admit only FILESYSTEM_MOUNT_READ_ONLY, and reserved is zero. No pointer remains borrowed after mounting returns. vmo_create admits VMO_CREATE_CONTIGUOUS for physically contiguous backing; zero options uses ordinary backing. Both retain the same ObjectFactory authority and produced rights.
+- directory_open_file is the only file open/create operation. FILE_OPEN_CREATE permits creation, FILE_OPEN_EXCLUSIVE additionally requires CREATE and rejects an existing entry, and FILE_OPEN_TRUNCATE requires WRITE on the returned File. Creation requires directory WRITE in addition to normal derivation rights, but the resulting File may be read-only. Mode supplies creation permissions and must fit 0777. Directory opens accept DIRECTORY_OPEN_NOFOLLOW to reject a final symbolic link; it does not prohibit traversal of earlier links. Unknown bits fail before namespace or file mutation.
+- byte_channel_trace_rpc is optional observational instrumentation requiring READ|WRITE on the endpoint; it cannot enable, read or stop a capture. A kernel without kernel-trace returns NOT_SUPPORTED. The size-delimited rpc_trace_request is copied once; flags and reserved are zero. Query requires the five fields after phase to be zero. Begin phases require a nonzero protocol request ID and detail is a caller-defined operation; generation/parent_connection/parent_request are either all zero or an explicitly propagated parent context. End phases carry the begin generation, nonzero request ID, caller-defined completion detail and zero parent fields. Success returns the admitted capture generation (zero when inactive or stale) and a boot-local connection identity shared by the endpoints. Contexts grant no authority. Request IDs must be unique among concurrent calls on a connection; clients and servers explicitly annotate their own boundaries. The kernel never parses opaque message payloads, infers parentage from thread adjacency, or retains annotations after the call. Stale generations do not correlate into a replacement capture. Missing boundaries produce incomplete observations rather than fabricated success.
 - Native invocations carry a process-local target handle in the selector register, a separate object-local operation, and six business argument registers. AArch64 uses x8/x6/x0..x5; RISC-V uses a7/a6/a0..a5. No global syscall number or implicit privileged target exists. Common handle operations use 0..5; object-specific operations start at 256 and may repeat across object kinds. Unknown target handles fail before operation dispatch; unknown operations return NOT_SUPPORTED. The receiver is not duplicated in the business arguments.
 - ExecutionContext and ObjectFactory are ordinary process-local, nontransferable capabilities bound to their creating Process. They never grant operations on another Process, Thread, address space or resource domain. ExecutionContext methods act on the invoking Thread or its Process; ObjectFactory charges every allocation to that Process's resource domain. SystemInfo grants public read-only ABI, configuration and clock observations. Closing or attenuating a capability does not implicitly recreate its authority.
 - device_dma_fault_info requires INSPECT and ASSIGN_DEVICE on the physical-device handle. It returns the first retained DMA containment report without consuming it; an all-zero record means no report. DMA_FAULT is a persistent level signal observed with WAIT. Claim and claim_matching grant WAIT. Fault evidence follows the device object across handle transfer; querying does not acknowledge or resume DMA. The kernel never selects a userspace process or stops a VM for this notification. The formal I/O runtime queries after adoption and journals each device's first report; bootstrap does not consume it. timestamp_ns is monotonic boot time. source 1 identifies SMMUv3. scope 1 means stream quarantine, with code holding the SMMUv3 event ID; scope 2 means controller containment, with code holding the captured GERROR bits (zero is possible for a software-detected failure). stream_id always identifies this handle's device. ADDRESS_VALID, READ and WRITE describe the address only for translation/access faults; controller reports disclose no other device's address. reserved is zero. A first stream report remains unchanged if the whole controller later fails. Quarantine and backing retention remain independent of observer presence or progress.
-- Scheduling reads require INSPECT on ExecutionContext, Thread or VirtualCpu. ExecutionContext targets only the invoking Thread; VirtualCpu targets its scheduler Thread. Configuration is a complete 64-byte record with canonical zero inactive/reserved fields. Fair weight is 1..1024 and quantum 1..1000000000 nanoseconds; Fair backend 2 requests the configured default, while reads return concrete backend 0 or 1. Budget Q, P and burst are positive, Q and burst do not exceed P, and P must equal the kernel arbitration period. Disabled policies or malformed parameters return INVALID_ARGUMENT before mutation.
+- Scheduling reads require INSPECT on ExecutionContext, Thread or VirtualCpu. ExecutionContext targets only the invoking Thread; VirtualCpu targets its scheduler Thread. Configuration uses an explicit byte size with a 64-byte minimum prefix and canonical zero inactive/reserved fields; unknown input tails must be zero. Reads report the supported record size. Fair weight is 1..1024 and quantum 1..1000000000 nanoseconds; Fair backend 2 requests the configured default, while reads return concrete backend 0 or 1. Budget Q, P and burst are positive, Q and burst do not exceed P, and P must equal the kernel arbitration period. Disabled policies or malformed parameters return INVALID_ARGUMENT before mutation.
 - Scheduling changes compare old and requested parameters atomically under scheduler ownership. SCHED_LOWER permits lowering band, Fair weight or FIFO priority; SCHED_PRIORITY permits raising those fields and changing quantum; SCHED_CLASS permits policy, arbitration role or Fair-backend changes; SCHED_BUDGET permits any budget change. A compound change may require multiple rights. WRITE, thread ownership, executable names and configuration text confer no elevation. Immutable target ceilings remain enforced after handle attenuation or transfer. Rejection preserves the old parameters.
 - ProcessBuilder scheduling configuration also declares the child's execution-context scheduling subset. It cannot delegate rights absent from the builder. Ordinary process creation uses the native App boundary and preserves ordinary demotion; in-process thread_create inherits its caller's current parameters and cannot restore a higher initial weight. All threads receive SCHED_LOWER for self demotion; child Thread handles receive only scheduling rights present in both the execution-context receiver and process grant. VM creation authorities propagate explicitly held scheduling rights through leases, pending machines, installed machines and vCPUs. Thread handles may transfer only through explicit capability rendezvous, with the receiver retaining an attenuated subset of the sender's rights. Creating, blocking, migrating or switching policy does not authorize resetting an existing Thread's budget accounting. Budget entitlement is per Thread, not an aggregate Process or VM cgroup quota; separately authorized construction creates independently accounted Threads.
 - thread_set_current_name changes only the calling Native Thread's diagnostic label. The caller must hold its ExecutionContext with WRITE; no other Thread or Process can be renamed. Input is 1..thread_name_max_bytes (64) bytes of UTF-8 without control characters, excluding any NUL terminator. Empty, oversized, invalid UTF-8, control-containing names and nonzero unused arguments return INVALID_ARGUMENT without changing the old name. Inspectors receive complete old or new snapshots; names confer no identity or authority. Process names remain unchanged.
@@ -844,7 +884,7 @@ RISC-V ISA extensions accepted in guest configuration.
 - Virtual CPU set_affinity borrows a VirtualCpu with WRITE and accepts the same nonempty little-endian u64 CPU-mask word array as process-builder affinity. Bits above the kernel CPU limit are rejected; the mask must contain a schedulable CPU. The affinity update retains the current assignment when allowed; otherwise the scheduler selects an allowed registered CPU and safely migrates the saved context. Automatic Fair balancing may later move a Ready vCPU within this allowed set; a singleton mask prevents automatic movement. OK means the update or required handoff was accepted; migration may complete before or after return. An overlapping incompatible handoff or CPU-local wait returns busy. VM stop or guest power operations may supersede the request. Stopping, detached, and reaped endpoints reject new affinity updates. VirtualCpu info extends its 24-byte prefix with host_cpu and migration_target at offsets 24 and 28, one scheduler placement observation rather than running state or a completion token. Value 0xffffffff means unavailable assignment or no pending migration; older kernels return only the original prefix.
 - Guest mapping creation borrows backend VirtualMachine WRITE and GuestMemory MAP, populates the full stable grant, and returns an owned mapping handle plus a backend-VM-local non-reused token. The backend IPA envelope must contain all sparse aliases: alias = 64 GiB + host physical address, with host addresses below 256 GiB. Unadmitted envelope holes have no RAM or page bitmap entries. The kernel constructs immutable frontend-ordered, coalesced physical extents; neither Native policy nor Linux may replace their addresses. Backend notification write64 0x28 admits one token exactly once to that unique notification route; read64 0x30/0x38/0x40/0x48 return frontend base, total bytes, status, extent count. Write64 0x50 selects an extent index; read64 0x58/0x60/0x68/0x70 return alias, frontend-relative offset, byte length, and query status. Rejection clears the old reply. Extents cover the entire frontend range without holes or overlapping physical pages. After draining vhost and releasing all page pins, only that backend route may write64 the token at 0x20 to certify quiescence. Mapping release accepts never-admitted or quiescent tokens, withdraws lookup, clears leaves, waits for every CPU translation acknowledgement and, for an IOMMU-bound backend, completed DMA invalidation, then releases backing. Closing a mapping handle alone quarantines its pages until backend VM retirement. Notification control operation 3 permanently disconnects both routes, only when no admitted mapping remains; a disconnected route never affects an address or IRQ reused by a subsequent connection.
 - Native block creation dedicates one fully resident 1048576-byte guest-memory grant permanently to one kernel virtio-scsi initiator; repeated creation from that grant fails. The backend VM must retain the matching mapping until execution and physical DMA are quiescent. Six standard split queues (control, event, and four request queues) have size 8, descriptor offsets n*4096, available offsets n*4096+256, and used offsets n*4096+512, relative to guest_base. Userspace negotiates VERSION_1 with the backend before activation. Activation enables notifications and issues READ CAPACITY(16), accepting only 512-byte sectors; capacity is never supplied by userspace. The activated block object survives filesystem worker handoff; a clean unmount returns that object rather than activating a replacement. Synchronous native_block_transfer calls use a persistent internal logical queue on the same device engine as explicit BlockQueue submissions, including their overlap ordering and flush fences. The transport has four independent command heads and a shared 512 KiB data pool. A command can use up to four contiguous 128 KiB data spans, so larger merged commands trade command concurrency for transfer size. Requests use shared queues and kernel completion notifications, not per-request userspace RPC. Unretired request failures permanently disconnect the initiator and never recycle its buffer. PEER_CLOSED reports disconnection. The physical pages remain retained by backend mappings until VM/DMA retirement; notification closure alone never proves DMA quiescence.
-- filesystem_mount borrows a READ|WRITE|WAIT ByteChannel, a READ|WRITE|MAP shared VMO, an optional READ|WAIT BlockQueue bound to the exact volume (also WRITE for writable mounts), and a WRITE|EXECUTE Directory. A zero queue handle selects buffered requests for a provider without block storage; a nonzero queue binds immutable write windows and direct read plans. The kernel retains the transport and buffer, validates the worker root, and publishes a fresh mount and filesystem identity at the capability-relative path. The VMO must satisfy the published filesystem protocol capacity and pinning contract. read_only is exactly zero or one; read-only mounts reject mutating protocol operations in the kernel independently of worker policy. Media discovery, format selection and exclusive NativeBlock ownership belong to the userspace filesystem manager and format worker, not this syscall.
+- filesystem_mount borrows a READ|WRITE|WAIT ByteChannel, a READ|WRITE|MAP shared VMO, an optional READ|WAIT BlockQueue bound to the exact volume (also WRITE for writable mounts), and a WRITE|EXECUTE Directory. A zero queue handle selects buffered requests for a provider without block storage; a nonzero queue binds immutable write windows and direct read plans. The kernel retains the transport and buffer, validates the worker root, and publishes a fresh mount and filesystem identity at the capability-relative path. The VMO must satisfy the published filesystem protocol capacity and pinning contract. flags accept only FILESYSTEM_MOUNT_READ_ONLY; read-only mounts reject mutating protocol operations in the kernel independently of worker policy. Media discovery, format selection and exclusive NativeBlock ownership belong to the userspace filesystem manager and format worker, not this syscall.
 - filesystem_mount_ramfs and filesystem_switch_root require MANAGE_NAMESPACE|WRITE|EXECUTE on the live namespace-root Directory anchor. Ordinary directory opens never confer MANAGE_NAMESPACE; only explicit capability duplication, delegation or root-anchor scope creation preserves it. Ramfs mount does not create or configure block filesystems. switch_root copies its request, at most 16 mount moves and every bounded UTF-8 path before namespace mutation; zero moves requires a null moves pointer. new_root and move sources resolve in the old namespace, while put_old and move targets resolve inside new_root. The root and all requested moves publish atomically. Existing non-anchor Directory and File capabilities retain their opened locations; existing root anchors follow the published root. A rejected transaction preserves all mount edges and the current root. Paths are at most 4096 bytes, nonempty and contain no NUL bytes. Layout, boot stages and the choice of put_old are userspace policy.
 - filesystem_unmount requires Directory WRITE|EXECUTE and an exact mounted-root path. The namespace root cannot be detached. Live File, Directory, cwd, path-resolution or nested-mount uses return busy. Admission closes before synchronous backend flush and namespace publication; no mount-table spinlock is held across backend IPC. A failed flush or concurrent topology change leaves the mount attached. Successful detach permanently retires its transport health and content identity, so retained snapshots or speculative cache work cannot revive the old mount. Userspace then stops and joins the worker before reusing the returned NativeBlock; the syscall itself does not terminate processes or release backend DMA mappings.
 - VM power control requires WRITE authority. virtual_machine_get_power_request returns a non-consuming snapshot of one pending request, or would_block when none exists. Request IDs identify one completion and stale IDs are rejected. Operations are CPU_ON (1), CPU_OFF (2), SYSTEM_OFF (3), and SYSTEM_RESET (4); accept is strictly 0 or 1. Reserved output is zero. POWER_REQUEST signals pending work, and VCPU_TERMINATED prompts inspection of per-vCPU terminal state. virtual_machine_open_vcpu returns a control handle for an already configured vCPU; it does not change the immutable topology. The runtime owns lifecycle policy; no guest request is forwarded to host firmware. Guest suspend operations remain unsupported.
@@ -1232,11 +1272,11 @@ Object-local method `byte_channel_trace_rpc`.
 | Receiver | `receiver: Borrow, kind=byte_channel, rights=0x30` |
 | Operation | 258 |
 | Feature | `Core` |
-| Arguments | `phase: u64`, `request: u64`, `detail: u64`, `generation: u64`, `parent_connection: u64`, `parent_request: u64` |
+| Arguments | `request: user_address`, `request_size: byte_count` |
 | Results | `generation: u64`, `connection: u64` |
 | Capability effects | `receiver: Borrow, kind=byte_channel, rights=0x30` |
-| User memory | — |
-| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| User memory | `request: Read, len=request_size bytes, max-bytes=4096, record=rpc_trace_request; order=0` |
+| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Capability` |
 
 Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
@@ -1292,7 +1332,7 @@ Object-local method `directory_open_file`.
 | Receiver | `directory: Borrow, kind=directory, rights=0x10` |
 | Operation | 256 |
 | Feature | `Core` |
-| Arguments | `path: user_address`, `path_size: byte_count`, `requested_rights: rights`, `options: u32` |
+| Arguments | `path: user_address`, `path_size: byte_count`, `requested_rights: rights`, `options: u32`, `mode: u32` |
 | Results | `file: handle` |
 | Capability effects | `directory: Borrow, kind=directory, rights=0x10`, `file: produce, kind=file, exact-from(requested_rights), allowed=0x9800000bb, required-from=directory` |
 | User memory | `path: Read, len=path_size bytes, max-bytes=4096; order=0` |
@@ -1612,10 +1652,10 @@ Object-local method `task_inspector_scan_processes`.
 | Receiver | `inspector: Borrow, kind=task_inspector, rights=0x8` |
 | Operation | 256 |
 | Feature | `Core` |
-| Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count` |
+| Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count`, `record_size: byte_count` |
 | Results | `count: element_count`, `next_cursor: u64` |
 | Capability effects | `inspector: Borrow, kind=task_inspector, rights=0x8` |
-| User memory | `records: Write, len=capacity elements, max-elements=8, element-size=96, record=task_process; order=0` |
+| User memory | `records: Write, len=capacity records, max-elements=8, stride=record_size bytes, max-stride=4096, record=task_process; order=0` |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Task` |
 
@@ -1632,10 +1672,10 @@ Object-local method `task_inspector_scan_threads`.
 | Receiver | `inspector: Borrow, kind=task_inspector, rights=0x8` |
 | Operation | 257 |
 | Feature | `Core` |
-| Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count` |
+| Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count`, `record_size: byte_count` |
 | Results | `count: element_count`, `next_cursor: u64` |
 | Capability effects | `inspector: Borrow, kind=task_inspector, rights=0x8` |
-| User memory | `records: Write, len=capacity elements, max-elements=8, element-size=104, record=task_thread; order=0` |
+| User memory | `records: Write, len=capacity records, max-elements=8, stride=record_size bytes, max-stride=4096, record=task_thread; order=0` |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Task` |
 
@@ -1672,10 +1712,10 @@ Object-local method `object_inspector_scan_objects`.
 | Receiver | `inspector: Borrow, kind=object_inspector, rights=0x8` |
 | Operation | 256 |
 | Feature | `Core` |
-| Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count` |
+| Arguments | `cursor: u64`, `records: user_address`, `capacity: element_count`, `record_size: byte_count` |
 | Results | `count: element_count`, `next_cursor: u64` |
 | Capability effects | `inspector: Borrow, kind=object_inspector, rights=0x8` |
-| User memory | `records: Write, len=capacity elements, max-elements=8, element-size=104, record=object_inspection; order=0` |
+| User memory | `records: Write, len=capacity records, max-elements=8, stride=record_size bytes, max-stride=4096, record=object_inspection; order=0` |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Object` |
 
@@ -1692,10 +1732,10 @@ Object-local method `object_inspector_scan_handles`.
 | Receiver | `inspector: Borrow, kind=object_inspector, rights=0x8` |
 | Operation | 257 |
 | Feature | `Core` |
-| Arguments | `process_koid: u64`, `cursor: u64`, `records: user_address`, `capacity: element_count` |
+| Arguments | `process_koid: u64`, `cursor: u64`, `records: user_address`, `capacity: element_count`, `record_size: byte_count` |
 | Results | `count: element_count`, `next_cursor: u64` |
 | Capability effects | `inspector: Borrow, kind=object_inspector, rights=0x8` |
-| User memory | `records: Write, len=capacity elements, max-elements=8, element-size=40, record=handle_inspection; order=0` |
+| User memory | `records: Write, len=capacity records, max-elements=8, stride=record_size bytes, max-stride=4096, record=handle_inspection; order=0` |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Object` |
 
@@ -1832,11 +1872,11 @@ Object-local method `vmo_create`.
 | Receiver | `receiver: Borrow, kind=object_factory, rights=0x8000000000` |
 | Operation | 259 |
 | Feature | `Core` |
-| Arguments | `size: byte_count` |
+| Arguments | `size: byte_count`, `options: u64` |
 | Results | `vmo: handle` |
 | Capability effects | `receiver: Borrow, kind=object_factory, rights=0x8000000000`, `vmo: produce, kind=vmo, fixed=0x7b` |
 | User memory | — |
-| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
+| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
 | Audit | `Object` |
 
 Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
@@ -1992,10 +2032,10 @@ Object-local method `directory_read`.
 | Receiver | `stream: Borrow, kind=directory_stream, rights=0x10` |
 | Operation | 256 |
 | Feature | `Core` |
-| Arguments | `cookie: u64`, `records: user_address`, `capacity: element_count`, `options: u32` |
+| Arguments | `cookie: u64`, `records: user_address`, `capacity: element_count`, `options: u32`, `record_size: byte_count` |
 | Results | `count: element_count`, `next_cookie: u64` |
 | Capability effects | `stream: Borrow, kind=directory_stream, rights=0x10` |
-| User memory | `records: Write, len=capacity elements, max-elements=4, element-size=280, record=directory_entry; order=0` |
+| User memory | `records: Write, len=capacity records, max-elements=4, stride=record_size bytes, max-stride=4096, record=directory_entry; order=0` |
 | Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
 | Audit | `Capability` |
 
@@ -2092,10 +2132,10 @@ Object-local method `cpu_inspector_trace_start`.
 | Receiver | `inspector: Borrow, kind=cpu_inspector, rights=0x80000000` |
 | Operation | 260 |
 | Feature | `Core` |
-| Arguments | `configuration: user_address` |
+| Arguments | `request: user_address`, `request_size: byte_count` |
 | Results | `generation: u64` |
 | Capability effects | `inspector: Borrow, kind=cpu_inspector, rights=0x80000000` |
-| User memory | `configuration: Read, fixed-bytes=56, record=trace_config; order=0` |
+| User memory | `request: Read, len=request_size bytes, max-bytes=4096, record=trace_config; order=0` |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Object` |
 
@@ -2592,10 +2632,10 @@ Object-local method `thread_create`.
 | Receiver | `receiver: Borrow, kind=execution_context, rights=0x200000` |
 | Operation | 260 |
 | Feature | `Core` |
-| Arguments | `entry: u64`, `stack: u64`, `tls: u64`, `argument: u64`, `affinity_words: user_address`, `word_count: element_count` |
+| Arguments | `request: user_address`, `request_size: byte_count` |
 | Results | `thread: handle` |
 | Capability effects | `receiver: Borrow, kind=execution_context, rights=0x200000`, `thread: produce, kind=thread, fixed=0x10000000c0f, inherited-from(receiver), mask=0xe0000000000` |
-| User memory | `affinity_words: Read, len=word_count elements, max-elements=4, element-size=8; order=0` |
+| User memory | `request: Read, len=request_size bytes, max-bytes=4096, record=thread_create_request; order=0` |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Task` |
 
@@ -2736,26 +2776,6 @@ Object-local method `file_resize`.
 | Results | — |
 | Capability effects | `file: Borrow, kind=file, rights=0x20` |
 | User memory | — |
-| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
-| Audit | `Capability` |
-
-Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
-
-Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
-
-### `directory_create_file`
-
-Object-local method `directory_create_file`.
-
-| Property | Contract |
-| --- | --- |
-| Receiver | `directory: Borrow, kind=directory, rights=0x30` |
-| Operation | 259 |
-| Feature | `Core` |
-| Arguments | `path: user_address`, `path_size: byte_count`, `requested_rights: rights`, `mode: u32` |
-| Results | `file: handle` |
-| Capability effects | `directory: Borrow, kind=directory, rights=0x30`, `file: produce, kind=file, exact-from(requested_rights), allowed=0x9800000bb, required-from=directory` |
-| User memory | `path: Read, len=path_size bytes, max-bytes=4096; order=0` |
 | Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
 | Audit | `Capability` |
 
@@ -3183,26 +3203,6 @@ Arguments and auxiliary results follow the listed register order; neither list i
 
 Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
 
-### `directory_open_directory_nofollow`
-
-Object-local method `directory_open_directory_nofollow`.
-
-| Property | Contract |
-| --- | --- |
-| Receiver | `directory: Borrow, kind=directory, rights=0x10` |
-| Operation | 272 |
-| Feature | `Core` |
-| Arguments | `path: user_address`, `path_length: byte_count`, `rights: rights` |
-| Results | `directory: handle` |
-| Capability effects | `directory: Borrow, kind=directory, rights=0x10`, `directory: produce, kind=directory, exact-from(rights), allowed=0x9800000bb, required-from=directory` |
-| User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0` |
-| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
-| Audit | `Capability` |
-
-Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
-
-Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
-
 ### `file_sync`
 
 Object-local method `file_sync`.
@@ -3277,26 +3277,6 @@ Object-local method `clock_get_realtime`.
 | Capability effects | `receiver: Borrow, kind=system_info, rights=0x10` |
 | User memory | — |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
-| Audit | `Capability` |
-
-Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
-
-Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
-
-### `directory_open_file_with_options`
-
-Object-local method `directory_open_file_with_options`.
-
-| Property | Contract |
-| --- | --- |
-| Receiver | `directory: Borrow, kind=directory, rights=0x10` |
-| Operation | 273 |
-| Feature | `Core` |
-| Arguments | `path: user_address`, `path_length: byte_count`, `rights: rights`, `options: u32`, `mode: u32` |
-| Results | `file: handle` |
-| Capability effects | `directory: Borrow, kind=directory, rights=0x10`, `file: produce, kind=file, exact-from(rights), allowed=0x9800000bb, required-from=directory` |
-| User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0` |
-| Execution | `blocking=MayBlock, cancellation=None, restart=Never, completion=Returns, flags=Strict` |
 | Audit | `Capability` |
 
 Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
@@ -3515,26 +3495,6 @@ Object-local method `pending_virtual_machine_map_memory`.
 | Arguments | `memory: handle`, `guest_offset: u64`, `source_offset: u64`, `length: u64` |
 | Results | — |
 | Capability effects | `pending_virtual_machine: Borrow, kind=pending_virtual_machine, rights=0x20`, `memory: Borrow, kind=guest_memory, rights=0x40` |
-| User memory | — |
-| Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
-| Audit | `Capability` |
-
-Arguments and auxiliary results follow the listed register order; neither list includes the receiver or signed status.
-
-Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
-
-### `vmo_create_contiguous`
-
-Object-local method `vmo_create_contiguous`.
-
-| Property | Contract |
-| --- | --- |
-| Receiver | `receiver: Borrow, kind=object_factory, rights=0x8000000000` |
-| Operation | 262 |
-| Feature | `Core` |
-| Arguments | `size: byte_count` |
-| Results | `vmo: handle` |
-| Capability effects | `receiver: Borrow, kind=object_factory, rights=0x8000000000`, `vmo: produce, kind=vmo, fixed=0x7b` |
 | User memory | — |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Capability` |
@@ -3772,10 +3732,10 @@ Object-local method `filesystem_mount`.
 | Receiver | `directory: Borrow, kind=directory, rights=0xa0` |
 | Operation | 274 |
 | Feature | `Core` |
-| Arguments | `channel: handle`, `buffer: handle`, `path: user_address`, `path_length: byte_count`, `read_only: u64`, `queue: handle` |
+| Arguments | `channel: handle`, `buffer: handle`, `queue: handle`, `request: user_address`, `request_size: byte_count` |
 | Results | — |
 | Capability effects | `directory: Borrow, kind=directory, rights=0xa0`, `channel: Borrow, kind=byte_channel, rights=0x34`, `buffer: Borrow, kind=vmo, rights=0x70`, `queue: Borrow, kind=block_queue, rights=0x14` |
-| User memory | `path: Read, len=path_length bytes, max-bytes=4096; order=0` |
+| User memory | `request: Read, len=request_size bytes, max-bytes=4096, record=filesystem_mount_request; order=0` |
 | Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
 | Audit | `Capability` |
 
@@ -3892,10 +3852,10 @@ Object-local method `device_firmware_read`.
 | Receiver | `authority: Borrow, kind=device_assignment_authority, rights=0x8` |
 | Operation | 259 |
 | Feature | `Core` |
-| Arguments | `query: user_address`, `output: user_address`, `capacity: byte_count` |
+| Arguments | `query: user_address`, `query_size: byte_count`, `output: user_address`, `capacity: byte_count` |
 | Results | `value: u64` |
 | Capability effects | `authority: Borrow, kind=device_assignment_authority, rights=0x8` |
-| User memory | `query: Read, fixed-bytes=24, record=device_firmware_query; order=0`, `output: Write, len=capacity bytes, max-bytes=65536; order=1` |
+| User memory | `query: Read, len=query_size bytes, max-bytes=4096, record=device_firmware_query; order=0`, `output: Write, len=capacity bytes, max-bytes=65536; order=1` |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Capability` |
 
@@ -4092,10 +4052,10 @@ Object-local method `filesystem_switch_root`.
 | Receiver | `directory: Borrow, kind=directory, rights=0x4000000a0` |
 | Operation | 277 |
 | Feature | `Core` |
-| Arguments | `request: user_address` |
+| Arguments | `request: user_address`, `request_size: byte_count` |
 | Results | — |
 | Capability effects | `directory: Borrow, kind=directory, rights=0x4000000a0` |
-| User memory | `request: Read, fixed-bytes=48, record=filesystem_root_switch; order=0` |
+| User memory | `request: Read, len=request_size bytes, max-bytes=4096, record=filesystem_root_switch; order=0` |
 | Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
 | Audit | `Capability` |
 
@@ -4352,10 +4312,10 @@ Object-local method `filesystem_begin_root_switch`.
 | Receiver | `directory: Borrow, kind=directory, rights=0x4000000a0` |
 | Operation | 279 |
 | Feature | `Core` |
-| Arguments | `request: user_address` |
+| Arguments | `request: user_address`, `request_size: byte_count` |
 | Results | `transition: handle` |
 | Capability effects | `directory: Borrow, kind=directory, rights=0x4000000a0`, `transition: produce, kind=root_transition, fixed=0x2a` |
-| User memory | `request: Read, fixed-bytes=48, record=filesystem_root_switch; order=0` |
+| User memory | `request: Read, len=request_size bytes, max-bytes=4096, record=filesystem_root_switch; order=0` |
 | Execution | `blocking=MayBlock, cancellation=Explicit, restart=Never, completion=Returns, flags=None` |
 | Audit | `Capability` |
 
@@ -4732,10 +4692,10 @@ Object-local method `thread_get_current_scheduling`.
 | Receiver | `receiver: Borrow, kind=execution_context, rights=0x8` |
 | Operation | 266 |
 | Feature | `Core` |
-| Arguments | `configuration: user_address` |
-| Results | — |
+| Arguments | `configuration: user_address`, `configuration_size: byte_count` |
+| Results | `supported_size: byte_count` |
 | Capability effects | `receiver: Borrow, kind=execution_context, rights=0x8` |
-| User memory | `configuration: Write, fixed-bytes=64, record=scheduling_parameters; order=0` |
+| User memory | `configuration: Write, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Task` |
 
@@ -4752,10 +4712,10 @@ Object-local method `thread_set_current_scheduling`.
 | Receiver | `receiver: Borrow, kind=execution_context, rights=0x0` |
 | Operation | 267 |
 | Feature | `Core` |
-| Arguments | `configuration: user_address` |
+| Arguments | `configuration: user_address`, `configuration_size: byte_count` |
 | Results | — |
 | Capability effects | `receiver: Borrow, kind=execution_context, rights=0x0` |
-| User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+| User memory | `configuration: Read, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Task` |
 
@@ -4772,10 +4732,10 @@ Object-local method `thread_get_scheduling`.
 | Receiver | `receiver: Borrow, kind=thread, rights=0x8` |
 | Operation | 258 |
 | Feature | `Core` |
-| Arguments | `configuration: user_address` |
-| Results | — |
+| Arguments | `configuration: user_address`, `configuration_size: byte_count` |
+| Results | `supported_size: byte_count` |
 | Capability effects | `receiver: Borrow, kind=thread, rights=0x8` |
-| User memory | `configuration: Write, fixed-bytes=64, record=scheduling_parameters; order=0` |
+| User memory | `configuration: Write, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Task` |
 
@@ -4792,10 +4752,10 @@ Object-local method `thread_set_scheduling`.
 | Receiver | `receiver: Borrow, kind=thread, rights=0x0` |
 | Operation | 259 |
 | Feature | `Core` |
-| Arguments | `configuration: user_address` |
+| Arguments | `configuration: user_address`, `configuration_size: byte_count` |
 | Results | — |
 | Capability effects | `receiver: Borrow, kind=thread, rights=0x0` |
-| User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+| User memory | `configuration: Read, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Task` |
 
@@ -4812,10 +4772,10 @@ Object-local method `virtual_cpu_get_scheduling`.
 | Receiver | `receiver: Borrow, kind=virtual_cpu, rights=0x8` |
 | Operation | 261 |
 | Feature | `Core` |
-| Arguments | `configuration: user_address` |
-| Results | — |
+| Arguments | `configuration: user_address`, `configuration_size: byte_count` |
+| Results | `supported_size: byte_count` |
 | Capability effects | `receiver: Borrow, kind=virtual_cpu, rights=0x8` |
-| User memory | `configuration: Write, fixed-bytes=64, record=scheduling_parameters; order=0` |
+| User memory | `configuration: Write, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Task` |
 
@@ -4832,10 +4792,10 @@ Object-local method `virtual_cpu_set_scheduling`.
 | Receiver | `receiver: Borrow, kind=virtual_cpu, rights=0x0` |
 | Operation | 262 |
 | Feature | `Core` |
-| Arguments | `configuration: user_address` |
+| Arguments | `configuration: user_address`, `configuration_size: byte_count` |
 | Results | — |
 | Capability effects | `receiver: Borrow, kind=virtual_cpu, rights=0x0` |
-| User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+| User memory | `configuration: Read, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Task` |
 
@@ -4852,10 +4812,10 @@ Object-local method `process_builder_set_scheduling`.
 | Receiver | `receiver: Borrow, kind=process_builder, rights=0x0` |
 | Operation | 265 |
 | Feature | `Core` |
-| Arguments | `configuration: user_address`, `delegated_rights: rights` |
+| Arguments | `configuration: user_address`, `configuration_size: byte_count`, `delegated_rights: rights` |
 | Results | — |
 | Capability effects | `receiver: Borrow, kind=process_builder, rights=0x0` |
-| User memory | `configuration: Read, fixed-bytes=64, record=scheduling_parameters; order=0` |
+| User memory | `configuration: Read, len=configuration_size bytes, max-bytes=4096, record=scheduling_parameters; order=0` |
 | Execution | `blocking=Never, cancellation=None, restart=Never, completion=Returns, flags=None` |
 | Audit | `Task` |
 
@@ -5024,6 +4984,47 @@ Arguments and auxiliary results follow the listed register order; neither list i
 Auxiliary results are valid only on `ok`, except for the explicitly listed failure statuses.
 
 ## Public records
+
+### `thread_create_request`
+
+Minimum prefix: 64 bytes; size: 64 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `entry` | `u64` |
+| 8 | `stack` | `u64` |
+| 16 | `tls` | `u64` |
+| 24 | `argument` | `u64` |
+| 32 | `affinity_words` | `u64` |
+| 40 | `affinity_word_count` | `u64` |
+| 48 | `flags` | `u64` |
+| 56 | `reserved` | `u64` |
+
+### `rpc_trace_request`
+
+Minimum prefix: 64 bytes; size: 64 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `phase` | `u64` |
+| 8 | `request` | `u64` |
+| 16 | `detail` | `u64` |
+| 24 | `generation` | `u64` |
+| 32 | `parent_connection` | `u64` |
+| 40 | `parent_request` | `u64` |
+| 48 | `flags` | `u64` |
+| 56 | `reserved` | `u64` |
+
+### `filesystem_mount_request`
+
+Minimum prefix: 32 bytes; size: 32 bytes; alignment: 8 bytes.
+
+| Offset | Field | Type |
+| ---: | --- | --- |
+| 0 | `path` | `u64` |
+| 8 | `path_size` | `u64` |
+| 16 | `flags` | `u64` |
+| 24 | `reserved` | `u64` |
 
 ### `trace_config`
 

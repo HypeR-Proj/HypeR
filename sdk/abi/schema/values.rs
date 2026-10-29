@@ -66,9 +66,32 @@ macro_rules! constant_groups {
 }
 
 constant_groups! {
+    /// VMO allocation options; zero uses ordinary noncontiguous backing.
+    flags vmo_create {
+        vmo_create_contiguous = 1 << 0,
+    }
+
+    /// Filesystem attachment options.
+    flags filesystem_mount {
+        filesystem_mount_read_only = 1 << 0,
+    }
+
+    /// File-open options; EXCLUSIVE requires CREATE.
+    flags file_open {
+        file_open_create = 1 << 0,
+        file_open_exclusive = 1 << 1,
+        file_open_truncate = 1 << 2,
+    }
+
+    /// Directory traversal options.
+    flags directory_open {
+        /// Reject a symbolic link in the final path component.
+        directory_open_nofollow = 1 << 0,
+    }
+
     /// Optional, observational `ByteChannel` RPC annotations. Not transport operations.
     enum rpc_trace_phase {
-        /// Probe support; all other arguments must be zero.
+        /// Probe support; all other request fields must be zero.
         rpc_trace_query = 0,
         rpc_trace_client_begin = 1,
         rpc_trace_client_end = 2,

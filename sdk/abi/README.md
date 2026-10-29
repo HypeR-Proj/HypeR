@@ -18,6 +18,9 @@ HypeR is pre-release. The ABI revision remains zero until the project explicitly
 publishes its first supported ABI; schema changes before then do not imply
 stability.
 
+See the [Native ABI reference](docs/native.md) for operation selectors, arguments,
+record layouts, rights and failure results.
+
 ## Repository layout
 
 | Path | Responsibility |
