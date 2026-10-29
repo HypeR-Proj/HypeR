@@ -1,5 +1,0 @@
-# SPDX-FileCopyrightText: 2026 roolrz
-# SPDX-License-Identifier: Apache-2.0
-
-CONFIG_ARCH_X86_64=y
-CONFIG_KERNEL_STACK_SIZE_KB=32

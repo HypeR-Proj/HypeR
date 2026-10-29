@@ -3,13 +3,12 @@ SPDX-FileCopyrightText: 2026 roolrz
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# Contributing to HypeR
+# Contributing
 
-Start with the [development guide](docs/usage/development/development.md#contributing) for the
-contribution policy, component boundaries and local commands. The
-[CI guide](tests/ci/README.md) describes available validation suites;
-[current status](docs/project/status.md) distinguishes implemented features from plans.
+Use a pull request against `main`. Explain the behavior changed and the module
+tests performed. Coordinated changes share a `topic:` label across repositories.
+System verification is manually dispatched from HypeR-Proj/ci and is required
+for ordinary merges. Administrators may bypass review and checks through a PR;
+direct pushes, force pushes and deletion of main are prohibited for everyone.
 
-Keep changes focused on one invariant or user-visible behavior. Explain the
-problem, ownership and failure behavior, and report the checks actually run.
-QEMU results do not replace physical-hardware qualification.
+Preserve SPDX headers and third-party notices. Sign off commits with `git commit -s`.
