@@ -95,7 +95,7 @@ the new root and receives the transition owner together with core supervision.
 Before that transfer, failed launch or admission restores the bootstrap root and
 fallback services. After adoption, component-manager commits the transition and
 forwards domain resources; system-startup replaces core providers and submits retirement. See
-[boot layout](../architecture/boot-layout.md).
+[boot layout](https://hyper-proj.github.io/bootstrap/docs/boot-layout.html).
 
 For image contents and launch commands, use the
 [getting-started guide](getting-started.md) and
@@ -374,9 +374,9 @@ applies the bootstrap fstab, then `/etc/fstab` when requested by formal init.
 It launches a separate FAT or EROFS worker for each mount and remains outside the
 data path. Kernel VFS
 and cache hits need no worker round trip; misses and mutations go directly to
-the worker through [filesystem RPC](../design/storage/filesystem-services.md). Neither io-runtime
+the worker through [filesystem RPC](https://hyper-proj.github.io/lib-fs-service/docs/filesystem-services.html). Neither io-runtime
 nor fs-backend relays individual file operations. The Linux I/O VM supplies
-block storage, not pathname lookup. Consult [FAT semantics](../design/storage/fat.md) for
+block storage, not pathname lookup. Consult [FAT semantics](https://hyper-proj.github.io/fs-fat/docs/fat.html) for
 differences from ramfs.
 
 **Following a write:** separate acceptance by the file operation, completion of
@@ -445,7 +445,7 @@ The Linux kernel, modules and appliance services live in the separate
 The imported OCI manifest records the selected generation;
 use its source revision when tracing the other side, rather than assuming the
 other repository's latest main matches a local image.
-[The I/O VM design](../design/virtualization/io-vm.md) explains queue ownership, eager shared-memory
+[The I/O VM design](https://hyper-proj.github.io/io-vm/docs/hyper-integration.html) explains queue ownership, eager shared-memory
 backing, DMA constraints and the limits of the zero-copy claim.
 
 ## 8. Follow teardown and tests before changing a path
@@ -465,12 +465,12 @@ Useful checks to read beside these paths:
 | Area | Tests |
 | --- | --- |
 | vGIC state and synchronization | [controller tests](https://github.com/HypeR-Proj/kernel/blob/main/tests/host/src/cases/vgic.rs), [quiesce tests](https://github.com/HypeR-Proj/kernel/blob/main/tests/host/src/cases/vgic_quiesce.rs) |
-| VM ownership and trapped device operations | [vm-smoke](https://github.com/HypeR-Proj/ci/blob/main/tests/app/vm-smoke/src/main.rs), [QEMU harness](https://github.com/HypeR-Proj/ci/blob/main/tests/qemu/verify-vm-smoke.py) |
-| Guest SMP and power | [guest SMP harness](https://github.com/HypeR-Proj/ci/blob/main/tests/qemu/verify-guest-smp.py) |
-| Native file and guest disk integration | [CI entry points](https://github.com/HypeR-Proj/ci/blob/main/tests/ci/run.sh): `board-storage` and `io-vm` |
+| VM ownership and trapped device operations | [vm-smoke](https://github.com/HypeR-Proj/ci/blob/main/app/vm-smoke/src/main.rs), [QEMU harness](https://github.com/HypeR-Proj/ci/blob/main/qemu/verify-vm-smoke.py) |
+| Guest SMP and power | [guest SMP harness](https://github.com/HypeR-Proj/ci/blob/main/qemu/verify-guest-smp.py) |
+| Native file and guest disk integration | [CI entry points](https://github.com/HypeR-Proj/ci/blob/main/ci/run.sh): `board-storage` and `io-vm` |
 | SDK stacks and thread cleanup | [stack tests](https://github.com/HypeR-Proj/libc/blob/main/tests/unit/stack.c), [spawn tests](https://github.com/HypeR-Proj/libc/blob/main/tests/unit/thread-spawn.c) |
 
-Use [development](../usage/development/development.md) for commands and test prerequisites. A model
+Use [development](https://hyper-proj.github.io/build/docs/development.html) for commands and test prerequisites. A model
 test can establish a transition invariant; QEMU checks integration. Neither
 alone establishes physical-device DMA safety or every weak-memory ordering case.
 
@@ -659,7 +659,7 @@ For private writable views, read `prepare_private_write` and
 The [Native user runner](https://github.com/HypeR-Proj/kernel/blob/main/src/entry/user/mod.rs) is the other end
 of this path when an access faults. Do not apply private-write/COW assumptions
 to shared guest memory used by I/O: those mappings have a different physical
-page lifetime contract, described in [the I/O design](../design/virtualization/io-vm.md).
+page lifetime contract, described in [the I/O design](https://hyper-proj.github.io/io-vm/docs/hyper-integration.html).
 
 For stale-translation questions, continue into
 [kernel translation-ID ownership](https://github.com/HypeR-Proj/kernel/blob/main/src/mm/translation_id.rs)
@@ -718,7 +718,7 @@ events and control clients; ordinary byte-stream applications use `std::io`.
 [Session-manager](https://github.com/HypeR-Proj/session-manager/blob/main/src/main.rs) creates the terminal and
 shell, holds their Process supervisors, and retires their task groups on failure.
 It does not relay data. Separate log channels enter console-raw independently of
-terminal flow control. See [Native terminals](../design/services/terminal.md) for the capability and
+terminal flow control. See [Native terminals](https://hyper-proj.github.io/terminal-service/docs/terminal.html) for the capability and
 read/flush/fence contracts.
 
 For guest attachment, read [vmm console](https://github.com/HypeR-Proj/vmm/blob/main/src/console.rs),
@@ -732,7 +732,7 @@ when changing the relay.
 **Tests to start with:** [vmm console tests](https://github.com/HypeR-Proj/vmm/blob/main/tests/console.rs),
 [runtime console tests](https://github.com/HypeR-Proj/vm-runtime/blob/main/tests/console.rs),
 [virtual UART tests](https://github.com/HypeR-Proj/kernel/blob/main/tests/host/src/cases/sbsa_uart.rs) and
-[console integration](https://github.com/HypeR-Proj/ci/blob/main/tests/qemu/verify-console.py).
+[console integration](https://github.com/HypeR-Proj/ci/blob/main/qemu/verify-console.py).
 
 ## 14. From configuration to a running service or disk image
 
@@ -749,7 +749,7 @@ with the same handoff wire contract and an independent dependency graph.
 | Who supplies capabilities? | [startup migration](https://github.com/HypeR-Proj/system-startup/blob/main/src/runtime/sequence.rs) → [component launch](https://github.com/HypeR-Proj/component-manager/blob/main/src/runtime/launch.rs) and [connection routing](https://github.com/HypeR-Proj/component-manager/blob/main/src/runtime/routing.rs) |
 | What happens when it exits? | [lifecycle reactor](https://github.com/HypeR-Proj/component-manager/blob/main/src/runtime/mod.rs) joins the process/group, then applies [restart policy](https://github.com/HypeR-Proj/component-manager/blob/main/src/lifecycle.rs) |
 | Which files and volumes go into a board image? | [board configuration](https://github.com/HypeR-Proj/build/blob/main/scripts/board_config.py) → [bootstrap generation](https://github.com/HypeR-Proj/build/blob/main/scripts/board_bootstrap.py) → [disk packer](https://github.com/HypeR-Proj/build/blob/main/scripts/pack-board-image.py) |
-| Which I/O VM build is imported? | [package resolver](https://github.com/HypeR-Proj/build/blob/main/scripts/fetch-io-vm.py) and [I/O VM documentation](../design/virtualization/io-vm.md) |
+| Which I/O VM build is imported? | [package resolver](https://github.com/HypeR-Proj/build/blob/main/scripts/fetch-io-vm.py) and [I/O VM documentation](https://hyper-proj.github.io/io-vm/docs/hyper-integration.html) |
 
 The [root Makefile](https://github.com/HypeR-Proj/build/blob/main/Makefile) connects those operations. `make` builds and
 updates boot artifacts while preserving existing persistent disk content;
@@ -792,8 +792,8 @@ Before opening a change, be able to answer:
 4. Which test exercises the user-visible behavior, and which lower-level test
    checks the invariant it relies on?
 
-Use [the CI dispatcher](https://github.com/HypeR-Proj/ci/blob/main/tests/ci/run.sh) and
-[CI documentation](https://github.com/HypeR-Proj/ci/blob/main/tests/ci/README.md) to select the repository's actual
+Use [the CI dispatcher](https://github.com/HypeR-Proj/ci/blob/main/ci/run.sh) and
+[CI documentation](https://github.com/HypeR-Proj/ci/blob/main/ci/README.md) to select the repository's actual
 validation entry points. Prefer them to inventing a parallel test command that
 silently omits configuration, generated-code or packaging checks. Use
 [the syscall reference](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/syscall-abi.md) for wire contracts and

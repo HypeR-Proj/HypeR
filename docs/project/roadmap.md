@@ -165,14 +165,14 @@ tools remain available; deferral does not mean the checks have passed.
 - [ ] Extended qualification of the minimal Pi 5 appliance, repeatability,
   system-wide CPU consumption and controlled environment metadata.
 
-See the [manual storage procedure](https://github.com/HypeR-Proj/ci/blob/main/tests/hardware/storage/README.md) and
-[network exercise](https://github.com/HypeR-Proj/ci/blob/main/tests/hardware/network/README.md). Current measurements
+See the [manual storage procedure](https://github.com/HypeR-Proj/ci/blob/main/hardware/storage/README.md) and
+[network exercise](https://github.com/HypeR-Proj/ci/blob/main/hardware/network/README.md). Current measurements
 remain exploratory and do not establish production readiness.
 
 ## Later work
 
 - A full-featured Native shell as a separate application; retain the
-  [feature-frozen basic shell](../usage/applications/shell.md) for bootstrap and recovery;
+  [feature-frozen basic shell](https://hyper-proj.github.io/shell/docs/usage.html) for bootstrap and recovery;
 - Native network APIs and a connection for the reserved Native endpoint;
 - transactional multi-vCPU management, richer VM supervision and accounting;
 - broader Native ABI/std coverage, ABI stabilization and generated bindings;
@@ -182,5 +182,5 @@ remain exploratory and do not establish production readiness.
   and x86-64 builds.
 
 See [Pi 5 bring-up](https://github.com/HypeR-Proj/kernel/blob/main/docs/usage/rpi5.md),
-[implementation status](status.md), [I/O VM delivery and integration](../design/virtualization/io-vm.md),
+[implementation status](status.md), [I/O VM delivery and integration](https://hyper-proj.github.io/io-vm/docs/hyper-integration.html),
 and [VFS boundaries](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/vfs.md).

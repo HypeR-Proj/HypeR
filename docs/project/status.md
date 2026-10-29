@@ -39,7 +39,7 @@ containment for the MMIO compatibility or Pi 5 deployments. See the
 [I/O authority and DMA ownership contract](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/io-isolation.md) for
 implemented protections and remaining qualification gaps.
 See the [Pi 5 guide](https://github.com/HypeR-Proj/kernel/blob/main/docs/usage/rpi5.md) and
-[image release contract](../usage/deployment/image-distribution.md).
+[image release contract](https://hyper-proj.github.io/pi5-images/docs/distribution.html).
 
 The current foundation includes:
 
@@ -138,7 +138,7 @@ development.
 
 ## Linux I/O VM baseline
 
-The [I/O VM integration](../design/virtualization/io-vm.md) retains a dedicated AArch64 QEMU MMIO
+The [I/O VM integration](https://hyper-proj.github.io/io-vm/docs/hyper-integration.html) retains a dedicated AArch64 QEMU MMIO
 cross-VM storage compatibility fixture. Unmodified upstream Linux 6.18.51 and
 external modules run in a trusted I/O VM; it directly drives a QEMU virtio-scsi
 disk and exports it through upstream vhost-scsi/LIO iblock. A separate Linux
@@ -211,7 +211,7 @@ retirement. The network device has one RX/TX pair, a configured MAC and MTU
 1500. Guest TX checksum and TCPv4/TCPv6 segmentation can be negotiated with an
 offload-capable I/O VM. Both pinned upstream appliances advertise these optional
 features; default builds require no local backend override. RX offloads and
-multiqueue remain disabled. See the [network contract](../design/virtualization/io-vm.md#guest-networking) for the header
+multiqueue remain disabled. See the [network contract](https://hyper-proj.github.io/io-vm/docs/hyper-integration.html#guest-networking) for the header
 ownership and software fallback requirements.
 
 Host configuration/state-machine tests and Linux control/retirement-failure
@@ -256,7 +256,7 @@ see [Ethernet qualification](https://github.com/HypeR-Proj/kernel/blob/main/docs
 This control plane uses protocol version 3 of the independent Linux appliance.
 The package lock selects the published QEMU and Pi 5 generations from the
 merged upstream source. Ordinary builds import these immutable GHCR digests.
-See [build and validation](../design/virtualization/io-vm.md#build-and-validation) for the QEMU deployment
+See [build and validation](https://hyper-proj.github.io/io-vm/docs/hyper-integration.html#build-and-validation) for the QEMU deployment
 and package boundary.
 
 ## Runtime qualification

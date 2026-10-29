@@ -7,7 +7,17 @@ SPDX-License-Identifier: Apache-2.0
 
 [Project overview](../../README.md)
 
-Commands in this guide run from the repository root.
+First create a repo-managed workspace:
+
+```sh
+git clone https://github.com/HypeR-Proj/HypeR.git
+cd HypeR
+./setup.sh
+cd workspace
+```
+
+Install the Android `repo` tool before running the helper. All build commands below
+run from the workspace root; each component checkout remains independently editable.
 
 ## Prerequisites
 
@@ -60,8 +70,8 @@ make run
 ```
 
 The build imports the matching protocol version 3 appliance from
-[the qualified platform channel](../design/virtualization/io-vm.md#protocol-version-3-appliance-requirement), verifies its immutable
-GHCR digest and caches it locally. See [appliance requirements](../design/virtualization/io-vm.md#protocol-version-3-appliance-requirement)
+[the qualified platform channel](https://hyper-proj.github.io/io-vm/docs/hyper-integration.html#protocol-version-3-appliance-requirement), verifies its immutable
+GHCR digest and caches it locally. See [appliance requirements](https://hyper-proj.github.io/io-vm/docs/hyper-integration.html#protocol-version-3-appliance-requirement)
 for the package boundary and default QEMU deployment.
 `make run` uses the already packaged appliance and needs no package argument.
 
@@ -86,7 +96,7 @@ including its VM definitions, Alpine FIT and root filesystem. Changes to
 library requires a matching system image; the build rejects a stale system
 payload instead of silently pairing it with a new bootstrap. `make rebuild`
 repacks the whole disk and resets its data. See
-[updating existing deployments](../usage/deployment/board-storage.md#updating-existing-deployments)
+[updating existing deployments](https://hyper-proj.github.io/build/docs/deployment/board-storage.html#updating-existing-deployments)
 before changing a persistent deployment.
 
 The applications do not include private kernel or SDK source paths. The RAM
@@ -100,7 +110,7 @@ Ordinary applications are dynamic PIEs by default and share `libhyper.so`;
 SDK consumers can select a self-contained static PIE with
 `HYPER_LINK_MODE=static`. Both kinds of system executable use the explicitly
 delegated formal loader; only bootstrap programs use the static bootstrap
-loader. See [boot and system deployment](../architecture/boot-layout.md) for the launch contract.
+loader. See [boot and system deployment](https://hyper-proj.github.io/bootstrap/docs/boot-layout.html) for the launch contract.
 Pass `INITRAMFS=/path/to/archive.cpio` to test another Native userspace image.
 
 The default AArch64 board profile retains the HypeR shell and starts a resident
@@ -119,7 +129,7 @@ For an idle-backend diagnostic without mounted Native storage, build with
 `make RUN_PROFILE=io`,
 then launch with `make run RUN_PROFILE=io`. Its separate
 64 MiB disk is created once during the build. Set `IO_VM_DISK=/path/to/disk.img`
-on both commands to select another diagnostic disk. See [I/O VM](../design/virtualization/io-vm.md).
+on both commands to select another diagnostic disk. See [I/O VM](https://hyper-proj.github.io/io-vm/docs/hyper-integration.html).
 
 Native-only tests use an explicit fixture init that copies the formal payload
 into an independent RAMFS before entering the ordinary stage-1 supervisor.
@@ -172,7 +182,7 @@ Useful targets:
 | `make test-image ARCH=<arch>` | Verify the ELF, relocation, image, and architecture contract |
 | `make test-qemu ARCH=<arch>` | Run the architecture's QEMU acceptance test where supported |
 | `make release ARCH=<arch>` | Build and verify a stripped copy of the canonical kernel image |
-| `sh tests/ci/run.sh <suite>` | Run the same named suite or serial aggregate as CI; see the [suite catalog](https://github.com/HypeR-Proj/ci/blob/main/tests/ci/README.md) |
+| `sh tests/ci/run.sh <suite>` | Run the same named suite or serial aggregate as CI; see the [suite catalog](https://github.com/HypeR-Proj/ci/blob/main/ci/README.md) |
 
 The old `verify`, `verify-runtime`, `verify-image`, `verify-boot`, `verify-smp`,
 `check-all`, `test-all` and `verify-all` Make targets have been removed. Use
@@ -223,6 +233,6 @@ developer's `kernel/.config`:
 make image ARCH=aarch64 CONFIG_FILE=kernel/configs/qemu_aarch64_defconfig
 ```
 
-See [Incremental builds](../usage/development/incremental-builds.md) for cache behavior and recovery.
+See [Incremental builds](https://hyper-proj.github.io/build/docs/incremental-builds.html) for cache behavior and recovery.
 
 For physical Pi 5 bring-up, see the [official firmware boot and debug UART setup](https://github.com/HypeR-Proj/kernel/blob/main/docs/usage/rpi5.md).
