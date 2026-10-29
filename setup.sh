@@ -37,4 +37,4 @@ cd "$directory"
 repo init -u https://github.com/HypeR-Proj/manifest -b "$branch"
 repo sync
 printf '\nWorkspace ready: %s\n' "$directory"
-printf 'Build from that directory; see README.md and docs/learn/getting-started.md.\n'
+printf 'Build from that directory; see README.md for build instructions.\n'
