@@ -55,6 +55,8 @@ Each component maintains and publishes its own documentation after changes merge
 | lib-vm-policy | [Read](https://hyper-proj.github.io/lib-vm-policy/) | [GitHub](https://github.com/HypeR-Proj/lib-vm-policy) |
 | lib-vm-support | [Read](https://hyper-proj.github.io/lib-vm-support/) | [GitHub](https://github.com/HypeR-Proj/lib-vm-support) |
 | libc | [Read](https://hyper-proj.github.io/libc/) | [GitHub](https://github.com/HypeR-Proj/libc) |
+| lib-musl | [Read](https://hyper-proj.github.io/lib-musl/) | [GitHub](https://github.com/HypeR-Proj/lib-musl) |
+| lib-cxx | [Read](https://hyper-proj.github.io/lib-cxx/) | [GitHub](https://github.com/HypeR-Proj/lib-cxx) |
 | manifest | [Read](https://hyper-proj.github.io/manifest/) | [GitHub](https://github.com/HypeR-Proj/manifest) |
 | memstat | [Read](https://hyper-proj.github.io/memstat/) | [GitHub](https://github.com/HypeR-Proj/memstat) |
 | mount | [Read](https://hyper-proj.github.io/mount/) | [GitHub](https://github.com/HypeR-Proj/mount) |
