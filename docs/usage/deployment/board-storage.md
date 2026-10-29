@@ -315,7 +315,7 @@ with the pinned official prebuilt DTBs/overlays. The boot chain uses the officia
 EEPROM firmware and its built-in BL31; no custom TF-A artifact is required.
 QEMU and Pi 5 package channels advance automatically after qualified main builds. Recorded
 Pi 5 development runs established SD-backed reads and basic guest persistence.
-The 2026-10-06 [performance survey](../../../README.md#exploratory-pi-5-io-measurements)
+The 2026-10-06 [performance survey](https://github.com/HypeR-Proj/HypeR/blob/8d42d047058a2b58a291803700e86487fb723f7a/README.md#exploratory-pi-5-io-measurements)
 also exercised Native and guest SD writes with full readback and physical guest
 TCP traffic using the published pin. Full hardware qualification and DMA fault
 recovery remain [deferred work](../../project/roadmap.md#deferred-hardware-qualification).

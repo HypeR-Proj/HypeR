@@ -34,7 +34,7 @@ separate proposal.
   correctness checks and disclose differences in filesystem, card state,
   workload and network setup. Do not add QEMU or CI performance thresholds.
 
-The [2026-10-06 survey](../../README.md#exploratory-pi-5-io-measurements) supplies
+The [2026-10-06 survey](https://github.com/HypeR-Proj/HypeR/blob/8d42d047058a2b58a291803700e86487fb723f7a/README.md#exploratory-pi-5-io-measurements) supplies
 starting reference data, not a controlled benchmark or a diagnosis of the gaps.
 Each optimization should have measured benefit and preserve existing I/O,
 memory ownership and flush semantics. Report remaining gaps when further gains

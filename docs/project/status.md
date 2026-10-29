@@ -24,7 +24,7 @@ file preserved, and ordinary poweroff with the I/O VM and `/data` still
 available. Those lifecycle results precede the combined SDIO1/RP1 deployment.
 On 2026-10-06, the combined deployment completed 1 GiB Native FAT and guest ext4
 writes/overwrites with full readback, plus bidirectional guest TCP measurements
-against a Mac peer. The [reference data](../../README.md#exploratory-pi-5-io-measurements)
+against a Mac peer. The [reference data](https://github.com/HypeR-Proj/HypeR/blob/8d42d047058a2b58a291803700e86487fb723f7a/README.md#exploratory-pi-5-io-measurements)
 uses an informal environment and one run per case. Power-loss durability,
 concurrent and sustained load, and physical DMA retirement under faults remain
 unqualified and are tracked as
@@ -242,7 +242,7 @@ fixing vhost work-node reuse ordering. Single-connection 60- and 120-second TX
 runs and one/four-connection bidirectional cases completed without a stall.
 These results used a local build of the same appliance source tree; they do
 not qualify the exact published binary or establish long-duration stability.
-See the [Pi 5 I/O measurements](../../README.md#exploratory-pi-5-io-measurements) for the
+See the [Pi 5 I/O measurements](https://github.com/HypeR-Proj/HypeR/blob/8d42d047058a2b58a291803700e86487fb723f7a/README.md#exploratory-pi-5-io-measurements) for the
 comparison and its limits.
 
 The Pi 5 development image also passed a physical smoke test after PCI host window

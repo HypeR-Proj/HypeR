@@ -40,7 +40,7 @@ repo start improve-top top
 cd top
 git add src
 git commit -s
-git push origin HEAD
+git push hyper HEAD
 ```
 
 `hyper test NAME` runs that repository's declared tests. Dependencies are resolved from the workspace;

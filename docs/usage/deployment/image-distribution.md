@@ -74,7 +74,7 @@ VM remained available. Those lifecycle results precede the combined SDIO1/RP1
 deployment. The combined deployment using the published Pi 5 I/O VM pin then
 completed 1 GiB Native/guest writes with readback and bidirectional guest TCP
 measurements on 2026-10-06; see the
-[exploratory survey](../../../README.md#exploratory-pi-5-io-measurements).
+[exploratory survey](https://github.com/HypeR-Proj/HypeR/blob/8d42d047058a2b58a291803700e86487fb723f7a/README.md#exploratory-pi-5-io-measurements).
 Power-loss durability, device-reset recovery, physical DMA retirement and
 extended/concurrent load remain [deferred qualification](../../project/roadmap.md#deferred-hardware-qualification).
 The appliance lock retains `hardware_qualified: false`.
