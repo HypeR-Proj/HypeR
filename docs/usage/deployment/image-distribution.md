@@ -5,7 +5,7 @@
 
 The selected distribution model separates HypeR development, Linux appliance
 publication and final SD-image releases. The
-[image-distribution repository](https://github.com/roolrz/HypeR-pi5-images) builds
+[image-distribution repository](https://github.com/HypeR-Proj/pi5-images) builds
 compressed images and creates draft releases on updates to its main branch.
 Public release publication is manual. Users only need a HypeR checkout: its Make
 targets download pinned external inputs and compose images once matching
@@ -63,9 +63,9 @@ input locks, component inventories, notices and companion source archives.
 The distribution pipeline collects Rust dependency/std sources for every
 profile, matching libc materials for I/O profiles, and Alpine package/kernel
 sources for the full SD profile. See the
-[artifact guide](https://github.com/roolrz/HypeR-pi5-images/blob/main/ARTIFACTS.md)
+[artifact guide](https://github.com/HypeR-Proj/pi5-images/blob/main/ARTIFACTS.md)
 for image selection and the
-[component and source inventory](https://github.com/roolrz/HypeR-pi5-images/blob/main/DISTRIBUTION.md)
+[component and source inventory](https://github.com/HypeR-Proj/pi5-images/blob/main/DISTRIBUTION.md)
 for the supplied materials.
 
 A boot-file update bundle is also planned. It must preserve Linux Image runtime padding
@@ -86,7 +86,7 @@ Power-loss durability, device-reset recovery, physical DMA retirement and
 extended/concurrent load remain [deferred qualification](../../project/roadmap.md#deferred-hardware-qualification).
 The appliance lock retains `hardware_qualified: false`.
 
-The [manual hardware fixtures](../../../tests/hardware/storage/README.md) create
+The [manual hardware fixtures](https://github.com/HypeR-Proj/ci/blob/main/tests/hardware/storage/README.md) create
 separate development images under explicit output directories. They enlarge
 the test configuration partition and optionally add guest iperf3; they are not
 default build or distribution profiles. Their manifests record the actual

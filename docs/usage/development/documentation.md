@@ -39,7 +39,7 @@ exception). A new guide needs no navigation inventory entry.
 Use relative Markdown links to other guides and source owners, so links work
 both in GitHub and in the generated site. When moving a published guide, update
 all in-tree references and add its old path to
-[`scripts/docs/redirects.json`](../../../scripts/docs/redirects.json). These
+[`scripts/docs/redirects.json`](https://github.com/HypeR-Proj/build/blob/main/scripts/docs/redirects.json). These
 migration aliases produce only small HTML redirects, outside navigation and
 search; they are not duplicate source pages. Section aliases handle guides split
 across several manuals. Existing fragments and query strings are preserved by

@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # `ps`: process and thread inventory
 
-[ps](../../../app/ps/) lists visible Native processes with their KOIDs, immutable service
+[ps](https://github.com/HypeR-Proj/ps/tree/main/) lists visible Native processes with their KOIDs, immutable service
 names, lifecycle states and active/pending thread counts. `ps -T` also groups
 threads beneath their process and includes unowned kernel threads; per-CPU idle
 and timer threads are labelled `idle/CPU` and `ktimer/CPU`. Native workers show

@@ -49,7 +49,7 @@ The profile's `handoff` section selects the root and successor:
 
 Stage-1 gives the candidate a separate `BOOT_COMMAND_LINE` startup handle holding
 the arguments it did not recognize. This uses the bounded, length-prefixed UTF-8
-VMO format described in [Native startup](../../../kernel/docs/design/native-init.md), with
+VMO format described in [Native startup](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/native-init.md), with
 `READ | INSPECT` rights. Reading consumes and closes the handle; the SDK returns
 an owned string. It is not part of the supervision inventory and is not added to
 component `argv` or environment variables. Stage-1 retains its string through

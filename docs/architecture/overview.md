@@ -61,6 +61,6 @@ actions only after policy returns. Cargo enforces the HAL-to-core dependency
 direction, Rust privacy hides architecture internals, and CI checks that graph
 and rejects direct private-backend imports.
 
-Read [the architecture guide](../../kernel/docs/architecture/README.md) for the normative
+Read [the architecture guide](https://github.com/HypeR-Proj/kernel/blob/main/docs/architecture/README.md) for the normative
 boundary rules and migration constraints. The Native contracts are specified in the
-[userspace and syscall design](../../kernel/docs/design/syscall-abi.md).
+[userspace and syscall design](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/syscall-abi.md).

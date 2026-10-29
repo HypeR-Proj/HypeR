@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # `ldd`: shared-library dependency inspection
 
-[ldd](../../../app/ldd/) reads an executable or shared object's ELF metadata and reports its
+[ldd](https://github.com/HypeR-Proj/ldd/tree/main/) reads an executable or shared object's ELF metadata and reports its
 interpreter and complete `DT_NEEDED` dependency graph. It does not execute the
 input, load it into executable memory, or call constructors. The default
 listing includes each dependency name once; paths resolve symbolic links, so

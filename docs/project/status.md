@@ -32,13 +32,13 @@ unqualified and are tracked as
 The current priorities are best-effort block/guest-network tuning without major
 code or architecture rework, and capability/DMA isolation hardening around the
 I/O VM. The default QEMU deployment now connects physical virtio-PCI assignments
-to [host-owned SMMUv3 domains](../../kernel/docs/design/smmuv3.md), with retained RAM and
+to [host-owned SMMUv3 domains](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/smmuv3.md), with retained RAM and
 shared-buffer leases, completed invalidation, IRQ-driven stream quarantine and
 fail-closed controller handling. This integration does not establish DMA
 containment for the MMIO compatibility or Pi 5 deployments. See the
-[I/O authority and DMA ownership contract](../../kernel/docs/design/io-isolation.md) for
+[I/O authority and DMA ownership contract](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/io-isolation.md) for
 implemented protections and remaining qualification gaps.
-See the [Pi 5 guide](../../kernel/docs/usage/rpi5.md) and
+See the [Pi 5 guide](https://github.com/HypeR-Proj/kernel/blob/main/docs/usage/rpi5.md) and
 [image release contract](../usage/deployment/image-distribution.md).
 
 The current foundation includes:
@@ -53,7 +53,7 @@ The current foundation includes:
 - SMP startup with a scheduler-owned idle thread on every admitted CPU;
 - intrusive indexed ready queues with FIFO, weighted-stride Fair (or a
   configured round-robin backend), and per-vCPU Budget scheduling; arbitration
-  and scheduling authority are described in the [scheduler design](../../kernel/docs/design/scheduling.md);
+  and scheduling authority are described in the [scheduler design](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/scheduling.md);
 - tickless scheduler deadlines, load-aware initial placement and bounded
   event-driven balancing of Ready Fair/Budget threads within their CPU affinity;
 - explicit affinity-controlled kernel-Thread migration with source-context
@@ -61,7 +61,7 @@ The current foundation includes:
 - generation-tagged, allocation-free wait arbitration across notification,
   timeout, and cancellation, with counted Completion, sleeping Mutex and
   Semaphore primitives, and migration-safe deadline waits;
-- an in-tree, schema-defined pre-release [HypeR Native ABI](../../sdk/abi/docs/native.md)
+- an in-tree, schema-defined pre-release [HypeR Native ABI](https://github.com/HypeR-Proj/abi/blob/main/docs/native.md)
   with checked Rust and C layouts, syscall metadata, and an auditable reference;
 - a compiled capability foundation with fallible shared objects, schema-owned
   rights, 64-bit generation handles, detached unpublished slot transactions,
@@ -158,7 +158,7 @@ AArch64 GICv2/GICv3 tests also exercise mailbox interrupts, cross-VM notificatio
 peer exit, stale completion rejection and interrupted MMIO retirement.
 
 Linux build, modules, services, rootfs assembly and source packaging live in
-[HypeR-io-vm](https://github.com/roolrz/HypeR-io-vm). HypeR owns Native deployment,
+[HypeR-io-vm](https://github.com/HypeR-Proj/io-vm). HypeR owns Native deployment,
 DT generation and digest-pinned import. Default AArch64 `make run` keeps the
 Native shell and starts the resident I/O VM, whose shared queues back separate
 EROFS system and FAT configuration volumes. Stage-1 switches the independent
@@ -176,7 +176,7 @@ gate device inspection, assignment, DMA-address disclosure, register access and
 interrupt acknowledgement. These mechanisms protect ungranted HypeR memory;
 guests still trust the backend for data and availability. In addition to
 functional PCI storage/network acceptance and the EDU DMA-denial fixture, a
-[production NIC test](../../kernel/docs/design/smmuv3.md#production-io-vm-mapping-revocation)
+[production NIC test](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/smmuv3.md#production-io-vm-mapping-revocation)
 revokes a warmed Linux RX buffer mapping and verifies actual DMA write denial,
 unchanged destination bytes, continued storage DMA and journal reporting across
 bootstrap handoff. Other device/read paths and physical hardware retirement
@@ -251,7 +251,7 @@ Linux, with a separate noncoherent DMA bus and exclusive ownership of the RP1
 shared infrastructure. The published pin subsequently served the 2026-10-06
 physical storage and TCP performance survey. Full hardware qualification,
 stress behavior and DMA retirement remain separate;
-see [Ethernet qualification](../../kernel/docs/usage/rpi5.md#ethernet-backend-qualification).
+see [Ethernet qualification](https://github.com/HypeR-Proj/kernel/blob/main/docs/usage/rpi5.md#ethernet-backend-qualification).
 
 This control plane uses protocol version 3 of the independent Linux appliance.
 The package lock selects the published QEMU and Pi 5 generations from the
@@ -269,7 +269,7 @@ stop, WFI wakeup, virtual UART/PLIC, privilege isolation and retirement.
 The x86-64 build gate does not establish a userspace guest-boot contract.
 
 Pi 5 host bring-up prerequisites and recommended firmware configuration are
-documented in [Raspberry Pi 5](../../kernel/docs/usage/rpi5.md). GICv2 Linux guest boot
+documented in [Raspberry Pi 5](https://github.com/HypeR-Proj/kernel/blob/main/docs/usage/rpi5.md). GICv2 Linux guest boot
 and lifecycle tests run in QEMU; physical Pi 5 validation has established the
 bounded hardware results listed above. Broader stress and fault qualification
 remain outstanding.

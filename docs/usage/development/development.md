@@ -131,9 +131,9 @@ An explicit `APP_OUTPUT` can name a fixture's own staging directory. Updating
 only a runtime binary can leave its Rust generic symbols incompatible with
 previously staged libraries, even when their SONAMEs match.
 
-[Component declarations and templates](../../../mk/README.md) own installation and
+[Component declarations and templates](https://github.com/HypeR-Proj/build/blob/main/mk/README.md) own installation and
 image membership. Each app or library declares its delivery in `component.mk`;
-[the registry](../../../mk/components.mk) expands those declarations and checks their
+[the registry](https://github.com/HypeR-Proj/build/blob/main/mk/components.mk) expands those declarations and checks their
 Cargo targets. `make app-manifest` prints the resulting installation manifest.
 Cargo workspace membership and dependencies remain in Cargo. Service manifests
 still own startup and capabilities, and board JSON owns storage and device
@@ -273,7 +273,7 @@ sh tests/ci/run.sh x86_64-build
 ```
 
 QEMU tests track and terminate the processes they create. Failed CI runs retain
-serial logs as artifacts. See [the CI contract](../../../tests/ci/README.md) for the
+serial logs as artifacts. See [the CI contract](https://github.com/HypeR-Proj/ci/blob/main/tests/ci/README.md) for the
 exact coverage and supported runtime expectations.
 
 ## Repository guide
@@ -307,20 +307,20 @@ exact coverage and supported runtime expectations.
 
 Further documentation:
 
-- [Kernel stack budgets and workload checks](../../../kernel/docs/usage/stack-budgets.md)
-- [Architecture boundaries](../../../kernel/docs/architecture/README.md)
-- [Native init contract](../../../kernel/docs/design/native-init.md)
-- [Userspace and syscall architecture](../../../kernel/docs/design/syscall-abi.md)
-- [Virtual filesystem architecture](../../../kernel/docs/design/vfs.md)
-- [Native SDK contract](../../../sdk/README.md)
-- [HypeR Native ABI reference](../../../sdk/abi/docs/native.md)
-- [VM image format and boot ownership](../../../kernel/docs/design/vm-bundle.md)
+- [Kernel stack budgets and workload checks](https://github.com/HypeR-Proj/kernel/blob/main/docs/usage/stack-budgets.md)
+- [Architecture boundaries](https://github.com/HypeR-Proj/kernel/blob/main/docs/architecture/README.md)
+- [Native init contract](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/native-init.md)
+- [Userspace and syscall architecture](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/syscall-abi.md)
+- [Virtual filesystem architecture](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/vfs.md)
+- [Native SDK contract](https://github.com/HypeR-Proj/build/blob/main/sdk/README.md)
+- [HypeR Native ABI reference](https://github.com/HypeR-Proj/abi/blob/main/docs/native.md)
+- [VM image format and boot ownership](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/vm-bundle.md)
 - [Linux I/O VM ownership and package delivery](../../design/virtualization/io-vm.md)
-- [RISC-V execution profile](../../../kernel/docs/architecture/riscv64.md)
-- [x86-64 execution profile](../../../kernel/docs/architecture/x86_64.md)
-- [Crash console](../../../kernel/docs/usage/crash-console.md)
+- [RISC-V execution profile](https://github.com/HypeR-Proj/kernel/blob/main/docs/architecture/riscv64.md)
+- [x86-64 execution profile](https://github.com/HypeR-Proj/kernel/blob/main/docs/architecture/x86_64.md)
+- [Crash console](https://github.com/HypeR-Proj/kernel/blob/main/docs/usage/crash-console.md)
 - [Security policy](../../../SECURITY.md)
-- [External guest payload and licensing](../../../kernel/tools/guest/README.md)
+- [External guest payload and licensing](https://github.com/HypeR-Proj/kernel/blob/main/tools/guest/README.md)
 
 ## Contributing
 
@@ -362,7 +362,7 @@ They are checksum-verified, ignored by Git, and are not part of the
 Apache-2.0-licensed source distribution. Linux is GPL-2.0-only and Alpine
 packages carry their own licenses. Anyone redistributing generated guest
 payloads must preserve the relevant upstream notices and source-availability
-obligations. See [kernel/tools/guest/README.md](../../../kernel/tools/guest/README.md) for details.
+obligations. See [kernel/tools/guest/README.md](https://github.com/HypeR-Proj/kernel/blob/main/tools/guest/README.md) for details.
 
 The Linux I/O appliance has a separate delivery path: HypeR-io-vm builds and
 publishes the complete kernel/initramfs as a GHCR package, while HypeR imports

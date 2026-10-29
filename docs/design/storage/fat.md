@@ -185,7 +185,7 @@ for performance measurements.
 ## VFS semantics
 
 Regular-file read caching belongs to the common VFS layer, described in
-[VFS file-data cache](../../../kernel/docs/design/vfs.md#file-data-cache). The generic remote adapter supplies positioned reads and metadata over RPC;
+[VFS file-data cache](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/vfs.md#file-data-cache). The generic remote adapter supplies positioned reads and metadata over RPC;
 its local endpoint-health check detects a closed or failed volume without RPC.
 The shared file record owns the common content gate and revision; all writes,
 resizes and truncating opens pass through that gate before entering FAT.

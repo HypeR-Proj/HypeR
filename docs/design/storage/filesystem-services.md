@@ -73,7 +73,7 @@ fstab after adoption.
 uncompressed core EROFS, including compact/extended inodes, plain and inline
 data, directories and symlinks. It validates a present superblock CRC32C and
 rejects compression, xattrs, external devices and unsupported inode layouts.
-Its [reader documentation](../../../svc/fs-erofs/README.md) gives bounds and
+Its [reader documentation](https://github.com/HypeR-Proj/fs-erofs/blob/main/README.md) gives bounds and
 supported block sizes. Recognition alone is not a promise that a worker can
 read every extension of that filesystem format.
 
@@ -419,14 +419,14 @@ identity cannot become visible through a recreated file.
 It cannot recursively predict more work. This worker is separate from memory
 reclamation, so a backend waiting for memory cannot deadlock the reclaim path.
 
-Implementation entry points: [formal manager](../../../svc/fs-backend/src/main.rs),
-[bootstrap transfer](../../../bootstrap/stage1/fs-backend/src/migration.rs),
-[formal worker transport](../../../lib/fs-service/src/lib.rs),
-[FAT worker](../../../svc/fs-fat/src/main.rs), [EROFS worker](../../../svc/fs-erofs/src/main.rs),
-[wire protocol](../../../stdlib/rust/hyper-filesystem/src/protocol/mod.rs),
-[kernel adapter](../../../kernel/src/fs/vfs/remote/mod.rs), and
-[transport](../../../kernel/src/fs/vfs/remote/transport.rs).
-See [FAT semantics](fat.md) and [VFS cache](../../../kernel/docs/design/vfs.md#file-data-cache)
+Implementation entry points: [formal manager](https://github.com/HypeR-Proj/fs-backend/blob/main/src/main.rs),
+[bootstrap transfer](https://github.com/HypeR-Proj/bootstrap/blob/main/fs-backend/src/migration.rs),
+[formal worker transport](https://github.com/HypeR-Proj/fs-service/blob/main/src/lib.rs),
+[FAT worker](https://github.com/HypeR-Proj/fs-fat/blob/main/src/main.rs), [EROFS worker](https://github.com/HypeR-Proj/fs-erofs/blob/main/src/main.rs),
+[wire protocol](https://github.com/HypeR-Proj/abi/blob/main/filesystem/src/protocol/mod.rs),
+[kernel adapter](https://github.com/HypeR-Proj/kernel/blob/main/src/fs/vfs/remote/mod.rs), and
+[transport](https://github.com/HypeR-Proj/kernel/blob/main/src/fs/vfs/remote/transport.rs).
+See [FAT semantics](fat.md) and [VFS cache](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/vfs.md#file-data-cache)
 for format details and memory policy.
 
 ## Validation

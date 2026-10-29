@@ -236,7 +236,7 @@ broker. The runtime retains its already-opened vCPU handles and their scheduling
 rights. The returned VM handle has no scheduling elevation rights; reopening a
 vCPU through it cannot recover those rights.
 
-See [scheduling policy and tickless execution](../../../kernel/docs/design/scheduling.md)
+See [scheduling policy and tickless execution](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/scheduling.md)
 for arbitration, tickless deadlines, balancing and platform limitations, and
 [product configuration](../deployment/configuration.md) for kernel menu settings.
 

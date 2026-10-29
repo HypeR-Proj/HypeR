@@ -18,15 +18,15 @@ deployment policy in the Linux I/O VM.
 | `BOARD_CONFIG` | Physical devices, guest definitions, disk partitions and mount policy |
 | Component and service declarations | Build targets, required child programs, startup and capability grants |
 
-The root [Kconfig](../../../Kconfig) sources the configuration definitions owned by
-[bootstrap/stage1](../../../bootstrap/stage1/Kconfig), [app](../../../app/Kconfig),
-[svc](../../../svc/Kconfig) and [tests/app](../../../tests/app/Kconfig). These files own
+The root [Kconfig](https://github.com/HypeR-Proj/build/blob/main/Kconfig) sources the configuration definitions owned by
+[bootstrap/stage1](https://github.com/HypeR-Proj/bootstrap/blob/main/Kconfig), [app](https://github.com/HypeR-Proj/build/blob/main/app/Kconfig),
+[svc](https://github.com/HypeR-Proj/build/blob/main/svc/Kconfig) and [tests/app](https://github.com/HypeR-Proj/ci/blob/main/tests/app/Kconfig). These files own
 program defaults, deployment dependencies, menu labels and help.
 `component.mk` binds those symbols to Cargo targets and installed paths; it does
 not repeat their normal-product defaults or executable dependencies.
 
 The saved `.config` is the product selection used by both builds and packaging.
-[`configs/default_defconfig`](../../../configs/default_defconfig) is a minimal preset;
+[`configs/default_defconfig`](../../../products/configs/default_defconfig) is a minimal preset;
 omitted values take their defaults from Kconfig. Without a local `.config`,
 ordinary builds use the same Kconfig defaults. Test programs default to disabled.
 
@@ -398,8 +398,8 @@ customized configuration merely to change optional functionality.
 ### Kernel architecture and resource configuration
 
 `make -C kernel defconfig ARCH=aarch64` resolves the selected
-[`kernel/configs/`](../../../kernel/configs/) fragment against
-[`kernel/Kconfig`](../../../kernel/Kconfig). Common defaults live in Kconfig rather
+[`kernel/configs/`](https://github.com/HypeR-Proj/kernel/tree/main/configs) fragment against
+[`kernel/Kconfig`](https://github.com/HypeR-Proj/kernel/blob/main/Kconfig). Common defaults live in Kconfig rather
 than being copied into every architecture fragment. `make -C kernel config` edits the
 existing selection as line-by-line prompts; enter `?` at a value prompt for help.
 
@@ -466,7 +466,7 @@ or `CONFIG_SCHED_FAIR_RR`), the common Budget period and vCPU defaults, the shar
 priority allowance and protected execution floor, and the guest/native preference.
 These are kernel policy defaults; per-component and per-VM settings stay in their
 existing deployment declarations and require scheduling capabilities to apply.
-See [scheduling policy and tickless execution](../../../kernel/docs/design/scheduling.md),
+See [scheduling policy and tickless execution](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/scheduling.md),
 [component scheduling authority](../../design/services/components.md#scheduling-authority),
 and [VM scheduling configuration](../applications/vmm.md#scheduling).
 
@@ -519,4 +519,4 @@ preserving persistent partition bytes. Selecting a smaller image does not grant
 permission to repartition or erase an existing data volume. To change storage
 geometry, use a separate output directory or the explicitly destructive rebuild
 target. See [board storage](board-storage.md) and
-[component builds](../../../mk/README.md) for output and packaging details.
+[component builds](https://github.com/HypeR-Proj/build/blob/main/mk/README.md) for output and packaging details.

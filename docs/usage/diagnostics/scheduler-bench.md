@@ -124,7 +124,7 @@ and inspect distributions rather than comparing only averages. A short maximum
 does not prove a worst-case real-time bound. CI checks functionality on one and
 four QEMU CPUs; TCG timings are not hardware performance claims.
 
-See the [host matrix runner and CSV exporter](../../../tests/performance/scheduler/README.md)
+See the [host matrix runner and CSV exporter](https://github.com/HypeR-Proj/ci/blob/main/tests/performance/scheduler/README.md)
 for reproducible artifacts and comparison guidance. For a critical-chain trace,
 run the benchmark under [`perf trace record`](tracing.md); enable tracing only
 in a separate diagnostic run because tracing itself perturbs latency.

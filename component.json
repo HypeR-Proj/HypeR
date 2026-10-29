@@ -68,13 +68,18 @@
   },
   "SPDX-FileCopyrightText": "2026 roolrz",
   "SPDX-License-Identifier": "Apache-2.0",
-  "mounts": {},
+  "mounts": {
+    "docs": "docs",
+    "products/boards": "boards",
+    "products/configs": "configs"
+  },
   "packages": [],
   "tests": [
     [
       "python3",
-      "-B",
-      "tests/ci/check-workspace.py"
+      "{component}/hyper",
+      "--help"
     ]
-  ]
+  ],
+  "cargo_context": {}
 }

@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # `mount` and `umount`: Native volume administration
 
-[mount](../../../app/mount/) lists active managed volumes without arguments. `mount -a`
+[mount](https://github.com/HypeR-Proj/mount/tree/main/) lists active managed volumes without arguments. `mount -a`
 applies automatic `/etc/fstab` entries; `mount /data` or
 `mount PARTLABEL=hyper-data` selects one entry there. An explicit `-T` path
 selects another table; `/boot/etc/fstab` exists only while bootstrap is retained. `mount -t auto -o ro PARTLABEL=backup /mnt/backup` selects an authorized
@@ -13,7 +13,7 @@ GPT partition and target. Types are `auto`, `fat`/`vfat`, and `erofs`; EROFS req
 `ro`. The manager identifies media before selecting an installed worker, and
 reports unavailable volumes, format mismatches and missing workers separately.
 
-[umount](../../../app/umount/) synchronizes and detaches one idle target. Open files,
+[umount](https://github.com/HypeR-Proj/umount/tree/main/) synchronizes and detaches one idle target. Open files,
 directory/cwd handles, active lookups or nested mounts return Busy and preserve
 the existing mount. It has no forced or lazy mode. A clean shutdown returns the
 worker's exclusive block owner to the manager for a later mount; a crashed

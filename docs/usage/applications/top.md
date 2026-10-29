@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # `top`: live CPU and process activity
 
-[top](../../../app/top/) monitors CPU time, physical memory, processes and threads.
+[top](https://github.com/HypeR-Proj/top/tree/main/) monitors CPU time, physical memory, processes and threads.
 The **first snapshot appears immediately**; `-d` controls the interval between
 subsequent samples. `top -b -n 1 -d 60` therefore prints once and exits without
 waiting 60 seconds. The first frame is labelled `since boot`: CPU categories use

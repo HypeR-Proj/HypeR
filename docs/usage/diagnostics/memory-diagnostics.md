@@ -105,7 +105,7 @@ it only to the trusted `/bin/memstat` path, just as it does for `/bin/free`.
 The API returns counters only, not kernel addresses or mutation authority.
 `hyper_os::inspect::MemoryInspector` offers typed heap, buddy, owner, file-cache
 and heap-class reads. The topic/record contract is defined by
-[`sdk/abi/schema/native.rs`](../../../sdk/abi/schema/native.rs).
+[`sdk/abi/schema/native.rs`](https://github.com/HypeR-Proj/abi/blob/main/schema/native.rs).
 
 ## Sampling limits
 

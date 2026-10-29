@@ -321,7 +321,7 @@ The 2026-10-06 [performance survey](../../../README.md#exploratory-pi-5-io-measu
 also exercised Native and guest SD writes with full readback and physical guest
 TCP traffic using the published pin. Full hardware qualification and DMA fault
 recovery remain [deferred work](../../project/roadmap.md#deferred-hardware-qualification).
-The [manual test image](../../../tests/hardware/storage/README.md) adds a 1 GiB workload
+The [manual test image](https://github.com/HypeR-Proj/ci/blob/main/tests/hardware/storage/README.md) adds a 1 GiB workload
 and enlarges the configuration volume to 2 GiB; default images neither compile
 nor package that workload. The FAT boot
 volume contains the firmware configuration, official DTBs/overlays, kernel and bootstrap archive.
@@ -348,7 +348,7 @@ quarantines its device and all own/imported memory until host reboot. A timeout
 never releases potentially active DMA storage. These are explicit deployment
 constraints, not a claim of successful hardware qualification. The common
 appliance must include the upstream SDHCI/GPIO/pinctrl/regulator drivers, and the
-[Pi 5 bring-up checks](../../../kernel/docs/usage/rpi5.md) remain required.
+[Pi 5 bring-up checks](https://github.com/HypeR-Proj/kernel/blob/main/docs/usage/rpi5.md) remain required.
 
 The same `boards/rpi5.json` deployment gives Alpine an RP1 GEM network uplink
 alongside its SD-backed disk. The kernel assigns the whole RP1 PCI function
@@ -357,7 +357,7 @@ Linux owns RP1 interrupts, GEM, clocks, GPIO and the Ethernet bridge. Its DMA
 bus translation is separate from SDHCI. This trusted I/O VM path has no IOMMU
 DMA isolation. The pinned Pi 5 appliance has served the physical TCP survey;
 extended network qualification remains deferred. See
-[Ethernet bring-up](../../../kernel/docs/usage/rpi5.md#ethernet-backend-qualification).
+[Ethernet bring-up](https://github.com/HypeR-Proj/kernel/blob/main/docs/usage/rpi5.md#ethernet-backend-qualification).
 
 `make test-userspace-device` uses a test-only virtio worker and a real QEMU disk
 with a level interrupt to exercise the same generic bundle/MMIO/IRQ mechanism.

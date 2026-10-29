@@ -21,7 +21,7 @@ Native `/boot` mount.
 
 ## Files and dependencies
 
-[`bootstrap/stage1`](../../bootstrap/stage1/README.md) owns static bootstrap
+[`bootstrap/stage1`](https://github.com/HypeR-Proj/bootstrap/blob/main/README.md) owns static bootstrap
 programs. Formal commands live in `app/` and background providers in `svc/`, and their reusable
 implementations live in `lib/`. Bootstrap does not link these formal libraries.
 It may use the Native kernel-facility substrate, static Rust std and third-party

@@ -35,7 +35,7 @@ process; use the OBJECT KOID to correlate the same object across processes.
 Handle values are opaque and include the owning process's mask. Inspector
 output shows exactly the value that process holds; do not decode it or infer
 allocation order. Neither an observed ID nor this command grants access to the
-observed object. See the [handle encoding contract](../../../kernel/docs/design/syscall-abi.md#objects-handles-and-rights).
+observed object. See the [handle encoding contract](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/syscall-abi.md#objects-handles-and-rights).
 
 `--kind` accepts a catalog name or numeric kind ID; repeated kinds match any of
 them. Unknown names are errors. `--right` filters **granted** handle rights and

@@ -60,7 +60,7 @@ make run
 ```
 
 The build imports the matching protocol version 3 appliance from
-[`scripts/io-vm.lock.json`](../../scripts/io-vm.lock.json), verifies its immutable
+[`scripts/io-vm.lock.json`](https://github.com/HypeR-Proj/build/blob/main/scripts/io-vm.lock.json), verifies its immutable
 GHCR digest and caches it locally. See [appliance requirements](../design/virtualization/io-vm.md#protocol-version-3-appliance-requirement)
 for the package boundary and default QEMU deployment.
 `make run` uses the already packaged appliance and needs no package argument.
@@ -172,7 +172,7 @@ Useful targets:
 | `make test-image ARCH=<arch>` | Verify the ELF, relocation, image, and architecture contract |
 | `make test-qemu ARCH=<arch>` | Run the architecture's QEMU acceptance test where supported |
 | `make release ARCH=<arch>` | Build and verify a stripped copy of the canonical kernel image |
-| `sh tests/ci/run.sh <suite>` | Run the same named suite or serial aggregate as CI; see the [suite catalog](../../tests/ci/README.md) |
+| `sh tests/ci/run.sh <suite>` | Run the same named suite or serial aggregate as CI; see the [suite catalog](https://github.com/HypeR-Proj/ci/blob/main/tests/ci/README.md) |
 
 The old `verify`, `verify-runtime`, `verify-image`, `verify-boot`, `verify-smp`,
 `check-all`, `test-all` and `verify-all` Make targets have been removed. Use
@@ -225,4 +225,4 @@ make image ARCH=aarch64 CONFIG_FILE=kernel/configs/qemu_aarch64_defconfig
 
 See [Incremental builds](../usage/development/incremental-builds.md) for cache behavior and recovery.
 
-For physical Pi 5 bring-up, see the [official firmware boot and debug UART setup](../../kernel/docs/usage/rpi5.md).
+For physical Pi 5 bring-up, see the [official firmware boot and debug UART setup](https://github.com/HypeR-Proj/kernel/blob/main/docs/usage/rpi5.md).

@@ -54,7 +54,7 @@ provide physical DMA isolation.
   device/resource boundaries in the kernel and allow delegation only with the
   same or reduced authority. Audit grants from init through io-runtime to the
   I/O VM; board configuration alone is not an access-control boundary.
-  [Implemented operation rights](../../kernel/docs/design/io-isolation.md#device-operations)
+  [Implemented operation rights](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/io-isolation.md#device-operations)
   now separate inspection, claims, assignment, DMA-address disclosure,
   register reads/writes and interrupt observation/acknowledgement. This does
   not complete the broader delegation and device-lifecycle audit.
@@ -63,10 +63,10 @@ provide physical DMA isolation.
   access. Admit only authorized RAM and shared buffers, with supported access
   permissions, explicit mapping lifetimes and completed invalidation before
   reuse. Unsupported hardware must report its actual isolation limits.
-  The [standard SMMUv3 mechanism and QEMU PCI DMA fixture](../../kernel/docs/design/smmuv3.md)
+  The [standard SMMUv3 mechanism and QEMU PCI DMA fixture](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/smmuv3.md)
   include stage-2 mappings, IRQ-driven stream quarantine, failure containment
   and fault injection. [Device operation permissions and retained buffer
-  leases](../../kernel/docs/design/io-isolation.md) now separate claim, register/IRQ and
+  leases](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/io-isolation.md) now separate claim, register/IRQ and
   DMA-address authority, and share kernel-only memory owners with SMMU mappings.
   Default QEMU virtio-PCI assignments now bind requester IDs to the I/O VM's
   domain before bus mastering and admit only its RAM and explicit live grants.
@@ -108,7 +108,7 @@ contracts; containment claims require evidence for the covered paths.
   interrupt-driven debug UART; retain QEMU GICv2/GICv3 coverage.
 - [x] Run the Linux I/O VM on Pi 5 and consume independently published,
   digest-pinned protocol version 3 appliances from
-  [HypeR-io-vm](https://github.com/roolrz/HypeR-io-vm).
+  [HypeR-io-vm](https://github.com/HypeR-Proj/io-vm).
 - [x] Provide board/guest device trees, RAM reservations and VM configuration;
   validate two-vCPU Alpine boot, console, CPU off/on, ordinary reboot with a
   synced file preserved, and poweroff on Pi 5.
@@ -165,8 +165,8 @@ tools remain available; deferral does not mean the checks have passed.
 - [ ] Extended qualification of the minimal Pi 5 appliance, repeatability,
   system-wide CPU consumption and controlled environment metadata.
 
-See the [manual storage procedure](../../tests/hardware/storage/README.md) and
-[network exercise](../../tests/hardware/network/README.md). Current measurements
+See the [manual storage procedure](https://github.com/HypeR-Proj/ci/blob/main/tests/hardware/storage/README.md) and
+[network exercise](https://github.com/HypeR-Proj/ci/blob/main/tests/hardware/network/README.md). Current measurements
 remain exploratory and do not establish production readiness.
 
 ## Later work
@@ -181,6 +181,6 @@ remain exploratory and do not establish production readiness.
 - broader hardware support while preserving existing AArch64/RISC-V acceptance
   and x86-64 builds.
 
-See [Pi 5 bring-up](../../kernel/docs/usage/rpi5.md),
+See [Pi 5 bring-up](https://github.com/HypeR-Proj/kernel/blob/main/docs/usage/rpi5.md),
 [implementation status](status.md), [I/O VM delivery and integration](../design/virtualization/io-vm.md),
-and [VFS boundaries](../../kernel/docs/design/vfs.md).
+and [VFS boundaries](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/vfs.md).

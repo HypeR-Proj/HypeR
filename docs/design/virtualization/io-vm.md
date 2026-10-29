@@ -4,14 +4,14 @@
 # Linux I/O VM
 
 Keeping an independent I/O VM and preferring device drivers outside the HypeR
-kernel is an [architectural decision](../../../kernel/docs/architecture/README.md#device-driver-placement),
+kernel is an [architectural decision](https://github.com/HypeR-Proj/kernel/blob/main/docs/architecture/README.md#device-driver-placement),
 not a temporary bring-up arrangement. Native userspace drivers are another
 supported placement; applications consume their services through controlled
 interfaces.
 
 The I/O VM is a trusted Linux service VM. HypeR owns the Native applications,
 virtual hardware, launch policy, and authoritative DTS/DTB. The separate
-[HypeR-io-vm repository](https://github.com/roolrz/HypeR-io-vm) owns everything
+[HypeR-io-vm repository](https://github.com/HypeR-Proj/io-vm) owns everything
 needed to produce the Linux appliance: pinned upstream Linux, configuration,
 external modules, Linux userspace services, initramfs assembly, tests, and
 package publication. This repository does not build Linux or modify appliance binaries. Board
@@ -21,7 +21,7 @@ The default QEMU deployment assigns physical virtio-PCI devices through
 host-owned SMMUv3 domains, restricting DMA to the I/O VM's RAM and explicit
 shared-memory grants. Guests still trust the backend for I/O data and
 availability. The physical MMIO compatibility and Pi 5 paths retain their
-trusted-I/O-VM requirement. See [I/O isolation](../../../kernel/docs/design/io-isolation.md)
+trusted-I/O-VM requirement. See [I/O isolation](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/io-isolation.md)
 for the permission, memory-lifetime and qualification boundaries.
 
 The AArch64 QEMU baseline runs two Linux VMs: the I/O VM directly drives a
@@ -125,7 +125,7 @@ architecture/platform, missing artifact, or failed checksum aborts import.
 Download and verification finish before a new generation becomes visible;
 failed updates leave the previously selected generation intact.
 Separate QEMU and Pi 5 AArch64 appliances are published as prereleases in GHCR.
-Each entry in [io-vm.lock.json](../../../scripts/io-vm.lock.json) pins its platform's
+Each entry in [io-vm.lock.json](https://github.com/HypeR-Proj/build/blob/main/scripts/io-vm.lock.json) pins its platform's
 immutable reference, source revision and successful qualification/publication
 runs. Platform metadata identifies the build profile; it does not certify Pi
 hardware operation. The development image with the combined SDIO1/RP1
@@ -188,7 +188,7 @@ for the runtime; the I/O runtime checks its complete device policy against
 `/etc/hyper/io-clients.conf`, generated from the same board JSON as the Linux
 client and network tables. Duplicate active bindings are refused.
 The board source assigns client IDs when it generates the runtime definitions;
-see [the QEMU board](../../../boards/qemu.json) for the source format.
+see [the QEMU board](../../../products/boards/qemu.json) for the source format.
 `vmm create NAME --config FILE` reads disk/network assignments and runtime settings from
 the named definition in the configuration file; `--from SOURCE` selects a template.
 
@@ -463,12 +463,12 @@ activated I/O VM quarantines its physical devices and memory; clearing PCI bus
 mastering is not a DMA-drain proof. Ordinary business-VM stop/start still uses
 the shared backend retirement protocol.
 
-See the [Pi 5 Ethernet bring-up procedure](../../../kernel/docs/usage/rpi5.md#ethernet-backend-qualification).
+See the [Pi 5 Ethernet bring-up procedure](https://github.com/HypeR-Proj/kernel/blob/main/docs/usage/rpi5.md#ethernet-backend-qualification).
 Host tests and QEMU acceptance do not qualify the physical RP1 link, cache
 maintenance or interrupt ordering. The physical TCP survey records basic
 operation; sustained traffic, concurrent I/O and fault coverage remain
 [deferred qualification](../../project/roadmap.md#deferred-hardware-qualification).
-The [manual network tools](../../../tests/hardware/network/README.md) are opt-in guest
+The [manual network tools](https://github.com/HypeR-Proj/ci/blob/main/tests/hardware/network/README.md) are opt-in guest
 additions and do not change the default Alpine rootfs or I/O VM appliance.
 
 ## Shared pages and DMA
@@ -641,7 +641,7 @@ to reuse them.
 
 ### Protocol version 3 appliance requirement
 
-The [package lock](../../../scripts/io-vm.lock.json) selects separate protocol version 3
+The [package lock](https://github.com/HypeR-Proj/build/blob/main/scripts/io-vm.lock.json) selects separate protocol version 3
 QEMU and Pi 5 appliances published from the merged HypeR-io-vm source. Default
 builds and I/O VM acceptance import and verify these immutable GHCR digests.
 The appliance boot banner and `/etc/hyper-io-version` identify the source
@@ -701,7 +701,7 @@ when changing device policy or guest startup files.
 
 ### Network acceptance
 
-The [network verifier](../../../tests/qemu/verify-network.py) derives a test fixture
+The [network verifier](https://github.com/HypeR-Proj/ci/blob/main/tests/qemu/verify-network.py) derives a test fixture
 from the default board and adds a second, network-only guest with a distinct
 MAC address. This second guest belongs to the test, not the default deployment.
 `test-board-network` prepares and runs this fixture with a fresh disposable disk
@@ -779,7 +779,7 @@ To qualify another generation, pass
 built Pi package against its platform metadata. The lock explicitly records `hardware_qualified: false`.
 
 Linux build instructions and the vhost-scsi reserved-page acceptance test live
-in [HypeR-io-vm](https://github.com/roolrz/HypeR-io-vm). They run in that
+in [HypeR-io-vm](https://github.com/HypeR-Proj/io-vm). They run in that
 repository. The HypeR fixture defaults to the pinned QEMU package:
 
 ```sh
@@ -896,7 +896,7 @@ This reporting does not stop or restart the I/O VM. The quarantined device canno
 resume DMA until host reboot; unaffected devices can continue working. Kernel
 serial logs remain available independently. Platforms without SMMU enforcement
 do not gain DMA protection from the reporting API. See
-[SMMUv3 fault handling](../../../kernel/docs/design/smmuv3.md#formal-io-runtime-notification).
+[SMMUv3 fault handling](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/smmuv3.md#formal-io-runtime-notification).
 
 ### Hotplugged agent transport
 

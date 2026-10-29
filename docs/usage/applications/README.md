@@ -28,7 +28,7 @@ The shell also has builtins, including `echo` and `printf`.
 
 [Application I/O and authority](execution.md) explains terminal ownership,
 standard streams and which diagnostic capabilities a launched command receives.
-[Native application development](../../../app/README.md) covers the SDK and build
+[Native application development](https://github.com/HypeR-Proj/build/blob/main/app/README.md) covers the SDK and build
 workspace; [component design](../../design/services/components.md) covers background
 service configuration and lifecycle.
 
