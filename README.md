@@ -31,7 +31,7 @@ repository's `main`; updating the workspace is `repo sync` from its root.
 The manifest owns directory layout, product configuration and shared workspace
 files. [build](https://github.com/HypeR-Proj/build) supplies build tools at the
 workspace root. Edit the component checkouts directly; builds use those files.
-Library repository names start with `lib`, including `libc`, `lib-rust` and
+Library repository names start with `lib`, including `lib-system`, `lib-rust` and
 `lib-std`. I/O VM packages and Pi5 images have separate publication repositories.
 
 ## Development

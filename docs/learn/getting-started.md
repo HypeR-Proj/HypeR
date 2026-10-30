@@ -106,7 +106,7 @@ at `/system`, switches it to `/`, then launches system init. The original archiv
 is retained at `/boot` until formal providers take over and bootstrap retires.
 Ordinary programs and shared libraries live on the EROFS root; `/tmp` is RAM and
 `/data` is the persistent FAT volume.
-Ordinary applications are dynamic PIEs by default and share `libhyper.so`;
+Ordinary applications are dynamic PIEs by default and share `libsystem.so`;
 SDK consumers can select a self-contained static PIE with
 `HYPER_LINK_MODE=static`. Both kinds of system executable use the explicitly
 delegated formal loader; only bootstrap programs use the static bootstrap
