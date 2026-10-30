@@ -265,8 +265,8 @@ A new Process and a new Thread in an existing Process are different operations.
 Both eventually publish scheduler-owned Threads, but only Process creation
 loads a new image and address space.
 
-- **Process:** [std process adapter](https://github.com/HypeR-Proj/lib-std/blob/main/pal/overlay/std/src/sys/process/hyper.rs)
-  and [libsystem process adapter](https://github.com/HypeR-Proj/lib-std/blob/main/shim/src/std-process.c), or an explicit
+- **Process:** [std process adapter](https://github.com/HypeR-Proj/lib-rust-std/blob/main/pal/overlay/std/src/sys/process/hyper.rs)
+  and [libsystem process adapter](https://github.com/HypeR-Proj/lib-rust-std/blob/main/shim/src/std-process.c), or an explicit
   [SDK ProcessBuilder](https://github.com/HypeR-Proj/lib-rust/blob/main/hyper-os/src/task.rs), lead through Native
   dispatch to [the kernel builder](https://github.com/HypeR-Proj/kernel/blob/main/src/process/builder.rs).
   Follow `start_process_builder`, [bootstrap mapping](https://github.com/HypeR-Proj/kernel/blob/main/src/process/loader.rs),
@@ -281,7 +281,7 @@ loads a new image and address space.
   SDK start waits for runtime readiness, before constructors and `main`.
   A loader failure after kernel commit
   stops and joins the child rather than returning a retryable builder.
-- **Additional Thread:** [std thread adapter](https://github.com/HypeR-Proj/lib-std/blob/main/pal/overlay/std/src/sys/thread/hyper.rs)
+- **Additional Thread:** [std thread adapter](https://github.com/HypeR-Proj/lib-rust-std/blob/main/pal/overlay/std/src/sys/thread/hyper.rs)
   uses [thread_spawn.c](https://github.com/HypeR-Proj/lib-system/blob/main/src/thread_spawn.c). Native `thread_create`
   reaches `create_thread` in [task services](https://github.com/HypeR-Proj/kernel/blob/main/src/entry/services/task.rs),
   which validates start information and affinity and asks the Process owner to
@@ -327,8 +327,8 @@ and bounded by the capacity reserved at creation, not automatic fault-driven gro
 
 ## 6. Native file access: ramfs versus `/data`
 
-Start with [std fs](https://github.com/HypeR-Proj/lib-std/blob/main/pal/overlay/std/src/sys/fs/hyper.rs),
-[std-fs.c](https://github.com/HypeR-Proj/lib-std/blob/main/shim/src/std-fs.c), then Native filesystem dispatch.
+Start with [std fs](https://github.com/HypeR-Proj/lib-rust-std/blob/main/pal/overlay/std/src/sys/fs/hyper.rs),
+[std-fs.c](https://github.com/HypeR-Proj/lib-rust-std/blob/main/shim/src/std-fs.c), then Native filesystem dispatch.
 [Kernel VFS services](https://github.com/HypeR-Proj/kernel/blob/main/src/fs/vfs/service.rs) and
 [entry adapters](https://github.com/HypeR-Proj/kernel/blob/main/src/entry/services/vfs.rs) enforce capability
 rights, copy payloads and invoke the VFS objects.

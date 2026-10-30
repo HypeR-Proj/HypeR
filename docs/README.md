@@ -37,7 +37,7 @@ Each component maintains and publishes its own documentation after changes merge
 | less | [Read](https://hyper-proj.github.io/less/) | [GitHub](https://github.com/HypeR-Proj/less) |
 | lib-block | [Read](https://hyper-proj.github.io/lib-block/) | [GitHub](https://github.com/HypeR-Proj/lib-block) |
 | lib-bootstrap-handoff | [Read](https://hyper-proj.github.io/lib-bootstrap-handoff/) | [GitHub](https://github.com/HypeR-Proj/lib-bootstrap-handoff) |
-| lib-clap-shared | [Read](https://hyper-proj.github.io/lib-clap-shared/) | [GitHub](https://github.com/HypeR-Proj/lib-clap-shared) |
+| lib-clap | [Read](https://hyper-proj.github.io/lib-clap/) | [GitHub](https://github.com/HypeR-Proj/lib-clap) |
 | lib-component | [Read](https://hyper-proj.github.io/lib-component/) | [GitHub](https://github.com/HypeR-Proj/lib-component) |
 | lib-component-config | [Read](https://hyper-proj.github.io/lib-component-config/) | [GitHub](https://github.com/HypeR-Proj/lib-component-config) |
 | lib-dynamic-loader | [Read](https://hyper-proj.github.io/lib-dynamic-loader/) | [GitHub](https://github.com/HypeR-Proj/lib-dynamic-loader) |
@@ -45,9 +45,9 @@ Each component maintains and publishes its own documentation after changes merge
 | lib-journal-client | [Read](https://hyper-proj.github.io/lib-journal-client/) | [GitHub](https://github.com/HypeR-Proj/lib-journal-client) |
 | lib-rust | [Read](https://hyper-proj.github.io/lib-rust/) | [GitHub](https://github.com/HypeR-Proj/lib-rust) |
 | lib-rust-fatfs | [Read](https://hyper-proj.github.io/lib-rust-fatfs/) | [GitHub](https://github.com/HypeR-Proj/lib-rust-fatfs) |
+| lib-rust-std | [Read](https://hyper-proj.github.io/lib-rust-std/) | [GitHub](https://github.com/HypeR-Proj/lib-rust-std) |
 | lib-service | [Read](https://hyper-proj.github.io/lib-service/) | [GitHub](https://github.com/HypeR-Proj/lib-service) |
 | lib-service-ipc | [Read](https://hyper-proj.github.io/lib-service-ipc/) | [GitHub](https://github.com/HypeR-Proj/lib-service-ipc) |
-| lib-std | [Read](https://hyper-proj.github.io/lib-std/) | [GitHub](https://github.com/HypeR-Proj/lib-std) |
 | lib-terminal | [Read](https://hyper-proj.github.io/lib-terminal/) | [GitHub](https://github.com/HypeR-Proj/lib-terminal) |
 | lib-text-ui | [Read](https://hyper-proj.github.io/lib-text-ui/) | [GitHub](https://github.com/HypeR-Proj/lib-text-ui) |
 | lib-tool-args | [Read](https://hyper-proj.github.io/lib-tool-args/) | [GitHub](https://github.com/HypeR-Proj/lib-tool-args) |
