@@ -11,14 +11,11 @@
   "packages": [],
   "tests": [
     [
-      "sh",
-      "-n",
-      "{component}/setup.sh"
-    ],
-    [
-      "sh",
-      "{component}/setup.sh",
-      "--help"
+      "python3",
+      "{system}/scripts/docs/check-source.py",
+      "{component}"
     ]
-  ]
+  ],
+  "test_requires_rust": false,
+  "tests_need_workspace": false
 }
