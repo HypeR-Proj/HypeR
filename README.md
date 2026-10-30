@@ -37,9 +37,11 @@ Library repository names start with `lib`, including `lib-system`, `lib-rust` an
 ## Development
 
 Each repository owns its license, CODEOWNERS, module configuration and tests.
-Pull requests run module tests automatically. Related PRs can share a `topic:`
-label; system tests are manually dispatched in
-[ci](https://github.com/HypeR-Proj/ci/actions/workflows/system.yml).
+Pull requests run module tests automatically. Related PRs share a lower-case
+`topic:` label. In the PR Checks tab, use **Run system CI** and **Submit topic**
+to verify and submit the complete group. The central coordinator processes button
+requests every few minutes. See [topic controls](https://github.com/HypeR-Proj/ci/blob/main/docs/topic-controls.md)
+for submission policy, recovery and expired-label cleanup.
 
 ```sh
 cd workspace
