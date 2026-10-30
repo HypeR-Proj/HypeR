@@ -208,7 +208,7 @@ as a fresh read of remote hardware.
 
 ```mermaid
 flowchart TB
-    app["Application<br/>std / hyper-os"] --> sdk["SDK veneers<br/>libhyper / hyper-sys"]
+    app["Application<br/>std / hyper-os"] --> sdk["SDK veneers<br/>libsystem / hyper-sys"]
     sdk -->|Native trap| entry["HAL user entry"]
     entry --> runner["Kernel user runner<br/>Interruptible Thread context"]
     runner --> dispatch["Native syscall dispatch"]
@@ -266,7 +266,7 @@ Both eventually publish scheduler-owned Threads, but only Process creation
 loads a new image and address space.
 
 - **Process:** [std process adapter](https://github.com/HypeR-Proj/lib-std/blob/main/pal/overlay/std/src/sys/process/hyper.rs)
-  and [libhyper process adapter](https://github.com/HypeR-Proj/lib-std/blob/main/shim/src/std-process.c), or an explicit
+  and [libsystem process adapter](https://github.com/HypeR-Proj/lib-std/blob/main/shim/src/std-process.c), or an explicit
   [SDK ProcessBuilder](https://github.com/HypeR-Proj/lib-rust/blob/main/hyper-os/src/task.rs), lead through Native
   dispatch to [the kernel builder](https://github.com/HypeR-Proj/kernel/blob/main/src/process/builder.rs).
   Follow `start_process_builder`, [bootstrap mapping](https://github.com/HypeR-Proj/kernel/blob/main/src/process/loader.rs),
@@ -282,22 +282,22 @@ loads a new image and address space.
   A loader failure after kernel commit
   stops and joins the child rather than returning a retryable builder.
 - **Additional Thread:** [std thread adapter](https://github.com/HypeR-Proj/lib-std/blob/main/pal/overlay/std/src/sys/thread/hyper.rs)
-  uses [thread_spawn.c](https://github.com/HypeR-Proj/libc/blob/main/src/thread_spawn.c). Native `thread_create`
+  uses [thread_spawn.c](https://github.com/HypeR-Proj/lib-system/blob/main/src/thread_spawn.c). Native `thread_create`
   reaches `create_thread` in [task services](https://github.com/HypeR-Proj/kernel/blob/main/src/entry/services/task.rs),
   which validates start information and affinity and asks the Process owner to
   prepare the user Thread. Creation and `thread_start` are separate operations.
   [UserThread](https://github.com/HypeR-Proj/kernel/blob/main/src/process/user_thread.rs) and
   [scheduler Thread](https://github.com/HypeR-Proj/kernel/blob/main/src/task/thread.rs) serve different ownership roles.
-- **Stack:** [stack.c](https://github.com/HypeR-Proj/libc/blob/main/src/stack.c) manages guarded reservations and
+- **Stack:** [stack.c](https://github.com/HypeR-Proj/lib-system/blob/main/src/stack.c) manages guarded reservations and
   explicit growth for both the runtime-created main stack and SDK-created worker stacks.
-  [Runtime initialization](https://github.com/HypeR-Proj/libc/blob/main/src/runtime.c) copies startup data;
-  [bootstrap handoff](https://github.com/HypeR-Proj/libc/blob/main/src/bootstrap.c) builds the final entry vector,
+  [Runtime initialization](https://github.com/HypeR-Proj/lib-system/blob/main/src/runtime.c) copies startup data;
+  [bootstrap handoff](https://github.com/HypeR-Proj/lib-system/blob/main/src/bootstrap.c) builds the final entry vector,
   switches to the final stack and only then releases the kernel bootstrap
   reservation. Static programs also retire the loader mapping; dynamic programs
   retain their formal loader for runtime linking. The
   [address-layout table](https://github.com/HypeR-Proj/lib-dynamic-loader/blob/main/elf/README.md#address-layout)
   separates current placement policy from the kernel entry contract.
-  See [stack APIs](https://github.com/HypeR-Proj/libc/blob/main/README.md#guarded-growable-stacks) before changing
+  See [stack APIs](https://github.com/HypeR-Proj/lib-system/blob/main/README.md#guarded-growable-stacks) before changing
   stack size or cleanup. A userspace stack is separate from its kernel stack.
 
 **Where the new Thread's SP comes from:** `hyper_runtime_thread_spawn_with_stack`
@@ -313,7 +313,7 @@ userspace, `aarch64_run_native_user` in
 writes `SP_EL0`, and executes `eret` after restoring the remaining user state.
 `worker` therefore starts on its final stack; it does not perform another stack
 switch. Its `hyper_runtime_thread_attach_stack` call only associates the stack
-descriptor with the per-thread SDK state in [thread.c](https://github.com/HypeR-Proj/libc/blob/main/src/thread.c).
+descriptor with the per-thread SDK state in [thread.c](https://github.com/HypeR-Proj/lib-system/blob/main/src/thread.c).
 
 **Who reclaims it:** the SDK starts one process-lifetime reaper lazily on the
 first runtime thread spawn. It waits for kernel `THREAD_TERMINATED` events,
@@ -468,7 +468,7 @@ Useful checks to read beside these paths:
 | VM ownership and trapped device operations | [vm-smoke](https://github.com/HypeR-Proj/ci/blob/main/app/vm-smoke/src/main.rs), [QEMU harness](https://github.com/HypeR-Proj/ci/blob/main/qemu/verify-vm-smoke.py) |
 | Guest SMP and power | [guest SMP harness](https://github.com/HypeR-Proj/ci/blob/main/qemu/verify-guest-smp.py) |
 | Native file and guest disk integration | [CI entry points](https://github.com/HypeR-Proj/ci/blob/main/ci/run.sh): `board-storage` and `io-vm` |
-| SDK stacks and thread cleanup | [stack tests](https://github.com/HypeR-Proj/libc/blob/main/tests/unit/stack.c), [spawn tests](https://github.com/HypeR-Proj/libc/blob/main/tests/unit/thread-spawn.c) |
+| SDK stacks and thread cleanup | [stack tests](https://github.com/HypeR-Proj/lib-system/blob/main/tests/unit/stack.c), [spawn tests](https://github.com/HypeR-Proj/lib-system/blob/main/tests/unit/thread-spawn.c) |
 
 Use [development](https://hyper-proj.github.io/build/docs/development.html) for commands and test prerequisites. A model
 test can establish a transition invariant; QEMU checks integration. Neither
