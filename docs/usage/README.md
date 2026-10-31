@@ -25,7 +25,7 @@ describe supported behavior and limits, not assumed Linux compatibility.
 - [Memory diagnostics](https://hyper-proj.github.io/kernel/docs/usage/memory-diagnostics.html): snapshots, differences and optional heap profiling.
 - [PMU sampling and flame graphs](https://hyper-proj.github.io/perf/docs/profiling.html): capture, conversion and interpretation limits.
 - [Perfetto timelines](https://hyper-proj.github.io/perf/docs/tracing.html): event filters, bounded capture, export and loss interpretation.
-- [Scheduler benchmarks](https://hyper-proj.github.io/ci/docs/scheduler-bench.html): periodic wakeup latency, same/cross-CPU handoff, fairness and reproducible distributions.
+- [Scheduler benchmarks](https://hyper-proj.github.io/system-tests/docs/scheduler-bench.html): periodic wakeup latency, same/cross-CPU handoff, fairness and reproducible distributions.
 - [Crash console](https://github.com/HypeR-Proj/kernel/blob/main/docs/usage/crash-console.md): configured post-failure inspection.
 - [Kernel stack budgets](https://github.com/HypeR-Proj/kernel/blob/main/docs/usage/stack-budgets.md): measurement and reproducing the checks.
 - [Storage qualification](https://github.com/HypeR-Proj/ci/blob/main/hardware/storage/README.md) and [network exercise](https://github.com/HypeR-Proj/ci/blob/main/hardware/network/README.md): hardware test procedures.
@@ -35,4 +35,4 @@ describe supported behavior and limits, not assumed Linux compatibility.
 - [Development workflow](https://hyper-proj.github.io/build/docs/development.html): editor configuration, source owners and testing.
 - [Incremental builds](https://hyper-proj.github.io/build/docs/incremental-builds.html): dependencies and rebuild costs.
 - [Documentation maintenance](https://hyper-proj.github.io/build/docs/documentation.html): placement, website generation and link checks.
-- [CI suites](https://github.com/HypeR-Proj/ci/blob/main/ci/README.md), [kernel validation](https://github.com/HypeR-Proj/kernel/blob/main/tests/VALIDATION.md), and [stress/fuzz tests](https://github.com/HypeR-Proj/ci/blob/main/stress/README.md): acceptance procedures.
+- [CI suites](https://github.com/HypeR-Proj/system-tests/blob/main/ci/README.md), [kernel validation](https://github.com/HypeR-Proj/kernel/blob/main/tests/VALIDATION.md), and [stress/fuzz tests](https://github.com/HypeR-Proj/system-tests/blob/main/stress/README.md): acceptance procedures.

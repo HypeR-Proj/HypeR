@@ -793,7 +793,7 @@ Before opening a change, be able to answer:
    checks the invariant it relies on?
 
 Use [the CI dispatcher](https://github.com/HypeR-Proj/ci/blob/main/ci/run.sh) and
-[CI documentation](https://github.com/HypeR-Proj/ci/blob/main/ci/README.md) to select the repository's actual
+[CI documentation](https://github.com/HypeR-Proj/system-tests/blob/main/ci/README.md) to select the repository's actual
 validation entry points. Prefer them to inventing a parallel test command that
 silently omits configuration, generated-code or packaging checks. Use
 [the syscall reference](https://github.com/HypeR-Proj/kernel/blob/main/docs/design/syscall-abi.md) for wire contracts and
