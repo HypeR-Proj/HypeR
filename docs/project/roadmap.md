@@ -165,8 +165,8 @@ tools remain available; deferral does not mean the checks have passed.
 - [ ] Extended qualification of the minimal Pi 5 appliance, repeatability,
   system-wide CPU consumption and controlled environment metadata.
 
-See the [manual storage procedure](https://github.com/HypeR-Proj/ci/blob/main/hardware/storage/README.md) and
-[network exercise](https://github.com/HypeR-Proj/ci/blob/main/hardware/network/README.md). Current measurements
+See the [manual storage procedure](https://github.com/HypeR-Proj/system-tests/blob/main/hardware/storage/README.md) and
+[network exercise](https://github.com/HypeR-Proj/system-tests/blob/main/hardware/network/README.md). Current measurements
 remain exploratory and do not establish production readiness.
 
 ## Later work
