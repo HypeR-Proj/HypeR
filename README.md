@@ -28,8 +28,10 @@ product definitions. Sources track each repository's `main`; update with `repo s
 For a working manifest branch, select it with `repo init -b BRANCH`, then sync.
 There is no need to clone this documentation repository into the workspace.
 
-[build](https://github.com/HypeR-Proj/build) supplies build tools at the workspace
-root. `make` runs preparation automatically; `make prepare` is also available
+[build](https://github.com/HypeR-Proj/build) supplies build tools in `build/`,
+with the independent FIT tool in `build/tools/fit-pack`. The workspace root is
+a plain directory without a Git repository; the manifest creates its `Makefile`
+and `project.py` entry links. `make` runs preparation automatically; `make prepare` is also available
 explicitly. Generated Cargo workspaces, editor settings, configurations and build
 artifacts live in `OUT` (default: `out`). Sources remain in their owning repositories.
 Library repository names start with `lib`, including `lib-system`, `lib-rust` and

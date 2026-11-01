@@ -12,7 +12,8 @@
   "tests": [
     [
       "python3",
-      "{system}/scripts/docs/check-source.py",
+      "{system}/project.py",
+      "check-docs",
       "{component}"
     ]
   ],

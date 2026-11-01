@@ -21,6 +21,8 @@ make
 make run
 ```
 
+The workspace root is not a Git repository. Build tools live in `build/`;
+`Makefile` and `project.py` at the root are manifest-generated entry links.
 `make` also performs preparation automatically. `OUT` defaults to `out`; it holds
 configurations, generated workspace files and build artifacts. Source repositories
 remain independently editable. To change the output location, pass the same absolute
