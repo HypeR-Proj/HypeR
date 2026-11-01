@@ -6,7 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 # Getting started
 
 Install Git, Python 3.11 or newer and the Android `repo` tool. The
-[build guide](https://hyper-proj.github.io/build/docs/getting-started.html)
+[build guide](https://hyper-proj.github.io/HypeR/docs/learn/host-setup.html)
 contains compiler, host-tool and emulator requirements.
 
 Create a workspace directly; cloning the documentation repository is unnecessary:

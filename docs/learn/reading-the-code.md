@@ -470,7 +470,7 @@ Useful checks to read beside these paths:
 | Native file and guest disk integration | [CI entry points](https://github.com/HypeR-Proj/ci/blob/main/ci/run.sh): `board-storage` and `io-vm` |
 | SDK stacks and thread cleanup | [stack tests](https://github.com/HypeR-Proj/lib-system/blob/main/tests/unit/stack.c), [spawn tests](https://github.com/HypeR-Proj/lib-system/blob/main/tests/unit/thread-spawn.c) |
 
-Use [development](https://hyper-proj.github.io/build/docs/development.html) for commands and test prerequisites. A model
+Use [development](https://hyper-proj.github.io/HypeR/docs/learn/development.html) for commands and test prerequisites. A model
 test can establish a transition invariant; QEMU checks integration. Neither
 alone establishes physical-device DMA safety or every weak-memory ordering case.
 
