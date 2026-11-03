@@ -141,7 +141,9 @@ make board-run BOARD=qemu
 Plain AArch64 `make` creates the complete board image only when missing;
 otherwise it updates the host-side kernel/bootstrap and the generated EROFS
 system volume, preserving data and guest partitions.
-`make rebuild` atomically repacks the full disk, resetting its data.
+`make rebuild` (and `make board-rebuild`) follows the same data-preserving path.
+`make board-reset-storage` explicitly repacks the full disk, resetting all its data
+only after packing succeeds. Stop the VM before replacing its disk.
 `make run` only starts existing artifacts.
 The Alpine volume is initialized from the pinned base rootfs as an ext4 disk.
 Alpine boots it through I/O VM virtio-scsi; `apk` and BusyBox tools are included.
@@ -172,7 +174,7 @@ still carry their guest fixtures.
 `BOARD_CONFIG` selects a custom JSON file, `BOARD_OUTPUT` selects staging, and
 `BOARD_IMAGE` selects the resulting raw image. `board-image` refuses to
 overwrite an existing image unless `BOARD_IMAGE_REPLACE=--replace` is supplied.
-Use `make board-rebuild` for an explicit full replacement, or choose a new
+Use `make board-reset-storage` for an explicit full replacement, or choose a new
 output name to preserve the previous disk.
 `rpi5-sd` defaults to `boards/rpi5.json`, honors an explicitly supplied
 `BOARD_CONFIG`, and accepts a separate `RPI5_BOARD_CONFIG` override. Extra volume
@@ -254,7 +256,7 @@ To replace a disposable QEMU deployment with the current configuration and
 guest files, run:
 
 ```sh
-make board-rebuild ARCH=aarch64 BOARD=qemu
+make board-reset-storage ARCH=aarch64 BOARD=qemu
 make board-run ARCH=aarch64 BOARD=qemu
 ```
 
