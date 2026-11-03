@@ -754,7 +754,8 @@ with the same handoff wire contract and an independent dependency graph.
 The [root Makefile](https://github.com/HypeR-Proj/build/blob/main/Makefile) connects those operations. `make` builds and
 updates boot artifacts while preserving existing persistent disk content;
 `make run` launches existing artifacts without compiling; `make rebuild`
-repacks the image. In particular, rebuilding an application does not imply
+updates generated contents while preserving data and guest partitions. Only the
+explicit `make board-reset-storage` target repacks the whole disk. Rebuilding an application does not imply
 that an existing persistent configuration volume was reset.
 
 Read [deployment tests](https://github.com/HypeR-Proj/build/blob/main/tests/build/app-deployment.py) and

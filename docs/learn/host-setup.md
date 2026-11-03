@@ -96,7 +96,8 @@ the manifest-owned QEMU board definition or the guest `/init` do not update thos
 `make run` only starts existing artifacts. A changed system executable or
 library requires a matching system image; the build rejects a stale system
 payload instead of silently pairing it with a new bootstrap. `make rebuild`
-repacks the whole disk and resets its data. See
+preserves persistent data while updating generated contents. Stop the VM and use
+`make board-reset-storage` only when you intend to replace the entire disk. See
 [updating existing deployments](https://hyper-proj.github.io/HypeR/docs/usage/board-storage.html#updating-existing-deployments)
 before changing a persistent deployment.
 
@@ -175,7 +176,8 @@ Useful targets:
 | `make sdk-check` / `make sdk-test` | Verify SDK generation, publication, compilation, and portable runtime behavior |
 | `make native-initramfs` | Build the test-only RAMFS handoff fixture; product images use independent system storage |
 | `make` / `make run ARCH=aarch64` | Build while preserving persistent disk contents / start existing artifacts |
-| `make rebuild` | Repack the board disk, resetting persistent contents |
+| `make rebuild` | Rebuild generated outputs, preserving persistent data |
+| `make board-reset-storage` | Repack the board disk, resetting all persistent contents |
 | `make test-native` | Verify the Native service graph, command execution, and managed Linux VM console attach/detach under QEMU |
 | `make guest-assets ARCH=<arch>` | Download and package the pinned Linux guest inputs |
 | `make check ARCH=<arch>` | Run target checks and Clippy, including kernel self-test builds |
