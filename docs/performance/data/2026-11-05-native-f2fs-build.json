@@ -1,0 +1,378 @@
+{
+  "image_label": "rpi5-vfs-writeback-20261105-reviewed",
+  "source": {
+    "identity": "408e394739bf10bf9dfd1e2f3a4319f0756762084698c702696b6fe43d13e34e",
+    "dirty": false,
+    "components": {
+      "build": {
+        "commit": "5b99a514ea3ca8f0625c001f5bb1cc44acde2a98",
+        "dirty": false,
+        "path": "build/system"
+      },
+      "app": {
+        "commit": "520f52ebbc5a52753bf9bf4e4758c7b792486a2d",
+        "dirty": false,
+        "path": "build/app"
+      },
+      "svc": {
+        "commit": "6865f8abdacc551d81d12fc3eb71818d86490557",
+        "dirty": false,
+        "path": "build/svc"
+      },
+      "docs": {
+        "commit": "4b001649e2be22d14129804becf9ce5ef454e04a",
+        "dirty": false,
+        "path": "docs"
+      },
+      "componentctl": {
+        "commit": "c45c29c43831c6c2038c6ba1f491d6cb4a1c40b1",
+        "dirty": false,
+        "path": "app/componentctl"
+      },
+      "coreutils": {
+        "commit": "d922e4eac4190730c597eb80cbd5f476e9294c40",
+        "dirty": false,
+        "path": "app/coreutils"
+      },
+      "editor": {
+        "commit": "4d0056497de363138d01228baf5e96ec02e64cd0",
+        "dirty": false,
+        "path": "app/editor"
+      },
+      "free": {
+        "commit": "1695f1e9741657f4d275cd48bee6738ba21bab89",
+        "dirty": false,
+        "path": "app/free"
+      },
+      "grep": {
+        "commit": "edc05b8704aa015397f2dfe4b77f200343696e05",
+        "dirty": false,
+        "path": "app/grep"
+      },
+      "handle": {
+        "commit": "ae159d0b342d0c30f2cc65b14edc92e9637d2424",
+        "dirty": false,
+        "path": "app/handle"
+      },
+      "journalctl": {
+        "commit": "babbf5dc024de9c8bb2e7b636e0687d6fb2f094a",
+        "dirty": false,
+        "path": "app/journalctl"
+      },
+      "ldd": {
+        "commit": "73980ad849aeeff9895113ba960c743710758cca",
+        "dirty": false,
+        "path": "app/ldd"
+      },
+      "less": {
+        "commit": "72e6ef424db2fcfe103d4bfad4efd715d3c900b8",
+        "dirty": false,
+        "path": "app/less"
+      },
+      "memstat": {
+        "commit": "1b01c97a090025e847ba2640a7c0d84b66d0fc3f",
+        "dirty": false,
+        "path": "app/memstat"
+      },
+      "mount": {
+        "commit": "41a0756235e15a6d6be2d0acdd27e4f1c5d9727c",
+        "dirty": false,
+        "path": "app/mount"
+      },
+      "perf": {
+        "commit": "92250281fc800293a84012fe5ed199dac0b1de9d",
+        "dirty": false,
+        "path": "app/perf"
+      },
+      "ps": {
+        "commit": "3b0fd65fa56c177216ee69d1c4ea7dfc1221e6e3",
+        "dirty": false,
+        "path": "app/ps"
+      },
+      "shell": {
+        "commit": "a09d25257d42c77a9aa4753c9792890083f5295f",
+        "dirty": false,
+        "path": "app/shell"
+      },
+      "top": {
+        "commit": "e6a5b0f4a61756e59118539af742e4b9193b71e3",
+        "dirty": false,
+        "path": "app/top"
+      },
+      "umount": {
+        "commit": "34270fc2faf6c295412343c61ebf9cafe0d36a93",
+        "dirty": false,
+        "path": "app/umount"
+      },
+      "vmm": {
+        "commit": "ec488a40f3877f92a791791de038721b44744f03",
+        "dirty": false,
+        "path": "app/vmm"
+      },
+      "bootstrap": {
+        "commit": "e96c48f54db2d31be8b6a21b0137d1e0bfb8ccbc",
+        "dirty": false,
+        "path": "bootstrap/stage1"
+      },
+      "io-vm": {
+        "commit": "13e9ef2de3682abc60d3db3f2f0f4fdb58234d01",
+        "dirty": false,
+        "path": "io-vm"
+      },
+      "kernel": {
+        "commit": "a06c96301ecfc520d6d11cc90f6b2e4f91fb2441",
+        "dirty": false,
+        "path": "kernel"
+      },
+      "lib-block": {
+        "commit": "eea2930b4294398d24e5374e54ee01929a05ec22",
+        "dirty": false,
+        "path": "lib/block"
+      },
+      "lib-bootstrap-handoff": {
+        "commit": "aaec0187d222ac534e8e0478eaf4e66ec68235c7",
+        "dirty": false,
+        "path": "lib/bootstrap-handoff"
+      },
+      "lib-clap": {
+        "commit": "196d9b900f168eec0d90e51e6acfdd4753406f97",
+        "dirty": false,
+        "path": "lib/clap"
+      },
+      "lib-component": {
+        "commit": "474a992806d3a720b528794a8843dd9443fe3e7f",
+        "dirty": false,
+        "path": "lib/component"
+      },
+      "lib-component-config": {
+        "commit": "2dd5c6e558a20a00f51cd3cf6575b7dc5ae5b5b8",
+        "dirty": false,
+        "path": "lib/component-config"
+      },
+      "lib-dynamic-loader": {
+        "commit": "0a6e41d4eca0a8c6c0c0345023f4c6885cb218a3",
+        "dirty": false,
+        "path": "lib/dynamic-loader"
+      },
+      "lib-fs-service": {
+        "commit": "5398cb2dc7465e019a20dc27e36d65e1518a0185",
+        "dirty": false,
+        "path": "lib/fs-service"
+      },
+      "lib-journal-client": {
+        "commit": "88d698e74d24be69a76e519f21cd086697d3f3a1",
+        "dirty": false,
+        "path": "lib/journal"
+      },
+      "lib-service": {
+        "commit": "c13c339460b2f2f735c2a484fa816427b2c6c44a",
+        "dirty": false,
+        "path": "lib/service"
+      },
+      "lib-service-ipc": {
+        "commit": "91407edb10e00a5608a2ede3441bd70628d4b73d",
+        "dirty": false,
+        "path": "lib/service-ipc"
+      },
+      "lib-terminal": {
+        "commit": "4abf787adf86efc550611c4c027d9453073315e4",
+        "dirty": false,
+        "path": "lib/terminal"
+      },
+      "lib-text-ui": {
+        "commit": "c22500ebdf6fd3d0bde63a41c4df7035d4f17ca4",
+        "dirty": false,
+        "path": "lib/text-ui"
+      },
+      "lib-tool-args": {
+        "commit": "1ce09b0bd75b0423aec05b33fc57227e18df9bbb",
+        "dirty": false,
+        "path": "lib/tool-args"
+      },
+      "lib-vm-image": {
+        "commit": "e067b3aa00a5068bff55c47f4c138e7ff9c63a18",
+        "dirty": false,
+        "path": "lib/vm-image"
+      },
+      "lib-vm-policy": {
+        "commit": "5d6989612960917701a3a76da147ea09ad46100d",
+        "dirty": false,
+        "path": "lib/vm-policy"
+      },
+      "lib-vm-support": {
+        "commit": "d46fc1095dd4cee5a65176175b24e74a6906a2f2",
+        "dirty": false,
+        "path": "lib/vm-support"
+      },
+      "pi5-images": {
+        "commit": "5a1953e74af26807de762fae11ae329c815fb40a",
+        "dirty": false,
+        "path": "build/pi5-images"
+      },
+      "abi": {
+        "commit": "37d6db0a13afa9b7f4d26d32daf03431a6dfcd49",
+        "dirty": false,
+        "path": "sdk/abi"
+      },
+      "toolchain": {
+        "commit": "017bf6190f248965f822026fe17972d416229c10",
+        "dirty": false,
+        "path": "sdk/toolchain"
+      },
+      "lib-system": {
+        "commit": "3801f80bbdd5f060c63188ebc68cf6619fd0bff8",
+        "dirty": false,
+        "path": "stdlib/system"
+      },
+      "lib-musl": {
+        "commit": "dc949399d3b917819f78e579451ff9458c684a28",
+        "dirty": false,
+        "path": "stdlib/musl"
+      },
+      "lib-cxx": {
+        "commit": "4ff6480028fdd0fada0492312c2e7f4a9d6feee4",
+        "dirty": false,
+        "path": "stdlib/cxx"
+      },
+      "lib-rust": {
+        "commit": "b6b6aa57736b20165b53ce5a3119357dacb54ec9",
+        "dirty": false,
+        "path": "stdlib/rust"
+      },
+      "lib-rust-std": {
+        "commit": "244d78b56503dc13de5c1e46e759b75112281b2d",
+        "dirty": false,
+        "path": "stdlib/rust-std"
+      },
+      "bootstrap-retire": {
+        "commit": "3701a9542b13baf99aeb414f92ff9bbc4f31acec",
+        "dirty": false,
+        "path": "svc/bootstrap-retire"
+      },
+      "component-manager": {
+        "commit": "4c5d5b988ea03943236890e9f2013e5c2d58484d",
+        "dirty": false,
+        "path": "svc/component-manager"
+      },
+      "console-raw": {
+        "commit": "8395224690a40061ad484c8ba34297bef4b6c452",
+        "dirty": false,
+        "path": "svc/console-raw"
+      },
+      "fs-backend": {
+        "commit": "088f0cbf0e62b589caf84b3ef1d035ec9b85b934",
+        "dirty": false,
+        "path": "svc/fs-backend"
+      },
+      "fs-erofs": {
+        "commit": "a1a68bab155abee5704c29627786712eff7eb573",
+        "dirty": false,
+        "path": "svc/fs-erofs"
+      },
+      "fs-f2fs": {
+        "commit": "6b9222db470b59c788603d860d4eaf8f6c2bb5a9",
+        "dirty": false,
+        "path": "svc/fs-f2fs"
+      },
+      "fs-fat": {
+        "commit": "1647480b87d627506135f30e8d8e099e914ecb13",
+        "dirty": false,
+        "path": "svc/fs-fat"
+      },
+      "io-runtime": {
+        "commit": "d360529fa09d13e375ea841e0b64340625334662",
+        "dirty": false,
+        "path": "svc/io-runtime"
+      },
+      "journald": {
+        "commit": "9e8ae5b296c7a394587955a02651bc0ef884b7d6",
+        "dirty": false,
+        "path": "svc/journal"
+      },
+      "session-manager": {
+        "commit": "c6dfe1e75739e996e8b2588bac5858e01dc24ec5",
+        "dirty": false,
+        "path": "svc/session-manager"
+      },
+      "system-startup": {
+        "commit": "e012f1b47f78a7081452a784c99fab13782d911c",
+        "dirty": false,
+        "path": "svc/system-startup"
+      },
+      "terminal-service": {
+        "commit": "bea3c2035b2a23b1d3cbd6e0f6fa74e1611f67d3",
+        "dirty": false,
+        "path": "svc/terminal-service"
+      },
+      "vm-manager": {
+        "commit": "7d810f13bbc45b97fc56c092bb92c388e2945e7f",
+        "dirty": false,
+        "path": "svc/vm-manager"
+      },
+      "vm-runtime": {
+        "commit": "d0e617f8d78a0bc7a6898918f4f57859817d6030",
+        "dirty": false,
+        "path": "svc/vm-runtime"
+      },
+      "ci": {
+        "commit": "bdaea09cc168beaa29e3401548c95cb8b26b904d",
+        "dirty": false,
+        "path": "ci"
+      },
+      "test-framework": {
+        "commit": "34640dae9e12e8db919dc3a284a381ac8515b4cc",
+        "dirty": false,
+        "path": "test-framework"
+      },
+      "system-tests": {
+        "commit": "1a6ba77deacce6ca33fbf9675155192b7a7b3513",
+        "dirty": false,
+        "path": "tests"
+      },
+      "lib-rust-fatfs": {
+        "commit": "adb6acbc160e8be4152e34db874dbd8e2bd3cbce",
+        "dirty": false,
+        "path": "third_party/rust-fatfs"
+      },
+      "fit-pack": {
+        "commit": "ee92dbb8e78bb8b68bf44fc8cac2839d9618b17b",
+        "dirty": false,
+        "path": "build/tools/fit-pack"
+      },
+      "manifest": {
+        "commit": "c94dffc5b31b38d666f5de96f15bb43fceea14b4",
+        "dirty": false,
+        "path": "manifest"
+      }
+    }
+  },
+  "artifact_sha256": {
+    "storage-qual-linux": "645b6a840898f4942d5284bfc93f305c1eba58451181720f725bbdbdc178ee4b",
+    "storage-qual-hyper": "80b3efe4db50f62aeb0f06556c5cb5958c20acae962d977ac0388f2cc7c3e17a",
+    "disk.img": "f70f5478b068a1b98a8748fb70e7939b206e74369919169370da8dc4327bb72e",
+    "hyper.img": "a654db8a0281210a8c97930e7a612da9d5fc531b7ab54f6838ed905dec5324e9",
+    "kernel.config": "423a2c7d8e806bc9a8e81bcba6c05a851bc9a789b664f05c071a8a5983914c25",
+    "io.itb": "809f948fd2da1bc7f347d28c343e9dac8954889e0babb5351c0d32d6e045ce72"
+  },
+  "trace_profile": null,
+  "measurement_format": null,
+  "workload_source_sha256": {
+    "tests/hardware/storage/durability.c": "7cf70e5779679730ee965218e8b3e85144944c4aa7733bff7921d4cde2a0e1e0",
+    "tests/hardware/storage/entry-hyper.c": "5af90099b3acc693920f8bdd014d6e87c186a9f3bc8a2ea5329ccb8c40ed5dc7",
+    "tests/hardware/storage/entry-linux.c": "0cab65785fe979cce43dc5f2f82fb15e016eab6bbb4f9e93591fe3ec43cdd88c",
+    "tests/hardware/storage/records.c": "9767e76bb3716a8be1760b78ba23ebf01408ab8b68234c658f0ae8ee85806503",
+    "tests/hardware/storage/workload.c": "1172b359af35d3c4218ffb716119e1aaf68e4a7b4c0339e667801566f1ff4618",
+    "tests/hardware/storage/qualification.h": "e387d32eebb558f15e92da4236d8f247f0dbbc1148dbe31630c7631ab8a1ab4b",
+    "tests/hardware/storage/prepare.py": "de2043ded06e4141a7f951c0f9553d9e2d77a54c84c7d210b33bb1b502cc3773",
+    "tests/hardware/storage/results.py": "16db2aeea0157a46b262cfe3cc9517980cd3afea75c98ef0fcbe893c4eff5f5a",
+    "tests/hardware/storage/test-storage.py": "e8858fb0af7e953e33ea8e3e515247c9116f77c27a8a622f282f702931958ee6",
+    "tests/hardware/storage/README.md": "74707b1915ea980805f1778cae65d61a5b8602c8b2e281b6860ee391b2fea002",
+    "tests/performance/platform.h": "e28448525f18a6ca50a51d780b14199a6f230dc12f43b72ecbc8b7b7145ee810",
+    "tests/performance/hyper.c": "a5d9b9d64b6e0ff9804bb22bcf1f261fbc28f93ed153c66a1473e59fa7e12ce1",
+    "tests/performance/linux.c": "3b159bc32e3566ecc84479b9ca79b3520a36cd33af8e83231e03f546df27ad24",
+    "boards/rpi5.json": "b2260086e67f020a2f7485e828e27a86f55489fb0c5958d67ce9840e2901f14a",
+    "bootstrap/stage1/io-runtime/Cargo.toml": "4a5b8a4bce7c4cb2bf55e149415b4fad310ecef8133f8961ae5c3a693fac54dd",
+    "bootstrap/stage1/io-runtime/src/runtime/mod.rs": "978d718b9f6868b604cf10f626e9ede8d4a3b2b34c72a950be9b8d4a21d2e429",
+    "bootstrap/stage1/io-runtime/tests/fixtures/physical_retirement.rs": "72ac5583f06476d2533ba5491df17e09f40702fa02da36ca6377445731c2cb55"
+  }
+}

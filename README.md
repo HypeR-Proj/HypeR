@@ -13,7 +13,7 @@ only. System implementation lives in separate
 ## Quick start
 
 Install Git, Python 3.11 or newer, the Android `repo` tool, Rust, Clang/LLVM, Make
-and CMake. See the [build guide](docs/learn/getting-started.md) for host dependencies.
+and CMake. See the [host setup guide](docs/learn/host-setup.md) for host dependencies.
 
 ```sh
 mkdir workspace && cd workspace
@@ -55,5 +55,5 @@ repo status
 ```
 
 See [documentation](docs/README.md), [architecture](docs/architecture/overview.md),
-[project status](docs/project/status.md), [contribution guidelines](CONTRIBUTING.md)
+[project status](docs/project/status.md), [storage performance history](docs/performance/storage.md), [contribution guidelines](CONTRIBUTING.md)
 and [security policy](SECURITY.md).

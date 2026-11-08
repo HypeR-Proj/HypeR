@@ -152,7 +152,7 @@ Rootfs generation additionally requires e2fsprogs and squashfs-tools (Homebrew:
 packer builds private e2fsprogs tools under `target/host-tools/`, using bundled
 static UUID and blkid libraries. This avoids the MacPorts `libuuid`/`ossp-uuid`
 conflict with erofs-utils. `make host-e2fsprogs` prepares these tools explicitly;
-see [MacPorts setup](https://hyper-proj.github.io/HypeR/docs/learn/getting-started.html#macos-with-macports).
+see [MacPorts setup](../learn/host-setup.md#macos-with-macports).
 Run `make test-alpine-rootfs` for a disposable
 root-disk boot and persistence test.
 
