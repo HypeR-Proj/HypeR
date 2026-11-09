@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # HypeR documentation
 
-[Quick start](learn/getting-started.md) · [Architecture](architecture/overview.md) · [Roadmap](project/roadmap.md)
+[Quick start](learn/getting-started.md) · [Architecture](architecture/overview.md) · [Roadmap](project/roadmap.md) · [Storage performance](performance/storage.md)
 
 Each component maintains and publishes its own documentation after changes merge into `main`. This repository provides system introductions and navigation.
 

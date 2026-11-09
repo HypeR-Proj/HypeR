@@ -9,6 +9,7 @@ SPDX-License-Identifier: Apache-2.0
 
 This is the detailed inventory of implemented foundations and their current
 acceptance boundaries. Planned work is tracked in the [roadmap](roadmap.md).
+Physical disk measurements are tracked in the [storage performance history](../performance/storage.md).
 
 | Host architecture | Status | Current acceptance contract |
 | --- | --- | --- |
